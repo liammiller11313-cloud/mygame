@@ -76,6 +76,17 @@ Attributes.Game = table.freeze({
 	InfectedAlive = "FL_InfectedAlive", -- number
 	TankActive = "FL_TankActive", -- boolean, drives the tank music
 	ObjectiveText = "FL_Objective", -- string
+
+	-- Round structure. The two *EndsAt fields are absolute
+	-- workspace:GetServerTimeNow() stamps rather than remaining seconds, so the
+	-- client renders a perfectly smooth countdown from a value that only changes
+	-- when the phase does — no per-frame remote traffic, and no drift.
+	Mode = "FL_Mode", -- string, GameModeConfig.Modes
+	WaveIndex = "FL_WaveIndex", -- number, 0 during prep
+	WavePhase = "FL_WavePhase", -- string, "Prep" | "Active" | "Breather" | "Over"
+	WaveEndsAt = "FL_WaveEndsAt", -- number, server time the current phase ends
+	RoundEndsAt = "FL_RoundEndsAt", -- number, server time the whole round ends
+	Difficulty = "FL_Difficulty", -- string, DirectorConfig.Difficulty key
 })
 
 --[[

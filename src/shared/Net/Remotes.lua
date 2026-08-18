@@ -65,6 +65,15 @@ local EVENTS: { string } = {
 	"ObjectiveChanged", -- {text: string, progress: number?}
 	"KillFeed", -- {killer: string, victim: string, weaponId: string, headshot: boolean}
 	"StatsUpdated", -- {player, stats} — end-of-round tally
+
+	-- ── Round structure & matchmaking ───────────────────────────────────────
+	"WaveChanged", -- {index, name, announcement, isBreather, endsAt}
+	"RoundEnded", -- {outcome, waveReached, elapsed, scores}
+	"RequestMode", -- C->S (mode: string) — main menu mode selection
+	"LobbyStateChanged", -- {mode, countdown, players, canStart}
+	"VersusTeamChanged", -- {player, team}
+	"RequestInfectedSpawn", -- C->S (kind: string) — versus class pick
+	"InfectedSpawnOptions", -- {kinds: {string}, respawnAt: number}
 }
 
 -- Every RemoteFunction. Keep this list SHORT: remote functions block and can be
