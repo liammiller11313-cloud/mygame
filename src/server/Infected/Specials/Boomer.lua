@@ -64,6 +64,16 @@ local BURST_RADIUS = ATTACK.range * 0.5
 -- outspend every other pressure source the Director has.
 local PANIC_WAVES = 1
 
+-- The lure pulls in the commons that are ALREADY in the building, which is the
+-- half of the bile the player actually feels — the Director's wave is the
+-- reinforcement behind it. hearingRange is the honest radius: everything that
+-- could have heard the Boomer comes.
+local LURE_RADIUS = DEFINITION.hearingRange
+-- Re-issued while the bile lasts so the horde follows the person who is covered
+-- rather than converging on the tile they were standing on when it landed.
+local LURE_INTERVAL = 3
+local LURE_TICKS = math.max(math.floor(BILE_DURATION / LURE_INTERVAL), 1)
+
 local SCAN_INTERVAL = 0.3
 local BURP_INTERVAL = 5.0 -- the idle tell; a Boomer you can hear is a Boomer you can back away from
 
@@ -197,6 +207,27 @@ local function bile(player: Player, position: Vector3)
 	if director and typeof(director.triggerPanicEvent) == "function" then
 		director:triggerPanicEvent(position, PANIC_WAVES)
 	end
+
+	local infected: any = Registry.find("InfectedService")
+	if not infected or typeof(infected.lure) ~= "function" then
+		return
+	end
+	infected:lure(position, LURE_RADIUS, LURE_INTERVAL + 1)
+
+	-- One short-lived coroutine per biled survivor, ticking every few seconds —
+	-- not a connection, and not per frame. It follows them for exactly as long as
+	-- the screen stays green.
+	task.spawn(function()
+		for _ = 2, LURE_TICKS do
+			task.wait(LURE_INTERVAL)
+			local character = player.Character
+			local victimRoot = if character then RigUtil.getRoot(character) else nil
+			if not victimRoot then
+				return
+			end
+			infected:lure(victimRoot.Position, LURE_RADIUS, LURE_INTERVAL + 1)
+		end
+	end)
 end
 
 --[[ Everyone inside the cone with a sightline, skipping anyone this vomit has
@@ -244,15 +275,17 @@ local function spray(model: Model, root: BasePart, state: State): number
 	return hit
 end
 
-local function backToWaddle(model: Model, brain: any, state: State, delay: number)
+local function backToWaddle(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
 	state.phase = PHASE.Waddle
 	state.phaseTime = 0
 	state.readyAt = os.clock() + delay
 	table.clear(state.biled)
 
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = DEFINITION.walkSpeed
+	if not keepSpeed then
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = DEFINITION.walkSpeed
+		end
 	end
 	resumeBrain(brain)
 end
@@ -333,13 +366,14 @@ local function stepWaddle(model: Model, brain: any, state: State, root: BasePart
 		humanoid.WalkSpeed = 0
 	end
 	playSound("BoomerIdle", root)
+	state.nextBurp = now + BURP_INTERVAL
 
 	state.phase = PHASE.Windup
 	state.phaseTime = 0
 	table.clear(state.biled)
 end
 
-local function stepWindup(model: Model, brain: any, state: State, root: BasePart)
+local function stepWindup(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local target = state.target
 	local victimRoot: BasePart? = nil
 	if target then
@@ -348,10 +382,7 @@ local function stepWindup(model: Model, brain: any, state: State, root: BasePart
 	end
 
 	if victimRoot then
-		local flat = Vector3.new(victimRoot.Position.X - root.Position.X, 0, victimRoot.Position.Z - root.Position.Z)
-		if flat.Magnitude > 0.05 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-		end
+		faceTowards(brain, root, victimRoot.Position, dt)
 	end
 
 	if state.phaseTime < ATTACK.windup then
@@ -405,10 +436,17 @@ function Boomer.onUpdate(model: Model, brain: any, dt: number)
 	local now = os.clock()
 	state.phaseTime += dt
 
+	if state.phase ~= PHASE.Waddle and isStaggered(brain) then
+		-- A Boomer interrupted mid-swell is the cleanest outcome in the game for
+		-- whoever shoved it, and it costs the Boomer a full cooldown.
+		backToWaddle(model, brain, state, ATTACK.cooldown, true)
+		return
+	end
+
 	if state.phase == PHASE.Vent then
 		stepVent(model, brain, state, root, now)
 	elseif state.phase == PHASE.Windup then
-		stepWindup(model, brain, state, root)
+		stepWindup(model, brain, state, root, dt)
 	else
 		stepWaddle(model, brain, state, root, now)
 	end

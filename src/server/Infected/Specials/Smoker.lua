@@ -57,6 +57,7 @@ local DRAG_CONTACT = 6
 
 local CHOKE_INTERVAL = 1.0 -- attack.damage per tick; attack.cooldown is the tongue's own clock
 local MAX_DRAG_TIME = 14 -- backstop only; every real release comes from the list above
+local OWNERSHIP_WATCHDOG_SLACK = 2 -- grace before the ownership backstop fires
 local LOS_INTERVAL = 0.15 -- sightline re-check while dragging
 local SCAN_INTERVAL = 0.35
 local COUGH_INTERVAL = 6.0 -- the idle tell, audible long before the tongue
@@ -280,15 +281,41 @@ local function takeOwnership(root: BasePart)
 	end)
 end
 
-local function backToIdle(model: Model, brain: any, state: State, delay: number)
+--[[
+	Ownership has to come back even if this Smoker never runs another frame.
+
+	InfectedService:despawn destroys a model without calling onDeath — a round
+	reset, or the Director clearing the board — and a survivor left permanently
+	server-simulated feels laggy to the person playing them for the rest of the
+	map. The drag cannot outlive MAX_DRAG_TIME, so a single one-shot check past
+	that is enough to guarantee it.
+]]
+local function armOwnershipWatchdog(model: Model, player: Player, root: BasePart)
+	task.delay(MAX_DRAG_TIME + OWNERSHIP_WATCHDOG_SLACK, function()
+		if root.Parent == nil then
+			return
+		end
+		local survivors: any = Registry.find("SurvivorService")
+		if survivors and stillPinnedBy(survivors, player, model) then
+			return -- still a live grab; release() owns the restore
+		end
+		pcall(function()
+			root:SetNetworkOwnershipAuto()
+		end)
+	end)
+end
+
+local function backToIdle(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
 	state.phase = PHASE.Idle
 	state.phaseTime = 0
 	state.dragTime = 0
 	state.readyAt = os.clock() + delay
 
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = DEFINITION.walkSpeed
+	if not keepSpeed then
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = DEFINITION.walkSpeed
+		end
 	end
 	resumeBrain(brain)
 end
@@ -296,7 +323,7 @@ end
 --[[ Every way the tongue ends runs through here: shove, geometry, distance,
      death, the victim going down. One release path means one place that can
      leave a survivor stuck. ]]
-local function release(model: Model, brain: any, state: State, delay: number)
+local function release(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
 	local victim = state.victim
 	if victim then
 		local survivors: any = Registry.find("SurvivorService")
@@ -316,7 +343,7 @@ local function release(model: Model, brain: any, state: State, delay: number)
 		state.tongue = nil
 	end
 
-	backToIdle(model, brain, state, delay)
+	backToIdle(model, brain, state, delay, keepSpeed)
 end
 
 local function choke(model: Model, root: BasePart, character: Model, victimRoot: BasePart)
@@ -434,7 +461,7 @@ local function stepIdle(model: Model, brain: any, state: State, root: BasePart, 
 	state.phaseTime = 0
 end
 
-local function stepWindup(model: Model, brain: any, state: State, root: BasePart)
+local function stepWindup(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local target = state.target
 	local character, victimRoot = rootOf(target)
 	if not target or not character or not victimRoot then
@@ -443,10 +470,7 @@ local function stepWindup(model: Model, brain: any, state: State, root: BasePart
 	end
 
 	local mouth = mouthOf(model, root)
-	local flat = Vector3.new(victimRoot.Position.X - root.Position.X, 0, victimRoot.Position.Z - root.Position.Z)
-	if flat.Magnitude > 0.05 then
-		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-	end
+	faceTowards(brain, root, victimRoot.Position, dt)
 
 	if state.phaseTime < ATTACK.windup then
 		return
@@ -486,6 +510,7 @@ local function stepWindup(model: Model, brain: any, state: State, root: BasePart
 	state.nextChoke = os.clock() + CHOKE_INTERVAL
 
 	takeOwnership(victimRoot)
+	armOwnershipWatchdog(model, target, victimRoot)
 	drawTongue(state.tongue :: BasePart, mouth, victimRoot.Position)
 	playSound("SmokerTongue", root)
 	Remotes.Event.CameraImpulse:FireClient(target, GRAB_CAMERA_IMPULSE)
@@ -640,10 +665,17 @@ function Smoker.onUpdate(model: Model, brain: any, dt: number)
 	local now = os.clock()
 	state.phaseTime += dt
 
+	if state.phase ~= PHASE.Idle and isStaggered(brain) then
+		-- Shoved mid-tongue. The grab ends, the survivor is free, and the Smoker
+		-- coughs its way through a fresh cooldown before it tries again.
+		release(model, brain, state, ATTACK.cooldown, true)
+		return
+	end
+
 	if state.phase == PHASE.Drag then
 		stepDrag(model, brain, state, root, dt, now)
 	elseif state.phase == PHASE.Windup then
-		stepWindup(model, brain, state, root)
+		stepWindup(model, brain, state, root, dt)
 	else
 		stepIdle(model, brain, state, root, now)
 	end

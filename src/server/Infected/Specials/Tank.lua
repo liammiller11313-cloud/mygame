@@ -506,14 +506,13 @@ local function stepPursue(model: Model, brain: any, state: State, root: BasePart
 	end
 end
 
-local function stepSwing(model: Model, brain: any, state: State, root: BasePart)
+local function stepSwing(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local _, targetRoot = rootOf(state.target)
 	if targetRoot and state.phaseTime < ATTACK.windup then
-		local flat =
-			Vector3.new(targetRoot.Position.X - root.Position.X, 0, targetRoot.Position.Z - root.Position.Z)
-		if flat.Magnitude > 0.05 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-		end
+		-- Tracking during the wind-up, at turnSpeed. 150 degrees a second is fast
+		-- enough that standing still is fatal and slow enough that running past
+		-- its shoulder is not.
+		faceTowards(brain, root, targetRoot.Position, dt)
 	end
 
 	if state.phaseTime < ATTACK.windup then
@@ -557,7 +556,7 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart)
 	end
 end
 
-local function stepTear(model: Model, brain: any, state: State, root: BasePart)
+local function stepTear(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local rock = state.rock
 	local _, targetRoot = rootOf(state.target)
 
@@ -568,10 +567,8 @@ local function stepTear(model: Model, brain: any, state: State, root: BasePart)
 		return
 	end
 
-	local flat =
-		Vector3.new(targetRoot.Position.X - root.Position.X, 0, targetRoot.Position.Z - root.Position.Z)
-	local facing = if flat.Magnitude > 0.05 then flat.Unit else root.CFrame.LookVector
-	root.CFrame = CFrame.lookAt(root.Position, root.Position + facing)
+	faceTowards(brain, root, targetRoot.Position, dt)
+	local facing = root.CFrame.LookVector
 
 	-- Held overhead through the whole tell. The rock being visible in its hands
 	-- before it leaves them is the only reason a survivor can react to one.
@@ -601,7 +598,15 @@ local function stepDirect(model: Model, brain: any, state: State, root: BasePart
 		Vector3.new(targetRoot.Position.X - root.Position.X, 0, targetRoot.Position.Z - root.Position.Z)
 	if flat.Magnitude > 0.05 then
 		local heading = flat.Unit
-		humanoid:Move(heading, false)
+
+		-- brain:moveTo is the sanctioned way for a special to drive a paused body:
+		-- it throttles the MoveTo re-issue and drops the path the brain could not
+		-- finish, which is the whole reason we are here.
+		if brain and typeof(brain.moveTo) == "function" then
+			brain:moveTo(targetRoot.Position)
+		else
+			humanoid:Move(heading, false)
+		end
 
 		local blocked =
 			Workspace:Raycast(root.Position + Vector3.new(0, 1, 0), heading * DIRECT_PROBE, state.probe)
@@ -662,9 +667,9 @@ function Tank.onUpdate(model: Model, brain: any, dt: number)
 	stepRock(model, state, dt)
 
 	if state.phase == PHASE.Swing then
-		stepSwing(model, brain, state, root)
+		stepSwing(model, brain, state, root, dt)
 	elseif state.phase == PHASE.Tear then
-		stepTear(model, brain, state, root)
+		stepTear(model, brain, state, root, dt)
 	elseif state.phase == PHASE.Direct then
 		stepDirect(model, brain, state, root, now)
 	else

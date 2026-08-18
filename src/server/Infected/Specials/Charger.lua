@@ -51,6 +51,7 @@ local CHARGE_MAX_RANGE = 120
 
 local CHARGE_MAX_TIME = 4.0 -- a charge that has not hit anything by now is over
 local CARRY_MAX_TIME = 3.5 -- and a carry has to end even if the map has no walls
+local OWNERSHIP_WATCHDOG_SLACK = 2 -- grace before the ownership backstop fires
 
 -- Contact radius while running. attack.range is the Charger's own reach and is
 -- the honest number: if it could hit you standing still, it hits you running.
@@ -271,7 +272,26 @@ local function knockAside(root: BasePart, velocity: Vector3)
 	end)
 end
 
-local function backToStalk(model: Model, brain: any, state: State, delay: number)
+--[[
+	Ownership has to come back even if this Charger never runs another frame.
+
+	InfectedService:despawn destroys a model without calling onDeath — a round
+	reset, or the Director clearing the board — and a survivor left permanently
+	server-simulated feels laggy to the person playing them for the rest of the
+	map. The carry cannot outlive CARRY_MAX_TIME, so one check past that is
+	enough to guarantee it.
+]]
+local function armOwnershipWatchdog(root: BasePart)
+	task.delay(CARRY_MAX_TIME + OWNERSHIP_WATCHDOG_SLACK, function()
+		if root.Parent then
+			pcall(function()
+				root:SetNetworkOwnershipAuto()
+			end)
+		end
+	end)
+end
+
+local function backToStalk(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
 	state.phase = PHASE.Stalk
 	state.phaseTime = 0
 	state.carryTime = 0
@@ -279,14 +299,16 @@ local function backToStalk(model: Model, brain: any, state: State, delay: number
 	state.readyAt = os.clock() + delay
 	table.clear(state.bumped)
 
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = DEFINITION.walkSpeed
+	if not keepSpeed then
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = DEFINITION.walkSpeed
+		end
 	end
 	resumeBrain(brain)
 end
 
-local function release(model: Model, brain: any, state: State, delay: number)
+local function release(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
 	local victim = state.victim
 	if victim then
 		local survivors: any = Registry.find("SurvivorService")
@@ -300,7 +322,7 @@ local function release(model: Model, brain: any, state: State, delay: number)
 			end)
 		end
 	end
-	backToStalk(model, brain, state, delay)
+	backToStalk(model, brain, state, delay, keepSpeed)
 end
 
 -- ─── phases ──────────────────────────────────────────────────────────────────
@@ -380,29 +402,32 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 	end
 	playSound("ChargerCharge", root)
 
-	local flat =
-		Vector3.new(targetRoot.Position.X - root.Position.X, 0, targetRoot.Position.Z - root.Position.Z)
-	state.heading = if flat.Magnitude > 0.05 then flat.Unit else root.CFrame.LookVector
 	state.phase = PHASE.Windup
 	state.phaseTime = 0
 	table.clear(state.bumped)
 end
 
-local function stepWindup(model: Model, brain: any, state: State, root: BasePart)
-	-- Aim right up to the moment of launch, then commit. Everything after this
-	-- is steered at turnSpeed and nothing else.
+local function stepWindup(model: Model, brain: any, state: State, root: BasePart, dt: number)
+	-- Aim right up to the moment of launch, then commit. The yaw goes through the
+	-- brain, so it is limited to turnSpeed — 90 degrees a second — and a Charger
+	-- that has picked its line cannot re-aim onto somebody who stepped out of it.
+	-- That is the dodge, and it starts here rather than at the launch.
 	local _, targetRoot = rootOf(state.target)
 	if targetRoot then
-		local flat =
-			Vector3.new(targetRoot.Position.X - root.Position.X, 0, targetRoot.Position.Z - root.Position.Z)
-		if flat.Magnitude > 0.05 then
-			state.heading = flat.Unit
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + state.heading)
-		end
+		faceTowards(brain, root, targetRoot.Position, dt)
 	end
 
 	if state.phaseTime < ATTACK.windup then
 		return
+	end
+
+	-- It charges where it is POINTING, not where the target is standing. Anything
+	-- else would hand back the aim that turnSpeed just spent the wind-up taking
+	-- away.
+	local facing = root.CFrame.LookVector
+	local flat = Vector3.new(facing.X, 0, facing.Z)
+	if flat.Magnitude > 0.05 then
+		state.heading = flat.Unit
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
@@ -447,6 +472,13 @@ end
 local function beginPummel(model: Model, state: State, root: BasePart, victim: Player)
 	local character, victimRoot = rootOf(victim)
 	if character and victimRoot then
+		-- The carry is over, so the victim's own client gets its physics back.
+		-- The pin already holds them still (SurvivorService zeroes WalkSpeed);
+		-- keeping them server-simulated through a pummel of unbounded length
+		-- would only make being pummelled feel worse than it already does.
+		pcall(function()
+			victimRoot:SetNetworkOwnershipAuto()
+		end)
 		hit(model, root, character, victimRoot, ATTACK.damage)
 		Remotes.Event.CameraImpulse:FireClient(victim, SLAM_CAMERA_IMPULSE)
 		playSound("ChargerIdle", root)
@@ -498,10 +530,13 @@ local function stepCharge(model: Model, brain: any, state: State, root: BasePart
 	-- catches on a kerb mid-charge is worse than one that turns a beat late.
 	humanoid:Move(state.heading, false)
 
-	-- The wall. Probed from chest height so a kerb does not end a charge.
+	-- The wall. Probed from chest height so a kerb does not end a charge, and
+	-- bodies are explicitly not walls: the survivor being carried is four studs
+	-- in front of this ray, and a charge that stopped on the first person it
+	-- reached would never plow through a group or find the wall that ends it.
 	local from = root.Position + Vector3.new(0, 1, 0)
-	local wall = Workspace:Raycast(from, state.heading * WALL_PROBE, state.probe)
-	if wall then
+	local blocked = Workspace:Raycast(from, state.heading * WALL_PROBE, state.probe)
+	if blocked and RigUtil.getCharacterFromPart(blocked.Instance) == nil then
 		if victim then
 			beginPummel(model, state, root, victim)
 		else
@@ -546,6 +581,7 @@ local function stepCharge(model: Model, brain: any, state: State, root: BasePart
 				pcall(function()
 					victimRoot:SetNetworkOwner(nil)
 				end)
+				armOwnershipWatchdog(victimRoot)
 				hit(model, root, character, victimRoot, ATTACK.damage)
 				Remotes.Event.CameraImpulse:FireClient(player, IMPACT_CAMERA_IMPULSE)
 				continue
@@ -589,7 +625,6 @@ local function stepPummel(model: Model, brain: any, state: State, root: BasePart
 	root.CFrame =
 		CFrame.lookAt(victimRoot.Position - state.heading * 2.5 + Vector3.new(0, 0.5, 0), victimRoot.Position)
 	root.AssemblyLinearVelocity = Vector3.zero
-	victimRoot.AssemblyLinearVelocity = Vector3.zero
 
 	if now >= state.nextHit then
 		state.nextHit = now + ATTACK.cooldown
@@ -630,12 +665,19 @@ function Charger.onUpdate(model: Model, brain: any, dt: number)
 	local now = os.clock()
 	state.phaseTime += dt
 
+	if state.phase ~= PHASE.Stalk and isStaggered(brain) then
+		-- Shoved out of a charge or off a pummel. The victim goes free and the
+		-- Charger eats the full recovery, which is the trade the shove pays for.
+		release(model, brain, state, RECOVERY_TIME, true)
+		return
+	end
+
 	if state.phase == PHASE.Pummel then
 		stepPummel(model, brain, state, root, now)
 	elseif state.phase == PHASE.Charge then
 		stepCharge(model, brain, state, root, dt)
 	elseif state.phase == PHASE.Windup then
-		stepWindup(model, brain, state, root)
+		stepWindup(model, brain, state, root, dt)
 	else
 		stepStalk(model, brain, state, root, now)
 	end

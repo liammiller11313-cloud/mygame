@@ -350,7 +350,13 @@ local function pounceDamage(travelled: number): number
 	return ATTACK.damage * multiplier
 end
 
-local function claw(model: Model, root: BasePart, victimCharacter: Model, victimRoot: BasePart, amount: number)
+local function claw(
+	model: Model,
+	root: BasePart,
+	victimCharacter: Model,
+	victimRoot: BasePart,
+	amount: number
+)
 	local damageService: any = Registry.find("DamageService")
 	if not damageService then
 		return
@@ -377,7 +383,14 @@ end
 
 -- ─── phases ──────────────────────────────────────────────────────────────────
 
-local function beginCrouch(model: Model, brain: any, state: State, root: BasePart, targetRoot: BasePart, dt: number)
+local function beginCrouch(
+	model: Model,
+	brain: any,
+	state: State,
+	root: BasePart,
+	targetRoot: BasePart,
+	dt: number
+)
 	pauseBrain(brain)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
@@ -394,7 +407,14 @@ local function beginCrouch(model: Model, brain: any, state: State, root: BasePar
 	state.phaseTime = 0
 end
 
-local function launch(model: Model, brain: any, state: State, root: BasePart, targetRoot: BasePart, dt: number)
+local function launch(
+	model: Model,
+	brain: any,
+	state: State,
+	root: BasePart,
+	targetRoot: BasePart,
+	dt: number
+)
 	local gravity = Workspace.Gravity
 	-- jumpPower is an initial upward velocity, so the flight time is fixed and
 	-- the horizontal speed is what has to cover the gap.

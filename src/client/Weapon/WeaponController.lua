@@ -1,0 +1,894 @@
+--!nonstrict
+--[[
+	WeaponController — the fire loop, and every millisecond of latency it hides.
+
+	The server decides what was hit. This file decides what the trigger FEELS
+	like, and it does not wait for permission to do that: the frame the mouse
+	goes down, the muzzle flashes, the tracer draws, the camera kicks, the shell
+	ejects and the ammo counter drops. The packet leaves afterwards. A gun that
+	waits a round trip before it reacts is a gun nobody wants to hold, no matter
+	how correct its damage is.
+
+	── WHAT MAY BE PREDICTED, AND WHAT MAY NOT ─────────────────────────────────
+	Predicted here: muzzle flash, tracer, recoil, shake, fire sound, the ammo
+	count, and the reload clock. Every one of those is presentation the server
+	will agree with or quietly correct.
+
+	Never predicted: a hit, a damage number, a kill, a state change. Those arrive
+	as HitConfirmed / GoreEvent and belong to the controllers that own them. A
+	predicted hitmarker that the server disagrees with is worse than no hitmarker
+	at all, because it teaches the player to trust something that lies.
+
+	── THE SHARED CONE ─────────────────────────────────────────────────────────
+	Read Shared/Util/ShotPattern.lua's header, then BallisticsService's. One
+	integer seed goes out with the shot; both machines feed it to Random.new()
+	and get the same pellet directions. That is the only reason the tracers drawn
+	here land where the server's pellets resolved.
+
+	The seed is half the contract. The other half is the CONE ANGLE, which is not
+	sent — the server recomputes it. So the bloom model below is a deliberate,
+	line-for-line mirror of BallisticsService's:
+
+	    base   = isAiming and spreadAim or spreadHip
+	    base  += spreadMoving          while actually moving
+	    cone   = min(base + bloom, max(spreadMax, base))
+	    bloom += bloomPerShot          after the shot
+	    bloom -= bloomRecovery * dt    continuously
+
+	If those two drift apart, the same seed produces different directions and the
+	whole deterministic-pattern guarantee is worth nothing. Change one, change
+	both. It is also what CrosshairController reads, so the gap between the ticks
+	is the literal cone the shot will use.
+
+	── PERFORMANCE ─────────────────────────────────────────────────────────────
+	One Heartbeat connection drives held-auto fire, the reload clock and ammo
+	reconciliation for the whole controller. Bloom is not stepped per frame at
+	all: it is a closed-form decay evaluated when someone asks. Predicted tracers
+	are capped at the same three the server replicates, so a shotgun blast is
+	three raycasts, not ten.
+]]
+
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
+local AudioConfig = require(Shared.Config.AudioConfig)
+local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
+local RaycastUtil = require(Shared.Util.RaycastUtil)
+local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
+local ShotPattern = require(Shared.Util.ShotPattern)
+local Signal = require(Shared.Util.Signal)
+local Trove = require(Shared.Util.Trove)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
+
+local LA = Attributes.Loadout
+local PA = Attributes.Player
+local STATE = Enums.SurvivorState
+
+--[[ Mirrors BallisticsService's own movement test exactly, including the
+     velocity fallback for a survivor who is being carried or shoved. ]]
+local MOVE_INTENT_EPSILON = 0.1
+local MOVING_SPEED_SQUARED = 9
+
+--[[ The server draws three tracers per trigger pull and no more, because ten
+     from one shotgun read as one cone of light anyway. Index 1 is ShotPattern's
+     guaranteed centre pellet, so the shot always draws where the crosshair was. ]]
+local MAX_PREDICTED_TRACERS = 3
+
+--[[ The server is behind us by a round trip while we are firing, so a HIGHER
+     server ammo count is normally just latency, not disagreement. We only
+     believe an upward correction once the trigger has been quiet this long. A
+     lower count is believed immediately: the server never gives ammo back. ]]
+local RECONCILE_GRACE = 0.4
+
+--[[ How far into the pump's cycle the pump itself happens. Not at the shot and
+     not at the end — a beat after the blast is where the hand actually moves,
+     and it is what makes the pump shotgun feel worked rather than waited on. ]]
+local PUMP_POINT = 0.45
+
+-- An empty trigger held down clicks at a readable rate rather than at the
+-- weapon's rpm. Sixteen dry clicks a second is noise; three is a message.
+local DRY_FIRE_INTERVAL = 0.3
+
+--[[ Recoil is a learnable pattern only if the shot index climbs through a
+     burst. Releasing the trigger for this long starts the pattern over, which
+     is what makes tapping genuinely more accurate than holding. ]]
+local BURST_RESET = 0.35
+
+--[[ A small ring of Sound instances rather than one per shot: at 900rpm a fresh
+     Instance per round is fifteen allocations a second and fifteen more for the
+     GC, for audio that is 60ms long. ]]
+local SOUND_POOL_SIZE = 8
+
+-- How long a predicted tracer stays remembered, for ImpactController to
+-- recognise the server's echo of a shot we already drew. One round trip plus
+-- slack; anything older cannot be an echo of ours.
+local ECHO_MEMORY = 0.6
+local ECHO_SLOTS = 12
+local ECHO_TOLERANCE = 4 -- studs of slack between our origin and the server's
+
+--[[ States in which no trigger does anything. Mirrors BallisticsService's list:
+     incapacitated is absent because a downed survivor still has the pistol. ]]
+local CANNOT_FIRE: { [string]: boolean } = {
+	[STATE.Dead] = true,
+	[STATE.Spectating] = true,
+	[STATE.LedgeHanging] = true,
+	[STATE.Pinned] = true,
+}
+
+local WeaponController = {}
+
+WeaponController.fired = Signal.new() -- (weaponId, definition, seed, origin, direction, spread)
+WeaponController.dryFired = Signal.new() -- (weaponId, definition)
+WeaponController.weaponChanged = Signal.new() -- (weaponId, definition?)
+WeaponController.aimChanged = Signal.new() -- (isAiming)
+WeaponController.reloadChanged = Signal.new() -- (isReloading, perShell)
+WeaponController.ammoChanged = Signal.new() -- (ammo, reserve)
+
+local player = Players.LocalPlayer
+local trove = Trove.new()
+
+local state = {
+	weaponId = nil :: string?,
+	definition = nil :: any,
+	slot = Enums.Slot.Secondary,
+
+	ammo = 0,
+	reserve = 0,
+
+	bloom = 0,
+	bloomAt = 0,
+	bloomWeaponId = nil :: string?,
+
+	aiming = false,
+	sentAiming = false,
+	firing = false,
+	nextFireAt = 0,
+	lastPredictAt = 0,
+	burstIndex = 0,
+	nextDryAt = 0,
+	pumpAt = 0,
+	nextShoveAt = 0,
+	nextSwingAt = 0,
+	reload = nil :: any,
+}
+
+local echoes = table.create(ECHO_SLOTS)
+local echoCursor = 0
+local sounds: { Sound } = {}
+local soundCursor = 0
+local warned: { [string]: boolean } = {}
+
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn("[WeaponController] " .. message)
+end
+
+-- ── local audio ─────────────────────────────────────────────────────────────
+
+--[[
+	The shooter's own gun has to be heard on the frame it fired, so it is played
+	here rather than waiting for AudioService's server-side copy to replicate.
+	Parented to the camera, which makes it 2D: your own weapon is not a thing
+	happening somewhere in the room, it is a thing happening to you.
+]]
+local function playLocal(definition: any)
+	if not AudioConfig.isConfigured(definition) then
+		return
+	end
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	soundCursor = (soundCursor % SOUND_POOL_SIZE) + 1
+	local sound = sounds[soundCursor]
+	if not sound or not sound.Parent then
+		sound = Instance.new("Sound")
+		sound.Name = "FL_WeaponSound"
+		sounds[soundCursor] = sound
+		trove:add(sound)
+	end
+
+	sound.SoundId = definition.id
+	sound.Volume = definition.volume * AudioConfig.Mix.MasterVolume
+	sound.PlaybackSpeed = math.random() * (definition.pitchMax - definition.pitchMin) + definition.pitchMin
+	sound.Parent = camera
+	sound:Play()
+end
+
+-- ── the character, as the cone model sees it ────────────────────────────────
+
+local function humanoidOf(): Humanoid?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function isMoving(): boolean
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return false
+	end
+	if humanoid.MoveDirection.Magnitude > MOVE_INTENT_EPSILON then
+		return true
+	end
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return false
+	end
+	local velocity = root.AssemblyLinearVelocity
+	return velocity.X * velocity.X + velocity.Z * velocity.Z > MOVING_SPEED_SQUARED
+end
+
+local function survivorState(): string
+	return Attributes.get(player, PA.State, STATE.Spectating)
+end
+
+-- ── bloom, mirroring BallisticsService ──────────────────────────────────────
+
+local function decayBloom(now: number)
+	local definition = state.definition
+	if not definition then
+		return
+	end
+	if state.bloomWeaponId ~= definition.id then
+		-- The cone belongs to the gun that blew it out, not to the player.
+		state.bloomWeaponId = definition.id
+		state.bloom = 0
+	else
+		local elapsed = math.max(now - state.bloomAt, 0)
+		state.bloom = math.max(state.bloom - definition.bloomRecovery * elapsed, 0)
+	end
+	state.bloomAt = now
+end
+
+local function coneFor(): number
+	local definition = state.definition
+	if not definition then
+		return 0
+	end
+	local base = if state.aiming then definition.spreadAim else definition.spreadHip
+	if isMoving() then
+		base += definition.spreadMoving
+	end
+	-- max() guards a definition whose spreadMax sits under its own base spread:
+	-- bloom may widen the cone, never tighten it.
+	return math.min(base + state.bloom, math.max(definition.spreadMax, base))
+end
+
+--[[
+	The cone the next shot will use, in degrees of half-angle. This is what the
+	crosshair renders, and it is the same number the server will compute — the
+	gap between the ticks is not a mood, it is the shot.
+]]
+function WeaponController:getSpread(): number
+	decayBloom(os.clock())
+	return coneFor()
+end
+
+-- ── loadout, read from the attributes the server publishes ──────────────────
+
+local function readSlotAmmo(slot: string, definition: any): (number, number)
+	if slot == Enums.Slot.Primary then
+		return Attributes.get(player, LA.PrimaryAmmo, 0), Attributes.get(player, LA.PrimaryReserve, 0)
+	end
+	if slot == Enums.Slot.Secondary then
+		--[[ There is no SecondaryReserve attribute and there should not be: every
+		     secondary either has infinite reserve or no magazine at all. The
+		     definition already says which, so we read it from there. ]]
+		return Attributes.get(player, LA.SecondaryAmmo, 0), if definition then definition.reserveMax else 0
+	end
+	return 0, 0
+end
+
+local function activeWeaponId(slot: string): string
+	if slot == Enums.Slot.Primary then
+		return Attributes.get(player, LA.PrimaryId, "")
+	end
+	if slot == Enums.Slot.Secondary then
+		return Attributes.get(player, LA.SecondaryId, "")
+	end
+	-- Throwables, medkits and pills are held, not wielded. No weapon in hand.
+	return ""
+end
+
+local function endReload(finished: boolean)
+	if not state.reload then
+		return
+	end
+	local perShell = state.reload.perShell
+	state.reload = nil
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:onReloadFinished(finished)
+	end
+	WeaponController.reloadChanged:fire(false, perShell)
+end
+
+local function pushWeapon()
+	local definition = state.definition
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:setWeapon(state.weaponId, definition)
+	end
+	local camera = Registry.find("CameraController")
+	if camera then
+		camera:setWeapon(definition)
+	end
+end
+
+--[[
+	Re-reads the whole loadout from attributes. Called on every relevant
+	attribute change rather than polled, so an idle player costs nothing.
+]]
+local function refreshLoadout(force: boolean)
+	local slot = Attributes.get(player, LA.ActiveSlot, Enums.Slot.Secondary)
+	local weaponId = activeWeaponId(slot)
+	local definition = if weaponId ~= "" then WeaponConfig.get(weaponId) else nil
+
+	local switched = force or slot ~= state.slot or weaponId ~= (state.weaponId or "")
+	state.slot = slot
+
+	if switched then
+		state.weaponId = if weaponId ~= "" then weaponId else nil
+		state.definition = definition
+		state.burstIndex = 0
+		state.firing = false
+		state.pumpAt = 0
+		endReload(false)
+
+		if definition then
+			-- Drawing costs time; a swap that fires instantly is how a player
+			-- learns to quick-swap out of every reload in the game.
+			state.nextFireAt = os.clock() + definition.drawTime
+		end
+		pushWeapon()
+		WeaponController.weaponChanged:fire(state.weaponId, definition)
+	end
+
+	local ammo, reserve = readSlotAmmo(slot, definition)
+	local now = os.clock()
+
+	--[[ Downward corrections are believed at once — the server never hands ammo
+	     back. Upward ones are latency until the trigger has been quiet. ]]
+	if switched or ammo < state.ammo or now - state.lastPredictAt >= RECONCILE_GRACE then
+		if state.ammo ~= ammo or state.reserve ~= reserve then
+			state.ammo = ammo
+			state.reserve = reserve
+			WeaponController.ammoChanged:fire(ammo, reserve)
+		end
+	elseif state.reserve ~= reserve then
+		state.reserve = reserve
+		WeaponController.ammoChanged:fire(state.ammo, reserve)
+	end
+end
+
+-- ── firing ──────────────────────────────────────────────────────────────────
+
+local function cameraRay(): (Vector3, Vector3)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return Vector3.zero, Vector3.zAxis
+	end
+	local cframe = camera.CFrame
+	return cframe.Position, cframe.LookVector
+end
+
+local function rememberEcho(origin: Vector3, at: number)
+	echoCursor = (echoCursor % ECHO_SLOTS) + 1
+	local slot = echoes[echoCursor]
+	if slot then
+		slot.origin = origin
+		slot.at = at
+	else
+		echoes[echoCursor] = { origin = origin, at = at }
+	end
+end
+
+--[[
+	True when a TracerEffect the server just sent is the echo of a shot this
+	client already drew locally.
+
+	BallisticsService range-culls TracerEffect rather than excluding the shooter,
+	so the player who fired receives their own tracer a round trip after they
+	drew it. ImpactController should call this and drop the duplicate; without
+	it, every shot draws twice, the second one late, and a shotgun looks like it
+	fired twice.
+]]
+function WeaponController:isPredictedTracer(origin: Vector3, at: number?): boolean
+	local now = at or os.clock()
+	for _, slot in echoes do
+		if now - slot.at <= ECHO_MEMORY and (slot.origin - origin).Magnitude <= ECHO_TOLERANCE then
+			return true
+		end
+	end
+	return false
+end
+
+--[[
+	Draws what the shot will look like before the server has said what it hit.
+
+	The directions come from ShotPattern with the seed we are about to send, so
+	these are not "roughly where the pellets went" — they are the pellets. The
+	raycast is only to find where each one stops; the server does its own and
+	agrees, because the inputs are identical.
+]]
+local function drawTracers(origin: Vector3, direction: Vector3, seed: number, spread: number, definition: any)
+	local impacts = Registry.find("ImpactController")
+	if not impacts or typeof(impacts.drawTracer) ~= "function" then
+		warnOnce(
+			"tracer",
+			"ImpactController:drawTracer(origin, endPosition, weaponId) is missing; shots will not draw a tracer"
+		)
+		return
+	end
+
+	local directions = ShotPattern.generate(direction, seed, definition.pellets, spread)
+	local count = math.min(#directions, MAX_PREDICTED_TRACERS)
+	local params = RaycastUtil.excluding({ player.Character :: any })
+	local range = definition.maxRange
+
+	for index = 1, count do
+		local pellet = directions[index]
+		local hit = Workspace:Raycast(origin, pellet * range, params)
+		local endPosition = if hit then hit.Position else origin + pellet * range
+		impacts:drawTracer(origin, endPosition, definition.id)
+	end
+end
+
+local function canAct(): boolean
+	local humanoid = humanoidOf()
+	if not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+	local survivor = survivorState()
+	if CANNOT_FIRE[survivor] then
+		return false
+	end
+	--[[ Down means the pistol and only the pistol. BallisticsService drops
+	     anything else outright, so predicting it would only ever be a lie. ]]
+	if survivor == STATE.Incapacitated and state.weaponId ~= GameConfig.Survivor.IncapWeapon then
+		return false
+	end
+	return true
+end
+
+local function dryFire()
+	local now = os.clock()
+	if now < state.nextDryAt then
+		return
+	end
+	state.nextDryAt = now + DRY_FIRE_INTERVAL
+
+	playLocal(AudioConfig.WeaponReload.DryFire)
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:onDryFire()
+	end
+	WeaponController.dryFired:fire(state.weaponId, state.definition)
+
+	-- Pulling an empty trigger IS the reload command. Making the player press a
+	-- second key to say what they obviously meant is a tax on panic.
+	WeaponController:beginReload()
+end
+
+local function swingMelee()
+	local definition = state.definition
+	if not definition then
+		return
+	end
+	local now = os.clock()
+	if now < state.nextSwingAt or not canAct() then
+		return
+	end
+	state.nextSwingAt = now + WeaponConfig.getFireDelay(definition)
+
+	local origin, direction = cameraRay()
+	Remotes.Event.SwingMelee:FireServer({
+		origin = origin,
+		direction = direction,
+		clientTime = Workspace:GetServerTimeNow(),
+	})
+
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:onMeleeSwing(definition)
+	end
+	local camera = Registry.find("CameraController")
+	if camera then
+		camera:onWeaponFired(definition, 0, 0)
+	end
+	playLocal(AudioConfig.WeaponFire[definition.id])
+end
+
+--[[
+	One trigger pull, resolved locally and then announced.
+
+	Order matters here and is not negotiable: every scrap of feedback happens
+	BEFORE the remote call, because FireServer is where the frame's latency
+	lives. Flash, tracer, kick, shake, sound, counter — then the packet.
+]]
+local function fireOnce()
+	local definition = state.definition
+	if not definition then
+		return
+	end
+	if definition.fireMode == "Melee" then
+		swingMelee()
+		return
+	end
+
+	local now = os.clock()
+	if now < state.nextFireAt or not canAct() then
+		return
+	end
+	if state.ammo <= 0 then
+		dryFire()
+		return
+	end
+
+	-- Firing keeps the shells already loaded and drops the rest of the reload,
+	-- exactly as InventoryService:consumeAmmo does. The doorway decision between
+	-- two more shells and shooting now is the point of a shell reload.
+	endReload(false)
+
+	local origin, direction = cameraRay()
+	local seed = ShotPattern.generateSeed()
+
+	decayBloom(now)
+	local spread = coneFor()
+	state.bloom = math.min(state.bloom + definition.bloomPerShot, math.max(definition.spreadMax, 0))
+
+	--[[ Accumulate the next shot time rather than resetting it, so a 900rpm SMG
+	     keeps its real cadence instead of quantising to the frame rate. Clamped
+	     forward so a frame hitch cannot bank a burst of free shots. ]]
+	local fireDelay = WeaponConfig.getFireDelay(definition)
+	if state.nextFireAt < now - fireDelay then
+		state.nextFireAt = now
+	end
+	state.nextFireAt += fireDelay
+
+	if now - state.lastPredictAt > BURST_RESET then
+		state.burstIndex = 0
+	end
+	state.burstIndex += 1
+	state.lastPredictAt = now
+
+	state.ammo -= 1
+	WeaponController.ammoChanged:fire(state.ammo, state.reserve)
+
+	if definition.fireMode == "Pump" then
+		state.pumpAt = now + fireDelay * PUMP_POINT
+	end
+
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:onFired(definition, seed)
+	end
+	local camera = Registry.find("CameraController")
+	if camera then
+		camera:onWeaponFired(definition, seed, state.burstIndex)
+	end
+	playLocal(AudioConfig.WeaponFire[definition.id])
+	rememberEcho(origin, now)
+	drawTracers(origin, direction, seed, spread, definition)
+
+	Remotes.Event.FireWeapon:FireServer({
+		origin = origin,
+		direction = direction,
+		seed = seed,
+		clientTime = Workspace:GetServerTimeNow(),
+	})
+
+	WeaponController.fired:fire(definition.id, definition, seed, origin, direction, spread)
+end
+
+-- ── reloading ───────────────────────────────────────────────────────────────
+
+--[[
+	Asks for a reload and starts the local clock that mirrors it.
+
+	The mirror exists so the viewmodel and the ammo counter move on the frame the
+	key is pressed. InventoryService owns the real thing and publishes the result
+	through the attributes; anything this predicts wrong is corrected within a
+	round trip.
+]]
+function WeaponController:beginReload(): boolean
+	local definition = state.definition
+	if not definition or state.reload or definition.magSize <= 0 then
+		return false
+	end
+	if state.ammo >= definition.magSize or state.reserve == 0 then
+		return false
+	end
+	if not canAct() then
+		return false
+	end
+
+	Remotes.Event.ReloadWeapon:FireServer()
+
+	state.reload = {
+		weaponId = definition.id,
+		perShell = definition.reloadPerShell > 0,
+		phase = "Load",
+		timer = 0,
+	}
+	playLocal(AudioConfig.WeaponReload.MagOut)
+
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:onReloadStarted(definition, state.reload.perShell)
+	end
+	WeaponController.reloadChanged:fire(true, state.reload.perShell)
+	return true
+end
+
+--[[ Mirrors InventoryService:_stepReload, including the pump-and-ready tail. ]]
+local function stepReload(dt: number)
+	local reload = state.reload
+	local definition = state.definition
+	if not reload or not definition or reload.weaponId ~= definition.id then
+		endReload(false)
+		return
+	end
+
+	reload.timer += dt
+	local viewmodel = Registry.find("ViewmodelController")
+
+	if reload.phase == "Load" then
+		if reload.perShell then
+			-- A long frame must commit every shell it earned, not just one.
+			while reload.timer >= definition.reloadPerShell do
+				reload.timer -= definition.reloadPerShell
+				if state.ammo >= definition.magSize or state.reserve == 0 then
+					reload.phase = "Tail"
+					reload.timer = 0
+					break
+				end
+				state.ammo += 1
+				if state.reserve > 0 then
+					state.reserve -= 1
+				end
+				state.lastPredictAt = os.clock()
+				WeaponController.ammoChanged:fire(state.ammo, state.reserve)
+				playLocal(AudioConfig.WeaponReload.ShellInsert)
+				if viewmodel then
+					viewmodel:onShellLoaded()
+				end
+				if state.ammo >= definition.magSize then
+					reload.phase = "Tail"
+					reload.timer = 0
+					break
+				end
+			end
+		elseif reload.timer >= definition.reloadTime then
+			local need = definition.magSize - state.ammo
+			local taken = need
+			if state.reserve >= 0 then
+				taken = math.min(need, state.reserve)
+				state.reserve -= taken
+			end
+			state.ammo += taken
+			state.lastPredictAt = os.clock()
+			WeaponController.ammoChanged:fire(state.ammo, state.reserve)
+			playLocal(AudioConfig.WeaponReload.MagIn)
+			endReload(true)
+			return
+		end
+	end
+
+	if reload.phase == "Tail" and reload.timer >= definition.reloadTime then
+		playLocal(AudioConfig.WeaponReload.Pump)
+		if viewmodel then
+			viewmodel:onPump()
+		end
+		endReload(true)
+	end
+end
+
+-- ── aim, shove ──────────────────────────────────────────────────────────────
+
+function WeaponController:setAiming(value: boolean)
+	if state.aiming == value then
+		return
+	end
+	state.aiming = value
+
+	--[[ SetAimState is what the server's cone reads, so it goes out immediately
+	     rather than on a timer. It is a discrete edge, not a stream: toggling it
+	     costs one packet per press, which is nothing. ]]
+	if state.sentAiming ~= value then
+		state.sentAiming = value
+		Remotes.Event.SetAimState:FireServer(value)
+	end
+
+	local camera = Registry.find("CameraController")
+	if camera then
+		camera:setAiming(value)
+	end
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:setAiming(value)
+	end
+	WeaponController.aimChanged:fire(value)
+end
+
+function WeaponController:shove()
+	local now = os.clock()
+	if now < state.nextShoveAt or not canAct() then
+		return
+	end
+	-- The local gate is the animation's, not the rule's: MeleeService owns
+	-- fatigue and will refuse a shove this side thought was fine.
+	state.nextShoveAt = now + GameConfig.Shove.Cooldown
+
+	local origin, direction = cameraRay()
+	Remotes.Event.Shove:FireServer({ origin = origin, direction = direction })
+
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel then
+		viewmodel:onShove()
+	end
+end
+
+-- ── reads, for the HUD and the crosshair ────────────────────────────────────
+
+function WeaponController:getWeaponId(): string?
+	return state.weaponId
+end
+
+function WeaponController:getDefinition(): any
+	return state.definition
+end
+
+--[[ Predicted magazine and reserve. Reserve is -1 for a weapon with an infinite
+     one (every pistol), which the ammo counter should render as a symbol rather
+     than as a number. ]]
+function WeaponController:getAmmo(): (number, number)
+	return state.ammo, state.reserve
+end
+
+function WeaponController:isAiming(): boolean
+	return state.aiming
+end
+
+function WeaponController:isReloading(): boolean
+	return state.reload ~= nil
+end
+
+function WeaponController:isFiring(): boolean
+	return state.firing
+end
+
+function WeaponController:getActiveSlot(): string
+	return state.slot
+end
+
+-- ── lifecycle ───────────────────────────────────────────────────────────────
+
+function WeaponController:init()
+	for _, name in { LA.ActiveSlot, LA.PrimaryId, LA.SecondaryId, LA.PrimaryAmmo, LA.SecondaryAmmo, LA.PrimaryReserve } do
+		trove:connect(player:GetAttributeChangedSignal(name), function()
+			refreshLoadout(false)
+		end)
+	end
+
+	trove:connect(player:GetAttributeChangedSignal(PA.State), function()
+		local survivor = survivorState()
+		if CANNOT_FIRE[survivor] then
+			state.firing = false
+			endReload(false)
+			WeaponController:setAiming(false)
+		end
+		-- Going down swaps the weapon out from under us; re-read everything.
+		refreshLoadout(true)
+	end)
+end
+
+function WeaponController:start()
+	local input = Registry.get("InputController")
+	local Action = input.Action
+
+	trove:add(input:onBegan(Action.Fire):connect(function()
+		state.firing = true
+		fireOnce()
+	end))
+	trove:add(input:onEnded(Action.Fire):connect(function()
+		state.firing = false
+	end))
+
+	trove:add(input:onBegan(Action.Aim):connect(function()
+		WeaponController:setAiming(true)
+	end))
+	trove:add(input:onEnded(Action.Aim):connect(function()
+		WeaponController:setAiming(false)
+	end))
+
+	trove:add(input:onBegan(Action.Reload):connect(function()
+		WeaponController:beginReload()
+	end))
+	trove:add(input:onBegan(Action.Shove):connect(function()
+		WeaponController:shove()
+	end))
+	trove:add(input:onBegan(Action.Melee):connect(function()
+		swingMelee()
+	end))
+
+	-- Sprinting cancels the sights. You cannot run and aim, and letting the
+	-- player try is how they end up doing neither.
+	trove:add(input:onBegan(Action.Sprint):connect(function()
+		WeaponController:setAiming(false)
+	end))
+
+	refreshLoadout(true)
+
+	--[[ One connection for the whole controller: held-auto fire, the reload
+	     clock, the pump, and the slow half of ammo reconciliation. ]]
+	trove:connect(RunService.Heartbeat, function(dt: number)
+		local now = os.clock()
+		local definition = state.definition
+
+		if state.reload then
+			stepReload(dt)
+		end
+
+		if state.pumpAt > 0 and now >= state.pumpAt then
+			state.pumpAt = 0
+			playLocal(AudioConfig.WeaponReload.Pump)
+			local viewmodel = Registry.find("ViewmodelController")
+			if viewmodel then
+				viewmodel:onPump()
+			end
+		end
+
+		if state.firing and definition then
+			if definition.fireMode == "Auto" then
+				fireOnce()
+			elseif definition.fireMode == "Melee" then
+				swingMelee()
+			elseif state.ammo <= 0 and now >= state.nextFireAt then
+				-- Semi and Pump fire once per press, but an empty gun still has
+				-- to keep telling you it is empty while you hold the trigger.
+				dryFire()
+			end
+		end
+
+		-- The upward half of reconciliation, once the trigger has gone quiet.
+		if now - state.lastPredictAt >= RECONCILE_GRACE then
+			local ammo, reserve = readSlotAmmo(state.slot, definition)
+			if (ammo ~= state.ammo or reserve ~= state.reserve) and not state.reload then
+				state.ammo = ammo
+				state.reserve = reserve
+				WeaponController.ammoChanged:fire(ammo, reserve)
+			end
+		end
+	end)
+end
+
+--[[ Seeded by the bootstrap once RequestInitialState returns. Nothing in the
+     payload changes a weapon, but a fresh join has to read its loadout once
+     rather than wait for the first attribute to change. ]]
+function WeaponController:onInitialState(_payload: any)
+	refreshLoadout(true)
+end
+
+function WeaponController:destroy()
+	trove:destroy()
+end
+
+Registry.register("WeaponController", WeaponController)
+
+return WeaponController

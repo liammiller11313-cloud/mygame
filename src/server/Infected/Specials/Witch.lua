@@ -67,6 +67,7 @@ local CONTACT_RANGE = GameConfig.Shove.Range
 local RISE_TIME = 0.7 -- the scream before she moves; the only warning there is
 local STRIKE_RECOVER = 0.9 -- beat after the swing before she turns and runs
 local FLEE_TIME = 6.0 -- how long she runs before despawning
+local FLEE_LOOKAHEAD = 40 -- how far ahead she is told to run, re-issued every frame
 local GIVE_UP_TIME = DEFINITION.loseInterestTime -- unreachable target: she leaves
 
 local CRY_INTERVAL = 5.5 -- the sound that tells the team she exists at all
@@ -312,7 +313,7 @@ local function beginFlee(model: Model, brain: any, state: State, root: BasePart)
 	end
 end
 
-local function startle(model: Model, brain: any, state: State, root: BasePart, by: Player)
+local function startle(model: Model, brain: any, state: State, root: BasePart, by: Player, dt: number)
 	state.victim = by
 	state.attention = 0
 	state.chaseTime = 0
@@ -324,11 +325,7 @@ local function startle(model: Model, brain: any, state: State, root: BasePart, b
 
 	local _, victimRoot = rootOf(by)
 	if victimRoot then
-		local flat =
-			Vector3.new(victimRoot.Position.X - root.Position.X, 0, victimRoot.Position.Z - root.Position.Z)
-		if flat.Magnitude > 0.05 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-		end
+		faceTowards(brain, root, victimRoot.Position, dt)
 	end
 end
 
@@ -361,18 +358,14 @@ local function stepSit(model: Model, brain: any, state: State, root: BasePart, d
 
 	local by = checkStartle(model, root, state, elapsed)
 	if by then
-		startle(model, brain, state, root, by)
+		startle(model, brain, state, root, by, elapsed)
 	end
 end
 
-local function stepRise(model: Model, brain: any, state: State, root: BasePart)
+local function stepRise(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local _, victimRoot = rootOf(state.victim)
 	if victimRoot then
-		local flat =
-			Vector3.new(victimRoot.Position.X - root.Position.X, 0, victimRoot.Position.Z - root.Position.Z)
-		if flat.Magnitude > 0.05 then
-			root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-		end
+		faceTowards(brain, root, victimRoot.Position, dt)
 	end
 
 	if state.phaseTime < RISE_TIME then
@@ -433,20 +426,13 @@ local function stepChase(model: Model, brain: any, state: State, root: BasePart,
 	state.hasStruck = false
 end
 
-local function stepStrike(model: Model, brain: any, state: State, root: BasePart)
+local function stepStrike(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local victim = state.victim
 	local character, victimRoot = rootOf(victim)
 
 	if state.phaseTime < ATTACK.windup then
 		if victimRoot then
-			local flat = Vector3.new(
-				victimRoot.Position.X - root.Position.X,
-				0,
-				victimRoot.Position.Z - root.Position.Z
-			)
-			if flat.Magnitude > 0.05 then
-				root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-			end
+			faceTowards(brain, root, victimRoot.Position, dt)
 		end
 		return
 	end
@@ -495,6 +481,13 @@ local function stepFlee(model: Model, brain: any, state: State, root: BasePart)
 	if humanoid then
 		humanoid.WalkSpeed = DEFINITION.runSpeed
 		humanoid.AutoRotate = true
+	end
+
+	-- brain:moveTo is the sanctioned way for a special to drive a paused body: it
+	-- throttles the MoveTo re-issue and clears any path the brain had cached.
+	if brain and typeof(brain.moveTo) == "function" then
+		brain:moveTo(root.Position + state.fleeHeading * FLEE_LOOKAHEAD)
+	elseif humanoid then
 		humanoid:Move(state.fleeHeading, false)
 	end
 
@@ -550,11 +543,11 @@ function Witch.onUpdate(model: Model, brain: any, dt: number)
 	if state.phase == PHASE.Flee then
 		stepFlee(model, brain, state, root)
 	elseif state.phase == PHASE.Strike then
-		stepStrike(model, brain, state, root)
+		stepStrike(model, brain, state, root, dt)
 	elseif state.phase == PHASE.Chase then
 		stepChase(model, brain, state, root, dt)
 	elseif state.phase == PHASE.Rise then
-		stepRise(model, brain, state, root)
+		stepRise(model, brain, state, root, dt)
 	else
 		stepSit(model, brain, state, root, dt, now)
 	end
