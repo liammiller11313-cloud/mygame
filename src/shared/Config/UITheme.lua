@@ -18,47 +18,62 @@
 local UITheme = {}
 
 -- ── Palette ─────────────────────────────────────────────────────────────────
--- Warm near-black rather than pure black; pure black reads as a hole on OLED
--- and makes the amber accents look radioactive next to it.
+-- Three colours: black, white, orange. Nothing else appears on screen unless it
+-- is communicating danger, and that restraint is what makes the danger register.
+--
+-- The blacks are very slightly warm rather than pure #000. Pure black reads as a
+-- hole punched in the screen on an OLED panel, and it makes the orange next to it
+-- look radioactive. These are dark enough to read as black and warm enough to sit
+-- under the accent without fighting it.
 UITheme.Color = table.freeze({
-	Background = Color3.fromRGB(10, 9, 8),
-	Panel = Color3.fromRGB(18, 17, 15),
-	PanelRaised = Color3.fromRGB(27, 25, 22),
-	Border = Color3.fromRGB(58, 53, 45),
-	BorderBright = Color3.fromRGB(96, 87, 72),
+	Background = Color3.fromRGB(7, 6, 6),
+	Panel = Color3.fromRGB(13, 12, 11),
+	PanelRaised = Color3.fromRGB(22, 20, 18),
+	Border = Color3.fromRGB(52, 47, 40),
+	BorderBright = Color3.fromRGB(226, 148, 44), -- the accent, used as a rule
 
-	TextPrimary = Color3.fromRGB(232, 226, 214),
-	TextSecondary = Color3.fromRGB(150, 143, 130),
-	TextDim = Color3.fromRGB(94, 89, 80),
+	TextPrimary = Color3.fromRGB(240, 236, 228),
+	TextSecondary = Color3.fromRGB(154, 147, 136),
+	TextDim = Color3.fromRGB(92, 87, 79),
 
-	-- The signature amber. Used for the objective line, interact prompts, and
-	-- anything the game wants read before the player thinks about it.
+	-- The signature orange. Used for the objective line, interact prompts, wave
+	-- announcements, and anything the game wants read before the player thinks.
 	Accent = Color3.fromRGB(226, 148, 44),
-	AccentBright = Color3.fromRGB(255, 186, 88),
-	AccentDim = Color3.fromRGB(138, 90, 26),
+	AccentBright = Color3.fromRGB(255, 176, 66),
+	AccentDim = Color3.fromRGB(132, 84, 24),
 
-	HealthGood = Color3.fromRGB(122, 176, 74),
-	HealthHurt = Color3.fromRGB(214, 172, 46),
-	HealthCritical = Color3.fromRGB(196, 58, 42),
-	HealthTemp = Color3.fromRGB(226, 222, 210), -- the white pill buffer
-	HealthIncap = Color3.fromRGB(148, 36, 32),
-	HealthBlackWhite = Color3.fromRGB(128, 128, 128),
+	-- Health runs white -> orange -> red. White is "fine", orange is "this is
+	-- becoming a problem", and red is the only colour on the whole HUD that means
+	-- something is actually wrong — which is exactly why it works.
+	HealthGood = Color3.fromRGB(238, 234, 226),
+	HealthHurt = Color3.fromRGB(226, 148, 44),
+	HealthCritical = Color3.fromRGB(198, 48, 34),
+	HealthTemp = Color3.fromRGB(140, 134, 126), -- the pill buffer, dimmed white
+	HealthIncap = Color3.fromRGB(158, 34, 28),
+	HealthBlackWhite = Color3.fromRGB(118, 118, 118),
 
-	Danger = Color3.fromRGB(206, 52, 40),
-	Warning = Color3.fromRGB(226, 160, 46),
-	Success = Color3.fromRGB(118, 170, 82),
+	Danger = Color3.fromRGB(206, 46, 32),
+	Warning = Color3.fromRGB(226, 148, 44),
+	Success = Color3.fromRGB(238, 234, 226),
 
 	Blood = Color3.fromRGB(104, 16, 16),
 	Bile = Color3.fromRGB(142, 156, 58),
 })
 
---[[ Survivor outline colours. Four, maximally distinguishable, and assigned in
-     join order so a given player keeps their colour for the whole campaign. ]]
+--[[
+	Survivor outline colours — the one deliberate exception to the three-colour
+	rule. Telling four teammates apart through a wall at a glance is a FUNCTION,
+	not decoration, and four shades of orange cannot do it.
+
+	So these stay distinguishable, but they are all pulled warm so the palette
+	still reads as one system: orange, white, gold, and a hot vermillion. Assigned
+	in join order, stable for the whole round.
+]]
 UITheme.SurvivorColors = table.freeze({
-	Color3.fromRGB(96, 164, 226), -- blue
-	Color3.fromRGB(226, 148, 44), -- amber
-	Color3.fromRGB(126, 196, 96), -- green
-	Color3.fromRGB(214, 108, 176), -- magenta
+	Color3.fromRGB(226, 148, 44), -- orange
+	Color3.fromRGB(240, 236, 228), -- white
+	Color3.fromRGB(232, 194, 74), -- gold
+	Color3.fromRGB(226, 92, 48), -- vermillion
 })
 
 --[[ Silhouettes seen through geometry. This is the most important single piece
@@ -68,7 +83,7 @@ UITheme.Outline = table.freeze({
 	TeammateOccludedOnly = true, -- solid only when they are actually hidden
 	IncapTransparency = 0.0, -- a downed teammate is always fully visible
 	IncapPulseSpeed = 2.4,
-	PinnedColor = Color3.fromRGB(226, 62, 48),
+	PinnedColor = Color3.fromRGB(206, 46, 32),
 	ItemColor = Color3.fromRGB(226, 148, 44),
 	ItemMaxDistance = 90,
 	TeammateMaxDistance = 900,
@@ -128,7 +143,7 @@ UITheme.Crosshair = table.freeze({
 	GapPerDegree = 5.2, -- studs of gap per degree of spread
 	Color = Color3.fromRGB(238, 234, 226),
 	HitColor = Color3.fromRGB(255, 255, 255),
-	KillColor = Color3.fromRGB(226, 62, 48),
+	KillColor = Color3.fromRGB(206, 46, 32),
 	Transparency = 0.15,
 	DotEnabled = false,
 	SmoothSpeed = 18,
@@ -145,8 +160,8 @@ UITheme.Hitmarker = table.freeze({
 	Duration = 0.18,
 	KillDuration = 0.3,
 	NormalColor = Color3.fromRGB(238, 234, 226),
-	HeadshotColor = Color3.fromRGB(255, 206, 96),
-	KillColor = Color3.fromRGB(226, 62, 48),
+	HeadshotColor = Color3.fromRGB(255, 176, 66),
+	KillColor = Color3.fromRGB(206, 46, 32),
 	RotationOnKill = 45, -- the kill mark is an X, not a cross
 	ScalePunch = 1.5,
 })
@@ -157,7 +172,7 @@ UITheme.DamageIndicator = table.freeze({
 	Width = 66,
 	Height = 12,
 	Duration = 1.1,
-	Color = Color3.fromRGB(216, 52, 40),
+	Color = Color3.fromRGB(206, 46, 32),
 	MaxSimultaneous = 6,
 })
 
@@ -192,9 +207,9 @@ UITheme.DisplayOrder = table.freeze({
 	Fade = 90,
 })
 
---[[ Health colour, blended across the bar's range. The green -> amber -> red
-     ramp is deliberately non-linear: it holds green until 60% so that the first
-     hint of amber genuinely means something. ]]
+--[[ Health colour across the bar's range. Deliberately non-linear: it holds
+     white all the way down to 60% so that the first hint of orange genuinely
+     means something, then runs orange -> red over the bottom 60%. ]]
 function UITheme.getHealthColor(fraction: number): Color3
 	local clamped = math.clamp(fraction, 0, 1)
 	if clamped > 0.6 then

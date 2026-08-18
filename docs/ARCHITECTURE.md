@@ -365,3 +365,132 @@ Client rules:
   with `ResetOnSpawn = false` and the `DisplayOrder` from `UITheme.DisplayOrder`.
 - All UI reads colour, size, font and timing from `UITheme`. No literal colours.
 - One `RunService.RenderStepped` connection per controller, maximum.
+
+---
+
+# Addendum — round-based modes, matchmaking, atmosphere
+
+This supersedes the campaign/safe-room model in the sections above. **There are no
+safe rooms and no chapters.** A round is a fixed 17 minutes of holding out against
+seven escalating waves, defined in `Shared/Config/GameModeConfig.lua`.
+
+That changes what the Director is *for*, but not what it *does*. The wave schedule
+decides WHEN pressure happens; the Director still decides WHAT and HOW MUCH inside
+each wave, still reads team intensity, still refuses to spawn in someone's field of
+view, and still places items based on how badly the team is hurting. It works
+inside a wave's budget instead of inventing its own pacing.
+
+## New server modules
+
+### `Round/RoundService.lua` → `"RoundService"`
+Owns the Classic round lifecycle. Replaces LevelService's campaign loop entirely.
+```lua
+RoundService:startRound(mode: string)
+RoundService:endRound(outcome: string)          -- Enums.RoundState
+RoundService:getState(): string
+RoundService:getWaveIndex(): number
+RoundService:getWave(): WaveDefinition
+RoundService:isBreather(): boolean
+RoundService:getTimeRemaining(): number          -- to the end of the whole round
+RoundService:getWaveTimeRemaining(): number      -- to the end of the current phase
+RoundService:getElapsed(): number
+RoundService.waveChanged: Signal                 -- (index, definition)
+RoundService.phaseChanged: Signal                -- (isBreather, index)
+RoundService.roundEnded: Signal                  -- (outcome)
+```
+- Drives `Attributes.Game.RoundState`, plus new attributes `FL_WaveIndex`,
+  `FL_WavePhase` ("Prep" | "Active" | "Breather" | "Over"), `FL_RoundEndsAt`,
+  `FL_WaveEndsAt` (both absolute `workspace:GetServerTimeNow()` stamps so the
+  client can render a smooth countdown with no per-frame remote traffic).
+- Applies `GameModeConfig.Classic`: prep window, per-wave population and spawn-rate
+  scaling handed to the Director, boss releases at wave start, breather restock and
+  dead-player respawn.
+- Team wipe ends the round immediately. Surviving wave 7 is a Victory.
+- Announces via `DirectorEvent` and `Subtitle` — **`Subtitle` currently has no
+  server sender at all; RoundService becomes its producer.**
+
+### `Round/VersusService.lua` → `"VersusService"`
+Splits the server as evenly as possible into survivors and playable special
+infected, per `GameModeConfig.Versus`.
+```lua
+VersusService:startVersus()
+VersusService:getTeam(player: Player): string    -- Enums.Team
+VersusService:requestSpawnAs(player: Player, kind: string): boolean
+VersusService:getAvailableKinds(player: Player): { string }
+VersusService:swapTeams()
+VersusService:getScores(): { [string]: number }
+```
+Infected players spawn as ghosts for `InfectedGhostTime`, pick a spot, then
+materialise. Respawn on `InfectedRespawnTime`. `InfectedMaxSameKindAlive` forces
+the team to coordinate rather than all picking Tank.
+
+### `Round/MatchmakingService.lua` → `"MatchmakingService"`
+One place, one round per server. Uses `MemoryStoreService` for a cross-server
+browser and `TeleportService` to move players.
+```lua
+MatchmakingService:requestMode(player: Player, mode: string)
+MatchmakingService:getLobbyState(): { mode: string, countdown: number, players: number }
+MatchmakingService:advertise()
+```
+- If this server is idle, or already running the requested mode and is inside
+  `JoinInProgressUntilWave`, the player joins here.
+- Otherwise query the MemoryStore sorted map for a server running that mode with
+  room, and `TeleportToPlaceInstance`.
+- If none exists, this server claims the mode and starts a lobby countdown.
+- **Must degrade gracefully.** MemoryStore is unavailable in Studio and throws;
+  wrap every call in `pcall` and fall back to "run it on this server". A developer
+  pressing Play must always get a round, never a matchmaking error.
+
+### `Level/AtmosphereService.lua` → `"AtmosphereService"`
+The game is called Fading Light. Make that literal: the round opens at dusk and is
+pitch dark by wave 7, driven off `RoundService:getElapsed()` rather than a free-
+running timer, so the light level always reads as *how far through the round you
+are*.
+```lua
+AtmosphereService:setPhaseFromRound(elapsed: number, total: number)
+AtmosphereService:flash(duration: number, intensity: number)   -- explosions, lightning
+AtmosphereService:setBossMood(active: boolean)
+```
+Interpolates `Lighting.ClockTime`, `Ambient`, `OutdoorAmbient`, `Brightness`,
+`FogEnd`, `ExposureCompensation` and an `Atmosphere` instance's `Density`/`Haze`.
+Tune it dark and cold. Keep `FogEnd` short enough to hide draw distance and long
+enough that a Tank is visible before it reaches you.
+
+### `Combat/ProjectileService.lua` → `"ProjectileService"`
+`InventoryService` already calls `Registry.find("ProjectileService")`; it does not
+exist yet, so throwables are dead. Build it.
+```lua
+ProjectileService:throw(player: Player, itemId: string, origin: Vector3, direction: Vector3, power: number)
+```
+Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes via
+`DamageService:applyExplosion`), molotov (a fire pool that ignites infected through
+`InfectedService:ignite`), bile jar (the Boomer effect without the Boomer).
+
+## New client modules
+
+| Path | Registry name | Owns |
+|---|---|---|
+| `UI/MainMenuController.lua` | `"MainMenuController"` | mode select, server browser, lobby countdown |
+| `UI/WaveController.lua` | `"WaveController"` | wave timer, wave pips, wave announcements |
+
+## Asset loading
+
+`Assets/PlaceholderFactory` keeps its name and API but changes behaviour: it now
+**prefers the user's real models** and falls back to procedural grey-box only when
+one is absent.
+
+```
+ReplicatedStorage/Assets/
+    Infected/<Kind>/     one or more rig variants — pick one at RANDOM per spawn
+    Weapons/<modelName>  third-person / world model
+    Viewmodels/<modelName>
+```
+
+- `<Kind>` matches `Enums.Infected` exactly. `Common/` holds ~13 variants and the
+  random pick is what makes a horde read as a crowd instead of a clone army.
+- Weapon models are found by `WeaponConfig` **`modelName`**, not by the enum key —
+  `"(71 Mag) PPSh-41"` is not a valid Luau identifier.
+- The supplied rigs are a mix: **Commons, Hunter, Jockey and Tank are R6; Rusher is
+  R15.** `RigUtil` and `GoreConfig.Dismemberment.Severable` already cover both.
+  Never look a Humanoid up by name — the Rusher's is named `Zombie`.
+- Hunter has both `Head` and `FakeHead`; treat a hit on either as a headshot.
