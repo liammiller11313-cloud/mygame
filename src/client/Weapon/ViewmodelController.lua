@@ -547,9 +547,7 @@ local function ejectShell()
 	shell.Anchored = false
 	shell.Transparency = 0
 	shell.CFrame = base
-	shell.AssemblyLinearVelocity = base.RightVector * SHELL_SPEED
-		+ base.UpVector * (SHELL_SPEED * 0.45)
-		+ Vector3.new(0, 0, 0)
+	shell.AssemblyLinearVelocity = base.RightVector * SHELL_SPEED + base.UpVector * (SHELL_SPEED * 0.45)
 	shell.AssemblyAngularVelocity = Vector3.new(
 		(math.random() - 0.5) * SHELL_SPIN,
 		(math.random() - 0.5) * SHELL_SPIN,
@@ -586,19 +584,23 @@ function ViewmodelController:onFired(definition: any, _seed: number)
 	--[[ Back along the barrel, up, and a touch to the left, so a burst walks
 	     rather than pistons. The lateral component is signed randomly, which is
 	     the difference between a gun that lives and one that repeats. ]]
-	kickPosition:impulse(Vector3.new(
-		kickback * 0.25 * (if math.random() < 0.5 then -1 else 1) * speed * IMPULSE_GAIN,
-		kickback * 0.35 * speed * IMPULSE_GAIN,
-		kickback * speed * IMPULSE_GAIN
-	))
+	kickPosition:impulse(
+		Vector3.new(
+			kickback * 0.25 * (if math.random() < 0.5 then -1 else 1) * speed * IMPULSE_GAIN,
+			kickback * 0.35 * speed * IMPULSE_GAIN,
+			kickback * speed * IMPULSE_GAIN
+		)
+	)
 
 	local rotationSpeed = kickRotation.speed
 	local pitch = math.rad(kickback * KICK_PITCH_PER_STUD)
-	kickRotation:impulse(Vector3.new(
-		pitch * rotationSpeed * IMPULSE_GAIN,
-		pitch * 0.25 * (math.random() - 0.5) * rotationSpeed * IMPULSE_GAIN,
-		pitch * 0.4 * (math.random() - 0.5) * rotationSpeed * IMPULSE_GAIN
-	))
+	kickRotation:impulse(
+		Vector3.new(
+			pitch * rotationSpeed * IMPULSE_GAIN,
+			pitch * 0.25 * (math.random() - 0.5) * rotationSpeed * IMPULSE_GAIN,
+			pitch * 0.4 * (math.random() - 0.5) * rotationSpeed * IMPULSE_GAIN
+		)
+	)
 
 	if flashPart and flashLight then
 		flashPart.Transparency = 0.1
@@ -643,28 +645,30 @@ end
 function ViewmodelController:onMeleeSwing(definition: any)
 	local speed = kickPosition.speed
 	local reach = if definition then definition.kickback else 0.3
-	kickPosition:impulse(Vector3.new(
-		-reach * 1.6 * speed * IMPULSE_GAIN,
-		-reach * 0.8 * speed * IMPULSE_GAIN,
-		-reach * 1.2 * speed * IMPULSE_GAIN
-	))
+	kickPosition:impulse(
+		Vector3.new(
+			-reach * 1.6 * speed * IMPULSE_GAIN,
+			-reach * 0.8 * speed * IMPULSE_GAIN,
+			-reach * 1.2 * speed * IMPULSE_GAIN
+		)
+	)
 	local rotationSpeed = kickRotation.speed
-	kickRotation:impulse(Vector3.new(
-		math.rad(-18) * rotationSpeed * IMPULSE_GAIN,
-		math.rad(26) * rotationSpeed * IMPULSE_GAIN,
-		math.rad(-30) * rotationSpeed * IMPULSE_GAIN
-	))
+	kickRotation:impulse(
+		Vector3.new(
+			math.rad(-18) * rotationSpeed * IMPULSE_GAIN,
+			math.rad(26) * rotationSpeed * IMPULSE_GAIN,
+			math.rad(-30) * rotationSpeed * IMPULSE_GAIN
+		)
+	)
 end
 
 --[[ The shove is a shoulder-and-forearm push. It throws the weapon out of frame
      hard, which is exactly the cost the verb is supposed to have. ]]
 function ViewmodelController:onShove()
 	local speed = kickPosition.speed
-	kickPosition:impulse(Vector3.new(
-		-0.35 * speed * IMPULSE_GAIN,
-		-0.2 * speed * IMPULSE_GAIN,
-		-0.5 * speed * IMPULSE_GAIN
-	))
+	kickPosition:impulse(
+		Vector3.new(-0.35 * speed * IMPULSE_GAIN, -0.2 * speed * IMPULSE_GAIN, -0.5 * speed * IMPULSE_GAIN)
+	)
 	local rotationSpeed = kickRotation.speed
 	kickRotation:impulse(Vector3.new(math.rad(-14) * rotationSpeed * IMPULSE_GAIN, 0, 0))
 end

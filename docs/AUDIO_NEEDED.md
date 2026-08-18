@@ -136,3 +136,102 @@ will sound wrong every time it fades up mid-round.
 
 If you're sourcing a few at a time, the order that buys the most feel per sound:
 **weapon fire → flesh/bone impact → gore → special infected calls → everything else.**
+
+---
+
+# Roblox Creator Store — search terms
+
+Go to **Creator Store → Audio** (or the Toolbox → Audio tab in Studio). Filter to
+**Sound Effects** or **Music** as appropriate. Audio search there matches titles
+and tags, so short generic terms work far better than descriptive phrases.
+
+Two things to check on every result before you commit to it:
+- **Length.** Sound effects should be under ~2s. Anything longer is usually a
+  loop or a compilation.
+- **Preview it in context.** A gunshot that sounds great solo often disappears
+  when forty zombies are groaning over it. Prefer samples with a strong transient
+  at the very front.
+
+## Weapons
+
+| Want | Search |
+|---|---|
+| Pistol (M1911) | `pistol shot`, `handgun fire`, `45 pistol`, `9mm gunshot` |
+| Magnum revolver | `revolver shot`, `magnum gunshot`, `357 revolver`, `desert eagle` |
+| Shotgun blast | `shotgun blast`, `shotgun fire`, `12 gauge` |
+| Shotgun pump | `shotgun pump`, `shotgun cock`, `shotgun rack` |
+| SMG (MP7, Vector, PPSh) | `smg fire`, `smg shot`, `submachine gun`, `uzi fire`, `mp5 shot` |
+| AK family | `ak47 shot`, `ak fire`, `assault rifle shot` |
+| M4 / HK416 / Mk18 | `m4 shot`, `m4a1 fire`, `ar15 shot`, `rifle shot` |
+| M1A EBR / marksman | `sniper shot`, `battle rifle`, `dmr shot`, `762 rifle` |
+| Machete swing | `sword swing`, `whoosh`, `blade swing`, `knife swoosh` |
+| Reload | `gun reload`, `magazine reload`, `mag out`, `bolt pull`, `weapon reload` |
+| Shell insert | `shotgun shell load`, `shell insert` |
+| Dry fire | `dry fire`, `gun click`, `empty gun click` |
+
+> **Tip:** search for the same term several times and grab 3–5 *different*
+> results. That's your variation set — the engine pitch-shifts them for you.
+
+## Flesh, bone and gore
+
+| Want | Search |
+|---|---|
+| Body-shot impact | `flesh impact`, `bullet flesh`, `meat impact`, `flesh hit` |
+| **Headshot** | `bone crack`, `skull crack`, `bone break`, `head shot` |
+| Dismember | `flesh tear`, `rip flesh`, `gore rip`, `limb tear` |
+| Gib | `gore splat`, `blood splat`, `body explode`, `meat splat`, `squish` |
+| Body fall | `body fall`, `body drop`, `corpse fall` |
+| Blood | `blood squirt`, `blood splatter`, `squelch` |
+
+## Infected
+
+| Want | Search |
+|---|---|
+| Common idle | `zombie groan`, `zombie moan`, `zombie idle`, `undead groan` |
+| Common alert | `zombie scream`, `zombie horde`, `zombie alert`, `crowd scream` |
+| Common attack | `zombie attack`, `zombie growl`, `monster attack` |
+| Common death | `zombie death`, `monster death`, `creature die` |
+| **Hunter** growl | `creature growl`, `monster growl low`, `predator growl`, `beast snarl` |
+| **Hunter** pounce | `monster scream`, `creature shriek`, `beast attack` |
+| **Jockey** | `insane laugh`, `creepy laugh`, `evil giggle`, `maniacal laugh` |
+| **Rusher** | `heavy breathing monster`, `creature pant`, `monster bellow`, `beast roar` |
+| **Witch** cry | `woman crying`, `girl sobbing`, `creepy crying`, `female weeping` |
+| **Witch** scream | `woman scream`, `female shriek`, `horror scream` |
+| **Tank** roar | `monster roar`, `giant roar`, `beast roar deep`, `demon roar` |
+| **Tank** footstep | `heavy footstep`, `giant footstep`, `stomp`, `earth thud` |
+
+## Survivor and UI
+
+| Want | Search |
+|---|---|
+| Pain grunt | `male grunt`, `male pain`, `hurt grunt`, `player hurt` |
+| Incap / death | `male scream`, `death grunt`, `dying groan` |
+| Revived gasp | `gasp`, `breath in`, `wake up gasp` |
+| Labored breathing | `heavy breathing`, `exhausted breathing`, `panting` |
+| Heartbeat (low health) | `heartbeat`, `heart beat slow` |
+| Healing | `bandage`, `medkit`, `first aid`, `pill bottle` |
+| Hitmarker | `ui click`, `hitmarker`, `tick`, `click soft` |
+| Headshot marker | `ding`, `bell ding`, `notification ding` |
+| Pickup | `item pickup`, `ui pickup`, `collect` |
+| Wave cleared | `success sting`, `achievement`, `level complete` |
+
+## Surface impacts
+
+`bullet impact concrete` · `bullet ricochet` · `metal impact` · `wood impact` ·
+`glass break` · `water splash` · `dirt impact`
+
+## Music (filter to **Music**, not Sound Effects)
+
+| Cue | Search |
+|---|---|
+| Ambient / breather | `horror ambient loop`, `dark drone`, `tension ambient`, `apocalypse ambience` |
+| Buildup | `tension riser`, `suspense build`, `pulse loop` |
+| Horde / wave active | `action drums loop`, `intense percussion`, `battle loop`, `industrial drums` |
+| Tank theme | `boss battle music`, `epic drums`, `heavy orchestral action` |
+| Witch theme | `creepy strings`, `horror violin`, `unsettling music box`, `dissonant strings` |
+| Wave cleared | `success sting`, `victory short` |
+| Defeat | `failure sting`, `game over`, `dark ending` |
+| Victory | `victory music`, `triumphant short` |
+
+Add `loop` to any music search — you specifically want seamless loops, and
+tracks tagged that way are far more likely to fade in and out cleanly.

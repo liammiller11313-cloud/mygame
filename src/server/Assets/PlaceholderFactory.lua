@@ -135,7 +135,13 @@ end
 
 --[[ A prop part: rendered, hittable, but never physical. Used for every piece of
      a rig, a gun and a pickup. Map geometry uses `mapBox` below instead. ]]
-local function prop(name: string, size: Vector3, cframe: CFrame, color: Color3, material: Enum.Material?): Part
+local function prop(
+	name: string,
+	size: Vector3,
+	cframe: CFrame,
+	color: Color3,
+	material: Enum.Material?
+): Part
 	local part = Instance.new("Part")
 	part.Name = name
 	part.Size = size
@@ -198,7 +204,8 @@ local RIG_JOINTS = table.freeze({
 })
 
 local LEFT_ARM = table.freeze({ "LeftUpperArm", "LeftLowerArm", "LeftHand", "@LeftElbow", "@LeftWrist" })
-local RIGHT_ARM = table.freeze({ "RightUpperArm", "RightLowerArm", "RightHand", "@RightElbow", "@RightWrist" })
+local RIGHT_ARM =
+	table.freeze({ "RightUpperArm", "RightLowerArm", "RightHand", "@RightElbow", "@RightWrist" })
 local UPPER_BODY = table.freeze({
 	"UpperTorso",
 	"Head",
@@ -488,9 +495,7 @@ local function buildRig(kind: string): Model?
 	-- ── arms, per side, with the Charger's asymmetry baked in ───────────────
 	for _, side in { -1, 1 } do
 		local prefix = if side < 0 then "Left" else "Right"
-		local thickness = if side < 0
-			then (shape.leftArmScale or 1)
-			else (shape.rightArmScale or 1)
+		local thickness = if side < 0 then (shape.leftArmScale or 1) else (shape.rightArmScale or 1)
 		local length = if side < 0
 			then (shape.leftArmLength or shape.leftArmScale or 1)
 			else (shape.rightArmLength or shape.rightArmScale or 1)
@@ -591,7 +596,11 @@ local function buildRig(kind: string): Model?
 				"ShoulderPad",
 				V(radius, radius, radius) * scale,
 				parts.UpperTorso.CFrame
-					* CFrame.new(side * shape.upperTorso.X * 0.42 * scale, shape.upperTorso.Y * 0.3 * scale, 0),
+					* CFrame.new(
+						side * shape.upperTorso.X * 0.42 * scale,
+						shape.upperTorso.Y * 0.3 * scale,
+						0
+					),
 				body:Lerp(accent, 0.5)
 			)
 			hump.Massless = true
@@ -824,7 +833,8 @@ local function buildGun(weaponId: string): Model?
 	local barrel: BasePart? = nil
 
 	for _, entry in spec.parts do
-		local name, size, offset, colorKey, rotation, shape = entry[1], entry[2], entry[3], entry[4], entry[5], entry[6]
+		local name, size, offset, colorKey, rotation, shape =
+			entry[1], entry[2], entry[3], entry[4], entry[5], entry[6]
 		local cframe = CFrame.new(offset)
 		if rotation then
 			cframe = cframe * CFrame.Angles(math.rad(rotation.X), math.rad(rotation.Y), math.rad(rotation.Z))
@@ -951,7 +961,14 @@ end
 
 local PICKUP_BUILDERS: { [string]: (Model) -> () } = {}
 
-local function pickupPart(model: Model, name: string, size: Vector3, offset: Vector3, color: Color3, material: Enum.Material?)
+local function pickupPart(
+	model: Model,
+	name: string,
+	size: Vector3,
+	offset: Vector3,
+	color: Color3,
+	material: Enum.Material?
+)
 	local part = prop(name, size, CFrame.new(offset), color, material)
 	part.Parent = model
 	return part
@@ -968,7 +985,14 @@ PICKUP_BUILDERS[Enums.HealthItem.Defibrillator] = function(model)
 	pickupPart(model, "Case", V(2.0, 1.0, 1.4), V(0, 0.5, 0), UITheme.Color.Warning)
 	pickupPart(model, "PaddleLeft", V(0.6, 0.5, 0.5), V(-0.6, 1.2, 0), UITheme.Color.Panel)
 	pickupPart(model, "PaddleRight", V(0.6, 0.5, 0.5), V(0.6, 1.2, 0), UITheme.Color.Panel)
-	pickupPart(model, "Readout", V(0.7, 0.4, 0.06), V(0, 0.6, -0.72), UITheme.Color.AccentBright, Enum.Material.Neon)
+	pickupPart(
+		model,
+		"Readout",
+		V(0.7, 0.4, 0.06),
+		V(0, 0.6, -0.72),
+		UITheme.Color.AccentBright,
+		Enum.Material.Neon
+	)
 end
 
 PICKUP_BUILDERS[Enums.PillItem.PainPills] = function(model)
@@ -981,7 +1005,14 @@ PICKUP_BUILDERS[Enums.PillItem.Adrenaline] = function(model)
 	pickupPart(model, "Barrel", V(0.34, 1.3, 0.34), V(0, 0.75, 0), UITheme.Color.TextPrimary)
 	pickupPart(model, "Plunger", V(0.5, 0.16, 0.5), V(0, 1.46, 0), UITheme.Color.Accent)
 	pickupPart(model, "Needle", V(0.1, 0.5, 0.1), V(0, 0.15, 0), UITheme.Color.BorderBright)
-	pickupPart(model, "Fluid", V(0.24, 0.9, 0.24), V(0, 0.72, 0), UITheme.Color.AccentBright, Enum.Material.Neon)
+	pickupPart(
+		model,
+		"Fluid",
+		V(0.24, 0.9, 0.24),
+		V(0, 0.72, 0),
+		UITheme.Color.AccentBright,
+		Enum.Material.Neon
+	)
 end
 
 PICKUP_BUILDERS[Enums.Throwable.PipeBomb] = function(model)
@@ -994,7 +1025,14 @@ end
 PICKUP_BUILDERS[Enums.Throwable.Molotov] = function(model)
 	pickupPart(model, "Bottle", V(0.6, 1.2, 0.6), V(0, 0.6, 0), UITheme.Color.Warning)
 	pickupPart(model, "Neck", V(0.28, 0.4, 0.28), V(0, 1.35, 0), UITheme.Color.Warning)
-	pickupPart(model, "Rag", V(0.22, 0.5, 0.22), V(0, 1.75, 0), UITheme.Color.TextSecondary, Enum.Material.Fabric)
+	pickupPart(
+		model,
+		"Rag",
+		V(0.22, 0.5, 0.22),
+		V(0, 1.75, 0),
+		UITheme.Color.TextSecondary,
+		Enum.Material.Fabric
+	)
 end
 
 PICKUP_BUILDERS[Enums.Throwable.BileJar] = function(model)
@@ -1113,3 +1151,928 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 	clone.Name = itemId
 	return clone
 end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  The test level
+--
+--  A greybox map is not a placeholder for level design, it IS level design —
+--  cover, elevation, choke points and sightlines are gameplay and they are worth
+--  getting right before anybody models a brick. What follows is a full L4D-shaped
+--  chapter: start safe room, a street, a warehouse, a checkpoint, a rail yard, an
+--  overpass with a collapsed span, a generator courtyard that is the crescendo,
+--  and an end safe room. Roughly 1800 studs of flow, which is deliberate — that
+--  is long enough for DirectorConfig.Bosses to reach both its Witch window and
+--  its Tank window, so the set pieces actually happen in a playtest.
+--
+--  Every gameplay-relevant thing here is a TAG. LevelService never learns a
+--  coordinate from this file; it reads FL_FlowNode, FL_SpawnNode, FL_ItemSpawn,
+--  FL_SafeRoom, FL_PanicTrigger and FL_BossZone out of CollectionService. That is
+--  what lets a hand-built map replace all of this with zero code changes.
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Greybox surface colours. No config owns these: UITheme is the interface
+-- palette, and painting geometry in its near-black panel greys would make the
+-- level unreadable at ClockTime 4.25 with fog starting at 60 studs.
+local MAP = table.freeze({
+	Ground = Color3.fromRGB(38, 38, 34),
+	Asphalt = Color3.fromRGB(52, 52, 56),
+	Concrete = Color3.fromRGB(104, 101, 94),
+	ConcreteDark = Color3.fromRGB(70, 68, 62),
+	Brick = Color3.fromRGB(96, 64, 52),
+	Metal = Color3.fromRGB(84, 88, 92),
+	Rust = Color3.fromRGB(118, 76, 52),
+	Wood = Color3.fromRGB(104, 78, 48),
+	ContainerA = Color3.fromRGB(84, 96, 74),
+	ContainerB = Color3.fromRGB(122, 78, 60),
+	ContainerC = Color3.fromRGB(68, 84, 106),
+	Fence = Color3.fromRGB(56, 58, 60),
+})
+
+local TAG_FLOW = "FL_FlowNode"
+local TAG_SPAWN = "FL_SpawnNode"
+local TAG_ITEM = "FL_ItemSpawn"
+local TAG_SAFEROOM = "FL_SafeRoom"
+local TAG_PANIC = "FL_PanicTrigger"
+local TAG_BOSS = "FL_BossZone"
+local TAG_CLOSET = "FL_RescueCloset" -- SurvivorService's tag; see its header
+
+local ITEM_PAD_HEIGHT = 1.6
+
+--[[ Solid level geometry. Collision group is left at Default deliberately — the
+     Survivor/Infected/Debris/Gib groups are all defined to collide with the
+     world, and putting the world in any of them would break that. ]]
+local function mapBox(
+	parent: Instance,
+	name: string,
+	center: Vector3,
+	size: Vector3,
+	color: Color3,
+	material: Enum.Material?,
+	shadow: boolean?
+): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.CFrame = CFrame.new(center)
+	part.Color = color
+	part.Material = material or Enum.Material.Concrete
+	part.Anchored = true
+	part.CanCollide = true
+	part.CastShadow = shadow ~= false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Locked = true
+	part.Parent = parent
+	return part
+end
+
+--[[ An invisible tagged volume. CanQuery is off on every one of these: the
+     Director ground-raycasts through candidate spawn points, and a boss zone or
+     a panic trigger that answered that ray would look like a floor in mid-air. ]]
+local function marker(parent: Instance, name: string, center: Vector3, size: Vector3, tag: string): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.CFrame = CFrame.new(center)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Transparency = 1
+	part.Locked = true
+	part.Parent = parent
+	CollectionService:AddTag(part, tag)
+	return part
+end
+
+--[[ A shelf an item can sit on. `base` is the point the pad RESTS on, because
+     ItemPlacer puts the pickup on the pad's top face. ]]
+local function itemPad(parent: Instance, base: Vector3, slot: string?): Part
+	local pad = mapBox(
+		parent,
+		"ItemPad",
+		base + Vector3.new(0, ITEM_PAD_HEIGHT * 0.5, 0),
+		V(4, ITEM_PAD_HEIGHT, 3),
+		MAP.Metal,
+		Enum.Material.DiamondPlate,
+		false
+	)
+	CollectionService:AddTag(pad, TAG_ITEM)
+	if slot then
+		-- A pad that declares its slot is a designer's decision and ItemPlacer
+		-- does not argue with it. The safe-room shelves use this for medkits.
+		pad:SetAttribute("FL_Slot", slot)
+	end
+	return pad
+end
+
+local function spawnNode(parent: Instance, position: Vector3)
+	marker(parent, "SpawnNode", position, V(4, 6, 4), TAG_SPAWN)
+end
+
+--[[ A block bridging two points: ramps, gantries, planks. The block's length
+     runs along its local Z, which is what CFrame.lookAt orients. ]]
+local function ramp(
+	parent: Instance,
+	name: string,
+	from: Vector3,
+	to: Vector3,
+	width: number,
+	color: Color3,
+	material: Enum.Material?
+): Part
+	local delta = to - from
+	local length = delta.Magnitude
+	local part = mapBox(parent, name, (from + to) * 0.5, V(width, 1, length), color, material)
+	part.CFrame = CFrame.lookAt((from + to) * 0.5, to)
+	return part
+end
+
+local function pointLight(host: BasePart, color: Color3, range: number, brightness: number, shadows: boolean?)
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = range
+	light.Brightness = brightness
+	-- Shadow-casting lights are the single most expensive thing a level can add,
+	-- and a horde is not the moment to spend that budget. Only the handful of
+	-- fixtures that define a space get them.
+	light.Shadows = shadows == true
+	light.Parent = host
+end
+
+--[[ A street lamp: pole, head, a cone of light and a neon lens so the fixture
+     itself reads from outside the light's range. ]]
+local function lamp(parent: Instance, base: Vector3, height: number, color: Color3)
+	mapBox(
+		parent,
+		"LampPole",
+		base + Vector3.new(0, height * 0.5, 0),
+		V(0.8, height, 0.8),
+		MAP.Metal,
+		Enum.Material.Metal,
+		false
+	)
+	local head = mapBox(
+		parent,
+		"LampHead",
+		base + Vector3.new(0, height, 0),
+		V(3, 0.8, 3),
+		color,
+		Enum.Material.Neon,
+		false
+	)
+	head.CanCollide = false
+	local spot = Instance.new("SpotLight")
+	spot.Color = color
+	spot.Range = 46
+	spot.Brightness = 2.2
+	spot.Angle = 110
+	spot.Face = Enum.NormalId.Bottom
+	spot.Shadows = false
+	spot.Parent = head
+end
+
+local function crate(parent: Instance, center: Vector3, size: number)
+	mapBox(
+		parent,
+		"Crate",
+		center + Vector3.new(0, size * 0.5, 0),
+		V(size, size, size),
+		MAP.Wood,
+		Enum.Material.WoodPlanks
+	)
+end
+
+local function barrier(parent: Instance, center: Vector3, rotation: number)
+	local part = mapBox(parent, "Barrier", center + Vector3.new(0, 2, 0), V(10, 4, 2.4), MAP.Concrete)
+	part.CFrame = CFrame.new(part.Position) * CFrame.Angles(0, math.rad(rotation), 0)
+end
+
+--[[ A wrecked car. Two blocks is enough: at this scale the read is "waist-high
+     thing to crouch behind", and that is exactly what it needs to be. ]]
+local function wreck(parent: Instance, center: Vector3, rotation: number)
+	local turn = CFrame.new(center) * CFrame.Angles(0, math.rad(rotation), 0)
+	local body = mapBox(parent, "Wreck", center, V(13, 3, 5.6), MAP.Rust, Enum.Material.CorrodedMetal)
+	body.CFrame = turn * CFrame.new(0, 1.5, 0)
+	local cabin = mapBox(parent, "WreckCabin", center, V(7, 2.6, 5), MAP.Rust, Enum.Material.CorrodedMetal)
+	cabin.CFrame = turn * CFrame.new(-0.5, 4.3, 0)
+end
+
+local function container(parent: Instance, center: Vector3, color: Color3)
+	mapBox(
+		parent,
+		"Container",
+		center + Vector3.new(0, 5, 0),
+		V(12, 10, 30),
+		color,
+		Enum.Material.CorrodedMetal
+	)
+end
+
+--[[
+	Four walls, a floor and an optional ceiling, with holes where you ask for
+	them. `gaps` entries are { face = "+X" | "-X" | "+Z" | "-Z", offset, width,
+	height } measured along the face from its centre.
+
+	Returns the openings so a caller can drop a Door into one.
+]]
+local function enclosure(
+	parent: Instance,
+	name: string,
+	center: Vector3,
+	interior: Vector3,
+	thickness: number,
+	gaps: { any },
+	color: Color3,
+	material: Enum.Material?,
+	ceiling: boolean?
+): (Model, { any })
+	local model = Instance.new("Model")
+	model.Name = name
+	model.Parent = parent
+
+	local height = interior.Y
+	local outerX, outerZ = interior.X + thickness * 2, interior.Z + thickness * 2
+
+	mapBox(
+		model,
+		"Floor",
+		center - Vector3.new(0, thickness * 0.5, 0),
+		V(outerX, thickness, outerZ),
+		color,
+		material
+	)
+	if ceiling ~= false then
+		mapBox(
+			model,
+			"Ceiling",
+			center + Vector3.new(0, height + thickness * 0.5, 0),
+			V(outerX, thickness, outerZ),
+			color,
+			material
+		)
+	end
+
+	local openings = {}
+	local faces = {
+		{ id = "-X", axis = "X", sign = -1, span = outerZ },
+		{ id = "+X", axis = "X", sign = 1, span = outerZ },
+		{ id = "-Z", axis = "Z", sign = -1, span = outerX },
+		{ id = "+Z", axis = "Z", sign = 1, span = outerX },
+	}
+
+	for _, face in faces do
+		local onFace = {}
+		for _, gap in gaps do
+			if gap.face == face.id then
+				table.insert(onFace, gap)
+			end
+		end
+		table.sort(onFace, function(a, b)
+			return a.offset < b.offset
+		end)
+
+		local isX = face.axis == "X"
+		local wallOffset = (if isX then interior.X else interior.Z) * 0.5 + thickness * 0.5
+
+		--[[ Places one wall slab, given where along the face it starts and ends
+		     and how tall it is. Everything below is expressed in those terms so
+		     the segment maths only has to be right once. ]]
+		local function slab(from: number, to: number, bottom: number, top: number)
+			local length, tall = to - from, top - bottom
+			if length <= 0.01 or tall <= 0.01 then
+				return
+			end
+			local along = (from + to) * 0.5
+			local position = if isX
+				then center + Vector3.new(face.sign * wallOffset, bottom + tall * 0.5, along)
+				else center + Vector3.new(along, bottom + tall * 0.5, face.sign * wallOffset)
+			local size = if isX then V(thickness, tall, length) else V(length, tall, thickness)
+			mapBox(model, "Wall", position, size, color, material)
+		end
+
+		local cursor = -face.span * 0.5
+		for _, gap in onFace do
+			slab(cursor, gap.offset - gap.width * 0.5, 0, height)
+			slab(gap.offset - gap.width * 0.5, gap.offset + gap.width * 0.5, gap.height, height)
+			cursor = gap.offset + gap.width * 0.5
+
+			local doorCenter = if isX
+				then center + Vector3.new(face.sign * wallOffset, gap.height * 0.5, gap.offset)
+				else center + Vector3.new(gap.offset, gap.height * 0.5, face.sign * wallOffset)
+			table.insert(openings, {
+				face = face.id,
+				cframe = CFrame.new(doorCenter),
+				size = if isX
+					then V(thickness, gap.height, gap.width)
+					else V(gap.width, gap.height, thickness),
+				slide = if isX then V(0, 0, gap.width) else V(gap.width, 0, 0),
+			})
+		end
+		slab(cursor, face.span * 0.5, 0, height)
+	end
+
+	return model, openings
+end
+
+--[[
+	A safe room: an enclosure, a Door in the named opening, supply shelves and a
+	warm light so it reads as shelter the moment it comes out of the fog.
+
+	The Door is authored CLOSED and carries FL_OpenOffset — the local-space vector
+	LevelService slides it along to open. Sideways into the wall rather than up
+	through the ceiling, because a room only 18 studs tall has nowhere to put a
+	14-stud door overhead.
+]]
+local function safeRoom(
+	parent: Instance,
+	index: number,
+	name: string,
+	center: Vector3,
+	interior: Vector3,
+	gaps: { any }
+): Model
+	local model, openings =
+		enclosure(parent, name, center, interior, 2, gaps, MAP.ConcreteDark, Enum.Material.Concrete)
+	CollectionService:AddTag(model, TAG_SAFEROOM)
+	model:SetAttribute("FL_Index", index)
+
+	local opening = openings[1]
+	if opening then
+		local door =
+			mapBox(model, "Door", opening.cframe.Position, opening.size, MAP.Rust, Enum.Material.DiamondPlate)
+		door:SetAttribute("FL_OpenOffset", opening.slide)
+	end
+
+	local light = mapBox(
+		model,
+		"CeilingLight",
+		center + Vector3.new(0, interior.Y - 1, 0),
+		V(6, 0.4, 6),
+		UITheme.Color.Accent,
+		Enum.Material.Neon,
+		false
+	)
+	light.CanCollide = false
+	pointLight(light, UITheme.Color.Accent, 60, 2.6, true)
+
+	return model
+end
+
+--[[ A rescue closet. SurvivorService pivots a rescued survivor to the model's
+     own pivot, so the door face is what the model is built around. ]]
+local function rescueCloset(parent: Instance, center: Vector3, name: string)
+	local model = Instance.new("Model")
+	model.Name = name
+	model.Parent = parent
+
+	mapBox(
+		model,
+		"Back",
+		center + Vector3.new(0, 6, -3.5),
+		V(8, 12, 1),
+		MAP.Metal,
+		Enum.Material.DiamondPlate
+	)
+	mapBox(
+		model,
+		"Left",
+		center + Vector3.new(-3.5, 6, 0),
+		V(1, 12, 8),
+		MAP.Metal,
+		Enum.Material.DiamondPlate
+	)
+	mapBox(
+		model,
+		"Right",
+		center + Vector3.new(3.5, 6, 0),
+		V(1, 12, 8),
+		MAP.Metal,
+		Enum.Material.DiamondPlate
+	)
+	mapBox(model, "Top", center + Vector3.new(0, 12, 0), V(8, 1, 8), MAP.Metal, Enum.Material.DiamondPlate)
+	local face = mapBox(
+		model,
+		"Door",
+		center + Vector3.new(0, 6, 3.6),
+		V(7, 11, 0.4),
+		MAP.Rust,
+		Enum.Material.CorrodedMetal
+	)
+	face.Transparency = 0.35
+	pointLight(face, UITheme.Color.Accent, 14, 1.4)
+
+	model.WorldPivot = CFrame.new(center + Vector3.new(0, 0, 4))
+	CollectionService:AddTag(model, TAG_CLOSET)
+end
+
+--[[
+	The level spline, in order. LevelService projects a point onto this polyline
+	to answer "how far through the map is the team", which is the single number
+	the whole Director is steered by: what counts as ahead of the survivors, where
+	a Tank is due, whether a spawn is in front of them or behind.
+
+	It doubles back on itself on purpose — a U-shaped route buys 1800 studs of
+	progress inside a footprint you can see across, which is how a chapter stays
+	long enough for the boss windows without becoming a corridor to nowhere.
+]]
+local ROUTE = table.freeze({
+	V(-100, 3, 0), -- start safe room
+	V(-45, 3, 0),
+	V(30, 3, 0),
+	V(120, 3, 0),
+	V(200, 3, 25), -- around the bus barricade
+	V(265, 3, 0), -- warehouse door
+	V(340, 3, 0),
+	V(420, 3, 0),
+	V(500, 3, 0),
+	V(560, 3, 0), -- checkpoint
+	V(630, 3, 20), -- rail yard
+	V(680, 3, 110),
+	V(690, 3, 210),
+	V(690, 3, 320),
+	V(660, 3, 430),
+	V(620, 13, 490), -- up onto the overpass
+	V(520, 13, 495),
+	V(410, 13, 495),
+	V(330, 13, 495),
+	V(280, 3, 497), -- down into the courtyard
+	V(200, 3, 505), -- crescendo
+	V(120, 3, 502),
+	V(55, 3, 500), -- end safe room
+})
+
+-- Places the horde comes FROM. Every one of these is behind cover, inside a
+-- side room, or beyond a wall: DirectorConfig requires a spawn to be out of
+-- sight, and a node list that ignores that just makes the search fail.
+local SPAWN_NODES = table.freeze({
+	-- street: inside the buildings, up the alley, behind the barricade
+	V(-20, 4, -125),
+	V(60, 4, -138),
+	V(127, 4, -125),
+	V(220, 4, -125),
+	V(-10, 4, 125),
+	V(120, 4, 125),
+	V(225, 4, 125),
+	V(212, 4, -30),
+	-- warehouse: the office, the side door, the far corners of the hall
+	V(310, 4, -50),
+	V(300, 4, -90),
+	V(470, 4, -55),
+	V(470, 4, 60),
+	-- rail yard: the lanes between container stacks and outside the fence
+	V(600, 4, 60),
+	V(750, 4, 90),
+	V(605, 4, 180),
+	V(752, 4, 210),
+	V(600, 4, 300),
+	V(750, 4, 330),
+	V(618, 4, 440),
+	-- overpass: underneath it, and the far end
+	V(470, 4, 460),
+	V(360, 4, 530),
+	V(600, 14, 505),
+	-- courtyard: the two horde mouths and the ground outside the walls
+	V(145, 4, 412),
+	V(215, 4, 598),
+	V(95, 4, 430),
+	V(272, 4, 575),
+})
+
+local function buildStreet(root: Instance)
+	local folder = folderIn(root, "Street")
+
+	mapBox(folder, "Road", V(97.5, -0.5, 0), V(335, 1, 80), MAP.Asphalt, Enum.Material.Asphalt)
+	for _, side in { -1, 1 } do
+		mapBox(folder, "Sidewalk", V(97.5, 0.75, side * 51.25), V(335, 1.5, 22.5), MAP.Concrete)
+	end
+
+	-- The corridor walls. Varying heights stop the street reading as a trench and
+	-- give the fog something to eat at different distances.
+	mapBox(folder, "Building", V(-7.5, 18, -85), V(125, 36, 45), MAP.Brick, Enum.Material.Brick)
+	mapBox(folder, "Building", V(127, 21, -85), V(96, 42, 45), MAP.ConcreteDark)
+	mapBox(folder, "Building", V(220, 16, -85), V(90, 32, 45), MAP.Brick, Enum.Material.Brick)
+	mapBox(folder, "Building", V(-10, 20, 85), V(120, 40, 45), MAP.ConcreteDark)
+	mapBox(folder, "Building", V(120, 15, 85), V(110, 30, 45), MAP.Brick, Enum.Material.Brick)
+	mapBox(folder, "Building", V(225, 24, 85), V(80, 48, 45), MAP.ConcreteDark)
+
+	-- The alley: a dead end off the main sightline, which is exactly where a
+	-- player who wants the extra pickup has to walk away from their team.
+	mapBox(folder, "AlleyFloor", V(67, -0.5, -103.75), V(24, 1, 82.5), MAP.Asphalt, Enum.Material.Asphalt)
+	mapBox(folder, "AlleyWall", V(54, 14, -126), V(2, 28, 40), MAP.Brick, Enum.Material.Brick)
+	mapBox(folder, "AlleyWall", V(80, 14, -126), V(2, 28, 40), MAP.Brick, Enum.Material.Brick)
+	mapBox(folder, "AlleyEnd", V(67, 14, -145), V(28, 28, 2), MAP.Brick, Enum.Material.Brick)
+	itemPad(folder, V(67, 0, -135))
+
+	-- Cover, in a rhythm: something to break every long shot, nothing that turns
+	-- the street into a maze.
+	wreck(folder, V(10, 0, -20), 8)
+	wreck(folder, V(75, 0, 18), -14)
+	wreck(folder, V(150, 0, -25), 96)
+	wreck(folder, V(240, 0, 12), 74)
+	crate(folder, V(40, 0, 30), 5)
+	crate(folder, V(45, 0, 25), 5)
+	crate(folder, V(43, 5, 28), 4)
+	crate(folder, V(120, 0, -32), 6)
+	barrier(folder, V(95, 0, -8), 12)
+	barrier(folder, V(102, 0, 8), -8)
+
+	-- The choke. A bus across two thirds of the road: the team either funnels
+	-- through the remaining gap together or splits up, and splitting up is how
+	-- this game kills people.
+	mapBox(folder, "Bus", V(195, 6, -13), V(8, 12, 54), MAP.Rust, Enum.Material.CorrodedMetal)
+	itemPad(folder, V(186, 0, 30))
+
+	for _, x in { -30, 40, 110, 180, 245 } do
+		lamp(folder, V(x, 1.5, -45), 18, UITheme.Color.AccentBright)
+	end
+	itemPad(folder, V(20, 1.5, -48))
+	itemPad(folder, V(160, 1.5, 50))
+end
+
+local function buildWarehouse(root: Instance)
+	local folder = folderIn(root, "Warehouse")
+
+	enclosure(folder, "Hall", V(382.5, 0, 0), V(235, 34, 140), 2, {
+		{ face = "-X", offset = 0, width = 16, height = 16 },
+		{ face = "+X", offset = 0, width = 16, height = 16 },
+		{ face = "-Z", offset = -70, width = 12, height = 12 },
+	}, MAP.ConcreteDark, Enum.Material.Concrete)
+
+	-- Mezzanine. The elevation is the point: from up here the whole hall is a
+	-- shooting gallery, and the price is that the stairs are the only way down.
+	mapBox(folder, "Mezzanine", V(385, 15.5, 55), V(190, 1, 30), MAP.Metal, Enum.Material.DiamondPlate)
+	mapBox(folder, "MezzanineRail", V(385, 18, 40.5), V(190, 4, 1), MAP.Metal, Enum.Material.Metal, false)
+	ramp(folder, "MezzanineRamp", V(292, 0, 55), V(332, 16, 55), 12, MAP.Metal, Enum.Material.DiamondPlate)
+	ramp(folder, "MezzanineStair", V(478, 16, 48), V(478, 0, 18), 10, MAP.Metal, Enum.Material.DiamondPlate)
+	itemPad(folder, V(400, 16, 55))
+	itemPad(folder, V(450, 16, 55))
+
+	-- Racks sit clear of the office so the two never intersect; three rows deep
+	-- means every angle across the hall is broken by something.
+	for _, x in { 345, 405, 465 } do
+		for _, z in { -20, 6, 32 } do
+			mapBox(folder, "Rack", V(x, 2.5, z), V(18, 5, 6), MAP.Rust, Enum.Material.CorrodedMetal)
+			mapBox(folder, "RackShelf", V(x, 9, z), V(18, 0.6, 6), MAP.Metal, Enum.Material.Metal, false)
+			mapBox(
+				folder,
+				"RackPost",
+				V(x - 8.5, 5, z),
+				V(0.8, 10, 0.8),
+				MAP.Metal,
+				Enum.Material.Metal,
+				false
+			)
+			mapBox(
+				folder,
+				"RackPost",
+				V(x + 8.5, 5, z),
+				V(0.8, 10, 0.8),
+				MAP.Metal,
+				Enum.Material.Metal,
+				false
+			)
+		end
+	end
+	itemPad(folder, V(345, 5, -20))
+	itemPad(folder, V(465, 5, 32))
+
+	-- Side office: a room off the hall with the only rescue closet before the
+	-- checkpoint, so a dead teammate is worth a detour.
+	enclosure(
+		folder,
+		"Office",
+		V(310, 0, -50),
+		V(44, 12, 30),
+		2,
+		{ { face = "+Z", offset = 0, width = 10, height = 10 } },
+		MAP.Concrete,
+		Enum.Material.Concrete
+	)
+	rescueCloset(folder, V(296, 0, -60), "RescueCloset_Warehouse")
+	itemPad(folder, V(322, 0, -58), Enums.Slot.Health)
+
+	marker(folder, "BossZone", V(400, 6, 8), V(80, 14, 90), TAG_BOSS)
+
+	for _, x in { 300, 360, 420, 480 } do
+		local fixture = mapBox(
+			folder,
+			"HangingLight",
+			V(x, 30, 0),
+			V(5, 0.6, 5),
+			UITheme.Color.AccentBright,
+			Enum.Material.Neon,
+			false
+		)
+		fixture.CanCollide = false
+		pointLight(fixture, UITheme.Color.AccentBright, 70, 2.0)
+	end
+	for _, z in { -60, 60 } do
+		local emergency = mapBox(
+			folder,
+			"EmergencyLight",
+			V(495, 16, z),
+			V(1, 1.4, 3),
+			UITheme.Color.Danger,
+			Enum.Material.Neon,
+			false
+		)
+		emergency.CanCollide = false
+		pointLight(emergency, UITheme.Color.Danger, 30, 1.6)
+	end
+end
+
+local function buildRailYard(root: Instance)
+	local folder = folderIn(root, "RailYard")
+
+	mapBox(folder, "YardFloor", V(674, -0.5, 215), V(182, 1, 520), MAP.Ground, Enum.Material.Ground)
+	mapBox(folder, "Corridor", V(519, -0.5, 0), V(38, 1, 26), MAP.Concrete)
+	mapBox(folder, "CorridorWall", V(519, 9, -14), V(38, 18, 2), MAP.ConcreteDark)
+	mapBox(folder, "CorridorWall", V(519, 9, 14), V(38, 18, 2), MAP.ConcreteDark)
+
+	-- Perimeter fence, with the checkpoint door and the overpass ramp as its
+	-- only two openings.
+	mapBox(folder, "Fence", V(583, 10, -26), V(2, 20, 40), MAP.Fence, Enum.Material.Metal)
+	mapBox(folder, "Fence", V(583, 10, 240.5), V(2, 20, 469), MAP.Fence, Enum.Material.Metal)
+	mapBox(folder, "Fence", V(765, 10, 215), V(2, 20, 520), MAP.Fence, Enum.Material.Metal)
+	mapBox(folder, "Fence", V(674, 10, -45), V(182, 20, 2), MAP.Fence, Enum.Material.Metal)
+	mapBox(folder, "Fence", V(724, 10, 475), V(82, 20, 2), MAP.Fence, Enum.Material.Metal)
+	mapBox(folder, "Fence", V(591, 10, 475), V(16, 20, 2), MAP.Fence, Enum.Material.Metal)
+
+	-- Containers, stacked into lanes. Two levels of cover and two levels of
+	-- sightline, which is most of what makes an open yard interesting.
+	container(folder, V(620, 0, 40), MAP.ContainerA)
+	container(folder, V(620, 10, 40), MAP.ContainerB)
+	container(folder, V(700, 0, 20), MAP.ContainerC)
+	container(folder, V(640, 0, 120), MAP.ContainerB)
+	container(folder, V(700, 0, 150), MAP.ContainerA)
+	container(folder, V(700, 10, 150), MAP.ContainerC)
+	container(folder, V(620, 0, 210), MAP.ContainerC)
+	container(folder, V(690, 0, 260), MAP.ContainerB)
+	container(folder, V(690, 10, 260), MAP.ContainerA)
+	container(folder, V(620, 0, 330), MAP.ContainerA)
+	container(folder, V(700, 0, 350), MAP.ContainerB)
+	container(folder, V(640, 0, 430), MAP.ContainerC)
+
+	ramp(folder, "ContainerRamp", V(678, 0, 150), V(694, 10, 150), 10, MAP.Metal, Enum.Material.DiamondPlate)
+	mapBox(folder, "Gantry", V(670, 21.5, 265), V(120, 1, 10), MAP.Metal, Enum.Material.DiamondPlate)
+	mapBox(folder, "GantryRail", V(670, 24, 260), V(120, 4, 0.8), MAP.Metal, Enum.Material.Metal, false)
+	mapBox(folder, "GantryRail", V(670, 24, 270), V(120, 4, 0.8), MAP.Metal, Enum.Material.Metal, false)
+	ramp(folder, "GantryStair", V(613, 22, 265), V(592, 0, 292), 8, MAP.Metal, Enum.Material.DiamondPlate)
+
+	itemPad(folder, V(620, 20, 40))
+	itemPad(folder, V(700, 20, 150))
+	itemPad(folder, V(742, 0, 100))
+	itemPad(folder, V(670, 22, 265))
+
+	marker(folder, "BossZone", V(655, 8, 195), V(60, 16, 80), TAG_BOSS)
+
+	for _, base in { V(760, 0, 60), V(588, 0, 240), V(756, 0, 400) } do
+		lamp(folder, base, 26, UITheme.Color.AccentBright)
+	end
+end
+
+local function buildOverpass(root: Instance)
+	local folder = folderIn(root, "Overpass")
+
+	ramp(folder, "OverpassRamp", V(632, 0, 450), V(608, 10, 496), 26, MAP.Concrete)
+	mapBox(folder, "Deck", V(497.5, 9.5, 495), V(235, 1, 44), MAP.Concrete)
+	mapBox(folder, "Deck", V(331.5, 9.5, 495), V(73, 1, 44), MAP.Concrete)
+
+	-- The collapsed span. A single plank across a twelve-stud hole turns a wide
+	-- road into a one-at-a-time crossing, which is a free panic beat that costs
+	-- nothing to build and reads instantly.
+	mapBox(folder, "Plank", V(374, 9.9, 506), V(14, 0.6, 6), MAP.Wood, Enum.Material.WoodPlanks)
+
+	for _, z in { 473.5, 516.5 } do
+		mapBox(folder, "Guardrail", V(497.5, 12, z), V(235, 4, 1), MAP.Metal, Enum.Material.Metal, false)
+		mapBox(folder, "Guardrail", V(331.5, 12, z), V(73, 4, 1), MAP.Metal, Enum.Material.Metal, false)
+	end
+	for _, x in { 340, 430, 520, 600 } do
+		mapBox(folder, "Pillar", V(x, 4.5, 495), V(7, 9, 7), MAP.ConcreteDark)
+	end
+
+	wreck(folder, V(450, 10, 488), 4)
+	wreck(folder, V(560, 10, 504), -172)
+	barrier(folder, V(500, 10, 495), 88)
+	itemPad(folder, V(470, 10, 480))
+
+	rescueCloset(folder, V(540, 10, 478), "RescueCloset_Overpass")
+	ramp(folder, "DescentRamp", V(300, 10, 495), V(268, 0, 495), 26, MAP.Concrete)
+
+	for _, x in { 330, 420, 510, 590 } do
+		lamp(folder, V(x, 10, 476), 16, UITheme.Color.AccentBright)
+	end
+end
+
+local function buildCourtyard(root: Instance)
+	local folder = folderIn(root, "Courtyard")
+
+	enclosure(folder, "Yard", V(185, 0, 505), V(200, 26, 150), 2, {
+		{ face = "+X", offset = -10, width = 30, height = 20 },
+		{ face = "-X", offset = -5, width = 12, height = 14 },
+		{ face = "-Z", offset = -40, width = 16, height = 14 },
+		{ face = "+Z", offset = 30, width = 16, height = 14 },
+	}, MAP.ConcreteDark, Enum.Material.Concrete, false)
+
+	-- The generator. Starting it is the crescendo: a bounded, scripted horde on
+	-- top of whatever the Director is already doing, arriving through two mouths
+	-- in the walls that the team can see and still cannot cover at once.
+	mapBox(folder, "GeneratorBase", V(185, 1, 505), V(12, 2, 9), MAP.Metal, Enum.Material.DiamondPlate)
+	mapBox(folder, "GeneratorHousing", V(185, 5, 505), V(9, 6, 7), MAP.Rust, Enum.Material.CorrodedMetal)
+	mapBox(folder, "GeneratorExhaust", V(189, 9, 505), V(1.4, 8, 1.4), MAP.Metal, Enum.Material.Metal, false)
+	local panel = mapBox(
+		folder,
+		"GeneratorPanel",
+		V(185, 5, 501.4),
+		V(3, 1.8, 0.3),
+		UITheme.Color.Accent,
+		Enum.Material.Neon,
+		false
+	)
+	panel.CanCollide = false
+	pointLight(panel, UITheme.Color.Accent, 26, 2.4)
+
+	marker(folder, "PanicTrigger", V(185, 6, 505), V(34, 14, 34), TAG_PANIC)
+
+	barrier(folder, V(150, 0, 470), 20)
+	barrier(folder, V(160, 0, 540), -30)
+	barrier(folder, V(225, 0, 470), 70)
+	barrier(folder, V(230, 0, 545), 110)
+	crate(folder, V(120, 0, 520), 6)
+	crate(folder, V(126, 0, 514), 6)
+	wreck(folder, V(245, 0, 555), 40)
+
+	itemPad(folder, V(120, 0, 462))
+	itemPad(folder, V(252, 0, 560))
+	itemPad(folder, V(140, 0, 548))
+
+	for _, spot in { V(110, 0, 440), V(260, 0, 570) } do
+		lamp(folder, spot, 22, UITheme.Color.AccentBright)
+	end
+	for _, spot in { V(145, 20, 434), V(215, 20, 576) } do
+		local hazard =
+			mapBox(folder, "HazardLight", spot, V(2, 1.2, 1), UITheme.Color.Danger, Enum.Material.Neon, false)
+		hazard.CanCollide = false
+		pointLight(hazard, UITheme.Color.Danger, 34, 2.0)
+	end
+end
+
+--[[
+	Builds the whole greybox chapter and parents it to Workspace.
+
+	Always builds: `ensureAssets` is the one that decides whether a test map is
+	wanted at all, so that a place which already contains a hand-built level is
+	never littered with this one.
+]]
+function PlaceholderFactory:buildTestMap(): Model
+	local existing = Workspace:FindFirstChild(MAP_NAME)
+	if existing and existing:IsA("Model") then
+		return existing
+	end
+
+	local root = Instance.new("Model")
+	root.Name = MAP_NAME
+
+	-- One ground plane under everything. Cheaper than patching floor into every
+	-- pocket the spawn nodes sit in, and it means a survivor who walks off the
+	-- level lands on dirt instead of falling out of the world.
+	mapBox(root, "Ground", V(320, -2, 215), V(1100, 2, 900), MAP.Ground, Enum.Material.Ground)
+	for _, wall in
+		{
+			{ V(320, 20, -235), V(1100, 40, 4) },
+			{ V(320, 20, 665), V(1100, 40, 4) },
+			{ V(-230, 20, 215), V(4, 40, 900) },
+			{ V(870, 20, 215), V(4, 40, 900) },
+		}
+	do
+		mapBox(root, "Perimeter", wall[1], wall[2], MAP.ConcreteDark)
+	end
+
+	local start = safeRoom(root, 1, "SafeRoom_Start", V(-100, 0, 0), V(56, 18, 36), {
+		{ face = "+X", offset = 0, width = 12, height = 14 },
+	})
+	itemPad(start, V(-118, 0, -12), Enums.Slot.Health)
+	itemPad(start, V(-118, 0, 12), Enums.Slot.Primary)
+	itemPad(start, V(-92, 0, -14), Enums.Slot.Throwable)
+
+	-- LoadCharacter needs somewhere to put a body before SurvivorService pivots
+	-- it to the level's spawn CFrame; without this a joining player materialises
+	-- at the origin for a frame, in the middle of the street.
+	local spawnPoint = Instance.new("SpawnLocation")
+	spawnPoint.Name = "StartSpawn"
+	spawnPoint.Size = V(14, 1, 14)
+	spawnPoint.CFrame = CFrame.new(-100, 0.5, 0)
+	spawnPoint.Anchored = true
+	spawnPoint.CanCollide = false
+	spawnPoint.CanQuery = false
+	spawnPoint.Transparency = 1
+	spawnPoint.Neutral = true
+	spawnPoint.Duration = 0
+	spawnPoint.Parent = start
+
+	buildStreet(root)
+	buildWarehouse(root)
+
+	local checkpoint = safeRoom(root, 2, "SafeRoom_Checkpoint", V(560, 0, 0), V(44, 18, 34), {
+		{ face = "-X", offset = 0, width = 12, height = 14 },
+		{ face = "+X", offset = 0, width = 12, height = 14 },
+	})
+	itemPad(checkpoint, V(546, 0, -13), Enums.Slot.Health)
+	itemPad(checkpoint, V(572, 0, -13), Enums.Slot.Pills)
+	itemPad(checkpoint, V(560, 0, 13), Enums.Slot.Primary)
+
+	buildRailYard(root)
+	buildOverpass(root)
+	buildCourtyard(root)
+
+	local finish = safeRoom(root, 3, "SafeRoom_End", V(55, 0, 500), V(56, 18, 36), {
+		{ face = "+X", offset = 0, width = 12, height = 14 },
+	})
+	itemPad(finish, V(40, 0, 486), Enums.Slot.Health)
+	itemPad(finish, V(70, 0, 486), Enums.Slot.Pills)
+
+	local flow = folderIn(root, "Flow")
+	for index, point in ROUTE do
+		local node = marker(flow, string.format("FlowNode_%02d", index), point, V(3, 3, 3), TAG_FLOW)
+		node:SetAttribute("FL_Order", index)
+	end
+
+	local nodes = folderIn(root, "SpawnNodes")
+	for _, point in SPAWN_NODES do
+		spawnNode(nodes, point)
+	end
+
+	root.Parent = Workspace
+	return root
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  Lifecycle
+-- ════════════════════════════════════════════════════════════════════════════
+
+--[[ True when this place already has a tagged level in it that this module did
+     not build. That is the drop-in case: the user's own map is present, and the
+     last thing they want is a greybox street on top of it. ]]
+local function hasHandBuiltLevel(): boolean
+	local ours = Workspace:FindFirstChild(MAP_NAME)
+	for _, node in CollectionService:GetTagged(TAG_FLOW) do
+		if node:IsDescendantOf(Workspace) and not (ours and node:IsDescendantOf(ours)) then
+			return true
+		end
+	end
+	return false
+end
+
+--[[
+	Builds everything the round will ask for, before it asks.
+
+	Idempotent by construction: templates are cached by name and the map returns
+	the one already in Workspace, so calling this twice is two folder lookups.
+
+	Warming matters more than it looks. The first shot of the round would
+	otherwise pay for laying out a gun, and the first horde would pay for laying
+	out seven rigs — both at exactly the moment the game is trying to convince
+	somebody it feels good.
+]]
+function PlaceholderFactory:ensureAssets()
+	for weaponId in WeaponConfig.all() do
+		self:buildWeaponModel(weaponId)
+		self:buildViewmodel(weaponId)
+	end
+	for kind in InfectedConfig.all() do
+		self:buildInfectedRig(kind)
+	end
+	for slot, ids in
+		{
+			[Enums.Slot.Health] = { Enums.HealthItem.Medkit, Enums.HealthItem.Defibrillator },
+			[Enums.Slot.Pills] = { Enums.PillItem.PainPills, Enums.PillItem.Adrenaline },
+			[Enums.Slot.Throwable] = {
+				Enums.Throwable.PipeBomb,
+				Enums.Throwable.Molotov,
+				Enums.Throwable.BileJar,
+			},
+		}
+	do
+		for _, itemId in ids do
+			self:buildPickup(slot, itemId)
+		end
+	end
+
+	if hasHandBuiltLevel() then
+		print("[PlaceholderFactory] a tagged level is already in Workspace; skipping the test map")
+		return
+	end
+	self:buildTestMap()
+end
+
+function PlaceholderFactory:init()
+	-- Assets exist before any other service's start() runs, which is what lets
+	-- LevelService index the map's tags in its own start() without waiting.
+	self:ensureAssets()
+end
+
+Registry.register("PlaceholderFactory", PlaceholderFactory)
+
+return PlaceholderFactory

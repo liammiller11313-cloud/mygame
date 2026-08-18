@@ -126,7 +126,11 @@ local BINDINGS: { Binding } = {
 	{ action = Action.Throw, keys = { Enum.KeyCode.G } },
 
 	{ action = Action.Slot1, keys = { Enum.KeyCode.One, Enum.KeyCode.DPadUp }, slot = Enums.Slot.Primary },
-	{ action = Action.Slot2, keys = { Enum.KeyCode.Two, Enum.KeyCode.DPadLeft }, slot = Enums.Slot.Secondary },
+	{
+		action = Action.Slot2,
+		keys = { Enum.KeyCode.Two, Enum.KeyCode.DPadLeft },
+		slot = Enums.Slot.Secondary,
+	},
 	{
 		action = Action.Slot3,
 		keys = { Enum.KeyCode.Three, Enum.KeyCode.DPadRight },

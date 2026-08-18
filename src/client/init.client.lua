@@ -23,15 +23,15 @@
 	still has to run.
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Registry = require(Shared.Util.Registry)
--- Requiring Remotes on the client WAITS for the server's manifest to replicate,
--- so this line is also the "is the server actually up" check. It has to happen
--- before any controller tries to connect to a remote in start().
-local Remotes = require(Shared.Net.Remotes)
+
+-- Assigned in the boot section below, not here: requiring it can fail, and the
+-- failure has to be reported through `report` rather than thrown at module
+-- scope. Declared up here so requestInitialState closes over the local.
+local Remotes: any = nil
 
 local BAR = string.rep("=", 72)
 
@@ -77,7 +77,16 @@ type Loaded = {
 local loaded: { Loaded } = {}
 
 local function report(phase: string, subject: string, err: any)
-	warn(string.format("\n%s\n[Fading Light client] %s FAILED — %s\n%s\n%s", BAR, phase, subject, tostring(err), BAR))
+	warn(
+		string.format(
+			"\n%s\n[Fading Light client] %s FAILED — %s\n%s\n%s",
+			BAR,
+			phase,
+			subject,
+			tostring(err),
+			BAR
+		)
+	)
 end
 
 local function traceback(err: any): string
@@ -185,6 +194,22 @@ end
 
 local started = os.clock()
 
+--[[
+	Requiring Remotes on the client WAITS for the server's manifest to replicate,
+	so this is also the "is the server actually up" check, and it has to succeed
+	before any controller connects to a remote in start().
+
+	It is isolated because a failure here is not one controller's problem: every
+	controller requires Remotes, so letting it throw fourteen more times would
+	cost fourteen more twenty-second waits and bury the one message that matters.
+]]
+local remotesOk, remotesResult = xpcall(require, traceback, Shared.Net.Remotes :: any)
+if not remotesOk then
+	report("require", "Shared/Net/Remotes", remotesResult)
+	error("[Fading Light client] the network manifest never replicated; the client cannot start", 0)
+end
+Remotes = remotesResult
+
 for _, path in CONTROLLERS do
 	loadController(path)
 end
@@ -217,7 +242,3 @@ print(
 --[[ Seeded after start() so a controller's remote listeners are already up: the
      snapshot is a starting point, not a substitute for the events that follow. ]]
 seed(requestInitialState())
-
--- Nothing else runs at module scope. Everything from here is event-driven, and
--- the local player is the only thing this script still owns.
-local _ = Players.LocalPlayer

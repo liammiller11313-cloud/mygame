@@ -204,8 +204,12 @@ function CameraController:onWeaponFired(definition: any, seed: number, shotIndex
 		return
 	end
 	if definition.recoilVertical > 0 or definition.recoilHorizontal > 0 then
-		local vertical, horizontal =
-			ShotPattern.generateRecoil(seed, shotIndex, definition.recoilVertical, definition.recoilHorizontal)
+		local vertical, horizontal = ShotPattern.generateRecoil(
+			seed,
+			shotIndex,
+			definition.recoilVertical,
+			definition.recoilHorizontal
+		)
 		self:addRecoil(vertical, horizontal)
 	end
 	self:addTrauma(definition.shakeMagnitude * TRAUMA_PER_MAGNITUDE)

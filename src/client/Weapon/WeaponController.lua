@@ -48,7 +48,6 @@
 	three raycasts, not ten.
 ]]
 
-local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -157,6 +156,11 @@ local state = {
 	nextShoveAt = 0,
 	nextSwingAt = 0,
 	reload = nil :: any,
+
+	--[[ Set when an attribute update disagreed with the prediction and was not
+	     believed yet. The Heartbeat only re-reads the loadout while this is up,
+	     so an idle player costs zero attribute reads per frame. ]]
+	pendingReconcile = false,
 }
 
 local echoes = table.create(ECHO_SLOTS)
@@ -362,17 +366,42 @@ local function refreshLoadout(force: boolean)
 	local ammo, reserve = readSlotAmmo(slot, definition)
 	local now = os.clock()
 
-	--[[ Downward corrections are believed at once — the server never hands ammo
-	     back. Upward ones are latency until the trigger has been quiet. ]]
-	if switched or ammo < state.ammo or now - state.lastPredictAt >= RECONCILE_GRACE then
+	--[[
+		Who to believe about the magazine.
+
+		A weapon swap: the server, always — nothing was predicted yet.
+		Mid-reload: neither. Both sides are counting shells on their own clock and
+		will disagree by up to one; correcting each other every shell is a counter
+		that visibly stutters while you watch it. The last shell sets
+		lastPredictAt, so the grace window below covers the round trip.
+		Otherwise: a LOWER server count is believed at once, because the server
+		never hands ammo back, and a higher one is latency until the trigger has
+		been quiet for a round trip's worth of grace.
+	]]
+	local believeServer
+	if switched then
+		believeServer = true
+	elseif state.reload then
+		believeServer = false
+	else
+		believeServer = ammo < state.ammo or now - state.lastPredictAt >= RECONCILE_GRACE
+	end
+
+	if believeServer then
+		state.pendingReconcile = false
 		if state.ammo ~= ammo or state.reserve ~= reserve then
 			state.ammo = ammo
 			state.reserve = reserve
 			WeaponController.ammoChanged:fire(ammo, reserve)
 		end
-	elseif state.reserve ~= reserve then
+	elseif state.reserve ~= reserve and not state.reload then
+		-- The reserve is not predicted while firing, so it is safe to take on its
+		-- own; it only moves when the server actually spends it.
 		state.reserve = reserve
 		WeaponController.ammoChanged:fire(state.ammo, reserve)
+		state.pendingReconcile = state.ammo ~= ammo
+	else
+		state.pendingReconcile = state.ammo ~= ammo or state.reserve ~= reserve
 	end
 end
 
@@ -418,6 +447,21 @@ function WeaponController:isPredictedTracer(origin: Vector3, at: number?): boole
 	return false
 end
 
+--[[ One RaycastParams for the whole session, refiltered only when the character
+     changes. A fresh one per trigger pull is an allocation the GC eventually
+     charges to a frame in the middle of a horde. ]]
+local castParams = RaycastUtil.excluding({})
+local castCharacter: Model? = nil
+
+local function tracerParams(): RaycastParams
+	local character = player.Character
+	if character ~= castCharacter then
+		castCharacter = character
+		castParams.FilterDescendantsInstances = if character then { character } else {}
+	end
+	return castParams
+end
+
 --[[
 	Draws what the shot will look like before the server has said what it hit.
 
@@ -438,8 +482,8 @@ local function drawTracers(origin: Vector3, direction: Vector3, seed: number, sp
 
 	local directions = ShotPattern.generate(direction, seed, definition.pellets, spread)
 	local count = math.min(#directions, MAX_PREDICTED_TRACERS)
-	local params = RaycastUtil.excluding({ player.Character :: any })
 	local range = definition.maxRange
+	local params = tracerParams()
 
 	for index = 1, count do
 		local pellet = directions[index]
@@ -625,6 +669,7 @@ function WeaponController:beginReload(): boolean
 		perShell = definition.reloadPerShell > 0,
 		phase = "Load",
 		timer = 0,
+		startedAt = os.clock(),
 	}
 	playLocal(AudioConfig.WeaponReload.MagOut)
 
@@ -780,7 +825,15 @@ end
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function WeaponController:init()
-	for _, name in { LA.ActiveSlot, LA.PrimaryId, LA.SecondaryId, LA.PrimaryAmmo, LA.SecondaryAmmo, LA.PrimaryReserve } do
+	local WATCHED = {
+		LA.ActiveSlot,
+		LA.PrimaryId,
+		LA.SecondaryId,
+		LA.PrimaryAmmo,
+		LA.SecondaryAmmo,
+		LA.PrimaryReserve,
+	}
+	for _, name in WATCHED do
 		trove:connect(player:GetAttributeChangedSignal(name), function()
 			refreshLoadout(false)
 		end)
@@ -842,7 +895,19 @@ function WeaponController:start()
 		local definition = state.definition
 
 		if state.reload then
-			stepReload(dt)
+			--[[ The server can refuse a reload we optimistically started — a
+			     throttled request, a pickup that changed the weapon, going down
+			     mid-reload. IsReloading is its answer; once a round trip has
+			     passed and it still says no, the local mirror is wrong and is
+			     dropped rather than left to finish into a magazine that never
+			     filled. ]]
+			local serverReloading = Attributes.get(player, LA.IsReloading, false)
+			if not serverReloading and now - state.reload.startedAt > RECONCILE_GRACE then
+				endReload(false)
+				refreshLoadout(false)
+			else
+				stepReload(dt)
+			end
 		end
 
 		if state.pumpAt > 0 and now >= state.pumpAt then
@@ -866,14 +931,11 @@ function WeaponController:start()
 			end
 		end
 
-		-- The upward half of reconciliation, once the trigger has gone quiet.
-		if now - state.lastPredictAt >= RECONCILE_GRACE then
-			local ammo, reserve = readSlotAmmo(state.slot, definition)
-			if (ammo ~= state.ammo or reserve ~= state.reserve) and not state.reload then
-				state.ammo = ammo
-				state.reserve = reserve
-				WeaponController.ammoChanged:fire(ammo, reserve)
-			end
+		--[[ The upward half of reconciliation. Only runs when an earlier
+		     attribute update was disbelieved, so a player who is not shooting
+		     does no work here at all. ]]
+		if state.pendingReconcile and not state.reload and now - state.lastPredictAt >= RECONCILE_GRACE then
+			refreshLoadout(false)
 		end
 	end)
 end
