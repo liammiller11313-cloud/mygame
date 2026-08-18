@@ -116,6 +116,24 @@ function RaycastUtil.pierce(
 end
 
 --[[
+	The one RaycastParams every line-of-sight test reuses.
+
+	hasLineOfSight is the most-called cast in the game — every brain retarget and
+	re-path, every Director spawn visibility check, every melee sweep candidate —
+	and at SustainPeak that is well over a thousand calls a second. Allocating a
+	fresh RaycastParams for each of them is pure garbage.
+
+	Reusing one looks unsafe and is not: Luau is single-threaded, and nothing
+	between the filter assignment and the cast below yields, so no other caller
+	can observe or overwrite the filter mid-cast. Only touch this from
+	hasLineOfSight, and only in those two adjacent lines.
+]]
+local sightParams = RaycastParams.new()
+sightParams.FilterType = Enum.RaycastFilterType.Exclude
+sightParams.IgnoreWater = true
+sightParams.RespectCanCollide = false
+
+--[[
 	True when nothing solid sits between two points. The Director uses this to
 	keep spawns out of sight, and hit validation uses it to reject a claimed hit
 	through a wall.
@@ -126,7 +144,8 @@ function RaycastUtil.hasLineOfSight(from: Vector3, to: Vector3, ignoreList: { In
 	if distance < 0.1 then
 		return true
 	end
-	local result = workspace:Raycast(from, delta.Unit * distance, RaycastUtil.excluding(ignoreList))
+	sightParams.FilterDescendantsInstances = ignoreList
+	local result = workspace:Raycast(from, delta.Unit * distance, sightParams)
 	return result == nil
 end
 

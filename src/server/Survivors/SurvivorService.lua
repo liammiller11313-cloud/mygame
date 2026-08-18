@@ -731,16 +731,10 @@ function SurvivorService:damage(player: Player, amount: number, ctx): any
 
 	self:_publish(record)
 
-	-- Where the damage came FROM, not where it landed: the HUD draws an arrow.
-	local source = ctx.hitPosition
-	if ctx.distance and ctx.distance > 0 and ctx.direction and ctx.direction.Magnitude > 0 then
-		source = ctx.hitPosition - ctx.direction.Unit * ctx.distance
-	end
-	Remotes.Event.DamageTaken:FireClient(player, {
-		amount = dealt,
-		sourcePosition = source,
-		damageType = ctx.damageType,
-	})
+	-- DamageTaken belongs to DamageService, which is the only way into this
+	-- function and which resolves the source from the attacker's own root rather
+	-- than by walking back up the shot line. Firing it here as well drew the
+	-- damage arrow twice, at two different places, and doubled the screen blood.
 
 	if not killed and dealt > 0 then
 		playAt(AudioConfig.Survivor.Hurt, record.root)

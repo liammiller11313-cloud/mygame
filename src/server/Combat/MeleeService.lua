@@ -249,10 +249,14 @@ local function headPositionOf(character: Model): Vector3?
 end
 
 --[[
-	Everything both verbs need before they may touch the world, in cheapest-first
-	order so a client spamming either remote costs a handful of type checks. Nil
-	means the request is dropped — silently, like every other rejection in the
+	Everything both verbs need before they may touch the world, cheapest first.
+	Nil means the request is dropped — silently, like every other rejection in the
 	combat path, because an error tells a cheater exactly which check they tripped.
+
+	The last check is a line-of-sight raycast, and it is the only expensive thing
+	in here. Both callers therefore admit the request against their per-player
+	cooldown BEFORE calling this, so the number of casts a client can buy is
+	capped by its fire rate rather than by its packet rate.
 ]]
 local function validateActor(player: Player, origin: any, direction: any): Actor?
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
@@ -564,8 +568,12 @@ end
 function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3): { Types.HitRecord }
 	local records: { Types.HitRecord } = {}
 
-	local actor = validateActor(player, origin, direction)
-	if not actor then
+	-- Cheapest first, and the rate check ahead of validateActor: that function
+	-- ends in a line-of-sight raycast, so a client firing SwingMelee at packet
+	-- rate would otherwise buy one RaycastParams and one cast per packet however
+	-- fast it sent them. Everything above the raycast is table lookups and
+	-- number compares. BallisticsService admits a shot in exactly this order.
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return records
 	end
 
@@ -585,12 +593,20 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 		return records
 	end
 
+	-- Consumed on ADMISSION, not on success. A swing that is then thrown out by
+	-- validateActor still costs its cooldown, which is what makes the remote
+	-- unspammable; a client swinging at its real fire rate never notices.
 	local now = os.clock()
 	local state = stateFor(player)
 	if now - state.lastSwingAt < WeaponConfig.getFireDelay(definition) * FIRE_DELAY_LENIENCY then
 		return records
 	end
 	state.lastSwingAt = now
+
+	local actor = validateActor(player, origin, direction)
+	if not actor then
+		return records
+	end
 
 	local apex, unit = actor.apex, actor.unit
 
@@ -722,11 +738,14 @@ end
 	on it. That is the whole verb, and it is the answer to being surrounded.
 ]]
 function MeleeService:shove(player: Player, origin: Vector3, direction: Vector3): number
-	local actor = validateActor(player, origin, direction)
-	if not actor then
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return 0
 	end
 
+	-- Same order as the swing, for the same reason: validateActor ends in a
+	-- line-of-sight raycast, and the cooldown is the only thing standing between
+	-- a client spamming the Shove remote and an unbounded number of casts. The
+	-- shove is admitted here and pays for itself here, whatever happens next.
 	local now = os.clock()
 	local state = stateFor(player)
 	local cooldown = if isFatigued(state, now) then SHOVE.FatigueCooldown else SHOVE.Cooldown
@@ -734,6 +753,11 @@ function MeleeService:shove(player: Player, origin: Vector3, direction: Vector3)
 		return 0
 	end
 	recordShove(state, now)
+
+	local actor = validateActor(player, origin, direction)
+	if not actor then
+		return 0
+	end
 
 	local apex, unit = actor.apex, actor.unit
 

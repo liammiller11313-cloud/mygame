@@ -21,11 +21,19 @@
 	studs at the top of the kick. WeaponConfig's units stay honest.
 
 	── WHERE THE MODEL COMES FROM ──────────────────────────────────────────────
-	ReplicatedStorage.Assets.Viewmodels.<weaponId>, cloned. That folder is built
-	either by the server's PlaceholderFactory or by studio-scripts/OrganizeAssets
-	from the user's own models. It is matched by weapon id first, then by
-	displayName, then case-insensitively, because an artist's folder is named
-	after their model rather than after our enum.
+	ReplicatedStorage.Assets.Viewmodels, cloned. The lookup key is WeaponConfig's
+	`modelName` FIRST, because that is the literal name of the artist's model and
+	the only key guaranteed to match it: the PPSh ships as "(71 Mag) PPSh-41",
+	which is neither our enum key nor its display name. Weapon id, display name
+	and a whitespace-insensitive sweep follow, so a folder populated by
+	PlaceholderFactory's grey-boxes still resolves.
+
+	Whatever is found is treated as somebody else's model rather than as ours:
+	scripts are stripped before it can run any, every part is anchored and made
+	unqueryable, a Muzzle is invented at the front of its bounding box if the art
+	did not ship one, and a model whose scale is wildly wrong for its class is
+	fitted to it — a six-stud rifle a stud and a half from the eye is a wall, not
+	a weapon.
 
 	If nothing matches, a blocky stand-in is built here instead. That is not a
 	nicety: a client that boots before the asset folder replicates must still
@@ -61,66 +69,138 @@ local STATE = Enums.SurvivorState
 local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 3
 local RENDER_NAME = "FL_Viewmodel"
 
+export type Pose = {
+	hip: Vector3,
+	aim: Vector3,
+	tilt: number,
+	length: number,
+}
+
 --[[
-	Where the weapon sits relative to the camera, in studs (right, up, forward).
-	None of this exists in a Config: WeaponConfig owns what a gun DOES, and the
+	Where the weapon sits relative to the camera, in studs (right, up, forward),
+	and how long a weapon of that class is assumed to be at that distance.
+
+	None of this lives in a Config: WeaponConfig owns what a gun DOES, and the
 	pose is a property of the viewmodel art, not of the balance. Anything a
 	designer would retune lives there; anything an artist would retune is here.
 
+	Keyed by `definition.class`, NOT by weapon id. A pose describes how a weapon
+	is held rather than which one it is — every rifle in the roster sits in the
+	same place — so six entries cover all sixteen guns, and the seventeenth
+	inherits a correct pose on the day someone adds it instead of silently
+	falling through to a generic one. Per-weapon exceptions go in WEAPON_POSE.
+
 	`aim` puts the weapon on the screen's centre line. When a model carries a
-	"Sight" or "AimPoint" attachment, that is used instead and this is only the
-	fallback for models that do not.
+	"Sight" or "AimPoint" attachment, that point is put there instead and this
+	becomes the pose of the model around it.
+
+	`length` is what the offsets assume the gun measures along its longest axis.
+	It is what the grey-box is built to and what a supplied model is fitted to,
+	so a real model and a placeholder frame identically.
 ]]
-local DEFAULT_POSE = {
+local DEFAULT_POSE: Pose = {
 	hip = Vector3.new(0.85, -0.75, -1.55),
 	aim = Vector3.new(0, -0.32, -1.05),
 	tilt = math.rad(-3), -- a dead-square weapon reads as a screenshot, not a gun
+	length = 1.8,
 }
 
-local POSE: { [string]: { hip: Vector3, aim: Vector3, tilt: number } } = {
-	[Enums.Weapon.Pistol] = {
+local CLASS_POSE: { [string]: Pose } = {
+	Pistol = {
 		hip = Vector3.new(0.7, -0.62, -1.2),
 		aim = Vector3.new(0, -0.26, -0.85),
 		tilt = math.rad(-4),
+		length = 0.95,
 	},
-	[Enums.Weapon.Magnum] = {
-		hip = Vector3.new(0.72, -0.64, -1.3),
-		aim = Vector3.new(0, -0.27, -0.9),
-		tilt = math.rad(-4),
-	},
-	[Enums.Weapon.SMG] = {
+	SMG = {
 		hip = Vector3.new(0.8, -0.7, -1.4),
 		aim = Vector3.new(0, -0.3, -1.0),
 		tilt = math.rad(-3),
+		length = 1.55,
 	},
-	[Enums.Weapon.PumpShotgun] = {
-		hip = Vector3.new(0.9, -0.8, -1.7),
-		aim = Vector3.new(0, -0.34, -1.2),
-		tilt = math.rad(-2),
-	},
-	[Enums.Weapon.AutoShotgun] = {
-		hip = Vector3.new(0.9, -0.8, -1.7),
-		aim = Vector3.new(0, -0.34, -1.2),
-		tilt = math.rad(-2),
-	},
-	[Enums.Weapon.AssaultRifle] = {
+	Rifle = {
 		hip = Vector3.new(0.85, -0.75, -1.6),
 		aim = Vector3.new(0, -0.3, -1.1),
 		tilt = math.rad(-3),
+		length = 1.9,
 	},
-	-- The scope has to sit dead on the centre line or the pull-in reads as a
+	-- The glass has to sit dead on the centre line or the pull-in reads as a
 	-- misalignment rather than as magnification.
-	[Enums.Weapon.HuntingRifle] = {
+	Marksman = {
 		hip = Vector3.new(0.88, -0.78, -1.75),
 		aim = Vector3.new(0, -0.22, -0.7),
 		tilt = math.rad(-2),
+		length = 2.15,
 	},
-	[Enums.Weapon.Machete] = {
+	Shotgun = {
+		hip = Vector3.new(0.9, -0.8, -1.7),
+		aim = Vector3.new(0, -0.34, -1.2),
+		tilt = math.rad(-2),
+		length = 2.0,
+	},
+	Melee = {
 		hip = Vector3.new(0.95, -0.9, -1.3),
 		aim = Vector3.new(0.75, -0.7, -1.2),
 		tilt = math.rad(-14),
+		length = 1.6,
 	},
 }
+
+--[[ Exceptions, keyed by weapon id, for the guns whose class pose is wrong for
+     them specifically. Kept as short as possible: an entry here is a promise to
+     retune it by hand every time the class pose moves. ]]
+local WEAPON_POSE: { [string]: Pose } = {
+	-- A six-inch revolver is a hand longer than the 1911 and hangs heavier, so
+	-- it sits further out and further down than the rest of its class.
+	[Enums.Weapon.Magnum357] = {
+		hip = Vector3.new(0.72, -0.66, -1.32),
+		aim = Vector3.new(0, -0.27, -0.92),
+		tilt = math.rad(-4),
+		length = 1.15,
+	},
+}
+
+--[[ The pose for a weapon: its own if it has earned one, otherwise its class's.
+     The class lookup is the one that must always resolve, so an unknown or
+     missing class falls through to the generic long-gun pose rather than nil. ]]
+local function poseFor(weaponId: string?, definition: any): Pose
+	local override = if weaponId then WEAPON_POSE[weaponId] else nil
+	if override then
+		return override
+	end
+	local class = definition and definition.class
+	return (class and CLASS_POSE[class]) or DEFAULT_POSE
+end
+
+--[[
+	The field of view the offsets above were authored against — Roblox's default,
+	and what the camera sits at from the hip.
+
+	Apparent size goes as 1/tan(fov/2), so a scope that pulls the frame from 70
+	degrees to the M1A EBR's 34 magnifies the weapon 2.3x. Left uncompensated the
+	gun swallows the screen at exactly the moment the player is trying to see
+	past it, so the pose is pushed out by the same factor and the weapon keeps
+	the size it has from the hip. Read off the live camera rather than off
+	definition.aimFov so it tracks the aim ramp and the sprint widen for free.
+]]
+local POSE_FOV = 70
+local POSE_FOV_TAN = math.tan(math.rad(POSE_FOV) * 0.5)
+-- The narrowest gun in the roster, the M1A EBR at 34 degrees, asks for 2.3x.
+local MAX_FOV_COMPENSATION = 3
+
+--[[ How far a supplied model's longest axis may be from its class `length`
+     before it is scaled to fit. Artists' guns arrive at wildly different
+     scales; a band this wide leaves anything plausible alone and only rescues
+     the ones that would otherwise fill the frame or vanish into it. ]]
+local FIT_TOLERANCE = 1.45
+
+--[[ A "Sight" further from the model's pivot than this is not a sight, it is a
+     mis-named attachment on somebody's free model, and honouring it would throw
+     the weapon off screen the moment the player aims. ]]
+local SIGHT_MAX_OFFSET = 2.5
+
+local MUZZLE_NAMES = { "Muzzle", "MuzzlePoint", "MuzzleAttachment", "FirePoint", "Tip" }
+local SIGHT_NAMES = { "Sight", "AimPoint", "AimPart", "Iron" }
 
 -- Sway. The weapon lags the camera, which is the single cheapest cue that the
 -- thing has mass. Clamped so a flick of the mouse cannot throw it off screen.
@@ -151,12 +231,20 @@ local IMPULSE_GAIN = math.exp(1)
 -- Degrees of muzzle rise per stud of kickback. Pure feel; the camera's real
 -- recoil is CameraController's and comes from WeaponConfig.
 local KICK_PITCH_PER_STUD = 26
+--[[ Down the sights the weapon is shouldered, and the M1A EBR's 0.5-stud kick
+     would otherwise throw thirteen degrees of pitch across a 34-degree frame —
+     the sights leave the screen entirely between shots. Braced, the same shot
+     still reads, because the camera's own recoil is doing the shouting. ]]
+local KICK_AIM_SCALE = 0.5
 
 local FLASH_SECONDS = 0.035 -- roughly two frames; any longer reads as a flare
 local FLASH_LIGHT_RANGE = 14
 local FLASH_LIGHT_BRIGHTNESS = 5
 
-local SHELL_POOL = 10
+--[[ Sized for the fastest gun in the roster, not for a comfortable average: the
+     Vector cycles at 1100rpm, so a ten-shell ring is recycling brass that is
+     still in the air and a burst looks like it ejected three cases. ]]
+local SHELL_POOL = 24
 local SHELL_LIFETIME = 2.5
 local SHELL_SIZE = Vector3.new(0.09, 0.09, 0.22)
 local SHELL_SPEED = 7
@@ -204,7 +292,12 @@ local kickRotation = Spring.new(Vector3.zero, KICK_ROTATION_SPEED, KICK_ROTATION
 local current = {
 	weaponId = nil :: string?,
 	definition = nil :: any,
-	pose = DEFAULT_POSE,
+	pose = DEFAULT_POSE :: Pose,
+	--[[ The model's sight, in pivot space, or nil for a model that did not ship
+	     one. Down the sights the pose is solved so that THIS point lands on the
+	     centre line, which is what makes a scoped model's glass line up with the
+	     crosshair instead of merely near it. ]]
+	sightOffset = nil :: Vector3?,
 	aiming = false,
 	aimAlpha = 0,
 	bobPhase = 0,
@@ -220,6 +313,14 @@ local cameraController: any = nil
 
 -- ── model construction ──────────────────────────────────────────────────────
 
+--[[
+	Makes somebody else's model safe to hold.
+
+	The supplied guns are real models with real baggage: a LocalScript in one
+	would run the moment the clone is parented to the Camera, and a Sound left
+	Playing would loop under the player's ear forever with nothing to stop it.
+	Both are stripped here, while the clone is still parented to nil.
+]]
 local function prepare(instance: Instance)
 	for _, descendant in instance:GetDescendants() do
 		if descendant:IsA("BasePart") then
@@ -232,7 +333,11 @@ local function prepare(instance: Instance)
 			descendant.CanTouch = false
 			descendant.CastShadow = false
 			descendant.Massless = true
-		elseif descendant:IsA("Script") or descendant:IsA("LocalScript") then
+		elseif descendant:IsA("LuaSourceContainer") then
+			descendant:Destroy()
+		elseif descendant:IsA("Sound") then
+			-- Every sound this weapon makes is played by WeaponController, in 2D,
+			-- on the frame it happened. Nothing the model brought is wanted.
 			descendant:Destroy()
 		end
 	end
@@ -257,57 +362,64 @@ end
 	The player must be able to tell what they are holding from the shape alone,
 	because that is all a placeholder can promise.
 ]]
-local function buildFallback(weaponId: string, definition: any): Model
+local function buildFallback(weaponId: string, definition: any, pose: Pose): Model
 	local built = Instance.new("Model")
 	built.Name = weaponId
 
+	-- Built to the pose's own length, so a stand-in frames exactly where the
+	-- real model will and swapping the art in is not also a retune.
+	local length = pose.length
+
 	if definition and definition.fireMode == "Melee" then
-		local grip = block(built, "Handle", Vector3.new(0.16, 0.16, 0.5), CFrame.new(), BLOCK_ACCENT)
+		local grip =
+			block(built, "Handle", Vector3.new(0.16, 0.16, 0.25 * length), CFrame.new(), BLOCK_ACCENT)
 		block(
 			built,
 			"Blade",
-			Vector3.new(0.06, 0.42, 1.5),
-			CFrame.new(0, 0.12, -1.0) * CFrame.Angles(math.rad(6), 0, 0),
+			Vector3.new(0.06, 0.42, 0.75 * length),
+			CFrame.new(0, 0.12, -0.5 * length) * CFrame.Angles(math.rad(6), 0, 0),
 			BLADE_COLOR
 		)
 		built.PrimaryPart = grip
 		return built
 	end
 
-	-- Length tracks how far the gun reaches; magazine depth tracks how much it
-	-- holds. Both come from the definition so every weapon reads differently.
-	local isSecondary = definition and definition.slot == Enums.Slot.Secondary
-	local scale = if isSecondary then 0.72 else 1.0
-	local length = (if definition then math.clamp(definition.maxRange / 900, 0.55, 1.35) else 1) * scale
+	--[[ Girth is the weapon's own: a sidearm is thin everywhere, and ten pellets
+	     leave a barrel wide enough to see. Both read off the definition so the
+	     silhouette still says something true about what is being held. ]]
+	local girth = (if definition and definition.slot == Enums.Slot.Secondary then 0.74 else 1.0)
+		* (if definition and definition.pellets > 1 then 1.3 else 1.0)
 
 	local receiver = block(
 		built,
 		"Handle",
-		Vector3.new(0.2 * scale, 0.34 * scale, 1.0 * length),
-		CFrame.new(),
+		Vector3.new(0.2 * girth, 0.34 * girth, 0.5 * length),
+		CFrame.new(0, 0, 0.05 * length),
 		BLOCK_COLOR
 	)
 	block(
 		built,
 		"Barrel",
-		Vector3.new(0.12 * scale, 0.12 * scale, 1.1 * length),
-		CFrame.new(0, 0.06 * scale, -0.95 * length),
+		Vector3.new(0.12 * girth, 0.12 * girth, 0.55 * length),
+		CFrame.new(0, 0.06 * girth, -0.45 * length),
 		BLOCK_ACCENT
 	)
 	block(
 		built,
 		"Grip",
-		Vector3.new(0.16 * scale, 0.46 * scale, 0.22 * scale),
-		CFrame.new(0, -0.36 * scale, 0.28 * length) * CFrame.Angles(math.rad(12), 0, 0),
+		Vector3.new(0.16 * girth, 0.46 * girth, 0.22 * girth),
+		CFrame.new(0, -0.36 * girth, 0.2 * length) * CFrame.Angles(math.rad(12), 0, 0),
 		BLOCK_ACCENT
 	)
 	if definition and definition.magSize > 0 then
+		-- Clamped hard at the top: the PPSh's seventy-one rounds would otherwise
+		-- hang a magazine down past the bottom of the screen.
 		local depth = math.clamp(definition.magSize / 50, 0.35, 1) * 0.5
 		block(
 			built,
 			"Magazine",
-			Vector3.new(0.14 * scale, depth, 0.2 * scale),
-			CFrame.new(0, -0.2 * scale - depth * 0.5, -0.1 * length),
+			Vector3.new(0.14 * girth, depth, 0.2 * girth),
+			CFrame.new(0, -0.2 * girth - depth * 0.5, -0.05 * length),
 			BLOCK_ACCENT
 		)
 	end
@@ -316,8 +428,39 @@ local function buildFallback(weaponId: string, definition: any): Model
 	return built
 end
 
---[[ Weapon id, then the artist's display name, then a loose case-insensitive
-     match — the folder is named after somebody's model, not after our enum. ]]
+--[[ A name reduced to the part a human would call the same: "AK-12", "AK 12"
+     and "ak_12" all collapse onto one key. ]]
+local function normalise(name: string): string
+	local stripped = string.gsub(name, "[%s%-_%.]", "")
+	return string.lower(stripped)
+end
+
+--[[ A candidate template: the model itself, or one out of a folder of variants,
+     since OrganizeAssets lays some categories out that way. ]]
+local function asModel(entry: Instance?): Model?
+	if not entry then
+		return nil
+	end
+	if entry:IsA("Model") then
+		return entry
+	end
+	if entry:IsA("Folder") then
+		return entry:FindFirstChildOfClass("Model")
+	end
+	return nil
+end
+
+--[[
+	The model for a weapon, out of ReplicatedStorage.Assets.Viewmodels.
+
+	`modelName` is tried FIRST and that ordering is the entire reason the field
+	exists: the artist's PPSh is called "(71 Mag) PPSh-41", which matches neither
+	the enum key `PPSh41` nor the display name "PPSh-41", and every earlier
+	lookup order silently handed that weapon a grey box. Weapon id and display
+	name follow for the grey-boxes PlaceholderFactory names after the enum, then
+	a whitespace- and case-insensitive sweep as a last resort for "AK 12" vs
+	"AK-12" and friends.
+]]
 local function findTemplate(weaponId: string, definition: any): Model?
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	local folder = assets and assets:FindFirstChild("Viewmodels")
@@ -325,21 +468,32 @@ local function findTemplate(weaponId: string, definition: any): Model?
 		return nil
 	end
 
-	local exact = folder:FindFirstChild(weaponId)
-	if exact and exact:IsA("Model") then
-		return exact
+	local keys = table.create(3)
+	if definition and definition.modelName then
+		table.insert(keys, definition.modelName)
 	end
-	if definition then
-		local named = folder:FindFirstChild(definition.displayName)
-		if named and named:IsA("Model") then
-			return named
+	table.insert(keys, weaponId)
+	if definition and definition.displayName then
+		table.insert(keys, definition.displayName)
+	end
+
+	for _, key in keys do
+		local found = asModel(folder:FindFirstChild(key))
+		if found then
+			return found
 		end
 	end
 
-	local wanted = string.lower(string.gsub(weaponId, "%s", ""))
+	local wanted = {}
+	for _, key in keys do
+		wanted[normalise(key)] = true
+	end
 	for _, child in folder:GetChildren() do
-		if child:IsA("Model") and string.lower(string.gsub(child.Name, "%s", "")) == wanted then
-			return child
+		if wanted[normalise(child.Name)] then
+			local found = asModel(child)
+			if found then
+				return found
+			end
 		end
 	end
 	return nil
@@ -361,15 +515,113 @@ local function largestPart(instance: Instance): BasePart?
 	return best
 end
 
+--[[ First attachment matching any of `names`, ranked by the order given rather
+     than by tree order, in one descendant walk. A supplied model can carry
+     dozens of parts and walking it once per candidate name is wasteful on a
+     weapon swap that already has a clone to pay for. ]]
 local function findAttachment(root: Instance, names: { string }): Attachment?
-	for _, name in names do
-		for _, descendant in root:GetDescendants() do
-			if descendant:IsA("Attachment") and descendant.Name == name then
-				return descendant
+	local best: Attachment? = nil
+	local bestRank = math.huge
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("Attachment") then
+			local rank = table.find(names, descendant.Name)
+			if rank and rank < bestRank then
+				best = descendant
+				bestRank = rank
 			end
 		end
 	end
-	return nil
+	return best
+end
+
+--[[ Something to hang attachments off. Prefers the artist's own PrimaryPart,
+     then a "Handle" (what a Tool-derived model calls its grip), then the
+     biggest thing present. Deliberately never PROMOTED to PrimaryPart: a part
+     whose own rotation is arbitrary would drag the whole weapon's orientation
+     with it the first time the model is pivoted. ]]
+local function attachmentHost(built: Model): BasePart?
+	local primary = built.PrimaryPart
+	if primary then
+		return primary
+	end
+	local handle = built:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		return handle
+	end
+	return largestPart(built)
+end
+
+--[[ Pins the pivot to the centre of the model's own bounding box when the
+     artist did not choose one. An unset pivot is recomputed by the engine as
+     the parts move, and the pose, the fit and the muzzle below are all measured
+     against it — it has to hold still. ]]
+local function pinPivot(built: Model)
+	if built.PrimaryPart then
+		return
+	end
+	local boxCFrame = built:GetBoundingBox()
+	built.WorldPivot = boxCFrame
+end
+
+--[[
+	Scales a supplied model to the length its class pose was authored for.
+
+	Guns arrive at every scale imaginable: the same rifle exported at Roblox's
+	scale, at another engine's, or at whatever the mesh happened to be. Anything
+	within FIT_TOLERANCE is left exactly as the artist made it; only the models
+	that would otherwise fill the frame or vanish inside it are touched. Measured
+	on the longest axis, because which way a model points is the one thing about
+	it we genuinely cannot know.
+]]
+local function fitScale(built: Model, pose: Pose)
+	local _, size = built:GetBoundingBox()
+	local longest = math.max(size.X, size.Y, size.Z)
+	if longest < 1e-3 then
+		return
+	end
+	local ratio = longest / pose.length
+	if ratio <= FIT_TOLERANCE and ratio >= 1 / FIT_TOLERANCE then
+		return
+	end
+	-- ScaleTo rejects a handful of exotic instance trees; a model at the wrong
+	-- scale is survivable, an error that kills the swap is not.
+	local ok = pcall(function()
+		built:ScaleTo(built:GetScale() * (pose.length / longest))
+	end)
+	if not ok then
+		warn(string.format("[ViewmodelController] could not scale %q to fit", built.Name))
+	end
+end
+
+--[[ Every model gets a Muzzle. When the art did not ship one it is invented at
+     the forward-most point of the bounding box — the tip of the barrel, for any
+     model posed the way the table above assumes — so the flash, the tracer
+     origin and the ejection port have somewhere to be either way. ]]
+local function ensureMuzzle(built: Model, host: BasePart): Attachment
+	local existing = findAttachment(built, MUZZLE_NAMES)
+	if existing then
+		return existing
+	end
+	local boxCFrame, size = built:GetBoundingBox()
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "Muzzle"
+	attachment.Parent = host
+	attachment.WorldCFrame = boxCFrame * CFrame.new(0, 0, -size.Z * 0.5)
+	return attachment
+end
+
+--[[ The model's sight, in pivot space, or nil for art that did not ship one.
+     Measured once per swap: the model never moves relative to its own pivot. ]]
+local function sightOffsetOf(built: Model): Vector3?
+	local sight = findAttachment(built, SIGHT_NAMES)
+	if not sight then
+		return nil
+	end
+	local offset = built:GetPivot():Inverse() * sight.WorldPosition
+	if offset.Magnitude > SIGHT_MAX_OFFSET then
+		return nil
+	end
+	return offset
 end
 
 local function destroyModel()
@@ -381,6 +633,7 @@ local function destroyModel()
 	flashPart = nil
 	flashLight = nil
 	flashUntil = 0
+	current.sightOffset = nil
 end
 
 local function buildFlash(definition: any)
@@ -431,7 +684,7 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	destroyModel()
 	current.weaponId = weaponId
 	current.definition = definition
-	current.pose = (weaponId and POSE[weaponId]) or DEFAULT_POSE
+	current.pose = poseFor(weaponId, definition)
 
 	-- A weapon swap must not inherit the previous gun's recoil; the springs are
 	-- reset rather than left to settle, which would look like a flinch.
@@ -444,41 +697,35 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 		return
 	end
 
+	local pose = current.pose
 	local template = findTemplate(weaponId, definition)
 	local built: Model
 	if template then
 		built = template:Clone()
 	else
-		built = buildFallback(weaponId, definition)
+		built = buildFallback(weaponId, definition, pose)
 	end
 
 	prepare(built)
-	if not built.PrimaryPart then
-		built.PrimaryPart = largestPart(built)
-	end
-	if not built.PrimaryPart then
+	local host = attachmentHost(built)
+	if not host then
 		-- A model with no parts cannot be posed; fall back rather than render
 		-- an invisible weapon the player will read as a bug.
 		built:Destroy()
-		built = buildFallback(weaponId, definition)
+		built = buildFallback(weaponId, definition, pose)
 		prepare(built)
+		host = attachmentHost(built) :: BasePart
 	end
 
 	built.Name = "FL_Viewmodel"
-	model = built
+	pinPivot(built)
+	-- Fit before measuring anything off the model: the muzzle, the sight and the
+	-- flash are all placed against its final geometry.
+	fitScale(built, pose)
 
-	muzzle = findAttachment(built, { "Muzzle", "MuzzlePoint", "FirePoint" })
-	if not muzzle then
-		--[[ Every model gets a Muzzle, invented at the front of the pivot part if
-		     the art did not ship one, so the flash and the shell have somewhere
-		     to be regardless of whose model this is. ]]
-		local anchor = built.PrimaryPart :: BasePart
-		local attachment = Instance.new("Attachment")
-		attachment.Name = "Muzzle"
-		attachment.CFrame = CFrame.new(0, 0, -anchor.Size.Z * 0.5 - 0.6)
-		attachment.Parent = anchor
-		muzzle = attachment
-	end
+	model = built
+	muzzle = ensureMuzzle(built, host)
+	current.sightOffset = sightOffsetOf(built)
 
 	buildFlash(definition)
 
@@ -541,9 +788,10 @@ local function ejectShell()
 		return
 	end
 
-	-- Out of the right of the weapon and slightly back, which is where a real
-	-- ejection port throws and where the player's eye already expects to see it.
-	local base = muzzle.WorldCFrame * CFrame.new(0.18, 0, 0.9)
+	--[[ Out of the right of the weapon, back from the muzzle by a fraction of the
+	     weapon's own length rather than by a fixed distance — a constant tuned
+	     for a rifle throws a pistol's brass out of the barrel. ]]
+	local base = muzzle.WorldCFrame * CFrame.new(0.18, 0, current.pose.length * 0.45)
 	shell.Anchored = false
 	shell.Transparency = 0
 	shell.CFrame = base
@@ -579,7 +827,9 @@ function ViewmodelController:onFired(definition: any, _seed: number)
 		return
 	end
 
-	local kickback = definition.kickback
+	-- One brace factor covers the punch and the rise below, because the pitch is
+	-- derived from the kickback rather than tuned separately.
+	local kickback = definition.kickback * (1 - current.aimAlpha * (1 - KICK_AIM_SCALE))
 	local speed = kickPosition.speed
 	--[[ Back along the barrel, up, and a touch to the left, so a burst walks
 	     rather than pistons. The lateral component is signed randomly, which is
@@ -826,19 +1076,38 @@ local function update(deltaTime: number)
 	local kickOffset = kickPosition:update(dt)
 	local kickAngles = kickRotation:update(dt)
 
-	local rest = pose.hip:Lerp(pose.aim, aimAlpha)
+	--[[ Push the pose out by however much the frame narrowed. Same direction from
+	     the camera, so the weapon does not move on screen; further away, so it
+	     keeps the size it has from the hip instead of being magnified into a wall
+	     by an M1A EBR's 34-degree pull. Floored at 1 because a WIDER frame
+	     dragging the weapon toward the near plane is not an improvement, and
+	     ceilinged because a cinematic that pulls the camera to a few degrees is
+	     not a reason to park the weapon thirty studs down the corridor. ]]
+	local fovScale =
+		math.clamp(POSE_FOV_TAN / math.tan(math.rad(camera.FieldOfView) * 0.5), 1, MAX_FOV_COMPENSATION)
+
 	local tilt = pose.tilt * (1 - aimAlpha)
+	local rotation = CFrame.Angles(
+		swayAngles.X + kickAngles.X,
+		swayAngles.Y + kickAngles.Y,
+		tilt + bobRoll + swayAngles.Z + kickAngles.Z
+	)
 
+	local aimRest = pose.aim * fovScale
+	--[[ Solve the aim pose around the model's own sight rather than around its
+	     pivot: the point the player is looking through is the one that has to sit
+	     on the centre line, and on a scoped model those are nowhere near each
+	     other. Rotated by the same angles the model is about to be posed with, so
+	     the alignment survives sway, bob and kick instead of only holding still. ]]
+	local sightOffset = current.sightOffset
+	if sightOffset then
+		aimRest -= rotation:VectorToWorldSpace(sightOffset)
+	end
+
+	local rest = pose.hip:Lerp(aimRest, aimAlpha)
 	local offset = rest + swayOffset + kickOffset + Vector3.new(bobX, bobY, 0)
-	local final = camera.CFrame
-		* CFrame.new(offset)
-		* CFrame.Angles(
-			swayAngles.X + kickAngles.X,
-			swayAngles.Y + kickAngles.Y,
-			tilt + bobRoll + swayAngles.Z + kickAngles.Z
-		)
 
-	model:PivotTo(final)
+	model:PivotTo(camera.CFrame * CFrame.new(offset) * rotation)
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────

@@ -1,49 +1,69 @@
 --!nonstrict
 --[[
-	PlaceholderFactory — every asset in the game, built from parts at runtime.
+	PlaceholderFactory — where every model in the game comes from.
 
-	There are no .rbxm files and no asset ids anywhere in this repo, because an
-	asset id that does not belong to the person running the place either fails to
-	load or loads somebody else's model. So the whole game is greyboxed in code:
-	rigs, guns, pickups and a full playable level. It is ugly on purpose and it is
-	COMPLETE on purpose — every system downstream can be exercised end to end
-	today, and the art can arrive later without a single line of code changing.
+	It answers one question, forty-six times inside a wave: "give me the model
+	for X". The answer is the USER'S model when they have supplied one and a
+	procedural grey-box when they have not, and no caller can tell the
+	difference. Nothing in here ever errors on a missing asset — it warns once
+	and grey-boxes, so a half-populated Assets folder still plays.
 
-	── THE DROP-IN CONTRACT ─────────────────────────────────────────────────────
-	Every build* method looks for a user-supplied Model first and only greyboxes
-	when it does not find one:
+	── WHERE MODELS COME FROM ───────────────────────────────────────────────────
+	    ReplicatedStorage/Assets/
+	        Infected/<Kind>/         one or more rig variants
+	        Weapons/<modelName>      third-person / world model
+	        Viewmodels/<modelName>   first-person model
+	        Pickups/<Slot>_<ItemId>  optional; grey-boxed when absent
 
-	    ReplicatedStorage.Assets.Weapons.<WeaponId>       world model
-	    ReplicatedStorage.Assets.Viewmodels.<WeaponId>    first-person model
-	    ReplicatedStorage.Assets.Infected.<Kind>          rig  (ServerStorage too)
-	    ReplicatedStorage.Assets.Pickups.<Slot>_<ItemId>  pickup
+	ServerStorage is searched as well, because somebody dropping models into a
+	place puts them wherever is convenient and being fussy about which storage
+	they picked is exactly the friction this module exists to remove.
 
-	Replacing a placeholder is therefore: drop a Model with the right NAME in the
-	right folder. Nothing else. That is the same lookup WeaponConfig's header
-	already promises ("drop a model in ReplicatedStorage.Assets.Weapons under the
-	same name. No new code").
+	`<Kind>` is the `Enums.Infected` key verbatim. Weapons resolve by
+	WeaponConfig's `modelName` FIRST, not by the enum key: the real models are
+	called "(71 Mag) PPSh-41" and "Mk 18 CQBR", which are not Luau identifiers.
+	The enum id and the displayName are tried after it, then the grey-box.
 
-	A replacement rig must keep the R15 part names and the R15 Motor6D names,
-	because GoreService dismembers by destroying the Motor6D whose Part1 is the
-	named limb and ragdolls by replacing the rest. Get those names right and gore
-	behaves identically on a hand-modelled zombie and on the boxes below.
+	── PREPARE ONCE, CLONE MANY ────────────────────────────────────────────────
+	A supplied model is never cloned raw into the world. It is copied once into a
+	template cache and there it is sanitised, welded, measured, scaled and
+	verified; every spawn afterwards is a single :Clone(). A wave asks for
+	forty-six rigs in a few seconds, so anything done per rig is done forty-six
+	times at exactly the moment the game is trying to look its best. The variant
+	LIST is cached too — a horde must not re-enumerate a thirteen-model folder
+	once per zombie.
 
-	── SILHOUETTE ───────────────────────────────────────────────────────────────
-	In a horde the silhouette is all a player gets: at twelve metres, in fog, at
-	ClockTime 4.25, you cannot read a texture and you certainly cannot read a
-	health bar. Every archetype is therefore shaped, not just tinted — the Tank is
-	enormous and hunched, the Boomer is a sphere on legs, the Hunter is folded
-	into a crouch, the Charger drags one absurd arm, the Smoker is a lamppost, the
-	Witch is small and pale. That reads at a glance and it survives the art pass,
-	because the proportions are what the real models will have to honour too.
+	── SANITISING IS SECURITY, NOT TIDINESS ────────────────────────────────────
+	Every LuaSourceContainer is destroyed on the way into the cache. Free-model
+	rigs routinely ship with a Script named after somebody's username, and on
+	Roblox that is the classic shape of a backdoor: it would run on OUR server,
+	with full server permissions, the first time a zombie spawns. Legacy
+	BodyMovers go with them, because they fight the Humanoid for control of the
+	rig and win.
+
+	── THE RIGS ARE MIXED R6 AND R15 ───────────────────────────────────────────
+	Commons, Hunter, Jockey and Tank are R6; the Rusher is R15 MeshParts. Two
+	consequences run through everything below:
+	  * a Humanoid is NEVER looked up by name — the Rusher's is called "Zombie"
+	    — always FindFirstChildOfClass;
+	  * part names are never assumed. GameConfig.PartRegions and
+	    GoreConfig.Dismemberment.Severable both carry the R6 and the R15 naming,
+	    and a rig that satisfies neither is reported by name at build time rather
+	    than discovered later as "dismemberment stopped working on Rushers".
+
+	── SILHOUETTE (the grey-box half) ──────────────────────────────────────────
+	In a horde the silhouette is all a player gets: at twelve metres, in fog, you
+	cannot read a texture and you certainly cannot read a health bar. So each
+	archetype is shaped, not just tinted — the Tank is enormous and hunched, the
+	Rusher drags one absurd arm, the Jockey is small and folded, the Hunter is
+	compact and crouched, the Witch is slight and pale. Those proportions are
+	also what the real models are expected to honour.
 
 	── PERFORMANCE ──────────────────────────────────────────────────────────────
-	Every template is built ONCE and cloned. A SustainPeak horde is 46 rigs; laying
-	out 46 rigs part by part would cost a visible hitch exactly when the game is
-	trying to be at its most impressive. Limbs are massless and non-collidable —
-	only the HumanoidRootPart has a physical footprint — because a horde whose
-	forty-six pairs of hands each collide with the world is a horde that arrives
-	as a slideshow.
+	Rig limbs are massless and non-collidable; only the root has a physical
+	footprint. A horde whose forty-six pairs of hands each collide with the world
+	arrives as a slideshow, and limbs snagging on scenery is what makes a
+	shambler look drunk.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -52,28 +72,49 @@ local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
+local RigUtil = require(Shared.Util.RigUtil)
 local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local PlaceholderFactory = {}
 
 local ASSETS_FOLDER = "Assets"
+local TEMPLATE_FOLDER = "FL_Templates"
 local MAP_NAME = "FadingLight_TestMap"
-
--- Categories the client has to be able to see live in ReplicatedStorage; every
--- other category is server-only and stays out of the replication budget.
-local REPLICATED_CATEGORIES = table.freeze({ Weapons = true, Viewmodels = true })
 
 local function V(x: number, y: number, z: number): Vector3
 	return Vector3.new(x, y, z)
 end
 
+local variantRandom = Random.new()
+
+-- How many of each category came from a real model versus a grey-box. Printed
+-- once at the end of ensureAssets: "12 of 16 weapons are yours" is the single
+-- most useful line in the output for somebody who has just dropped a folder of
+-- models in and wants to know whether the game found them.
+local resolved = {
+	Weapons = { real = 0, grey = 0 },
+	Viewmodels = { real = 0, grey = 0 },
+	Infected = { real = 0, grey = 0 },
+}
+
+local warned: { [string]: boolean } = {}
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn("[PlaceholderFactory] " .. message)
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
---  Template storage
+--  Asset resolution
 -- ════════════════════════════════════════════════════════════════════════════
 
 local function folderIn(parent: Instance, name: string): Folder
@@ -87,77 +128,162 @@ local function folderIn(parent: Instance, name: string): Folder
 	return folder
 end
 
-local function storageFor(category: string): Folder
-	local root = if REPLICATED_CATEGORIES[category] then ReplicatedStorage else ServerStorage
-	return folderIn(folderIn(root, ASSETS_FOLDER), category)
+--[[ The private template cache. Deliberately NOT under Assets/, so a prepared
+     copy can never be picked up by the next lookup and mistaken for something
+     the user supplied — which is how one gun quietly becomes three. ]]
+local function privateFolder(category: string): Folder
+	return folderIn(folderIn(ServerStorage, TEMPLATE_FOLDER), category)
 end
 
-local variantRandom = Random.new()
-
 --[[
-	What the user has supplied for this asset, if anything — a Model, or a Folder
-	holding several.
+	Parks a finished template and returns it.
 
-	ReplicatedStorage is checked first even for server-only categories: a person
-	dropping models into a place will put them wherever is convenient, and being
-	fussy about which storage they picked is exactly the kind of friction this
-	module exists to remove.
+	Templates stay server-side by default. The server clones them into Workspace
+	and Roblox replicates that clone on its own, so a second copy sitting in
+	ReplicatedStorage is every mesh in the model duplicated for no reader.
+
+	The exception is the viewmodel, which the CLIENT assembles for itself out of
+	ReplicatedStorage.Assets.Viewmodels.<weaponId>. When the client has no way to
+	reach the source — we grey-boxed the gun, or the user keeps their models in
+	ServerStorage — the prepared template is published there so first person
+	still shows a weapon. Publishing never takes a name that is already occupied:
+	two children with one name makes FindFirstChild a coin toss for everybody
+	downstream, and the user's own model has to win that name.
 ]]
-local function findSupplied(category: string, name: string): Instance?
-	for _, root in { ReplicatedStorage, ServerStorage } do
-		local assets = root:FindFirstChild(ASSETS_FOLDER)
-		local folder = assets and assets:FindFirstChild(category)
-		local entry = folder and folder:FindFirstChild(name)
-		if entry and (entry:IsA("Model") or entry:IsA("Folder")) then
-			return entry
+local function park(category: string, name: string, model: Model, publish: boolean?): Model
+	model.Name = name
+	local public = if publish then folderIn(folderIn(ReplicatedStorage, ASSETS_FOLDER), category) else nil
+	if public and not public:FindFirstChild(name) then
+		model.Parent = public
+	else
+		model.Parent = privateFolder(category)
+	end
+	return model
+end
+
+--[[ The first of `names` the user has supplied in this category, as a Model or
+     as a Folder of variants. Name order is the priority order and beats storage
+     order, so a `modelName` in ServerStorage still wins over an enum id in
+     ReplicatedStorage. ]]
+local function suppliedEntry(category: string, names: { string }): Instance?
+	for _, name in names do
+		for _, root in { ReplicatedStorage, ServerStorage } do
+			local assets = root:FindFirstChild(ASSETS_FOLDER)
+			local folder = assets and assets:FindFirstChild(category)
+			local entry = folder and folder:FindFirstChild(name)
+			if entry and (entry:IsA("Model") or entry:IsA("Folder")) then
+				return entry
+			end
 		end
 	end
 	return nil
 end
 
---[[
-	One model out of whatever was supplied.
-
-	A FOLDER of variants is a first-class case, not a fallback: studio-scripts/
-	OrganizeAssets lays every infected kind out as Assets/Infected/<Kind>/ holding
-	however many rigs the artist made, precisely so a horde of thirteen commons
-	reads as a crowd instead of a clone army. Rolling per request is what turns
-	that folder into that crowd.
-]]
-local function pickVariant(entry: Instance): Model?
+--[[ Every Model an entry offers: itself when it is one, its Model children when
+     it is a folder of variants. ]]
+local function modelsIn(entry: Instance): { Model }
 	if entry:IsA("Model") then
-		return entry
+		return { entry }
 	end
-	local candidates = {}
+	local models = {}
 	for _, child in entry:GetChildren() do
 		if child:IsA("Model") then
-			table.insert(candidates, child)
+			table.insert(models, child)
 		end
 	end
-	if #candidates == 0 then
-		return nil
-	end
-	return candidates[variantRandom:NextInteger(1, #candidates)]
+	return models
 end
 
---[[ Fetches a template, building and caching it on the first request. The cache
-     lives in the same folder the user would drop a replacement into, so a
-     generated placeholder and a hand-made model are interchangeable. ]]
-local function template(category: string, name: string, build: () -> Model?): Model?
-	local supplied = findSupplied(category, name)
-	if supplied then
-		local chosen = pickVariant(supplied)
-		if chosen then
-			return chosen
+--[[
+	Classes that never survive the trip into the template cache.
+
+	LuaSourceContainer is the security line and it is not negotiable: a Script
+	inside a downloaded zombie runs on OUR server with full permissions. The rest
+	are things that would quietly take control of an asset away from the game — a
+	BodyGyro out-steering the Humanoid, a ProximityPrompt offering the player a
+	verb no system here implements, and a Sound the model plays for itself.
+
+	That last one matters at horde scale: every noise in this game is played
+	through AudioService, which enforces AudioConfig.Mix's voice limits. A rig
+	that brings its own looping moan multiplies straight past that budget by
+	forty-six.
+]]
+local STRIPPED_CLASSES = table.freeze({
+	"LuaSourceContainer",
+	"BodyMover",
+	"ProximityPrompt",
+	"ClickDetector",
+	"Sound",
+})
+
+local function sanitise(instance: Instance): number
+	local removed = 0
+	for _, descendant in instance:GetDescendants() do
+		for _, className in STRIPPED_CLASSES do
+			if descendant:IsA(className) then
+				descendant:Destroy()
+				removed += 1
+				break
+			end
 		end
 	end
-	local built = build()
-	if not built then
-		return nil
+	return removed
+end
+
+local function basePartsOf(instance: Instance): { BasePart }
+	local parts = {}
+	if instance:IsA("BasePart") then
+		table.insert(parts, instance)
 	end
-	built.Name = name
-	built.Parent = storageFor(category)
-	return built
+	for _, descendant in instance:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			table.insert(parts, descendant)
+		end
+	end
+	return parts
+end
+
+local function largestPart(instance: Instance): BasePart?
+	local best: BasePart? = nil
+	local bestVolume = -1
+	for _, part in basePartsOf(instance) do
+		local size = part.Size
+		local volume = size.X * size.Y * size.Z
+		if volume > bestVolume then
+			best, bestVolume = part, volume
+		end
+	end
+	return best
+end
+
+--[[
+	The extents of everything under `instance`, expressed in `frame`'s own space.
+
+	Model:GetBoundingBox answers in the primary part's frame, and a user's gun
+	model frequently has no primary part at all — so the corners are transformed
+	by hand here. Eight corners per part, once per template, never per shot.
+]]
+local function extentsIn(instance: Instance, frame: CFrame): (Vector3, Vector3)
+	local inverse = frame:Inverse()
+	local min = V(math.huge, math.huge, math.huge)
+	local max = V(-math.huge, -math.huge, -math.huge)
+	for _, part in basePartsOf(instance) do
+		local half = part.Size * 0.5
+		local relative = inverse * part.CFrame
+		for x = -1, 1, 2 do
+			for y = -1, 1, 2 do
+				for z = -1, 1, 2 do
+					local corner = relative * V(half.X * x, half.Y * y, half.Z * z)
+					min = min:Min(corner)
+					max = max:Max(corner)
+				end
+			end
+		end
+	end
+	if min.X == math.huge then
+		return Vector3.zero, Vector3.zero
+	end
+	return min, max
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -165,7 +291,7 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --[[ A prop part: rendered, hittable, but never physical. Used for every piece of
-     a rig, a gun and a pickup. Map geometry uses `mapBox` below instead. ]]
+     a grey-box rig, gun and pickup. Map geometry uses `mapBox` instead. ]]
 local function prop(
 	name: string,
 	size: Vector3,
@@ -206,14 +332,52 @@ local function weldTo(anchor: BasePart, part: BasePart)
 	weld.Parent = part
 end
 
+--[[
+	Scales a whole rig geometrically: sizes, joint sockets, attachment points and
+	custom meshes together.
+
+	This exists because RigUtil.scaleRig can only drive the Humanoid's R15 scale
+	NumberValues, and four of the six supplied rigs are R6 and carry none — a
+	Tank left at engine scale is Common-sized, which is not a cosmetic problem,
+	it is the entire read of the archetype. So scale is applied here, once, at
+	template time, and the NumberValues are removed on the way through so that
+	InfectedService's RigUtil.scaleRig call stays a deliberate no-op rather than
+	multiplying a 2.35x Tank by 2.35 again.
+
+	Only a FileMesh SpecialMesh needs its Scale touched: every other MeshType
+	already renders at the part's size, so scaling both would double the effect.
+]]
+local function scaleRigGeometry(model: Model, scale: number)
+	if scale == 1 then
+		return
+	end
+	local pivot = model:GetPivot()
+	local inverse = pivot:Inverse()
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			local relative = inverse * descendant.CFrame
+			descendant.Size *= scale
+			descendant.CFrame = pivot * ((relative - relative.Position) + relative.Position * scale)
+		elseif descendant:IsA("JointInstance") then
+			descendant.C0 = (descendant.C0 - descendant.C0.Position) + descendant.C0.Position * scale
+			descendant.C1 = (descendant.C1 - descendant.C1.Position) + descendant.C1.Position * scale
+		elseif descendant:IsA("Attachment") then
+			descendant.Position *= scale
+		elseif descendant:IsA("SpecialMesh") and descendant.MeshType == Enum.MeshType.FileMesh then
+			descendant.Scale *= scale
+		end
+	end
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 --  Infected rigs
 --
---  The joint names below are load-bearing. GoreService looks a limb up by the
---  name of the Motor6D's Part1 and reads its per-joint ragdoll limits from the
---  Motor6D's own name; GoreConfig.Dismemberment.Severable lists the part names
---  it is allowed to take off. All three tables have to agree, so the rig is
---  verified against GoreConfig once, at build time, below.
+--  The joint names below are load-bearing for the GREY-BOX rigs. GoreService
+--  looks a limb up by the name of the Motor6D's Part1 and reads its per-joint
+--  ragdoll limits from the Motor6D's own name; GoreConfig.Dismemberment.
+--  Severable lists the part names it is allowed to take off. All three tables
+--  have to agree, so every rig — grey-box or supplied — is verified against
+--  GoreConfig once, when its template is prepared.
 -- ════════════════════════════════════════════════════════════════════════════
 
 local RIG_JOINTS = table.freeze({
@@ -258,6 +422,11 @@ local UPPER_BODY = table.freeze({
 
 --[[
 	Proportions, in studs, BEFORE InfectedConfig's per-kind `scale` is applied.
+
+	One entry per key in Enums.Infected and nothing else — this table is indexed
+	by enum value at module scope, so a stale key here is not a missing model, it
+	is `table index is nil` at require time and the whole server loses its asset
+	factory.
 
 	`hunch`, `armPitch`, `roll` and `headTilt` are degrees, and they are doing as
 	much work as the sizes: a Common and a Hunter share most of their numbers and
@@ -308,54 +477,35 @@ local SHAPES = {
 		headTilt = -30, -- looking up at you from under the hunch
 	},
 
-	-- A lamppost with a cough. Height is the whole read: if you can see it over
-	-- the crowd, it can see you, and its tongue reaches 220 studs.
-	[Enums.Infected.Smoker] = {
-		head = V(0.72, 0.72, 0.72),
-		neck = 0.55,
-		upperTorso = V(1.25, 1.45, 0.70),
-		lowerTorso = V(1.10, 0.50, 0.66),
-		upperArm = V(0.42, 1.50, 0.42),
-		lowerArm = V(0.38, 1.40, 0.38),
-		hand = V(0.42, 0.45, 0.50),
-		upperLeg = V(0.50, 1.70, 0.50),
-		lowerLeg = V(0.46, 1.60, 0.46),
-		foot = V(0.52, 0.35, 0.90),
-		root = V(1.10, 1.40, 0.66),
-		legSpread = 0.34,
-		armDrop = 0.14,
-		hunch = 10,
-		armPitch = 6,
+	-- Small, short-legged and folded almost flat, with arms far too long for it
+	-- and a head far too big. Everything about the proportions says "this thing
+	-- is going to end up on your shoulders", and at 0.82 scale it disappears
+	-- into a crowd until it moves.
+	[Enums.Infected.Jockey] = {
+		head = V(0.88, 0.82, 0.88),
+		neck = 0.02,
+		upperTorso = V(1.20, 0.95, 0.78),
+		lowerTorso = V(1.05, 0.45, 0.72),
+		upperArm = V(0.46, 1.30, 0.46),
+		lowerArm = V(0.42, 1.25, 0.42),
+		hand = V(0.50, 0.45, 0.62),
+		upperLeg = V(0.58, 0.80, 0.58),
+		lowerLeg = V(0.52, 0.72, 0.52),
+		foot = V(0.58, 0.30, 0.90),
+		root = V(1.05, 1.00, 0.72),
+		legSpread = 0.38,
+		armDrop = 0.10,
+		hunch = 46,
+		armPitch = 40,
 		roll = 0,
-		headTilt = 6,
+		headTilt = -18,
 	},
 
-	-- A sphere on stumps. Nothing else in the roster is round, so the shape
-	-- alone tells a player not to shoot it from arm's length.
-	[Enums.Infected.Boomer] = {
-		head = V(0.72, 0.62, 0.72),
-		neck = 0.0,
-		upperTorso = V(3.40, 2.10, 3.00),
-		lowerTorso = V(2.20, 0.60, 2.00),
-		upperArm = V(0.60, 0.80, 0.60),
-		lowerArm = V(0.55, 0.70, 0.55),
-		hand = V(0.55, 0.40, 0.60),
-		upperLeg = V(0.90, 0.50, 0.90),
-		lowerLeg = V(0.85, 0.50, 0.85),
-		foot = V(0.85, 0.35, 1.10),
-		root = V(2.00, 1.30, 1.60),
-		legSpread = 0.78,
-		armDrop = 0.55,
-		hunch = 6,
-		armPitch = 28,
-		roll = 0,
-		headTilt = 4,
-		roundTorso = true,
-	},
-
-	-- One arm the size of the rest of it. The asymmetry is the tell, and it
-	-- survives being seen for a quarter of a second down a corridor.
-	[Enums.Infected.Charger] = {
+	-- One arm the size of the rest of it, and enough mass behind it that the
+	-- charge reads as a threat before you can see what it is. The asymmetry is
+	-- the tell and it survives being seen for a quarter of a second down a
+	-- corridor.
+	[Enums.Infected.Rusher] = {
 		head = V(0.72, 0.62, 0.72),
 		neck = 0.0,
 		upperTorso = V(2.30, 1.60, 1.20),
@@ -371,14 +521,14 @@ local SHAPES = {
 		armDrop = 0.20,
 		hunch = 26,
 		armPitch = 16,
-		roll = -9,
+		roll = -9, -- listing toward the heavy side
 		headTilt = 8,
 		leftArmScale = 0.50,
 		rightArmScale = 2.20,
 		rightArmLength = 1.35,
 	},
 
-	-- Small, pale and still. She is the only thing in the game a player is
+	-- Slight, pale and still. She is the only thing in the game a player is
 	-- supposed to walk around, so she must not read as a threat until she does.
 	[Enums.Infected.Witch] = {
 		head = V(0.76, 0.74, 0.76),
@@ -425,17 +575,11 @@ local SHAPES = {
 	},
 }
 
---[[ Verifies once, at build time, that every part GoreConfig is allowed to sever
-     off an R15 body actually exists on this rig with a Motor6D behind it. A rig
-     that quietly loses a joint name would show up much later as "dismemberment
-     stopped working on Chargers", which is a miserable thing to debug. ]]
-local verifiedSeverable: { [string]: boolean } = {}
+--[[ Verifies once, per rig template, that every part GoreConfig is allowed to
+     sever actually exists on this rig with a Motor6D behind it. A rig that
+     quietly lacks a joint name would show up much later as "dismemberment
+     stopped working on Rushers", which is a miserable thing to debug. ]]
 local function verifySeverable(key: string, model: Model)
-	if verifiedSeverable[key] then
-		return
-	end
-	verifiedSeverable[key] = true
-
 	local motors: { [string]: boolean } = {}
 	for _, descendant in model:GetDescendants() do
 		if descendant:IsA("Motor6D") and descendant.Part1 then
@@ -448,7 +592,7 @@ local function verifySeverable(key: string, model: Model)
 	-- are the checklist for an R6 rig and the rest are the checklist for an R15
 	-- one. Holding a hand-made R6 model to the R15 list would report thirteen
 	-- missing joints on a rig that is perfectly fine.
-	local isR6 = model:FindFirstChild("UpperTorso") == nil
+	local isR6 = model:FindFirstChild("UpperTorso", true) == nil
 	local missing = {}
 	for _, name in GoreConfig.Dismemberment.Severable do
 		local isAlias = string.find(name, " ") ~= nil
@@ -460,15 +604,96 @@ local function verifySeverable(key: string, model: Model)
 		table.insert(missing, "Head")
 	end
 	if #missing > 0 then
-		warn(
+		warnOnce(
+			"severable:" .. key,
 			string.format(
-				"[PlaceholderFactory] the %s rig is missing severable joints: %s — GoreService will "
-					.. "silently refuse to dismember those parts",
+				"the %s rig is missing severable joints: %s — GoreService will silently refuse to "
+					.. "dismember those parts",
 				key,
 				table.concat(missing, ", ")
 			)
 		)
 	end
+end
+
+--[[
+	Reports, once per kind, anything a bullet can hit whose name GameConfig does
+	not recognise. Those parts score as Torso (RigUtil's safe default), so the
+	symptom is a rig that simply never takes a headshot — silent, and fatal to
+	the one rule the whole combat loop is built on.
+]]
+local function auditHitRegions(kind: string, model: Model)
+	local hasHead = false
+	local unknown = {}
+	for _, part in RigUtil.getBodyParts(model) do
+		local region = GameConfig.PartRegions[part.Name]
+		if region == Enums.HitRegion.Head then
+			hasHead = true
+		elseif not region and #unknown < 8 then
+			table.insert(unknown, part.Name)
+		end
+	end
+	if not hasHead then
+		warnOnce(
+			"nohead:" .. kind,
+			string.format(
+				"the %s rig has no part named in GameConfig.PartRegions as a head; every shot on it "
+					.. "will score as a torso hit and headshotAlwaysKills can never fire",
+				kind
+			)
+		)
+	end
+	if #unknown > 0 then
+		warnOnce(
+			"regions:" .. kind,
+			string.format(
+				"%s rig parts are not in GameConfig.PartRegions and will score as Torso: %s",
+				kind,
+				table.concat(unknown, ", ")
+			)
+		)
+	end
+end
+
+--[[
+	The Hunter's rig carries a "FakeHead" mesh over its real "Head".
+
+	Hit regions are resolved by part NAME (RigUtil.getHitRegion → the
+	GameConfig.PartRegions table), which has no FakeHead entry, so a shot that
+	lands on the visible head would score as a torso hit — on the one archetype
+	players are most likely to be shooting at the head of, mid-pounce.
+
+	The fix inside this module's remit is to take the fake head out of the
+	raycast entirely so the ray reaches the real Head behind it, and to grow that
+	real Head to the size of the mesh it is hiding under when it is invisible, so
+	that what a player sees is what they hit. The clean fix is one line in
+	GameConfig.PartRegions, which this module does not own — see the report.
+]]
+local function reconcileFakeHead(kind: string, model: Model)
+	local head = model:FindFirstChild("Head", true)
+	local fake = model:FindFirstChild("FakeHead", true)
+	if not head or not fake or not head:IsA("BasePart") or not fake:IsA("BasePart") then
+		return
+	end
+
+	fake.CanQuery = false
+	fake.CanTouch = false
+	if head.Transparency >= 1 then
+		head.Size = V(
+			math.max(head.Size.X, fake.Size.X),
+			math.max(head.Size.Y, fake.Size.Y),
+			math.max(head.Size.Z, fake.Size.Z)
+		)
+	end
+	warnOnce(
+		"fakehead:" .. kind,
+		string.format(
+			"the %s rig has both Head and FakeHead; FakeHead is now non-queryable so hits pass "
+				.. "through to the real head. Adding `FakeHead = Enums.HitRegion.Head` to "
+				.. "GameConfig.PartRegions would make that unnecessary",
+			kind
+		)
+	)
 end
 
 --[[
@@ -533,7 +758,7 @@ local function buildRig(kind: string): Model?
 	socket("Waist", V(0, waistY, 0))
 	socket("Neck", V(0, shoulderTopY, 0))
 
-	-- ── arms, per side, with the Charger's asymmetry baked in ───────────────
+	-- ── arms, per side, with the Rusher's asymmetry baked in ────────────────
 	for _, side in { -1, 1 } do
 		local prefix = if side < 0 then "Left" else "Right"
 		local thickness = if side < 0 then (shape.leftArmScale or 1) else (shape.rightArmScale or 1)
@@ -609,11 +834,6 @@ local function buildRig(kind: string): Model?
 			elseif ACCENTED[name] then accent
 			else body
 		local part = prop(name, size, pose[name], color)
-		-- Only the root has a physical footprint. Forty-six rigs whose every limb
-		-- collides is forty-six times more contact solving than the horde needs,
-		-- and limbs snagging on scenery is what makes a shambler look drunk.
-		part.CanCollide = name == "HumanoidRootPart"
-		part.Massless = name ~= "HumanoidRootPart"
 		part.CastShadow = name == "UpperTorso" or name == "Head"
 		part.Parent = model
 		parts[name] = part
@@ -625,9 +845,6 @@ local function buildRig(kind: string): Model?
 	model.PrimaryPart = root
 
 	roundOff(parts.Head)
-	if shape.roundTorso then
-		roundOff(parts.UpperTorso)
-	end
 
 	-- Decoration that extends the silhouette stays queryable — a Tank's shoulders
 	-- are part of the target. Decoration that sits ON a hit surface does not, or
@@ -646,7 +863,6 @@ local function buildRig(kind: string): Model?
 					),
 				body:Lerp(accent, 0.5)
 			)
-			hump.Massless = true
 			roundOff(hump)
 			hump.Parent = model
 			weldTo(parts.UpperTorso, hump)
@@ -661,7 +877,6 @@ local function buildRig(kind: string): Model?
 			Enum.Material.Neon
 		)
 		eyes.CanQuery = false
-		eyes.Massless = true
 		eyes.Parent = model
 		weldTo(parts.Head, eyes)
 	end
@@ -685,71 +900,214 @@ local function buildRig(kind: string): Model?
 
 	local humanoid = Instance.new("Humanoid")
 	humanoid.RigType = Enum.HumanoidRigType.R15
-	humanoid.MaxHealth = definition.health
-	humanoid.Health = definition.health
-	humanoid.WalkSpeed = definition.walkSpeed
-	humanoid.UseJumpPower = true
-	humanoid.JumpPower = definition.jumpPower
 	-- The root's bottom face sits exactly at the hip, so the distance from it to
 	-- the floor IS hipY. Measured from the built pose rather than assumed: every
 	-- archetype has a different leg length, and a Tank floating a stud above the
-	-- floor is exactly as wrong as a Boomer buried in it.
+	-- floor is exactly as wrong as a Jockey buried in it.
 	humanoid.HipHeight = hipY * scale
-	humanoid.BreakJointsOnDeath = false
-	humanoid.RequiresNeck = false
-	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-	humanoid.HealthDisplayDistance = 0
-	humanoid.NameDisplayDistance = 0
 	humanoid.Parent = model
-
-	-- Present so a real animation set can be played on these rigs later without
-	-- anything else changing; GoreService already stops tracks on ragdoll.
-	local animator = Instance.new("Animator")
-	animator.Parent = humanoid
 
 	--[[
 		NOTE (contract): the Humanoid deliberately carries NO BodyHeightScale /
 		BodyWidthScale / BodyDepthScale / HeadScale NumberValues, which makes
 		RigUtil.scaleRig a no-op on these rigs. InfectedConfig's `scale` is
-		already baked into every size above. That is on purpose: engine-side R15
-		scaling only applies to rigs authored with the values it expects, so
-		relying on it would leave a hand-built Tank exactly Common-sized, and
-		applying it on top of a pre-scaled rig would give a Tank 5.5x. Scale is
-		applied here, once. A user's real R15 rig that DOES carry those values
-		should be authored unscaled and will scale through RigUtil as intended.
+		already baked into every size above, exactly as it is baked into a
+		supplied rig by scaleRigGeometry. Scale is applied once, here, and never
+		again downstream.
 	]]
 
 	return model
 end
 
---[[ A finished, unparented rig for `kind`, or nil for an unknown kind. Clones a
-     cached template: a SustainPeak horde asks for this 46 times. ]]
+--[[
+	Turns any rig — grey-box or supplied — into something the game can spawn.
+
+	`scale` is 1 for the grey-box (which lays itself out pre-scaled) and
+	definition.scale for a supplied rig. Everything else is identical for both,
+	which is the point: a hand-modelled Tank and a box Tank have to behave the
+	same way under fire or the grey-box stops being a useful stand-in.
+]]
+local function adoptRig(model: Model, kind: string, definition, scale: number): Model?
+	sanitise(model)
+
+	-- NEVER by name. The Rusher's Humanoid is called "Zombie".
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		warnOnce(
+			"nohumanoid:" .. kind .. ":" .. model.Name,
+			string.format('the %s rig "%s" has no Humanoid and cannot be spawned', kind, model.Name)
+		)
+		model:Destroy()
+		return nil
+	end
+
+	-- Removed BEFORE the geometry is scaled: with these gone RigUtil.scaleRig is
+	-- a no-op, so InfectedService's spawn-time call cannot scale a rig a second
+	-- time on top of what happens below.
+	for _, name in { "BodyDepthScale", "BodyHeightScale", "BodyWidthScale", "HeadScale" } do
+		local value = humanoid:FindFirstChild(name)
+		if value then
+			value:Destroy()
+		end
+	end
+	scaleRigGeometry(model, scale)
+	humanoid.HipHeight *= scale
+
+	local root = RigUtil.getRoot(model)
+	if not root then
+		warnOnce("noroot:" .. kind, string.format("the %s rig has no BasePart at all", kind))
+		model:Destroy()
+		return nil
+	end
+	model.PrimaryPart = root
+
+	humanoid.MaxHealth = definition.health
+	humanoid.Health = definition.health
+	humanoid.WalkSpeed = definition.walkSpeed
+	humanoid.UseJumpPower = true
+	humanoid.JumpPower = definition.jumpPower
+	-- BreakJointsOnDeath would shatter the rig the instant health hits zero,
+	-- before GoreService can decide whether this body ragdolls, loses a limb or
+	-- comes apart entirely. RequiresNeck would kill it outright the moment a
+	-- headshot severs the neck, which is a decapitation, not a bug.
+	humanoid.BreakJointsOnDeath = false
+	humanoid.RequiresNeck = false
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayDistance = 0
+	humanoid.NameDisplayDistance = 0
+
+	-- A rig that arrived with an Animate script lost it to sanitise(), so the
+	-- Animator is put back: it costs nothing, and without one nothing can ever
+	-- play a walk cycle on these bodies.
+	if not humanoid:FindFirstChildOfClass("Animator") then
+		local animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+
+	local shadowCaster = largestPart(model)
+	for _, part in basePartsOf(model) do
+		part.Anchored = false
+		part.Locked = true
+		-- Only the root has a physical footprint. Forty-six rigs whose every limb
+		-- collides is forty-six times more contact solving than the horde needs,
+		-- and limbs snagging on scenery is what makes a shambler look drunk.
+		part.CanCollide = part == root
+		part.Massless = part ~= root
+		-- One shadow per body, at most. Shadows are per-part work and a horde is
+		-- the worst possible moment to pay for it twelve times per zombie.
+		part.CastShadow = part == shadowCaster
+	end
+
+	-- Contract: infected never collide with each other. Set here so the clone
+	-- starts correct; InfectedService sets it again at spawn, which is free.
+	local ok, err = pcall(RigUtil.setCollisionGroup, model, "Infected")
+	if not ok then
+		warnOnce(
+			"collisiongroup",
+			string.format('could not use the "Infected" collision group: %s', tostring(err))
+		)
+	end
+
+	reconcileFakeHead(kind, model)
+	auditHitRegions(kind, model)
+	verifySeverable(kind, model)
+
+	model:SetAttribute(Attributes.Infected.Kind, kind)
+	-- Which of the thirteen commons this is. Purely diagnostic, and worth its
+	-- keep the first time one variant turns out to be missing an arm joint.
+	model:SetAttribute("FL_Variant", model.Name)
+	return model
+end
+
+--[[
+	Every prepared rig template for a kind, built on the first request.
+
+	The LIST is what is cached, not just the models: picking a variant during a
+	wave must be one array index and one :Clone(), never a folder walk. That
+	random pick is the entire reason a horde of thirteen commons reads as a crowd
+	instead of a clone army.
+]]
+local infectedVariants: { [string]: { Model } } = {}
+
+local function variantsFor(kind: string): { Model }
+	local cached = infectedVariants[kind]
+	if cached then
+		return cached
+	end
+
+	local prepared: { Model } = {}
+	infectedVariants[kind] = prepared
+
+	local definition = InfectedConfig.get(kind)
+	if not definition then
+		warnOnce("kind:" .. kind, string.format("no InfectedConfig entry for %q", kind))
+		return prepared
+	end
+
+	local folder = folderIn(privateFolder("Infected"), kind)
+	local supplied = suppliedEntry("Infected", { kind })
+	if supplied then
+		for _, source in modelsIn(supplied) do
+			local rig = adoptRig(source:Clone(), kind, definition, definition.scale)
+			if rig then
+				rig.Parent = folder
+				table.insert(prepared, rig)
+			end
+		end
+	end
+
+	if #prepared > 0 then
+		resolved.Infected.real += 1
+		return prepared
+	end
+
+	resolved.Infected.grey += 1
+	if supplied then
+		warnOnce(
+			"unusable:" .. kind,
+			string.format("Assets.Infected.%s held nothing spawnable; grey-boxing that kind", kind)
+		)
+	end
+	local grey = buildRig(kind)
+	if grey then
+		-- Scale 1: buildRig already laid itself out at definition.scale.
+		local rig = adoptRig(grey, kind, definition, 1)
+		if rig then
+			rig.Parent = folder
+			table.insert(prepared, rig)
+		end
+	end
+	return prepared
+end
+
+--[[ A finished, unparented rig for `kind`, or nil for an unknown kind. A
+     SustainPeak horde asks for this 46 times, so it is a table index and a
+     clone and nothing else. ]]
 function PlaceholderFactory:buildInfectedRig(kind: string): Model?
 	if typeof(kind) ~= "string" then
 		return nil
 	end
-	local source = template("Infected", kind, function()
-		return buildRig(kind)
-	end)
-	if not source then
+	local variants = variantsFor(kind)
+	local count = #variants
+	if count == 0 then
 		return nil
 	end
-	-- Checked here rather than inside buildRig so a rig the USER supplied is held
-	-- to the same joint contract, and hears about it the first time it spawns
-	-- rather than the first time somebody shoots its arm off and nothing happens.
-	verifySeverable(kind, source)
-	return source:Clone()
+	local source = variants[if count == 1 then 1 else variantRandom:NextInteger(1, count)]
+	local clone = source:Clone()
+	clone.Name = kind
+	return clone
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
 --  Weapons
 --
+--  The grey-box table is keyed by WeaponConfig's `class`, not by weapon id: six
+--  shapes cover sixteen guns, and the seventeenth needs none. A stand-in only
+--  has to answer "what am I holding" — pistol, SMG, rifle, marksman rifle,
+--  shotgun, blade — and the real models answer everything past that.
+--
 --  Every gun is a short parts list in one local frame: the Handle sits at the
---  origin, the weapon points along -Z (a CFrame's LookVector), and +Y is up. The
---  shapes are deliberately crude but never generic — a player has to be able to
---  tell the pump shotgun from the auto shotgun in a dark room, at a glance, while
---  something is eating them, so each one owns a distinct outline: tube magazine
---  and pump, box magazine and stock, carry handle, scope, revolver cylinder.
+--  origin, the weapon points along -Z (a CFrame's LookVector), and +Y is up.
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Weapon greys. UITheme is the interface palette and these are the only place
@@ -765,7 +1123,7 @@ local GUN = table.freeze({
 
 -- { name, size, offset, colour key, optional rotation in degrees, optional shape }
 local GUNS = {
-	[Enums.Weapon.Pistol] = {
+	Pistol = {
 		muzzle = V(0, 0.14, -1.70),
 		parts = {
 			{ "Handle", V(0.42, 1.00, 0.50), V(0, -0.50, 0.06), "polymer", V(-8, 0, 0) },
@@ -775,18 +1133,7 @@ local GUNS = {
 		},
 	},
 
-	[Enums.Weapon.Magnum] = {
-		muzzle = V(0, 0.20, -2.20),
-		parts = {
-			{ "Handle", V(0.46, 1.05, 0.56), V(0, -0.52, 0.08), "wood", V(-10, 0, 0) },
-			{ "Receiver", V(0.44, 0.60, 1.20), V(0, 0.20, -0.35), "dark" },
-			{ "Cylinder", V(0.72, 0.64, 0.64), V(0, 0.16, -0.45), "metal", V(0, 90, 0), "Cylinder" },
-			{ "Barrel", V(0.26, 0.28, 1.50), V(0, 0.22, -1.40), "metal" },
-			{ "TriggerGuard", V(0.16, 0.32, 0.46), V(0, -0.22, -0.20), "dark" },
-		},
-	},
-
-	[Enums.Weapon.SMG] = {
+	SMG = {
 		muzzle = V(0, 0.20, -2.45),
 		parts = {
 			{ "Handle", V(0.42, 0.95, 0.50), V(0, -0.48, 0.10), "polymer", V(-8, 0, 0) },
@@ -798,31 +1145,7 @@ local GUNS = {
 		},
 	},
 
-	[Enums.Weapon.PumpShotgun] = {
-		muzzle = V(0, 0.28, -4.20),
-		parts = {
-			{ "Handle", V(0.42, 0.95, 0.52), V(0, -0.48, 0.18), "wood", V(-10, 0, 0) },
-			{ "Receiver", V(0.50, 0.62, 1.40), V(0, 0.22, -0.55), "metal" },
-			{ "Barrel", V(0.26, 0.28, 3.00), V(0, 0.30, -2.65), "metal" },
-			{ "TubeMagazine", V(0.22, 0.22, 2.40), V(0, -0.02, -2.30), "metal" },
-			{ "Pump", V(0.40, 0.42, 0.80), V(0, -0.02, -2.00), "wood" },
-			{ "Stock", V(0.42, 0.76, 1.50), V(0, -0.06, 1.02), "wood", V(4, 0, 0) },
-		},
-	},
-
-	[Enums.Weapon.AutoShotgun] = {
-		muzzle = V(0, 0.26, -3.80),
-		parts = {
-			{ "Handle", V(0.44, 0.95, 0.52), V(0, -0.48, 0.16), "polymer", V(-8, 0, 0) },
-			{ "Receiver", V(0.52, 0.68, 1.80), V(0, 0.20, -0.70), "dark" },
-			{ "Barrel", V(0.26, 0.28, 2.20), V(0, 0.26, -2.65), "metal" },
-			{ "HeatShield", V(0.34, 0.16, 1.70), V(0, 0.46, -2.45), "metal" },
-			{ "Magazine", V(0.36, 0.90, 0.60), V(0, -0.52, -0.90), "dark" },
-			{ "Stock", V(0.44, 0.70, 1.30), V(0, 0.06, 0.96), "polymer" },
-		},
-	},
-
-	[Enums.Weapon.AssaultRifle] = {
+	Rifle = {
 		muzzle = V(0, 0.20, -3.60),
 		parts = {
 			{ "Handle", V(0.42, 0.92, 0.50), V(0, -0.46, 0.22), "polymer", V(-8, 0, 0) },
@@ -835,7 +1158,7 @@ local GUNS = {
 		},
 	},
 
-	[Enums.Weapon.HuntingRifle] = {
+	Marksman = {
 		muzzle = V(0, 0.22, -4.60),
 		parts = {
 			{ "Handle", V(0.42, 0.90, 0.50), V(0, -0.44, 0.32), "wood", V(-12, 0, 0) },
@@ -850,9 +1173,21 @@ local GUNS = {
 		},
 	},
 
+	Shotgun = {
+		muzzle = V(0, 0.28, -4.20),
+		parts = {
+			{ "Handle", V(0.42, 0.95, 0.52), V(0, -0.48, 0.18), "wood", V(-10, 0, 0) },
+			{ "Receiver", V(0.50, 0.62, 1.40), V(0, 0.22, -0.55), "metal" },
+			{ "Barrel", V(0.26, 0.28, 3.00), V(0, 0.30, -2.65), "metal" },
+			{ "TubeMagazine", V(0.22, 0.22, 2.40), V(0, -0.02, -2.30), "metal" },
+			{ "Pump", V(0.40, 0.42, 0.80), V(0, -0.02, -2.00), "wood" },
+			{ "Stock", V(0.42, 0.76, 1.50), V(0, -0.06, 1.02), "wood", V(4, 0, 0) },
+		},
+	},
+
 	-- No muzzle to speak of, but the attachment is built anyway so the effects
 	-- code can ask any weapon where its business end is without a special case.
-	[Enums.Weapon.Machete] = {
+	Melee = {
 		muzzle = V(0, 0.34, -2.90),
 		parts = {
 			{ "Handle", V(0.30, 1.00, 0.34), V(0, -0.50, 0), "dark" },
@@ -865,19 +1200,20 @@ local GUNS = {
 
 --[[ A Cylinder-shaped Part extends along its own X axis, so a barrel-shaped
      cylinder is authored with the length in X and rotated into place. ]]
-local function buildGun(weaponId: string): Model?
-	local spec = GUNS[weaponId]
-	local definition = WeaponConfig.get(weaponId)
-	if not spec or not definition then
+local function buildGun(definition): Model?
+	local spec = GUNS[definition.class]
+	if not spec then
+		warnOnce(
+			"class:" .. tostring(definition.class),
+			string.format("no grey-box shape for weapon class %q", tostring(definition.class))
+		)
 		return nil
 	end
 
 	local model = Instance.new("Model")
-	model.Name = weaponId
+	model.Name = definition.id
 
-	local handle: BasePart? = nil
 	local barrel: BasePart? = nil
-
 	for _, entry in spec.parts do
 		local name, size, offset, colorKey, rotation, shape =
 			entry[1], entry[2], entry[3], entry[4], entry[5], entry[6]
@@ -897,80 +1233,259 @@ local function buildGun(weaponId: string): Model?
 		end
 		part.Parent = model
 
-		if name == "Handle" then
-			handle = part
-		elseif name == "Barrel" or (name == "Blade" and not barrel) then
+		if name == "Barrel" or (name == "Blade" and not barrel) then
 			barrel = part
 		end
 	end
 
-	handle = handle or model:FindFirstChildWhichIsA("BasePart")
+	-- Effects hang off "Muzzle": the flash, the smoke, the tracer origin. It sits
+	-- on the barrel so that moving the barrel moves the flash with it.
+	local host = barrel or model:FindFirstChild("Handle")
+	if host and host:IsA("BasePart") then
+		local muzzle = Instance.new("Attachment")
+		muzzle.Name = "Muzzle"
+		muzzle.CFrame = host.CFrame:Inverse() * CFrame.new(spec.muzzle)
+		muzzle.Parent = host
+	end
+
+	return model
+end
+
+local function findAttachmentNamed(model: Model, name: string): Attachment?
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("Attachment") and descendant.Name == name then
+			return descendant
+		end
+	end
+	return nil
+end
+
+--[[
+	Guarantees the model has a "Handle" to be welded, held and pivoted by.
+
+	A supplied gun model almost never has one, and whatever its biggest part is,
+	it is not the grip. An invisible node at the centre of the model's own
+	extents is the one choice that behaves predictably for anything: the
+	viewmodel poses about it, ItemPlacer rests a dropped gun on it, and it never
+	buries the model in the floor the way a grip-shaped pivot would.
+]]
+local function ensureHandle(model: Model): BasePart?
+	local existing = model:FindFirstChild("Handle", true)
+	if existing and existing:IsA("BasePart") then
+		return existing
+	end
+
+	local reference = model.PrimaryPart or largestPart(model)
+	if not reference then
+		return nil
+	end
+
+	local min, max = extentsIn(model, reference.CFrame)
+	local handle =
+		prop("Handle", V(0.4, 0.4, 0.4), reference.CFrame * CFrame.new((min + max) * 0.5), GUN.dark)
+	handle.Transparency = 1
+	handle.CanQuery = false
+	handle.Parent = model
+	return handle
+end
+
+-- Parts whose name says "this end of the gun is the loud end".
+local BARREL_NAMES = table.freeze({
+	Barrel = true,
+	Muzzle = true,
+	MuzzleBrake = true,
+	Suppressor = true,
+	Tip = true,
+	Blade = true,
+})
+
+--[[
+	Guarantees a "Muzzle" attachment at the business end.
+
+	A real gun model with no Muzzle means no muzzle flash and tracers leaving
+	from the middle of the receiver, which reads to a player as "the gun is
+	broken". Where the model does not say, the muzzle goes at the forward-most
+	point of the extents along the handle's look vector (-Z), measured against a
+	named barrel part when there is one and against the whole model when there is
+	not.
+]]
+local function ensureMuzzle(model: Model, handle: BasePart): Attachment
+	local existing = findAttachmentNamed(model, "Muzzle")
+	if existing then
+		return existing
+	end
+
+	-- Somebody else's naming for the same point; copy it rather than guess.
+	for _, alias in { "MuzzlePoint", "FirePoint", "Fire", "Shoot" } do
+		local found = findAttachmentNamed(model, alias)
+		if found and found.Parent and found.Parent:IsA("BasePart") then
+			local copy = Instance.new("Attachment")
+			copy.Name = "Muzzle"
+			copy.CFrame = found.CFrame
+			copy.Parent = found.Parent
+			return copy
+		end
+	end
+
+	local subject: Instance = model
+	for _, part in basePartsOf(model) do
+		if BARREL_NAMES[part.Name] then
+			subject = part
+			break
+		end
+	end
+
+	local min, max = extentsIn(subject, handle.CFrame)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "Muzzle"
+	attachment.CFrame = CFrame.new((min.X + max.X) * 0.5, (min.Y + max.Y) * 0.5, min.Z)
+	attachment.Parent = handle
+	return attachment
+end
+
+--[[
+	Turns any weapon model — grey-box or supplied — into something equippable.
+
+	The whole model rides on the Handle: one weld each, one pivot, one place the
+	effects code has to look. A viewmodel keeps its Handle anchored because it is
+	driven by writing a CFrame every frame and must never be touched by physics;
+	a world model is left loose so whoever equips it can weld it to a hand.
+]]
+local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): Model?
+	sanitise(model)
+
+	local handle = ensureHandle(model)
 	if not handle then
+		warnOnce("noparts:" .. weaponId, string.format("the %s weapon model has no parts", weaponId))
 		model:Destroy()
 		return nil
 	end
 	model.PrimaryPart = handle
 
-	for _, part in model:GetChildren() do
-		if part:IsA("BasePart") and part ~= handle then
+	for _, part in basePartsOf(model) do
+		part.CanCollide = false
+		part.Locked = true
+		if part ~= handle then
 			part.Massless = true
 			weldTo(handle, part)
 		end
+		if viewmodel then
+			-- A viewmodel is drawn, never hit: it must not answer a raycast, cast
+			-- a shadow into the world, or collide with anything.
+			part.CanQuery = false
+			part.CanTouch = false
+			part.CastShadow = false
+			part.Anchored = part == handle
+		else
+			part.Anchored = false
+		end
 	end
 
-	-- Effects hang off "Muzzle": the flash, the smoke, the tracer origin. It lives
-	-- on the barrel so a real model can move the barrel and the flash follows.
-	local muzzleHost = barrel or handle
-	local muzzle = Instance.new("Attachment")
-	muzzle.Name = "Muzzle"
-	muzzle.CFrame = muzzleHost.CFrame:Inverse() * CFrame.new(spec.muzzle)
-	muzzle.Parent = muzzleHost
-
+	ensureMuzzle(model, handle)
+	model.Name = weaponId
 	return model
 end
 
---[[ The world model: what a survivor is holding, seen by everybody else. Left
-     unanchored so whoever equips it can weld it straight to a hand. ]]
+--[[
+	The prepared template for one weapon in one category.
+
+	Resolution order is modelName, then the enum id, then displayName. modelName
+	comes first because that is what the artist's file is actually called; the
+	enum id is what an earlier boot parked here; displayName is the last honest
+	guess before the grey-box.
+]]
+local weaponTemplates: { [string]: Model } = {}
+local viewmodelTemplates: { [string]: Model } = {}
+
+local function weaponTemplate(definition, category: string, cache, build: () -> Model?): Model?
+	local cached = cache[definition.id]
+	if cached then
+		return cached
+	end
+
+	local viewmodel = category == "Viewmodels"
+	local supplied = suppliedEntry(category, { definition.modelName, definition.id, definition.displayName })
+	local prepared: Model? = nil
+
+	if supplied then
+		local candidates = modelsIn(supplied)
+		if candidates[1] then
+			prepared = adoptWeapon(candidates[1]:Clone(), definition.id, viewmodel)
+		end
+		if prepared then
+			resolved[category].real += 1
+		else
+			warnOnce(
+				"unusable:" .. category .. ":" .. definition.id,
+				string.format("Assets.%s.%s is not a usable model; grey-boxing it", category, supplied.Name)
+			)
+		end
+	end
+
+	if not prepared then
+		local built = build()
+		if built then
+			prepared = adoptWeapon(built, definition.id, viewmodel)
+		end
+		if prepared then
+			resolved[category].grey += 1
+		end
+	end
+
+	if not prepared then
+		return nil
+	end
+	-- Published only when the client would otherwise find nothing: it resolves a
+	-- viewmodel by modelName first, and reaches whatever the user put in
+	-- ReplicatedStorage without our help.
+	local reachable = supplied ~= nil and supplied:IsDescendantOf(ReplicatedStorage)
+	cache[definition.id] = park(category, definition.id, prepared, viewmodel and not reachable)
+	return prepared
+end
+
+--[[ The world model: what a survivor is holding, seen by everybody else. ]]
 function PlaceholderFactory:buildWeaponModel(weaponId: string): Model?
 	if typeof(weaponId) ~= "string" then
 		return nil
 	end
-	local source = template("Weapons", weaponId, function()
-		local model = buildGun(weaponId)
-		if model then
-			for _, part in model:GetChildren() do
-				if part:IsA("BasePart") then
-					part.Anchored = false
-				end
-			end
-		end
-		return model
+	local definition = WeaponConfig.get(weaponId)
+	if not definition then
+		return nil
+	end
+	local source = weaponTemplate(definition, "Weapons", weaponTemplates, function()
+		return buildGun(definition)
 	end)
 	return if source then source:Clone() else nil
 end
 
 --[[
-	The first-person model. Same geometry at the same scale as the world model, on
-	purpose: the Muzzle attachment then sits in the same place relative to the
-	Handle in both, so a tracer that starts at the viewmodel's muzzle lines up with
-	the one every other player sees leaving the world model.
+	The first-person model.
 
-	The Handle stays anchored — a viewmodel is driven by writing a CFrame every
-	frame and must never be touched by physics — and the rest is welded to it.
+	The grey-box is the same geometry at the same scale as the world model, on
+	purpose: the Muzzle attachment then sits in the same place relative to the
+	Handle in both, so a tracer that starts at the viewmodel's muzzle lines up
+	with the one every other player sees leaving the world model.
 ]]
 function PlaceholderFactory:buildViewmodel(weaponId: string): Model?
 	if typeof(weaponId) ~= "string" then
 		return nil
 	end
-	local source = template("Viewmodels", weaponId, function()
-		local model = buildGun(weaponId)
+	local definition = WeaponConfig.get(weaponId)
+	if not definition then
+		return nil
+	end
+	local source = weaponTemplate(definition, "Viewmodels", viewmodelTemplates, function()
+		local model = buildGun(definition)
 		if not model then
 			return nil
 		end
-		local handle = model.PrimaryPart :: BasePart
+		local handle = model:FindFirstChild("Handle")
+		if not handle or not handle:IsA("BasePart") then
+			return model
+		end
 
-		-- Sleeved forearms. Without hands a viewmodel reads as a floating prop,
-		-- and the arms are also what sells the reload and the melee swing.
+		-- Sleeved forearms, on the grey-box only. Without hands a stand-in reads
+		-- as a floating prop; a supplied model is assumed to bring its own.
 		for _, side in { -1, 1 } do
 			local isRight = side > 0
 			local arm = prop(
@@ -981,20 +1496,7 @@ function PlaceholderFactory:buildViewmodel(weaponId: string): Model?
 				UITheme.Color.PanelRaised,
 				Enum.Material.Fabric
 			)
-			arm.Massless = true
 			arm.Parent = model
-			weldTo(handle, arm)
-		end
-
-		for _, part in model:GetDescendants() do
-			if part:IsA("BasePart") then
-				-- A viewmodel is drawn, never hit: it must not answer a raycast,
-				-- cast a shadow into the world, or collide with anything.
-				part.CanQuery = false
-				part.CanTouch = false
-				part.CastShadow = false
-				part.Anchored = part == handle
-			end
 		end
 		return model
 	end)
@@ -1087,51 +1589,114 @@ PICKUP_BUILDERS[Enums.Throwable.BileJar] = function(model)
 end
 
 --[[
-	A pickup: a small readable object, lying on the floor, glowing just enough to
-	be found in a dark room without becoming a lamp. The outline controller adds
-	the highlight — what matters here is that the model has a PrimaryPart to
-	adorn, stays queryable so the interact raycast can find it, and never collides
-	with anybody who walks over it.
+	Finishes any pickup — grey-box, dropped gun or a model the user supplied.
 
 	The "Handle" is an invisible root at the centre of the model's own bounding
 	box, and that is not cosmetic: ItemPlacer places a pickup by pivoting it to
 	`ground + halfHeight`, which only rests the object on the floor if the pivot
 	really is the middle of it. A grip-shaped Handle would bury every dropped gun.
 ]]
+local function finishPickup(model: Model): Model?
+	if not model:FindFirstChildWhichIsA("BasePart", true) then
+		model:Destroy()
+		return nil
+	end
+
+	local box, extents = model:GetBoundingBox()
+	local handle = prop("Handle", V(0.4, 0.4, 0.4), CFrame.new(box.Position), UITheme.Outline.ItemColor)
+	handle.Transparency = 1
+	handle.CanQuery = false
+	handle.Parent = model
+	model.PrimaryPart = handle
+
+	-- The marker ring, flat on the floor under the item. Non-queryable so it can
+	-- never eat the interact ray aimed at the thing standing on it.
+	local ring = prop(
+		"Marker",
+		V(2.6, 0.06, 2.6),
+		CFrame.new(box.Position - Vector3.new(0, extents.Y * 0.5 - 0.04, 0)),
+		UITheme.Outline.ItemColor,
+		Enum.Material.Neon
+	)
+	ring.CanQuery = false
+	ring.Transparency = 0.4
+	ring.Parent = model
+
+	local glow = Instance.new("PointLight")
+	glow.Color = UITheme.Outline.ItemColor
+	glow.Brightness = 1.1
+	glow.Range = 10
+	glow.Shadows = false
+	glow.Parent = handle
+
+	for _, part in basePartsOf(model) do
+		-- Anchored: a pickup sitting where the level designer put it is worth far
+		-- more than one that rolls under a car, and a few dozen anchored props
+		-- cost nothing.
+		part.Anchored = true
+		part.CanCollide = false
+		part.CastShadow = false
+		part.Locked = true
+		if part ~= handle then
+			part.Massless = true
+			weldTo(handle, part)
+		end
+	end
+	return model
+end
+
+local pickupTemplates: { [string]: Model } = {}
+
+--[[ A small readable object, lying on the floor, glowing just enough to be
+     found in a dark room without becoming a lamp. ]]
 function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 	if typeof(slot) ~= "string" or typeof(itemId) ~= "string" then
 		return nil
 	end
 
-	local source = template("Pickups", slot .. "_" .. itemId, function()
-		local model: Model
-		if WeaponConfig.get(itemId) then
+	local key = slot .. "_" .. itemId
+	local source = pickupTemplates[key]
+	if not source then
+		local built: Model? = nil
+
+		local supplied = suppliedEntry("Pickups", { key, itemId })
+		if supplied then
+			local candidates = modelsIn(supplied)
+			if candidates[1] then
+				built = candidates[1]:Clone()
+				sanitise(built)
+			end
+		end
+
+		if not built and WeaponConfig.get(itemId) then
 			-- A dropped gun is the gun, lying on its side. Nothing else reads as
-			-- clearly as the silhouette the player is about to be holding.
-			local built = self:buildWeaponModel(itemId)
-			if not built then
-				return nil
-			end
-			model = built
-			model.PrimaryPart = nil
-			for _, part in model:GetChildren() do
-				if part:IsA("BasePart") then
-					part.CFrame = CFrame.Angles(0, 0, math.rad(90)) * part.CFrame
-					if part.Name == "Handle" then
-						part.Name = "Grip"
-					end
+			-- clearly as the silhouette the player is about to be holding. Pivoted
+			-- as one model rather than part by part, because a supplied gun is
+			-- welded together and rotating its parts individually would tear it up.
+			local weapon = self:buildWeaponModel(itemId)
+			if weapon then
+				weapon:PivotTo(CFrame.Angles(0, 0, math.rad(90)))
+				local grip = weapon:FindFirstChild("Handle", true)
+				if grip then
+					-- Freed for the pickup's own root; two Handles in one model is
+					-- one Handle too many for everybody downstream.
+					grip.Name = "Grip"
 				end
+				weapon.PrimaryPart = nil
+				built = weapon
 			end
-		else
-			model = Instance.new("Model")
+		end
+
+		if not built then
+			built = Instance.new("Model")
 			local builder = PICKUP_BUILDERS[itemId]
 			if builder then
-				builder(model)
+				builder(built)
 			else
 				-- An unknown id still has to become something a player can pick
 				-- up: a plain crate is better than a nil return.
 				pickupPart(
-					model,
+					built,
 					"Crate",
 					V(1.4, 1.2, 1.4),
 					V(0, 0.6, 0),
@@ -1141,58 +1706,14 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 			end
 		end
 
-		if not model:FindFirstChildWhichIsA("BasePart") then
-			model:Destroy()
+		local finished = finishPickup(built)
+		if not finished then
 			return nil
 		end
-
-		local box, extents = model:GetBoundingBox()
-		local handle = prop("Handle", V(0.4, 0.4, 0.4), CFrame.new(box.Position), UITheme.Outline.ItemColor)
-		handle.Transparency = 1
-		handle.CanQuery = false
-		handle.Parent = model
-		model.PrimaryPart = handle
-
-		-- The marker ring, flat on the floor under the item. Non-queryable so it
-		-- can never eat the interact ray aimed at the thing standing on it.
-		local ring = prop(
-			"Marker",
-			V(2.6, 0.06, 2.6),
-			CFrame.new(box.Position - Vector3.new(0, extents.Y * 0.5 - 0.04, 0)),
-			UITheme.Outline.ItemColor,
-			Enum.Material.Neon
-		)
-		ring.CanQuery = false
-		ring.Transparency = 0.4
-		ring.Parent = model
-
-		local glow = Instance.new("PointLight")
-		glow.Color = UITheme.Outline.ItemColor
-		glow.Brightness = 1.1
-		glow.Range = 10
-		glow.Shadows = false
-		glow.Parent = handle
-
-		for _, part in model:GetDescendants() do
-			if part:IsA("BasePart") then
-				-- Anchored: a pickup sitting where the level designer put it is
-				-- worth far more than one that rolls under a car, and a few dozen
-				-- anchored props cost nothing.
-				part.Anchored = true
-				part.CanCollide = false
-				part.CastShadow = false
-				if part ~= handle then
-					part.Massless = true
-					weldTo(handle, part)
-				end
-			end
-		end
-		return model
-	end)
-
-	if not source then
-		return nil
+		source = park("Pickups", key, finished)
+		pickupTemplates[key] = source
 	end
+
 	local clone = source:Clone()
 	clone.Name = itemId
 	return clone
@@ -1978,16 +2499,62 @@ local function buildCourtyard(root: Instance)
 end
 
 --[[
-	Builds the whole greybox chapter and parents it to Workspace.
+	True when this place already has a real level in it.
 
-	Always builds: `ensureAssets` is the one that decides whether a test map is
-	wanted at all, so that a place which already contains a hand-built level is
-	never littered with this one.
+	Two independent tests, because a map can be present before it is tagged:
+
+	  * anything tagged FL_FlowNode or FL_SpawnNode that this module did not
+	    build — those are the two tags nothing plays without, so either one is
+	    proof a level is installed;
+	  * a Workspace container called "Maps" with geometry in it, which is where
+	    the hand-built map lives. This second test matters because the tagging
+	    pass may not have run yet when assets are warmed: init() happens before
+	    every start(), and building a grey-box street through the middle of
+	    somebody's map is not a mistake that can be undone at runtime.
+
+	Our own fallback is excluded from both, or it would count as evidence of
+	itself and could never be rebuilt after a rebuild.
 ]]
-function PlaceholderFactory:buildTestMap(): Model
+local function hasRealLevel(): boolean
+	local ours = Workspace:FindFirstChild(MAP_NAME)
+	for _, tag in { TAG_FLOW, TAG_SPAWN } do
+		for _, node in CollectionService:GetTagged(tag) do
+			if node:IsDescendantOf(Workspace) and not (ours and node:IsDescendantOf(ours)) then
+				return true
+			end
+		end
+	end
+
+	local maps = Workspace:FindFirstChild("Maps")
+	if maps and maps ~= ours and maps:FindFirstChildWhichIsA("BasePart", true) then
+		return true
+	end
+	return false
+end
+
+--[[
+	FALLBACK ONLY — this is not the game's level.
+
+	The real map is the user's own ("Zombieville", under Workspace.Maps). This
+	grey-box chapter exists so that a place with NO tagged level in it is still
+	playable end to end: it builds if, and only if, Workspace contains no
+	FL_FlowNode or FL_SpawnNode geometry that this module did not build itself.
+	It never overwrites a real map and it never duplicates itself — the moment
+	the user's map is tagged, this returns nil and touches nothing.
+
+	Everything gameplay-relevant in it is a TAG, not a coordinate: LevelService
+	and the Director read FL_FlowNode, FL_SpawnNode, FL_ItemSpawn,
+	FL_PanicTrigger and FL_BossZone out of CollectionService, which is exactly
+	what lets a hand-built map replace all of this with zero code changes.
+]]
+function PlaceholderFactory:buildTestMap(): Model?
 	local existing = Workspace:FindFirstChild(MAP_NAME)
 	if existing and existing:IsA("Model") then
 		return existing
+	end
+	if hasRealLevel() then
+		print("[PlaceholderFactory] Workspace already has a level in it; the fallback map stays unbuilt")
+		return nil
 	end
 
 	local root = Instance.new("Model")
@@ -2081,38 +2648,33 @@ end
 --  Lifecycle
 -- ════════════════════════════════════════════════════════════════════════════
 
---[[ True when this place already has a tagged level in it that this module did
-     not build. That is the drop-in case: the user's own map is present, and the
-     last thing they want is a greybox street on top of it. ]]
-local function hasHandBuiltLevel(): boolean
-	local ours = Workspace:FindFirstChild(MAP_NAME)
-	for _, node in CollectionService:GetTagged(TAG_FLOW) do
-		if node:IsDescendantOf(Workspace) and not (ours and node:IsDescendantOf(ours)) then
-			return true
-		end
-	end
-	return false
-end
-
 --[[
-	Builds everything the round will ask for, before it asks.
+	Prepares everything the round will ask for, before it asks.
 
-	Idempotent by construction: templates are cached by name and the map returns
-	the one already in Workspace, so calling this twice is two folder lookups.
+	Idempotent: every template is cached by key and the fallback map refuses to
+	build twice, so a second call is a handful of table lookups.
 
-	Warming matters more than it looks. The first shot of the round would
-	otherwise pay for laying out a gun, and the first horde would pay for laying
-	out seven rigs — both at exactly the moment the game is trying to convince
-	somebody it feels good.
+	Warming matters more than it looks. The first shot of a round would otherwise
+	pay for preparing a gun, and the first horde would pay for sanitising,
+	scaling and verifying thirteen rigs — both at exactly the moment the game is
+	trying to convince somebody it feels good.
+
+	It also prints what it found. Somebody who has just dropped a folder of
+	models into a place needs one line telling them how many of them the game is
+	actually using, and no way to get it other than this.
 ]]
 function PlaceholderFactory:ensureAssets()
 	for weaponId in WeaponConfig.all() do
 		self:buildWeaponModel(weaponId)
 		self:buildViewmodel(weaponId)
 	end
+
+	local rigs = {}
 	for kind in InfectedConfig.all() do
-		self:buildInfectedRig(kind)
+		table.insert(rigs, string.format("%s x%d", kind, #variantsFor(kind)))
 	end
+	table.sort(rigs)
+
 	for slot, ids in
 		{
 			[Enums.Slot.Health] = { Enums.HealthItem.Medkit, Enums.HealthItem.Defibrillator },
@@ -2129,10 +2691,20 @@ function PlaceholderFactory:ensureAssets()
 		end
 	end
 
-	if hasHandBuiltLevel() then
-		print("[PlaceholderFactory] a tagged level is already in Workspace; skipping the test map")
-		return
-	end
+	print(
+		string.format(
+			"[PlaceholderFactory] weapons %d supplied / %d grey-boxed · viewmodels %d / %d · "
+				.. "infected %d kinds supplied / %d grey-boxed · rigs: %s",
+			resolved.Weapons.real,
+			resolved.Weapons.grey,
+			resolved.Viewmodels.real,
+			resolved.Viewmodels.grey,
+			resolved.Infected.real,
+			resolved.Infected.grey,
+			table.concat(rigs, ", ")
+		)
+	)
+
 	self:buildTestMap()
 end
 

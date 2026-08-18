@@ -1,34 +1,40 @@
 --!strict
 --[[
-	Witch — a hazard, not an enemy.
+	Witch — she cries, and then she calls.
 
-	She does nothing. That is the design and it has to be defended in code: no
-	target acquisition, no wandering, no retaliation for being looked at from
-	across a room. A good team hears her, finds her, turns their lights away and
-	walks around, and the entire encounter is over without a shot. All of the
-	tension lives in the approach, and every line below exists to keep it there.
+	This is NOT the Left 4 Dead witch and nothing about the old hazard behaviour
+	survives: she does not one-shot, she does not run away, and walking past her
+	with your light off is no longer a free pass. InfectedConfig says what she is
+	now — 1000 health, 45 damage, runSpeed 30 — and the shape of the encounter is
+	the two things she does the moment she is disturbed, at the same time:
 
-	She startles on exactly three things:
-	  * damage — any at all, from anyone
-	  * attention inside sightRange: standing in front of her with a light on her
-	    for long enough that it stops being an accident
-	  * contact — somebody close enough to touch or shove her
+	  1. SUMMONS. Every Common inside her call drops what it was doing and walks
+	     at the team, and the Director is told to run a panic on top of that. The
+	     horde arrives whether or not anybody engages her, which is what makes
+	     ignoring her no longer free.
+	  2. HUNTS. She goes after whoever woke her at 30 studs a second: faster than
+	     a survivor walks, slower than one sprints. Running IS the answer, but it
+	     costs the team everything they were doing instead.
 
-	The third case is an approximation and worth naming. MeleeService's shove
-	scales its effect by (1 - stumbleResistance), and the Witch's is 1.0, so a
-	shove on her produces no observable signal anywhere. Proximity inside
-	GameConfig.Shove.Range is the stand-in: anyone close enough to have shoved her
-	has startled her, which is the same outcome from the player's side.
+	The tension is that both halves are true at once. Fighting her means fighting
+	the horde she called, and running from her means running through it. Both
+	halves are made legible by sound, deliberately: WitchCry carries 460 studs so
+	you always know she is there, WitchStartle tells the whole team the exact
+	moment somebody made a mistake, and WitchSummon is loud, low and unmistakable
+	because the team has to be able to connect "we heard that" with "here they
+	come" without seeing anything.
 
-	Once startled she is faster than any survivor (runSpeed 48 against a sprint of
-	22), takes one swing worth attack.damage 999 — an incapacitation in practice,
-	never a survivable hit — and then leaves. She does not stay to fight the team,
-	because a Witch that stays is just a Tank with a bad HP bar.
+	The hunt itself is the brain's job, not this file's. InfectedBrain already
+	paths, re-paths, closes and swings on attack.cooldown with a visible windup,
+	using this definition's numbers — so an awake Witch is handed straight back to
+	it. Everything below is only the parts the brain has no concept of: sitting
+	still, being woken, calling the horde, and giving up.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
@@ -36,42 +42,59 @@ local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
-local Types = require(Shared.Types)
 
 local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Witch]
-local ATTACK = DEFINITION.attack
 
 local PHASE = table.freeze({
-	Sit = "Sit", -- crying, doing absolutely nothing
-	Rise = "Rise", -- screaming, about to move; the last moment to run
-	Chase = "Chase", -- sprinting at whoever did it
-	Strike = "Strike", -- the swing
-	Flee = "Flee", -- leaving, and then gone
+	Mourn = "Mourn", -- sitting, crying, doing nothing else
+	Wake = "Wake", -- screaming, calling, about to move
+	Hunt = "Hunt", -- the brain drives; she is coming
 })
 
--- How long sustained attention has to last before she takes it personally, and
--- how fast that reading falls off when nobody is looking. The decay is what lets
--- a player sweep a light past her by accident and get away with it.
-local ATTENTION_TO_STARTLE = 2.4
-local ATTENTION_DECAY = 0.7
-
--- Half-angle of "you are looking at me". Narrow: a survivor facing her is aiming
--- a torch at her, a survivor facing 45 degrees off is walking past.
-local ATTENTION_HALF_ANGLE = 26
-
--- Anyone this close has startled her regardless of where they are looking. Read
--- from the shove range because a shove is one of the three canonical startles
--- and cannot be observed directly — see the header.
+-- Anyone this close has disturbed her regardless of anything else. Read from the
+-- shove range because a shove is one of the three canonical ways to wake her and
+-- cannot be observed directly: MeleeService scales a shove by
+-- (1 - stumbleResistance), and hers is 1.0, so a shove on the Witch produces no
+-- signal anywhere. Proximity is the honest stand-in — anybody close enough to
+-- have shoved her has woken her, which is the same outcome from their side.
 local CONTACT_RANGE = GameConfig.Shove.Range
 
-local RISE_TIME = 0.7 -- the scream before she moves; the only warning there is
-local STRIKE_RECOVER = 0.9 -- beat after the swing before she turns and runs
-local FLEE_TIME = 6.0 -- how long she runs before despawning
-local FLEE_LOOKAHEAD = 40 -- how far ahead she is told to run, re-issued every frame
-local GIVE_UP_TIME = DEFINITION.loseInterestTime -- unreachable target: she leaves
-
+local WAKE_TIME = 0.9 -- the scream and the first call; the last moment to run
 local CRY_INTERVAL = 5.5 -- the sound that tells the team she exists at all
-local SCAN_INTERVAL = 0.25
+local SCAN_INTERVAL = 0.25 -- her only cost while sitting; never per frame
+
+--[[ The call.
+
+     The first one goes out the instant she wakes, and one every SUMMON_INTERVAL
+     after that for as long as she is awake. Twenty seconds is set against the
+     Director's own panic shape — three waves nine seconds apart — so each call
+     has finished arriving before the next one starts, and a team that kills her
+     inside half a minute pays for exactly one horde.
+
+     The radius is her hearingRange rather than a new number: that field already
+     means "how far away this thing is aware of the world", and a call that
+     reaches precisely as far as she can hear is the version a player can
+     reason about. ]]
+local SUMMON_INTERVAL = 20
+local SUMMON_RADIUS = DEFINITION.hearingRange
+-- How long a called Common ignores survivors and just walks. Short: they should
+-- arrive and immediately be a horde, not stand at the anchor looking at it.
+local SUMMON_LURE_TIME = 8
+
+-- Degraded path only, for a server with no Director (a Studio test place, a
+-- round that has not started). Small, and placed on the far side of her from the
+-- team at the Director's own minimum spawn distance, so a fallback horde still
+-- never materialises in somebody's face.
+local FALLBACK_SPAWN_COUNT = 6
+local FALLBACK_SPAWN_RADIUS = DirectorConfig.Spawning.MinDistanceFromSurvivor
+local FALLBACK_SPAWN_ARC = math.rad(120)
+local FALLBACK_GROUND_SEARCH = 40
+
+-- With nobody inside sightRange for this long she sits back down and starts
+-- again. She is a fixture of the map, not a roaming boss, and a Witch that
+-- follows the team across the whole level stops being an encounter and becomes
+-- weather. The horde she already called does not go away with her.
+local GIVE_UP_TIME = DEFINITION.loseInterestTime
 
 local STARTLE_CAMERA_IMPULSE = table.freeze({
 	position = Vector3.new(0, 0.1, 0.2),
@@ -83,13 +106,11 @@ type State = {
 	phase: string,
 	phaseTime: number,
 	nextCry: number,
+	nextSummon: number,
 	scanClock: number,
-	hasStruck: boolean,
-	attention: number,
 	lastHealth: number,
 	victim: Player?,
-	chaseTime: number,
-	fleeHeading: Vector3,
+	lostTime: number,
 	ignore: { Instance },
 }
 
@@ -101,16 +122,14 @@ local function ensure(model: Model): State
 	if not state then
 		local humanoid = model:FindFirstChildOfClass("Humanoid")
 		state = {
-			phase = PHASE.Sit,
+			phase = PHASE.Mourn,
 			phaseTime = 0,
 			nextCry = 0,
+			nextSummon = 0,
 			scanClock = 0,
-			hasStruck = false,
-			attention = 0,
 			lastHealth = if humanoid then humanoid.Health else DEFINITION.health,
 			victim = nil,
-			chaseTime = 0,
-			fleeHeading = Vector3.zAxis,
+			lostTime = 0,
 			ignore = { model },
 		}
 		states[model] = state
@@ -179,17 +198,101 @@ local function rootOf(player: Player?): (Model?, BasePart?)
 	return character, RigUtil.getRoot(character)
 end
 
+-- ─── the call ────────────────────────────────────────────────────────────────
+
+--[[ Where the horde is being sent: the middle of the team, falling back to her
+     own position when there is nobody left to converge on. ]]
+local function hordeAnchor(root: BasePart): Vector3
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors then
+		return root.Position
+	end
+
+	local sum = Vector3.zero
+	local count = 0
+	for _, player in survivors:getAliveSurvivors() do
+		local _, victimRoot = rootOf(player)
+		if victimRoot then
+			sum += victimRoot.Position
+			count += 1
+		end
+	end
+
+	return if count > 0 then sum / count else root.Position
+end
+
+--[[ Bodies out of nothing, for a server with no Director to ask. Ground-snapped
+     and placed behind her, because InfectedService:spawn takes a floor point and
+     trusts the caller to have chosen a sane one. ]]
+local function spawnFallbackHorde(root: BasePart, state: State, anchor: Vector3)
+	local infected: any = Registry.find("InfectedService")
+	if not infected or typeof(infected.spawn) ~= "function" then
+		return
+	end
+
+	local origin = root.Position
+	local delta = origin - anchor
+	local flat = Vector3.new(delta.X, 0, delta.Z)
+	local away = if flat.Magnitude > 0.05 then flat.Unit else root.CFrame.LookVector
+
+	for index = 1, FALLBACK_SPAWN_COUNT do
+		local fraction = (index - 1) / math.max(FALLBACK_SPAWN_COUNT - 1, 1) - 0.5
+		local direction = CFrame.fromAxisAngle(Vector3.yAxis, fraction * FALLBACK_SPAWN_ARC) * away
+		local point = origin + direction * FALLBACK_SPAWN_RADIUS
+		local ground = RaycastUtil.groundAt(point, FALLBACK_GROUND_SEARCH, state.ignore)
+		if ground then
+			infected:spawn(Enums.Infected.Common, ground)
+		end
+	end
+end
+
 --[[
-	Watches the three startle conditions and returns whoever tripped one.
+	One call. Announced first, because the sound is the mechanic: the team has to
+	be able to hear a summon and act on it before anything is visible.
+
+	Both halves go out together. The lure drags the Commons that already exist —
+	the ones the team walked past, the stragglers behind them — onto the anchor,
+	and the Director's panic event supplies the ones that do not exist yet through
+	its own spawn placement, which means they still arrive from somewhere legal
+	and out of sight rather than appearing in the room.
+]]
+local function summon(root: BasePart, state: State, now: number)
+	state.nextSummon = now + SUMMON_INTERVAL
+
+	playSound("WitchSummon", root)
+
+	local anchor = hordeAnchor(root)
+
+	local infected: any = Registry.find("InfectedService")
+	if infected and typeof(infected.lure) == "function" then
+		infected:lure(anchor, SUMMON_RADIUS, SUMMON_LURE_TIME)
+	end
+
+	local director: any = Registry.find("DirectorService")
+	if director and typeof(director.triggerPanicEvent) == "function" then
+		director:triggerPanicEvent(anchor)
+	else
+		spawnFallbackHorde(root, state, anchor)
+	end
+end
+
+-- ─── waking ──────────────────────────────────────────────────────────────────
+
+--[[
+	Watches for a disturbance and returns whoever caused it.
 
 	Damage is detected by watching the Humanoid's health rather than by listening
 	to DamageService.damageDealt: a signal connection made per Witch would outlive
 	a Witch that is despawned instead of killed, and this file must not own a
-	subscription it cannot guarantee it will clean up. The attacker is then read
-	as the nearest survivor with a sightline — which is who shot her, in every
-	case that is not a deliberate ricochet.
+	subscription it cannot guarantee it will clean up. The attacker is then read as
+	the nearest survivor with a sightline, which is who shot her in every case
+	that is not a deliberate ricochet.
+
+	Sight and contact are the other two. There is no "staring at her" grace period
+	any more — she is not a trap to be tiptoed around, she is an enemy who notices
+	you — so being inside sightRange with a clear line is enough.
 ]]
-local function checkStartle(model: Model, root: BasePart, state: State, dt: number): Player?
+local function checkDisturbance(model: Model, root: BasePart, state: State): Player?
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	local hurt = false
 	if humanoid then
@@ -205,12 +308,10 @@ local function checkStartle(model: Model, root: BasePart, state: State, dt: numb
 	end
 
 	local origin = root.Position
-	local closest: Player? = nil
-	local closestDistance = math.huge
+	local seen: Player? = nil
+	local seenDistance = math.huge
 	local blamed: Player? = nil
 	local blamedDistance = math.huge
-	local attentionFrom: Player? = nil
-	local contactFrom: Player? = nil
 
 	for _, player in survivors:getAliveSurvivors() do
 		local character, victimRoot = rootOf(player)
@@ -218,10 +319,9 @@ local function checkStartle(model: Model, root: BasePart, state: State, dt: numb
 			continue
 		end
 
-		local delta = victimRoot.Position - origin
-		local distance = delta.Magnitude
+		local distance = (victimRoot.Position - origin).Magnitude
 
-		-- Tracked without any range or sightline filter, because a Witch shot
+		-- Tracked with no range or sightline filter at all, because a Witch shot
 		-- from across the map is still a Witch that has been shot and she has to
 		-- have somebody to blame for it.
 		if distance < blamedDistance then
@@ -229,99 +329,43 @@ local function checkStartle(model: Model, root: BasePart, state: State, dt: numb
 			blamed = player
 		end
 
-		if distance > DEFINITION.sightRange then
+		-- Close enough to have shoved her, whatever is in the way.
+		if distance <= CONTACT_RANGE then
+			return player
+		end
+
+		if distance > DEFINITION.sightRange or distance >= seenDistance then
 			continue
 		end
 
 		state.ignore[2] = character
 		local visible = RaycastUtil.hasLineOfSight(origin, victimRoot.Position, state.ignore)
 		state.ignore[2] = nil
-		if not visible then
-			continue
-		end
-
-		if distance < closestDistance then
-			closestDistance = distance
-			closest = player
-		end
-		if distance <= CONTACT_RANGE then
-			contactFrom = player
-		end
-
-		-- Facing her, with something between "walking past" and "staring".
-		if distance > 0.05 then
-			local facing = victimRoot.CFrame.LookVector
-			local toWitch = (origin - victimRoot.Position).Unit
-			local angle = math.deg(math.acos(math.clamp(facing:Dot(toWitch), -1, 1)))
-			if angle <= ATTENTION_HALF_ANGLE then
-				attentionFrom = player
-			end
+		if visible then
+			seenDistance = distance
+			seen = player
 		end
 	end
 
 	if hurt then
-		return closest or blamed
+		return seen or blamed
 	end
-	if contactFrom then
-		return contactFrom
-	end
-
-	if attentionFrom then
-		state.attention += dt
-		if state.attention >= ATTENTION_TO_STARTLE then
-			return attentionFrom
-		end
-	else
-		state.attention = math.max(state.attention - ATTENTION_DECAY * dt, 0)
-	end
-
-	return nil
+	return seen
 end
 
-local function beginFlee(model: Model, brain: any, state: State, root: BasePart)
-	pauseBrain(brain)
-	setBrainTarget(brain, nil)
-
-	-- Away from the nearest survivor, flattened. She is leaving, not pathing.
-	local heading = -root.CFrame.LookVector
-	local survivors: any = Registry.find("SurvivorService")
-	if survivors then
-		local origin = root.Position
-		local nearest = math.huge
-		for _, player in survivors:getAliveSurvivors() do
-			local _, victimRoot = rootOf(player)
-			if victimRoot then
-				local delta = origin - victimRoot.Position
-				local distance = delta.Magnitude
-				if distance < nearest and distance > 0.05 then
-					nearest = distance
-					heading = delta
-				end
-			end
-		end
-	end
-
-	local flat = Vector3.new(heading.X, 0, heading.Z)
-	state.fleeHeading = if flat.Magnitude > 0.05 then flat.Unit else root.CFrame.LookVector
-	state.victim = nil
-	state.phase = PHASE.Flee
+local function wake(brain: any, state: State, root: BasePart, by: Player, dt: number, now: number)
+	state.phase = PHASE.Wake
 	state.phaseTime = 0
-
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = DEFINITION.runSpeed
-	end
-end
-
-local function startle(model: Model, brain: any, state: State, root: BasePart, by: Player, dt: number)
 	state.victim = by
-	state.attention = 0
-	state.chaseTime = 0
-	state.phase = PHASE.Rise
-	state.phaseTime = 0
+	state.lostTime = 0
 
 	playSound("WitchStartle", root)
 	Remotes.Event.CameraImpulse:FireClient(by, STARTLE_CAMERA_IMPULSE)
+
+	-- The horde is called on the same frame she stands up, not when she reaches
+	-- somebody. Whoever woke her has already spent that; the only question left
+	-- is whether the team fights her before it lands.
+	summon(root, state, now)
 
 	local _, victimRoot = rootOf(by)
 	if victimRoot then
@@ -329,11 +373,31 @@ local function startle(model: Model, brain: any, state: State, root: BasePart, b
 	end
 end
 
+--[[ Back to the floor, wherever she happens to be standing. The brain goes back
+     to sleep with her; the Commons she called do not. ]]
+local function sitDown(model: Model, brain: any, state: State)
+	pauseBrain(brain)
+	setBrainTarget(brain, nil)
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = 0
+		state.lastHealth = humanoid.Health
+	end
+
+	state.phase = PHASE.Mourn
+	state.phaseTime = 0
+	state.victim = nil
+	state.lostTime = 0
+	state.scanClock = 0
+end
+
 -- ─── phases ──────────────────────────────────────────────────────────────────
 
-local function stepSit(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
-	-- Re-asserted rather than set once at spawn. "She does not move" is the whole
-	-- encounter, and it must not depend on the brain having honoured pause().
+local function stepMourn(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
+	-- Re-asserted rather than set once at spawn. "She does not move until she is
+	-- disturbed" is the whole first half of the encounter, and it must not depend
+	-- on the brain having honoured pause().
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.WalkSpeed ~= 0 then
 		humanoid.WalkSpeed = 0
@@ -341,14 +405,11 @@ local function stepSit(model: Model, brain: any, state: State, root: BasePart, d
 
 	if now >= state.nextCry then
 		state.nextCry = now + CRY_INTERVAL
-		-- rollOffMax 420 in AudioConfig: she is meant to be heard two rooms away
-		-- and located by ear before she is ever seen.
 		playSound("WitchCry", root)
 	end
 
 	-- The sight tests are the only cost a sitting Witch has, so they run on their
-	-- own clock. Attention is integrated over the whole interval rather than one
-	-- frame, so the time it takes to startle her does not change with frame rate.
+	-- own clock rather than every frame.
 	state.scanClock += dt
 	if state.scanClock < SCAN_INTERVAL then
 		return
@@ -356,151 +417,92 @@ local function stepSit(model: Model, brain: any, state: State, root: BasePart, d
 	local elapsed = state.scanClock
 	state.scanClock = 0
 
-	local by = checkStartle(model, root, state, elapsed)
+	local by = checkDisturbance(model, root, state)
 	if by then
-		startle(model, brain, state, root, by, elapsed)
+		wake(brain, state, root, by, elapsed, now)
 	end
 end
 
-local function stepRise(model: Model, brain: any, state: State, root: BasePart, dt: number)
+local function stepWake(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local _, victimRoot = rootOf(state.victim)
 	if victimRoot then
 		faceTowards(brain, root, victimRoot.Position, dt)
 	end
 
-	if state.phaseTime < RISE_TIME then
+	if state.phaseTime < WAKE_TIME then
 		return
 	end
 
-	local victim = state.victim
-	if not victim then
-		beginFlee(model, brain, state, root)
-		return
-	end
-
-	-- The chase is handed BACK to the brain on purpose: it owns pathfinding, and
-	-- a Witch that cannot follow you round a corner is a Witch you beat with a
-	-- doorway. She only ever has one target and never re-picks.
+	-- Handed to the brain and left there. It owns pathing, and a Witch who cannot
+	-- follow you round a corner is a Witch you beat with a doorway; it also owns
+	-- the swing, which is already this definition's 45 damage on a 1.4s cooldown
+	-- behind a 0.25s windup. Re-implementing either here would only add a way for
+	-- them to disagree.
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid.WalkSpeed = DEFINITION.runSpeed
 	end
 	resumeBrain(brain)
-	setBrainTarget(brain, victim.Character)
 
-	state.phase = PHASE.Chase
+	local victim = state.victim
+	setBrainTarget(brain, if victim then victim.Character else nil)
+
+	state.phase = PHASE.Hunt
 	state.phaseTime = 0
-	state.chaseTime = 0
+	state.lostTime = 0
 end
 
-local function stepChase(model: Model, brain: any, state: State, root: BasePart, dt: number)
+local function stepHunt(model: Model, brain: any, state: State, root: BasePart, dt: number)
+	state.scanClock += dt
+	if state.scanClock < SCAN_INTERVAL then
+		return
+	end
+	state.scanClock = 0
+
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors then
+		sitDown(model, brain, state)
+		return
+	end
+
+	local origin = root.Position
 	local victim = state.victim
-	local character, victimRoot = rootOf(victim)
-	if not victim or not character or not victimRoot then
-		beginFlee(model, brain, state, root)
-		return
-	end
+	local victimAlive = false
+	local nearest: Player? = nil
+	local nearestDistance = math.huge
 
-	state.chaseTime += dt
-	if state.chaseTime >= GIVE_UP_TIME then
-		-- Cornered on a rooftop or blocked by geometry. She leaves rather than
-		-- grinding against a wall for the rest of the map.
-		beginFlee(model, brain, state, root)
-		return
-	end
-
-	-- The brain re-targets on its own schedule; this keeps it honest.
-	setBrainTarget(brain, character)
-
-	if (victimRoot.Position - root.Position).Magnitude > ATTACK.range then
-		return
-	end
-
-	pauseBrain(brain)
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = 0
-	end
-	state.phase = PHASE.Strike
-	state.phaseTime = 0
-	state.hasStruck = false
-end
-
-local function stepStrike(model: Model, brain: any, state: State, root: BasePart, dt: number)
-	local victim = state.victim
-	local character, victimRoot = rootOf(victim)
-
-	if state.phaseTime < ATTACK.windup then
-		if victimRoot then
-			faceTowards(brain, root, victimRoot.Position, dt)
+	for _, player in survivors:getAliveSurvivors() do
+		local _, victimRoot = rootOf(player)
+		if not victimRoot then
+			continue
 		end
+		if player == victim then
+			victimAlive = true
+		end
+		local distance = (victimRoot.Position - origin).Magnitude
+		if distance < nearestDistance then
+			nearestDistance = distance
+			nearest = player
+		end
+	end
+
+	-- She holds a grudge: whoever woke her stays the target for as long as they
+	-- are on their feet. Only when they are gone does she take the nearest.
+	if not victimAlive then
+		state.victim = nearest
+		victim = nearest
+	end
+
+	setBrainTarget(brain, if victim then victim.Character else nil)
+
+	if nearestDistance <= DEFINITION.sightRange then
+		state.lostTime = 0
 		return
 	end
 
-	if state.phaseTime >= ATTACK.windup + STRIKE_RECOVER then
-		beginFlee(model, brain, state, root)
-		return
-	end
-
-	if state.hasStruck then
-		return -- one swing per phase; everything after it is recovery
-	end
-	state.hasStruck = true
-
-	local damageService: any = Registry.find("DamageService")
-	if not victim or not character or not victimRoot or not damageService then
-		return
-	end
-
-	-- Still in reach? Sprinting out of her swing in the last tenth of a second is
-	-- allowed to work; that is the only thing that ever saves you.
-	local delta = victimRoot.Position - root.Position
-	local distance = delta.Magnitude
-	if distance > ATTACK.range * 1.25 then
-		return
-	end
-
-	local direction = if distance > 0.05 then delta.Unit else Vector3.yAxis
-	damageService:applyDamage(
-		character,
-		ATTACK.damage,
-		Types.newDamageContext({
-			attackerModel = model,
-			damageType = Enums.DamageType.Special,
-			region = Enums.HitRegion.Torso,
-			hitPosition = victimRoot.Position,
-			hitNormal = -direction,
-			direction = direction,
-			distance = distance,
-		})
-	)
-end
-
-local function stepFlee(model: Model, brain: any, state: State, root: BasePart)
-	local humanoid = model:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = DEFINITION.runSpeed
-		humanoid.AutoRotate = true
-	end
-
-	-- brain:moveTo is the sanctioned way for a special to drive a paused body: it
-	-- throttles the MoveTo re-issue and clears any path the brain had cached.
-	if brain and typeof(brain.moveTo) == "function" then
-		brain:moveTo(root.Position + state.fleeHeading * FLEE_LOOKAHEAD)
-	elseif humanoid then
-		humanoid:Move(state.fleeHeading, false)
-	end
-
-	if state.phaseTime < FLEE_TIME then
-		return
-	end
-
-	states[model] = nil
-	local infected: any = Registry.find("InfectedService")
-	if infected and typeof(infected.despawn) == "function" then
-		infected:despawn(model)
-	else
-		model:Destroy()
+	state.lostTime += SCAN_INTERVAL
+	if state.lostTime >= GIVE_UP_TIME then
+		sitDown(model, brain, state)
 	end
 end
 
@@ -512,8 +514,8 @@ function Witch.onSpawn(model: Model, brain: any)
 	local state = ensure(model)
 	state.ignore[1] = model
 
-	-- Paused from the first frame. She is not an AI with a target list; she is a
-	-- piece of level geometry that screams.
+	-- Paused from the first frame. Until something disturbs her she is not an AI
+	-- with a target list; she is a piece of level geometry that cries.
 	pauseBrain(brain)
 	setBrainTarget(brain, nil)
 
@@ -540,23 +542,36 @@ function Witch.onUpdate(model: Model, brain: any, dt: number)
 	local now = os.clock()
 	state.phaseTime += dt
 
-	if state.phase == PHASE.Flee then
-		stepFlee(model, brain, state, root)
-	elseif state.phase == PHASE.Strike then
-		stepStrike(model, brain, state, root, dt)
-	elseif state.phase == PHASE.Chase then
-		stepChase(model, brain, state, root, dt)
-	elseif state.phase == PHASE.Rise then
-		stepRise(model, brain, state, root, dt)
+	-- The call runs on its own clock in every awake phase, so it survives her
+	-- being staggered, cornered, or busy swinging at somebody. Once she is up,
+	-- the horde is coming on a timer the team cannot interrupt except by killing
+	-- her — which is the entire cost of having woken her.
+	if state.phase ~= PHASE.Mourn and now >= state.nextSummon then
+		summon(root, state, now)
+	end
+
+	if state.phase == PHASE.Hunt then
+		stepHunt(model, brain, state, root, dt)
+	elseif state.phase == PHASE.Wake then
+		stepWake(model, brain, state, root, dt)
 	else
-		stepSit(model, brain, state, root, dt, now)
+		stepMourn(model, brain, state, root, dt, now)
+	end
+
+	-- Her cry keeps going while she hunts. It is the only way a team that ran
+	-- knows how much distance they have actually made, and at 460 studs of
+	-- rolloff it is the loudest thing on the map that is not a Tank.
+	if state.phase ~= PHASE.Mourn and now >= state.nextCry then
+		state.nextCry = now + CRY_INTERVAL
+		playSound("WitchCry", root)
 	end
 end
 
 function Witch.onDeath(model: Model, brain: any, _ctx: any)
-	-- Killing a Witch is legitimate and expensive: 1000 health, stumbleResistance
-	-- 1.0, and she is already sprinting at somebody by the time most teams commit
-	-- to it. Nothing to unwind but the brain.
+	-- Killing her is legitimate and expensive: 1000 health, stumbleResistance
+	-- 1.0, and she is already on top of somebody by the time most teams commit to
+	-- it. Nothing to unwind but the brain — the horde she called is not hers to
+	-- take back, and that is the point of her.
 	resumeBrain(brain)
 	states[model] = nil
 end

@@ -1,0 +1,889 @@
+--!strict
+--[[
+	Rusher — winds up, commits, and cannot change its mind.
+
+	The charge is a contract with the player: you get a bellow and a visible
+	wind-up, the Rusher turns at 95 degrees a second while it winds up and NOT AT
+	ALL once it launches, and from that moment it is a 44 stud/second object
+	travelling in a straight line. Dodging it is one of the best things a survivor
+	does in this game, and every rule below exists to protect that moment.
+
+	  * The tell comes first. RusherCharge plays at the START of the wind-up, not
+	    at the launch — a warning that arrives with the attack is not a warning.
+	  * The heading is sampled once, at launch, and then frozen. There is no
+	    mid-charge correction anywhere in this file. A Rusher that homes is a
+	    Rusher nobody can dodge, and it would quietly delete the whole mechanic.
+	  * A miss is punished. The charge overshoots to the end of its lane and the
+	    Rusher then stands there, stopped and doing nothing, for MISS_RECOVERY.
+	    That window is the reward for reading the tell.
+
+	The first survivor in the lane is carried; everyone else is thrown clear
+	rather than collected, because a charge that pins the whole team is a wipe
+	rather than a threat. The carry ends against the first wall, which is where
+	the damage actually is: the slam, and then a pummel on attack.cooldown until
+	somebody answers it.
+
+	The pin runs through SurvivorService like every other pin, so a teammate's
+	shove frees the victim and staggers the Rusher — stumbleResistance 0.7 makes
+	that stagger short, which is the Rusher's compensation for being so easy to
+	sidestep. This module polls the pin's owner every tick and lets go the instant
+	it stops being the owner: the counter never depends on the Rusher agreeing.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
+local Enums = require(Shared.Enums)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
+local RaycastUtil = require(Shared.Util.RaycastUtil)
+local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
+local RigUtil = require(Shared.Util.RigUtil)
+local Types = require(Shared.Types)
+
+local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Rusher]
+local ATTACK = DEFINITION.attack
+
+local PHASE = table.freeze({
+	Stalk = "Stalk", -- the brain drives; we only look for a lane
+	WindUp = "WindUp", -- rooted, bellowing, turning at a clumsy 95 deg/s
+	Charge = "Charge", -- committed, straight, no steering of any kind
+	Pummel = "Pummel", -- a victim is on the floor and being hit on cooldown
+	Recover = "Recover", -- stopped and vulnerable, whether it hit or missed
+})
+
+-- The tell. Long enough to hear, turn, and step out of the lane; it is the
+-- single most important number in the file. attack.windup (0.3) is the pummel's
+-- tell and is far too short to dodge a charge from.
+local WINDUP_TIME = 0.85
+
+-- Range band. Inside the minimum there is no lane to run and the brain's ordinary
+-- swing is the right attack; past the maximum the charge expires before it
+-- arrives and the team gets a free 450-health target walking in a straight line.
+local CHARGE_MIN_RANGE = 24
+local CHARGE_MAX_RANGE = 130
+
+-- The lane. Time and distance both cap it, so a charge into open ground ends on
+-- the clock and a charge downhill ends on the odometer.
+local CHARGE_MAX_TIME = 3.0
+local CHARGE_MAX_DISTANCE = 120
+local CHARGE_LOOKAHEAD = 40 -- how far ahead the move order is re-issued
+-- attack.range is the reach of the arm doing the collecting, which is exactly
+-- what the lane is: anybody inside it is hit, anybody outside it watched it pass.
+local LANE_RADIUS = ATTACK.range
+
+-- Everyone who is not the first survivor hit gets thrown out of the way. Lower
+-- than the Tank's swing on purpose — this is a body-check in passing, not the
+-- game's biggest melee attack.
+local KNOCK_SPEED = 46
+local KNOCK_LIFT = 22
+-- The server has to own a victim's physics for a throw or a carry to survive
+-- their own simulation. Kept as short as it can be: a character that stays
+-- server-simulated feels laggy to play.
+local OWNERSHIP_RESTORE_TIME = 0.8
+
+-- Where a carried survivor rides: off the ground, in front, in the way. -Z is
+-- forward in object space, so this is the arm's length ahead of the chest.
+local CARRY_OFFSET = CFrame.new(0, 0.6, -3.4)
+
+-- The slam is where a charge's damage actually is. Twice attack.damage — the
+-- carry itself deals nothing, so this is the whole cost of being collected, and
+-- it is survivable from full health on purpose.
+local SLAM_MULTIPLIER = 2.0
+
+-- Wall detection. The forward probe covers the ground about to be crossed plus a
+-- margin, and the stall check catches the walls a ray slides along instead of
+-- hitting: a Rusher grinding a corner has stopped charging either way.
+local WALL_PROBE_MARGIN = 3.5
+local STALL_SPEED = DEFINITION.runSpeed * 0.35
+local STALL_TIME = 0.35
+-- A Humanoid does not reach 44 studs a second on the frame it is told to. The
+-- stall check is blind for this long after the launch, or every charge would
+-- diagnose its own acceleration as a wall.
+local CHARGE_SPINUP = 0.4
+
+local MISS_RECOVERY = 2.0 -- the punish window; the reward for dodging
+local SLAM_RECOVERY = 0.7 -- after a pummel ends, before it is a threat again
+local CHARGE_COOLDOWN = 7.0 -- between charges, so a lane is not a treadmill
+local SPAWN_SETTLE = 1.2 -- never charge out of the spawn frame
+
+local SCAN_INTERVAL = 0.3 -- target re-selection; never per frame
+local BELLOW_INTERVAL = 5.0 -- the approach vocalisation, on its own clock
+
+local IMPACT_CAMERA_IMPULSE = table.freeze({
+	position = Vector3.new(0, -0.5, 1.4),
+	rotation = Vector3.new(-14, 6, 0),
+	decay = 4,
+})
+
+local SLAM_CAMERA_IMPULSE = table.freeze({
+	position = Vector3.new(0, -1.1, 0.6),
+	rotation = Vector3.new(-22, 0, 0),
+	decay = 3,
+})
+
+type State = {
+	phase: string,
+	phaseTime: number,
+	readyAt: number,
+	nextScan: number,
+	nextBellow: number,
+	nextPummel: number,
+	target: Player?,
+	victim: Player?,
+	carrying: boolean,
+	owned: BasePart?, -- the root whose ownership we took, so we always give it back
+	carried: Model?, -- the character whose collisions and pose we changed
+	heading: Vector3, -- frozen at launch; never rewritten mid-charge
+	launchFrom: Vector3,
+	stallTime: number,
+	recoverFor: number,
+	hit: { [Player]: boolean }, -- who this charge has already thrown aside
+	ignore: { Instance },
+	probe: RaycastParams,
+}
+
+-- Weak keys: a Rusher despawned rather than killed never reaches onDeath, and a
+-- strong table here would hold its model alive forever.
+local states = (setmetatable({}, { __mode = "k" }) :: any) :: { [Model]: State }
+
+local function ensure(model: Model): State
+	local state = states[model]
+	if not state then
+		-- The ignore list and its RaycastParams are built once per Rusher and
+		-- then reused for every cast it ever makes: the wall probe runs every
+		-- frame of every charge, and a params object per frame is exactly the
+		-- allocation the horde cannot afford.
+		local ignore: { Instance } = { model }
+		state = {
+			phase = PHASE.Stalk,
+			phaseTime = 0,
+			readyAt = os.clock() + SPAWN_SETTLE,
+			nextScan = 0,
+			nextBellow = 0,
+			nextPummel = 0,
+			target = nil,
+			victim = nil,
+			carrying = false,
+			owned = nil,
+			carried = nil,
+			heading = Vector3.zAxis,
+			launchFrom = Vector3.zero,
+			stallTime = 0,
+			recoverFor = MISS_RECOVERY,
+			hit = {},
+			ignore = ignore,
+			probe = RaycastUtil.excluding(ignore),
+		}
+		states[model] = state
+	end
+	return state
+end
+
+-- FilterDescendantsInstances copies the array it is given, so the params have to
+-- be re-pointed at the ignore list whenever its contents change.
+local function refreshProbe(state: State)
+	state.probe.FilterDescendantsInstances = state.ignore
+end
+
+-- The brain is InfectedService's object and arrives here as an opaque handle.
+-- Every call into it is guarded so that a special still behaves like an ordinary
+-- infected if a hook it expects is not there.
+local function pauseBrain(brain: any)
+	if not brain then
+		return
+	end
+	if typeof(brain.pause) == "function" then
+		brain:pause()
+	end
+	-- pause() stands the common AI down but does not cancel a Humanoid:MoveTo it
+	-- already issued, and a stale walk order keeps steering the body for several
+	-- seconds. stop() is the brain's own way to drop it.
+	if typeof(brain.stop) == "function" then
+		brain:stop()
+	end
+end
+
+local function resumeBrain(brain: any)
+	if brain and typeof(brain.resume) == "function" then
+		brain:resume()
+	end
+end
+
+local function setBrainTarget(brain: any, target: Model?)
+	if brain and typeof(brain.setTarget) == "function" then
+		brain:setTarget(target)
+	end
+end
+
+--[[ A shove has to answer a special the way it answers a Common: whatever it was
+     doing stops. InfectedService:stagger freezes the body through the brain but
+     cannot interrupt a scripted phase from outside, so the phase has to ask. ]]
+local function isStaggered(brain: any): boolean
+	return brain ~= nil and typeof(brain.isStaggered) == "function" and brain:isStaggered() == true
+end
+
+--[[ Yaw toward a point at the definition's turnSpeed. This is the field that
+     makes the Rusher dodgeable — 95 degrees a second is deliberately clumsy — so
+     it is always deferred to the brain, which applies it honestly. ]]
+local function faceTowards(brain: any, root: BasePart, position: Vector3, dt: number)
+	if brain and typeof(brain.faceTowards) == "function" then
+		brain:faceTowards(position, dt)
+		return
+	end
+	local flat = Vector3.new(position.X - root.Position.X, 0, position.Z - root.Position.Z)
+	if flat.Magnitude > 0.05 then
+		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
+	end
+end
+
+local function playSound(key: string, part: BasePart)
+	local audio: any = Registry.find("AudioService")
+	if audio then
+		audio:play("Infected", key, part)
+	end
+end
+
+local function rootOf(player: Player?): (Model?, BasePart?)
+	if not player then
+		return nil, nil
+	end
+	local character = player.Character
+	if not character or not character.Parent then
+		return nil, nil
+	end
+	return character, RigUtil.getRoot(character)
+end
+
+--[[ True while SurvivorService still names this model as the pin's owner. The
+     shove clears a pin through SurvivorService rather than through us, so polling
+     is how the Rusher learns it has been answered. ]]
+local function stillPinnedBy(survivors: any, player: Player, model: Model): boolean
+	if typeof(survivors.getPinnedBy) == "function" then
+		return survivors:getPinnedBy(player) == model
+	end
+	return Attributes.get(player, Attributes.Player.PinnedBy, "") ~= ""
+end
+
+local function isCarriable(survivors: any, player: Player): boolean
+	local state = survivors:getState(player)
+	return state == Enums.SurvivorState.Healthy or state == Enums.SurvivorState.Hurt
+end
+
+local function damage(model: Model, character: Model, victimRoot: BasePart, origin: Vector3, amount: number)
+	local damageService: any = Registry.find("DamageService")
+	if not damageService then
+		return
+	end
+
+	local delta = victimRoot.Position - origin
+	local distance = delta.Magnitude
+	local direction = if distance > 0.05 then delta.Unit else Vector3.yAxis
+
+	damageService:applyDamage(
+		character,
+		amount,
+		Types.newDamageContext({
+			attackerModel = model,
+			damageType = Enums.DamageType.Special,
+			region = Enums.HitRegion.Torso,
+			hitPosition = victimRoot.Position,
+			hitNormal = -direction,
+			direction = direction,
+			distance = distance,
+		})
+	)
+end
+
+-- ─── ownership ───────────────────────────────────────────────────────────────
+
+--[[ Takes a survivor's physics off their own machine. Nothing the server does to
+     a character's velocity or CFrame survives otherwise, so both the throw and
+     the carry need this — and both of them have to give it back. ]]
+local function takeOwnership(state: State, root: BasePart)
+	state.owned = root
+	pcall(function()
+		root:SetNetworkOwner(nil)
+	end)
+end
+
+local function returnOwnership(root: BasePart?)
+	if not root or not root.Parent then
+		return
+	end
+	pcall(function()
+		root:SetNetworkOwnershipAuto()
+	end)
+end
+
+local function releaseOwnership(state: State)
+	local owned = state.owned
+	state.owned = nil
+	returnOwnership(owned)
+end
+
+--[[
+	Picks a survivor up.
+
+	Two things besides ownership have to change or the carry fights itself. The
+	victim goes into the Debris collision group, which collides with the level and
+	with nothing else, because a body held one arm's length in front of a charging
+	Rusher is otherwise a body the Rusher is walking into — it would brake against
+	its own victim and the stall check would read that as a wall. And PlatformStand
+	stands their Humanoid down, so its balance controller stops arguing with a
+	CFrame that moves 44 studs a second.
+
+	Both are undone in endCarry, which every release path runs through.
+]]
+local function beginCarry(state: State, character: Model, victimRoot: BasePart)
+	state.carrying = true
+	state.carried = character
+	takeOwnership(state, victimRoot)
+
+	pcall(RigUtil.setCollisionGroup, character, "Debris")
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.PlatformStand = true
+	end
+end
+
+local function endCarry(state: State)
+	local character = state.carried
+	state.carried = nil
+	state.carrying = false
+	releaseOwnership(state)
+
+	if not character or not character.Parent then
+		return
+	end
+
+	pcall(RigUtil.setCollisionGroup, character, "Survivor")
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.PlatformStand = false
+	end
+end
+
+--[[ Throws a survivor clear of the lane. Same shape as the Tank's swing: take
+     ownership, set the velocity, hand ownership back a beat later. ]]
+local function knockAside(state: State, root: BasePart, velocity: Vector3)
+	if state.owned == root then
+		return -- the carried victim is not also thrown
+	end
+	pcall(function()
+		root:SetNetworkOwner(nil)
+	end)
+	root.AssemblyLinearVelocity = velocity
+	task.delay(OWNERSHIP_RESTORE_TIME, function()
+		returnOwnership(root)
+	end)
+end
+
+-- ─── phase transitions ───────────────────────────────────────────────────────
+
+--[[ Hands the body back to the brain. Every exit from a scripted phase goes
+     through here so there is exactly one place that can forget to resume. ]]
+local function backToStalk(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
+	state.phase = PHASE.Stalk
+	state.phaseTime = 0
+	state.stallTime = 0
+	state.carrying = false
+	state.victim = nil
+	state.readyAt = os.clock() + delay
+
+	if not keepSpeed then
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = DEFINITION.runSpeed
+		end
+	end
+	resumeBrain(brain)
+end
+
+--[[ Drops whoever is being held or pummelled and unwinds everything that was
+     done to them: the pin, the ignore-list entry, and above all the network
+     ownership, which would leave a survivor permanently server-simulated if it
+     ever leaked. ]]
+local function releaseVictim(model: Model, state: State)
+	endCarry(state)
+
+	local victim = state.victim
+	if victim then
+		local survivors: any = Registry.find("SurvivorService")
+		if survivors and stillPinnedBy(survivors, victim, model) then
+			survivors:setPinned(victim, nil)
+		end
+	end
+
+	state.victim = nil
+	state.carrying = false
+	if state.ignore[2] ~= nil then
+		state.ignore[2] = nil
+		refreshProbe(state)
+	end
+end
+
+--[[ Stopped, empty-handed and doing nothing for `delay`. Both endings use it:
+     the overshoot after a miss, and the beat after a pummel ends. Standing still
+     with 450 health in the open IS the vulnerability — there is no damage
+     multiplier anywhere in the game and there should not be one here. ]]
+local function beginRecover(model: Model, brain: any, state: State, delay: number)
+	releaseVictim(model, state)
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = 0
+	end
+	if brain and typeof(brain.stop) == "function" then
+		brain:stop()
+	end
+
+	state.phase = PHASE.Recover
+	state.phaseTime = 0
+	state.stallTime = 0
+	state.recoverFor = delay
+	state.readyAt = os.clock() + delay + CHARGE_COOLDOWN
+end
+
+-- ─── target selection ────────────────────────────────────────────────────────
+
+local function pickTarget(root: BasePart): (Player?, Player?)
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors then
+		return nil, nil
+	end
+
+	local origin = root.Position
+	local best: Player? = nil
+	local bestDistance = math.huge
+	local nearest: Player? = nil
+	local nearestDistance = math.huge
+
+	for _, player in survivors:getAliveSurvivors() do
+		local _, victimRoot = rootOf(player)
+		if not victimRoot then
+			continue
+		end
+
+		local distance = (victimRoot.Position - origin).Magnitude
+		if distance < nearestDistance then
+			nearestDistance = distance
+			nearest = player
+		end
+
+		-- Somebody already down is not worth a charge: they cannot be collected,
+		-- and the lane would be spent scattering the people reviving them.
+		if not isCarriable(survivors, player) then
+			continue
+		end
+		if distance <= DEFINITION.sightRange and distance < bestDistance then
+			bestDistance = distance
+			best = player
+		end
+	end
+
+	return best, nearest
+end
+
+-- ─── the charge ──────────────────────────────────────────────────────────────
+
+local function beginWindUp(
+	model: Model,
+	brain: any,
+	state: State,
+	root: BasePart,
+	targetRoot: BasePart,
+	dt: number
+)
+	pauseBrain(brain)
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		-- Rooted for the whole tell. A Rusher that keeps closing while it winds
+		-- up is a Rusher that arrives before the warning has finished playing.
+		humanoid.WalkSpeed = 0
+	end
+
+	faceTowards(brain, root, targetRoot.Position, dt)
+	-- The dodge cue. Priority 8 and a 400-stud rolloff in AudioConfig: this is
+	-- meant to cut through a firefight two rooms away.
+	playSound("RusherCharge", root)
+
+	state.phase = PHASE.WindUp
+	state.phaseTime = 0
+end
+
+local function launch(model: Model, brain: any, state: State, root: BasePart)
+	-- The heading is taken HERE and never again. Everything about the dodge
+	-- depends on this line being the last decision the Rusher makes.
+	local facing = root.CFrame.LookVector
+	local flat = Vector3.new(facing.X, 0, facing.Z)
+	state.heading = if flat.Magnitude > 0.05 then flat.Unit else Vector3.zAxis
+	state.launchFrom = root.Position
+	state.stallTime = 0
+	state.carrying = false
+	table.clear(state.hit)
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = DEFINITION.runSpeed
+		-- faceTowards turned AutoRotate off for the wind-up; the charge wants the
+		-- body pointed down its own lane, which is where it is walking anyway.
+		humanoid.AutoRotate = true
+	end
+
+	state.phase = PHASE.Charge
+	state.phaseTime = 0
+end
+
+--[[ Collects the first upright survivor in the lane and throws the rest clear.
+     "First" is per charge, not per frame: state.hit remembers who has already
+     been dealt with so nobody is body-checked twice by one pass. ]]
+local function sweepLane(model: Model, state: State, root: BasePart)
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors then
+		return
+	end
+
+	local origin = root.Position
+	for _, player in survivors:getAliveSurvivors() do
+		if state.hit[player] or player == state.victim then
+			continue
+		end
+
+		local character, victimRoot = rootOf(player)
+		if not character or not victimRoot then
+			continue
+		end
+
+		local delta = victimRoot.Position - origin
+		if Vector3.new(delta.X, 0, delta.Z).Magnitude > LANE_RADIUS then
+			continue
+		end
+
+		state.hit[player] = true
+
+		-- The first one is carried, if they are in a state that can be pinned.
+		-- setPinned refusing is not a failure: it means they were already down,
+		-- and a pin on somebody who is already crawling has no answer.
+		if not state.carrying and isCarriable(survivors, player) then
+			if survivors:setPinned(player, model, Enums.Infected.Rusher) == true then
+				state.victim = player
+				-- The wall probe must not stop on the body it is carrying.
+				state.ignore[2] = character
+				refreshProbe(state)
+				beginCarry(state, character, victimRoot)
+				Remotes.Event.CameraImpulse:FireClient(player, IMPACT_CAMERA_IMPULSE)
+				continue
+			end
+		end
+
+		-- Everybody else is knocked out of the lane rather than collected: a
+		-- charge that pinned the whole team would be a wipe, not a threat. The
+		-- push is the part of their offset that is ACROSS the lane, so they end
+		-- up beside the charge rather than punted along it — somebody directly in
+		-- front, with no lateral offset to use, goes over whichever shoulder the
+		-- lane's perpendicular points at.
+		damage(model, character, victimRoot, origin, ATTACK.damage)
+		local flatDelta = Vector3.new(delta.X, 0, delta.Z)
+		local lateral = flatDelta - state.heading * flatDelta:Dot(state.heading)
+		local push = if lateral.Magnitude > 0.5 then lateral.Unit else state.heading:Cross(Vector3.yAxis).Unit
+		knockAside(state, victimRoot, push * KNOCK_SPEED + Vector3.new(0, KNOCK_LIFT, 0))
+		Remotes.Event.CameraImpulse:FireClient(player, IMPACT_CAMERA_IMPULSE)
+	end
+end
+
+--[[ True when the ground about to be crossed ends in a wall. Other bodies are
+     not walls: charging through the horde is normal, and a Common in the way must
+     never end a charge that was aimed past it. ]]
+local function hitWall(state: State, root: BasePart, travel: number): boolean
+	local distance = math.max(travel, 0) + WALL_PROBE_MARGIN
+	local result = Workspace:Raycast(root.Position, state.heading * distance, state.probe)
+	if not result then
+		return false
+	end
+	local character = RigUtil.getCharacterFromPart(result.Instance)
+	return character == nil
+end
+
+--[[ The end of a carry: the victim goes into the wall and then onto the floor,
+     and the Rusher settles in to pummel. This is where a collected survivor
+     actually loses health, so it is loud, it is a camera event, and it is
+     survivable from full. ]]
+local function slam(model: Model, brain: any, state: State, root: BasePart)
+	local victim = state.victim
+	local character, victimRoot = rootOf(victim)
+	if not victim or not character or not victimRoot then
+		state.carrying = false
+		return
+	end
+
+	-- The charge is over: drop the move order and the speed with it, or the
+	-- Humanoid keeps walking its old lane and drags the pummel down the corridor.
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = 0
+	end
+	if brain and typeof(brain.stop) == "function" then
+		brain:stop()
+	end
+
+	-- Put them on the ground at the Rusher's feet before ownership goes back, so
+	-- the position their own client wakes up with is the one the server chose.
+	local landing = root.CFrame * CFrame.new(0, -1.0, -3.0)
+	victimRoot.CFrame = CFrame.new(landing.Position)
+	victimRoot.AssemblyLinearVelocity = Vector3.zero
+	-- The carry is over the moment they touch the floor: they stand back up into
+	-- their own collisions and their own physics, and the pin is what holds them
+	-- there for the pummel.
+	endCarry(state)
+
+	damage(model, character, victimRoot, root.Position, ATTACK.damage * SLAM_MULTIPLIER)
+	Remotes.Event.CameraImpulse:FireClient(victim, SLAM_CAMERA_IMPULSE)
+	playSound("RusherCharge", root)
+
+	state.carrying = false
+	state.phase = PHASE.Pummel
+	state.phaseTime = 0
+	state.nextPummel = os.clock() + ATTACK.cooldown
+end
+
+-- ─── phases ──────────────────────────────────────────────────────────────────
+
+local function stepStalk(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
+	if now >= state.nextScan then
+		state.nextScan = now + SCAN_INTERVAL
+		local chargeable, nearest = pickTarget(root)
+		state.target = chargeable
+		local chase = chargeable or nearest
+		setBrainTarget(brain, if chase then chase.Character else nil)
+	end
+
+	local target = state.target
+	local _, targetRoot = rootOf(target)
+	if not target or not targetRoot then
+		return
+	end
+
+	local distance = (targetRoot.Position - root.Position).Magnitude
+	if now >= state.nextBellow and distance <= DEFINITION.sightRange then
+		state.nextBellow = now + BELLOW_INTERVAL
+		playSound("RusherIdle", root)
+	end
+
+	if now < state.readyAt then
+		return
+	end
+	if distance < CHARGE_MIN_RANGE or distance > CHARGE_MAX_RANGE then
+		return
+	end
+
+	local character = target.Character
+	if not character then
+		return
+	end
+
+	-- A charge into a wall is a wasted charge, so it needs a real sightline to
+	-- the target before it commits to one.
+	state.ignore[2] = character
+	local visible = RaycastUtil.hasLineOfSight(root.Position, targetRoot.Position, state.ignore)
+	state.ignore[2] = nil
+	if not visible then
+		return
+	end
+
+	beginWindUp(model, brain, state, root, targetRoot, dt)
+end
+
+local function stepWindUp(model: Model, brain: any, state: State, root: BasePart, dt: number)
+	local _, targetRoot = rootOf(state.target)
+	if not targetRoot then
+		backToStalk(model, brain, state, 0.5)
+		return
+	end
+
+	-- The only tracking a charge ever gets, and it is deliberately bad. A player
+	-- who strafes during the wind-up is aimed at where they used to be, which is
+	-- exactly the dodge the 95 deg/s turnSpeed exists to sell.
+	faceTowards(brain, root, targetRoot.Position, dt)
+
+	if state.phaseTime >= WINDUP_TIME then
+		launch(model, brain, state, root)
+	end
+end
+
+local function stepCharge(model: Model, brain: any, state: State, root: BasePart, dt: number)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.WalkSpeed ~= DEFINITION.runSpeed then
+		humanoid.WalkSpeed = DEFINITION.runSpeed
+	end
+
+	-- brain:moveTo is the sanctioned way to drive a paused body: it throttles the
+	-- MoveTo re-issue and clears any path the brain had cached. The destination
+	-- is always straight down the frozen heading, so this cannot steer.
+	local ahead = root.Position + state.heading * CHARGE_LOOKAHEAD
+	if brain and typeof(brain.moveTo) == "function" then
+		brain:moveTo(ahead)
+	elseif humanoid then
+		humanoid:Move(state.heading, false)
+	end
+
+	sweepLane(model, state, root)
+
+	if state.carrying then
+		local victim = state.victim
+		local survivors: any = Registry.find("SurvivorService")
+		local _, victimRoot = rootOf(victim)
+		if not victim or not victimRoot or not survivors or not stillPinnedBy(survivors, victim, model) then
+			-- Shoved out of its arms mid-charge. The charge itself continues:
+			-- the Rusher has committed, and that is the whole point of it.
+			releaseVictim(model, state)
+		else
+			victimRoot.CFrame = root.CFrame * CARRY_OFFSET
+			victimRoot.AssemblyLinearVelocity = Vector3.zero
+		end
+	end
+
+	local velocity = root.AssemblyLinearVelocity
+	local planar = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+	if planar < STALL_SPEED and state.phaseTime >= CHARGE_SPINUP then
+		state.stallTime += dt
+	else
+		state.stallTime = 0
+	end
+
+	local travelled = (root.Position - state.launchFrom).Magnitude
+	local blocked = state.stallTime >= STALL_TIME or hitWall(state, root, planar * dt)
+	local spent = state.phaseTime >= CHARGE_MAX_TIME or travelled >= CHARGE_MAX_DISTANCE
+
+	if not blocked and not spent then
+		return
+	end
+
+	if state.carrying then
+		-- Anything that ends the charge with somebody in its arms is a slam,
+		-- including running out of lane: they get put down hard either way.
+		slam(model, brain, state, root)
+		return
+	end
+
+	-- Nothing collected. It overshoots to a stop and stands there, which is the
+	-- entire reward for having dodged it.
+	beginRecover(model, brain, state, MISS_RECOVERY)
+end
+
+local function stepPummel(model: Model, brain: any, state: State, root: BasePart, now: number)
+	local victim = state.victim
+	local survivors: any = Registry.find("SurvivorService")
+	if not victim or not survivors then
+		beginRecover(model, brain, state, SLAM_RECOVERY)
+		return
+	end
+
+	local character, victimRoot = rootOf(victim)
+	if not character or not victimRoot or not stillPinnedBy(survivors, victim, model) then
+		-- Shoved off, shot off, or the survivor went down. All three are answers,
+		-- and all three end here.
+		beginRecover(model, brain, state, SLAM_RECOVERY)
+		return
+	end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.WalkSpeed ~= 0 then
+		humanoid.WalkSpeed = 0
+	end
+
+	if now >= state.nextPummel then
+		state.nextPummel = now + ATTACK.cooldown
+		damage(model, character, victimRoot, root.Position, ATTACK.damage)
+		Remotes.Event.CameraImpulse:FireClient(victim, IMPACT_CAMERA_IMPULSE)
+	end
+end
+
+local function stepRecover(model: Model, brain: any, state: State)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.WalkSpeed ~= 0 then
+		humanoid.WalkSpeed = 0
+	end
+
+	-- readyAt already carries the charge cooldown, so handing the body back the
+	-- moment the daze ends does not let it wind up again immediately.
+	if state.phaseTime >= state.recoverFor then
+		backToStalk(model, brain, state, 0)
+	end
+end
+
+-- ─── module surface ──────────────────────────────────────────────────────────
+
+local Rusher = {}
+
+function Rusher.onSpawn(model: Model, brain: any)
+	local state = ensure(model)
+	state.ignore[1] = model
+	refreshProbe(state)
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = DEFINITION.runSpeed
+	end
+
+	local root = RigUtil.getRoot(model)
+	if root then
+		playSound("RusherIdle", root)
+		-- The spawn bellow counts as this Rusher's first; without this the
+		-- approach clock fires again on the very next frame.
+		state.nextBellow = os.clock() + BELLOW_INTERVAL
+	end
+	setBrainTarget(brain, nil)
+end
+
+function Rusher.onUpdate(model: Model, brain: any, dt: number)
+	local state = states[model] or ensure(model)
+	local root = RigUtil.getRoot(model)
+	if not root then
+		return
+	end
+
+	local now = os.clock()
+	state.phaseTime += dt
+
+	-- A shove during a wind-up cancels the charge outright, which is the cheapest
+	-- answer in the game to the most expensive attack in it. stumbleResistance
+	-- 0.7 is what stops that being a hard counter: the stagger is brief.
+	if state.phase ~= PHASE.Stalk and isStaggered(brain) then
+		releaseVictim(model, state)
+		backToStalk(model, brain, state, MISS_RECOVERY, true)
+		return
+	end
+
+	if state.phase == PHASE.Charge then
+		stepCharge(model, brain, state, root, dt)
+	elseif state.phase == PHASE.Pummel then
+		stepPummel(model, brain, state, root, now)
+	elseif state.phase == PHASE.WindUp then
+		stepWindUp(model, brain, state, root, dt)
+	elseif state.phase == PHASE.Recover then
+		stepRecover(model, brain, state)
+	else
+		stepStalk(model, brain, state, root, dt, now)
+	end
+end
+
+function Rusher.onDeath(model: Model, brain: any, _ctx: any)
+	local state = states[model]
+	if not state then
+		return
+	end
+	-- Ownership is the one thing here that MUST be handed back. A survivor left
+	-- server-simulated because the thing carrying them died would stay that way
+	-- for the rest of the round.
+	releaseVictim(model, state)
+	resumeBrain(brain)
+	states[model] = nil
+end
+
+return Rusher

@@ -111,6 +111,49 @@ local random = Random.new()
 
 local GORE_FOLDER = "FL_Gore"
 
+--[[
+	dismemberPower's weight in the dismember gate.
+
+	GoreConfig.Scoring weights gibPower and nothing else, so every weapon's
+	dismemberPower — graded individually across all sixteen, and the machete's
+	whole stated identity — was dead data and the machete gibbed every swing.
+	GoreConfig has no field to hang a weight on and this file does not own it, so
+	the weight is derived here.
+
+	Deliberately under WeaponGibWeight (0.75): severing is the common outcome and
+	should not become automatic on every limb kill, but it is large enough that
+	the weapons WeaponConfig describes as cutting clear DismemberScore (0.45) on
+	their own — the machete at 1.0 scores 0.50, the .357 at 0.85 scores 0.43 and
+	needs only the limb's own region bonus, an MP7 at 0.16 scores 0.08 and still
+	has to earn it with overkill.
+]]
+local DISMEMBER_WEIGHT = 0.5
+
+--[[
+	Above this, a weapon cuts rather than bursts and its dismemberment is tested
+	BEFORE the gib gates instead of after them.
+
+	The measure is dismemberPower MINUS gibPower, because that difference is the
+	part of a weapon's identity gibPower cannot already express:
+
+	    machete    1.00 - 0.20 = 0.80   cuts
+	    M1A EBR    0.95 - 0.45 = 0.50   cuts
+	    .357       0.85 - 0.40 = 0.45
+	    AKM        0.60 - 0.22 = 0.38
+	    PPSh-41    0.18 - 0.04 = 0.14
+	    shotgun    1.00 - 1.00 = 0.00   bursts
+
+	It has to be precedence and not more arithmetic. The machete deals 300 to a
+	50-health Common, so overkillRatio alone is 5.0 on a chest hit and 23.0
+	through the 4x head multiplier; no weighting that is added to or multiplied
+	into the score survives numbers that size, and every swing keeps reading as a
+	point-blank shotgun blast. 0.5 claims the machete and the two marksman
+	rifles — the three weapons WeaponConfig describes as taking a head off
+	cleanly — and leaves every automatic (0.38 and below) and the shotgun (0.00)
+	scoring exactly as they did.
+]]
+local CUT_PRECEDENCE = 0.5
+
 -- Corpses expire on human timescales, so sweeping at 5Hz instead of 60 is the
 -- same behaviour for a twelfth of the cost.
 local SWEEP_INTERVAL = 0.2
@@ -344,6 +387,12 @@ end
 	Everything after the arithmetic is a gate, in strict precedence order. The
 	gates matter as much as the score: they are what keeps a Tank falling in one
 	piece and a Boomer never doing so.
+
+	The dismember gate additionally weights the weapon's `dismemberPower`, which
+	GoreConfig's formula has no term for and which nothing was reading — see
+	DISMEMBER_WEIGHT and CUT_PRECEDENCE above. A weapon that cuts far harder than
+	it bursts is checked for a sever BEFORE the gib gates; everything else keeps
+	GoreConfig's order exactly.
 ]]
 function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: number): (string, string?)
 	if not GoreConfig.Enabled or not model then
@@ -370,6 +419,16 @@ function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: nu
 		score += SCORING.ContactBonus
 	end
 
+	-- The same score, plus what the weapon brings to a clean cut specifically.
+	-- Only the dismember gate reads this; the gib gate keeps GoreConfig's formula
+	-- untouched, so nothing here can make a body burst that would not have.
+	local cutPreference = 0
+	local dismemberScore = score
+	if weapon then
+		cutPreference = math.clamp(weapon.dismemberPower - weapon.gibPower, 0, 1)
+		dismemberScore += weapon.dismemberPower * DISMEMBER_WEIGHT
+	end
+
 	-- Fire never gibs and never severs: a burned body has to stay recognisably
 	-- a body, which is the whole reason Incinerate is its own gore level. This
 	-- gate runs first so that even a body which cannot come apart still reads as
@@ -389,6 +448,19 @@ function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: nu
 		return LEVEL.Gib, nil
 	end
 
+	-- A cutting weapon takes the limb it struck instead of bursting the body,
+	-- however far past zero the hit went — that is what "the machete takes heads
+	-- off cleanly" has to mean, and it is why this sits ahead of both gib gates
+	-- rather than after them. It can only ever fire on a region that has
+	-- something to sever, so a chest hit still bursts, and the shotgun never
+	-- reaches it at all.
+	if cutPreference >= CUT_PRECEDENCE and dismemberScore >= SCORING.DismemberScore then
+		local part = self:_pickSeverablePart(model, ctx)
+		if part then
+			return LEVEL.Dismember, part
+		end
+	end
+
 	-- gibThreshold is a SUFFICIENT condition, not an extra gate on the score:
 	-- "overkill damage past which the body comes apart". Reading it as an extra
 	-- AND would make the Boomer's threshold of 1 mean nothing, and the Boomer
@@ -397,7 +469,7 @@ function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: nu
 		return LEVEL.Gib, nil
 	end
 
-	if score >= SCORING.DismemberScore then
+	if dismemberScore >= SCORING.DismemberScore then
 		local part = self:_pickSeverablePart(model, ctx)
 		if part then
 			return LEVEL.Dismember, part

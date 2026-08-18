@@ -197,6 +197,56 @@ local function coerceResult(
 end
 
 --[[
+	The kill feed, for infected kills only — SurvivorService already owns the
+	survivor-death line.
+
+	It has to be throttled, and the throttle is categorical rather than a token
+	bucket, because during a wave the feed's problem is not volume per second but
+	relevance: forty-six commons die in the time it takes to read one line, and a
+	feed that scrolls the whole horde is a feed nobody looks at.
+
+	  * a SPECIAL or a BOSS dying is news the whole team wants — broadcast it
+	  * a Common dying is not news. It goes back to the player who killed it and
+	    to nobody else, only on a headshot, and only every HEADSHOT_STREAK_STEP
+	    of them in a row — so the line reads as "you are stringing headshots
+	    together", which is the only thing about a common kill worth a row.
+
+	A single miss (any non-headshot kill) resets the count, which is what makes
+	the line mean something.
+]]
+local HEADSHOT_STREAK_STEP = 5
+
+-- Weak keys: a player who leaves is collected with their streak, so this needs
+-- no PlayerRemoving connection and this service needs no lifecycle at all.
+local headshotStreaks: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
+
+local function pushKillFeed(attacker: Player, definition: any, ctx: DamageContext, isHeadshot: boolean)
+	local payload = {
+		killer = attacker.Name,
+		victim = definition.displayName,
+		weaponId = ctx.weaponId or "",
+		headshot = isHeadshot,
+	}
+
+	if definition.isSpecial or definition.isBoss then
+		headshotStreaks[attacker] = 0
+		Remotes.Event.KillFeed:FireAllClients(payload)
+		return
+	end
+
+	if not isHeadshot then
+		headshotStreaks[attacker] = 0
+		return
+	end
+
+	local streak = (headshotStreaks[attacker] or 0) + 1
+	headshotStreaks[attacker] = streak
+	if streak % HEADSHOT_STREAK_STEP == 0 then
+		Remotes.Event.KillFeed:FireClient(attacker, payload)
+	end
+end
+
+--[[
 	The funnel. Returns a DamageResult for EVERY path, rejected ones included, so
 	that no caller anywhere has to branch on nil in the middle of a shotgun blast.
 
@@ -292,6 +342,13 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 				end
 				damage *= multiplier
 			end
+			-- SurvivorService:damage scales friendly fire too, and skips it when
+			-- this flag is set. Nothing was setting it, so every teammate hit was
+			-- taking 0.25 twice and landing at 6% — friendly fire was effectively
+			-- off, and friendly fire is what makes a doorway frightening. Every
+			-- call site builds a fresh DamageContext per hit (one per pellet of a
+			-- blast), so this cannot leak onto a later hit.
+			(ctx :: any).friendlyFireApplied = true
 		else
 			-- Infected and the world hit harder on higher difficulties. Normal is
 			-- 1.0, so this is a no-op in the default game.
@@ -401,6 +458,10 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 			sourcePosition = sourcePositionFor(ctx),
 			damageType = ctx.damageType,
 		})
+	end
+
+	if result.killed and not isSurvivor and attacker and attacker.Parent then
+		pushKillFeed(attacker, infectedDefinition :: any, ctx, isHeadshot)
 	end
 
 	-- The bone/flesh split is not decoration: it is the only audible existence

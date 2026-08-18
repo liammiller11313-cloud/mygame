@@ -100,9 +100,9 @@ local DRY_FIRE_INTERVAL = 0.3
      is what makes tapping genuinely more accurate than holding. ]]
 local BURST_RESET = 0.35
 
---[[ A small ring of Sound instances rather than one per shot: at 900rpm a fresh
-     Instance per round is fifteen allocations a second and fifteen more for the
-     GC, for audio that is 60ms long. ]]
+--[[ A small ring of Sound instances rather than one per shot: at the Vector's
+     1100rpm a fresh Instance per round is eighteen allocations a second and
+     eighteen more for the GC, for audio that is 60ms long. ]]
 local SOUND_POOL_SIZE = 8
 
 -- How long a predicted tracer stays remembered, for ImpactController to
@@ -184,6 +184,11 @@ end
 	here rather than waiting for AudioService's server-side copy to replicate.
 	Parented to the camera, which makes it 2D: your own weapon is not a thing
 	happening somewhere in the room, it is a thing happening to you.
+
+	The id comes from AudioConfig.pickId, never from `definition.id` directly.
+	A definition carrying an `ids` list means the sound is one the player hears
+	often enough to recognise the waveform — and reading `.id` takes the first
+	sample every time, which is exactly the buzzsaw the variation exists to stop.
 ]]
 local function playLocal(definition: any)
 	if not AudioConfig.isConfigured(definition) then
@@ -203,7 +208,7 @@ local function playLocal(definition: any)
 		trove:add(sound)
 	end
 
-	sound.SoundId = definition.id
+	sound.SoundId = AudioConfig.pickId(definition)
 	sound.Volume = definition.volume * AudioConfig.Mix.MasterVolume
 	sound.PlaybackSpeed = math.random() * (definition.pitchMax - definition.pitchMin) + definition.pitchMin
 	sound.Parent = camera
