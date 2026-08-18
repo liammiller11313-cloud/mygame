@@ -1,0 +1,93 @@
+--!strict
+--[[
+	Attributes — the contract for continuously-replicated state.
+
+	Roblox replicates Instance attributes to every client automatically, with
+	delta compression and no per-frame remote traffic. That makes them strictly
+	better than remotes for values that change often and that everyone can see:
+	health, temp health, ammo counts, the Director's current pacing state.
+
+	The rule this codebase follows:
+	  * Numbers that CHANGE OFTEN and are PUBLIC  -> attribute (declared here)
+	  * Things that HAPPEN ONCE                   -> RemoteEvent (Remotes.lua)
+
+	Only the server ever writes these. Clients read them and may listen with
+	:GetAttributeChangedSignal(). A client writing one of these is a no-op that
+	will be overwritten and should be treated as a bug.
+]]
+
+local Attributes = {}
+
+-- Written on the Player instance. Survives character respawns, so the HUD can
+-- keep rendering a teammate's slot while they are dead and awaiting a defib.
+Attributes.Player = table.freeze({
+	State = "FL_State", -- string, Enums.SurvivorState
+	Health = "FL_Health", -- number, 0-100 permanent health
+	TempHealth = "FL_TempHealth", -- number, decaying pills/adrenaline buffer
+	IncapCount = "FL_IncapCount", -- number, incaps this map; drives black & white
+	IsBlackAndWhite = "FL_BlackAndWhite", -- boolean, one more down = death
+	ReviveProgress = "FL_ReviveProgress", -- number 0-1, drives the teammate ring
+	PinnedBy = "FL_PinnedBy", -- string, Enums.Infected or "" when free
+	FlowDistance = "FL_Flow", -- number, studs along the level spline
+	IsReady = "FL_Ready", -- boolean, lobby readiness
+})
+
+-- Written on the Player instance, read by the ammo counter.
+Attributes.Loadout = table.freeze({
+	PrimaryId = "FL_PrimaryId", -- string, Enums.Weapon or ""
+	PrimaryAmmo = "FL_PrimaryAmmo", -- number, rounds in the magazine
+	PrimaryReserve = "FL_PrimaryReserve", -- number, rounds in reserve
+	SecondaryId = "FL_SecondaryId",
+	SecondaryAmmo = "FL_SecondaryAmmo",
+	ThrowableId = "FL_ThrowableId",
+	HealthItemId = "FL_HealthItemId",
+	PillItemId = "FL_PillItemId",
+	ActiveSlot = "FL_ActiveSlot", -- string, Enums.Slot
+	IsReloading = "FL_IsReloading", -- boolean
+})
+
+-- Written on an infected Model. The client reads these to colour outlines, pick
+-- the right hit sound, and decide whether a body deserves the gore budget.
+Attributes.Infected = table.freeze({
+	Kind = "FL_Kind", -- string, Enums.Infected
+	Health = "FL_Health", -- number
+	MaxHealth = "FL_MaxHealth", -- number
+	IsBoss = "FL_IsBoss", -- boolean, Tank / Witch
+	IsDead = "FL_IsDead", -- boolean, set before the model lingers as a corpse
+	Target = "FL_Target", -- string, UserId of the survivor being chased, or ""
+	SpawnFlow = "FL_SpawnFlow", -- number, flow distance it spawned at
+	Burning = "FL_Burning", -- boolean, on fire (molotov / gas can)
+})
+
+-- Written on a dropped pickup Model so the interact prompt can label it.
+Attributes.Pickup = table.freeze({
+	Slot = "FL_Slot", -- string, Enums.Slot
+	ItemId = "FL_ItemId", -- string
+	Ammo = "FL_Ammo", -- number, magazine contents for a dropped gun
+	Reserve = "FL_Reserve", -- number
+})
+
+-- Written on Workspace. Global, read by the music system and the debug overlay.
+Attributes.Game = table.freeze({
+	RoundState = "FL_RoundState", -- string, Enums.RoundState
+	PacingState = "FL_PacingState", -- string, Enums.PacingState
+	TeamIntensity = "FL_TeamIntensity", -- number 0-1, the Director's stress read
+	AliveSurvivors = "FL_AliveSurvivors", -- number
+	InfectedAlive = "FL_InfectedAlive", -- number
+	TankActive = "FL_TankActive", -- boolean, drives the tank music
+	ObjectiveText = "FL_Objective", -- string
+})
+
+--[[
+	Reads an attribute with a fallback. Attributes are nil until first written,
+	and every consumer wanting `(x or 0)` inline gets noisy fast.
+]]
+function Attributes.get<T>(instance: Instance, name: string, default: T): T
+	local value = instance:GetAttribute(name)
+	if value == nil then
+		return default
+	end
+	return value :: any
+end
+
+return Attributes

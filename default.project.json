@@ -1,0 +1,96 @@
+{
+  "name": "FadingLight",
+  "globIgnorePaths": ["**/*.spec.lua", "**/.DS_Store"],
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$properties": {
+        "CharacterWalkSpeed": 16,
+        "CharacterJumpPower": 42,
+        "EnableMouseLockOption": false,
+        "LoadCharacterAppearance": true
+      },
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Client": {
+          "$path": "src/client"
+        }
+      },
+      "StarterCharacterScripts": {
+        "$className": "StarterCharacterScripts"
+      }
+    },
+
+    "StarterGui": {
+      "$className": "StarterGui",
+      "$properties": {
+        "ResetPlayerGuiOnSpawn": false,
+        "ShowDevelopmentGui": true
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "FilteringEnabled": true,
+        "Gravity": 196.2,
+        "StreamingEnabled": false
+      },
+      "Terrain": {
+        "$className": "Terrain"
+      }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Ambient": [0.0666, 0.0745, 0.0941],
+        "OutdoorAmbient": [0.1176, 0.1254, 0.1568],
+        "Brightness": 1.1,
+        "ClockTime": 4.25,
+        "GeographicLatitude": 41.6,
+        "ExposureCompensation": 0.35,
+        "EnvironmentDiffuseScale": 0.45,
+        "EnvironmentSpecularScale": 0.5,
+        "GlobalShadows": true,
+        "Technology": "ShadowMap",
+        "FogColor": [0.0705, 0.0784, 0.0941],
+        "FogEnd": 620,
+        "FogStart": 60
+      }
+    },
+
+    "SoundService": {
+      "$className": "SoundService",
+      "$properties": {
+        "RespectFilteringEnabled": true,
+        "DistanceFactor": 12,
+        "RolloffScale": 1.2
+      }
+    },
+
+    "Players": {
+      "$className": "Players",
+      "$properties": {
+        "CharacterAutoLoads": false,
+        "RespawnTime": 3
+      }
+    }
+  }
+}
