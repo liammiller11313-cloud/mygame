@@ -87,7 +87,7 @@ GameConfig.Survivor = table.freeze({
 	-- Incapacitation
 	IncapHealth = 300,
 	IncapBleedPerSecond = 2.0,
-	IncapWeapon = Enums.Weapon.Pistol,
+	IncapWeapon = Enums.Weapon.M1911A1,
 	ReviveTime = 5.0,
 	ReviveHealth = 30, -- temp health you stand up with
 	MaxIncapsBeforeDeath = 2, -- the third down kills you

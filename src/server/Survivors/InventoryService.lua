@@ -54,8 +54,8 @@ local SLOT_ITEMS = table.freeze({
 --[[ What a survivor walks into the first chapter carrying: the pistol they can
      never lose, plus an SMG — the forgiving primary, so a new player's first
      horde is survivable while they learn what the shotgun is for. ]]
-local STARTING_PRIMARY = Enums.Weapon.SMG
-local STARTING_SECONDARY = Enums.Weapon.Pistol
+local STARTING_PRIMARY = Enums.Weapon.UMP45
+local STARTING_SECONDARY = Enums.Weapon.M1911A1
 
 -- Reload phases. "Tail" is the pump-and-ready after the last shell goes in.
 local PHASE_LOAD = "Load"

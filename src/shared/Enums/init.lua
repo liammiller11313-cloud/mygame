@@ -11,15 +11,35 @@
 local Enums = {}
 
 -- Which weapon a Weapon instance is. Keys must match WeaponConfig keys exactly.
+-- These are code identifiers, not file names: the actual model in
+-- ReplicatedStorage.Assets is named by WeaponConfig's `modelName` field, because
+-- "Mk 18 CQBR" and "(71 Mag) PPSh-41" are not valid Luau identifiers.
 Enums.Weapon = table.freeze({
-	Pistol = "Pistol",
-	Magnum = "Magnum",
-	SMG = "SMG",
-	PumpShotgun = "PumpShotgun",
-	AutoShotgun = "AutoShotgun",
-	AssaultRifle = "AssaultRifle",
-	HuntingRifle = "HuntingRifle",
+	-- Secondary
+	M1911A1 = "M1911A1",
+	Magnum357 = "Magnum357",
 	Machete = "Machete",
+
+	-- Primary: shotgun
+	Shotgun = "Shotgun",
+
+	-- Primary: submachine guns
+	PPSh41 = "PPSh41",
+	KrissVector = "KrissVector",
+	MP7A1 = "MP7A1",
+	UMP45 = "UMP45",
+	AKS74U = "AKS74U",
+
+	-- Primary: rifles
+	M4A1 = "M4A1",
+	HK416A5 = "HK416A5",
+	Mk18CQBR = "Mk18CQBR",
+	AK12 = "AK12",
+	AKM = "AKM",
+
+	-- Primary: marksman
+	ScopedMk18 = "ScopedMk18",
+	M1AEBR = "M1AEBR",
 })
 
 -- Inventory slot. A survivor holds exactly one item per slot, L4D2 style.
@@ -47,13 +67,13 @@ Enums.PillItem = table.freeze({
 	Adrenaline = "Adrenaline",
 })
 
--- Infected archetypes. Keys must match InfectedConfig keys exactly.
+-- Infected archetypes. Keys must match InfectedConfig keys AND the folder names
+-- under ReplicatedStorage.Assets.Infected exactly.
 Enums.Infected = table.freeze({
 	Common = "Common",
 	Hunter = "Hunter",
-	Smoker = "Smoker",
-	Boomer = "Boomer",
-	Charger = "Charger",
+	Jockey = "Jockey",
+	Rusher = "Rusher",
 	Witch = "Witch",
 	Tank = "Tank",
 })

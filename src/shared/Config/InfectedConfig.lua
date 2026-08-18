@@ -146,125 +146,97 @@ InfectedConfig.Definitions = {
 	--[[ Reaches out from long range, drags a survivor away from the group, and
 	     chokes them. The counter is cutting the tongue — so it wants to be shot
 	     the moment you hear it cough. ]]
-	[Enums.Infected.Smoker] = {
-		id = Enums.Infected.Smoker,
-		displayName = "Smoker",
+
+	--[[ Leaps onto a survivor's back and STEERS them — away from the team, off a
+	     ledge, into a Witch. The damage is trivial; the danger is entirely that
+	     you are no longer the one deciding where you go. Cackles constantly while
+	     riding, which is how the rest of the team finds the victim. ]]
+	[Enums.Infected.Jockey] = {
+		id = Enums.Infected.Jockey,
+		displayName = "Jockey",
 		health = 250,
 		isBoss = false,
 		isSpecial = true,
 
-		walkSpeed = 12,
-		runSpeed = 17,
-		sprintChance = 0.2,
-		turnSpeed = 360,
-		jumpPower = 32,
+		walkSpeed = 15,
+		runSpeed = 28,
+		sprintChance = 1.0,
+		turnSpeed = 720,
+		jumpPower = 78,
 
 		headshotAlwaysKills = false,
 		damageResistance = 1.0,
-		stumbleResistance = 0.2,
+		stumbleResistance = 0.15,
 		burnDamagePerSecond = 30,
 
-		attack = { damage = 4, range = 220, cooldown = 3.5, windup = 0.65 },
+		attack = { damage = 4, range = 5, cooldown = 0.7, windup = 0.1 },
 
-		sightRange = 420,
+		sightRange = 300,
 		hearingRange = 380,
-		loseInterestTime = 14,
+		loseInterestTime = 12,
 
-		spawnCost = 24,
+		spawnCost = 22,
 		maxAlive = 2,
 
-		bodyColor = Color3.fromRGB(74, 92, 62),
-		accentColor = Color3.fromRGB(46, 58, 38),
-		scale = 1.12,
-		outlineColor = Color3.fromRGB(96, 176, 84),
+		bodyColor = Color3.fromRGB(92, 74, 64),
+		accentColor = Color3.fromRGB(58, 46, 40),
+		scale = 0.82,
+		outlineColor = Color3.fromRGB(196, 132, 224),
 
 		gibThreshold = 140,
 		dismemberable = true,
-		corpseLifetime = 30,
+		corpseLifetime = 28,
 	},
 
-	--[[ Almost no health, almost no damage, and by far the most dangerous thing
-	     in the game: it coats you in bile and every Common within earshot comes.
-	     Killing it up close is the mistake — it explodes. ]]
-	[Enums.Infected.Boomer] = {
-		id = Enums.Infected.Boomer,
-		displayName = "Boomer",
-		health = 50,
+	--[[ Commits to a straight-line charge at speed and takes whoever it reaches
+	     off their feet, scattering everyone else in the lane. Deliberately clumsy
+	     to turn, so a charge CAN be dodged — the wind-up bellow is the tell, and
+	     making that dodge is the most satisfying thing a survivor does. ]]
+	[Enums.Infected.Rusher] = {
+		id = Enums.Infected.Rusher,
+		displayName = "Rusher",
+		health = 450,
 		isBoss = false,
 		isSpecial = true,
 
-		walkSpeed = 8,
-		runSpeed = 12,
-		sprintChance = 0.1,
-		turnSpeed = 240,
-		jumpPower = 20,
-
-		headshotAlwaysKills = false,
-		damageResistance = 1.0,
-		stumbleResistance = 0.0,
-		burnDamagePerSecond = 40,
-
-		attack = { damage = 0, range = 34, cooldown = 6, windup = 0.5 },
-
-		sightRange = 180,
-		hearingRange = 260,
-		loseInterestTime = 10,
-
-		spawnCost = 20,
-		maxAlive = 1,
-
-		bodyColor = Color3.fromRGB(128, 122, 74),
-		accentColor = Color3.fromRGB(92, 88, 44),
-		scale = 1.35,
-		outlineColor = Color3.fromRGB(148, 166, 62),
-
-		gibThreshold = 1, -- a Boomer always comes apart. That is the joke.
-		dismemberable = true,
-		corpseLifetime = 8,
-	},
-
-	--[[ Runs in a straight line, picks one survivor up, carries them out of the
-	     room, and beats them into the floor. Scatters everyone else on the way. ]]
-	[Enums.Infected.Charger] = {
-		id = Enums.Infected.Charger,
-		displayName = "Charger",
-		health = 600,
-		isBoss = false,
-		isSpecial = true,
-
-		walkSpeed = 12,
-		runSpeed = 42, -- charge speed; terrifying in a corridor
+		walkSpeed = 13,
+		runSpeed = 44, -- charge speed; terrifying in a corridor
 		sprintChance = 1.0,
-		turnSpeed = 90, -- deliberately clumsy, so a charge can be dodged
-		jumpPower = 28,
+		turnSpeed = 95, -- clumsy on purpose: this is the dodge window
+		jumpPower = 30,
 
 		headshotAlwaysKills = false,
 		damageResistance = 1.0,
-		stumbleResistance = 0.75,
+		stumbleResistance = 0.7,
 		burnDamagePerSecond = 30,
 
-		attack = { damage = 12, range = 7, cooldown = 1.1, windup = 0.3 },
+		attack = { damage = 11, range = 7, cooldown = 1.1, windup = 0.3 },
 
 		sightRange = 340,
 		hearingRange = 360,
 		loseInterestTime = 12,
 
-		spawnCost = 30,
-		maxAlive = 1,
+		spawnCost = 28,
+		maxAlive = 2,
 
-		bodyColor = Color3.fromRGB(120, 96, 78),
-		accentColor = Color3.fromRGB(84, 64, 50),
-		scale = 1.45,
-		outlineColor = Color3.fromRGB(214, 132, 48),
+		bodyColor = Color3.fromRGB(118, 92, 74),
+		accentColor = Color3.fromRGB(82, 62, 48),
+		scale = 1.25,
+		outlineColor = Color3.fromRGB(226, 132, 48),
 
-		gibThreshold = 320,
+		gibThreshold = 260,
 		dismemberable = true,
-		corpseLifetime = 40,
+		corpseLifetime = 36,
 	},
 
-	--[[ Does nothing at all until disturbed, then kills whoever disturbed her and
-	     leaves. A hazard rather than an enemy — the tension is entirely in the
-	     approach, and a good team simply walks around her. ]]
+	--[[ Not the Left 4 Dead witch. She sits and cries until something disturbs
+	     her, and then she does two things at once: she SUMMONS, dragging every
+	     Common within earshot toward the team, and she HUNTS the survivor who
+	     woke her, faster than any of them can run.
+
+	     That combination is why she is a boss rather than a hazard. Ignoring her
+	     is no longer free, because the horde she calls arrives whether you engage
+	     or not — but fighting her means fighting that horde at the same time. ]]
 	[Enums.Infected.Witch] = {
 		id = Enums.Infected.Witch,
 		displayName = "Witch",
@@ -272,10 +244,10 @@ InfectedConfig.Definitions = {
 		isBoss = true,
 		isSpecial = true,
 
-		walkSpeed = 4,
-		runSpeed = 48, -- once startled she is faster than any survivor
+		walkSpeed = 5,
+		runSpeed = 30, -- faster than a sprinting survivor, but catchable-ish
 		sprintChance = 1.0,
-		turnSpeed = 540,
+		turnSpeed = 420,
 		jumpPower = 34,
 
 		headshotAlwaysKills = false,
@@ -283,11 +255,11 @@ InfectedConfig.Definitions = {
 		stumbleResistance = 1.0,
 		burnDamagePerSecond = 45,
 
-		attack = { damage = 999, range = 7, cooldown = 1.5, windup = 0.15 },
+		attack = { damage = 45, range = 7.5, cooldown = 1.4, windup = 0.25 },
 
-		sightRange = 60, -- she is not looking for you
-		hearingRange = 90,
-		loseInterestTime = 20,
+		sightRange = 220,
+		hearingRange = 260,
+		loseInterestTime = 25,
 
 		spawnCost = 60,
 		maxAlive = 1,
@@ -302,9 +274,6 @@ InfectedConfig.Definitions = {
 		corpseLifetime = 45,
 	},
 
-	--[[ The set piece. Four thousand health, throws chunks of the level at you,
-	     and cannot be outrun by anyone who stops to shoot. The whole team has to
-	     move and fire at once, which is the most cooperative the game ever gets. ]]
 	[Enums.Infected.Tank] = {
 		id = Enums.Infected.Tank,
 		displayName = "Tank",
