@@ -92,24 +92,52 @@ local function storageFor(category: string): Folder
 	return folderIn(folderIn(root, ASSETS_FOLDER), category)
 end
 
+local variantRandom = Random.new()
+
 --[[
-	The user's model for this asset, if they have supplied one.
+	What the user has supplied for this asset, if anything — a Model, or a Folder
+	holding several.
 
 	ReplicatedStorage is checked first even for server-only categories: a person
 	dropping models into a place will put them wherever is convenient, and being
 	fussy about which storage they picked is exactly the kind of friction this
 	module exists to remove.
 ]]
-local function findSupplied(category: string, name: string): Model?
+local function findSupplied(category: string, name: string): Instance?
 	for _, root in { ReplicatedStorage, ServerStorage } do
 		local assets = root:FindFirstChild(ASSETS_FOLDER)
 		local folder = assets and assets:FindFirstChild(category)
-		local model = folder and folder:FindFirstChild(name)
-		if model and model:IsA("Model") then
-			return model
+		local entry = folder and folder:FindFirstChild(name)
+		if entry and (entry:IsA("Model") or entry:IsA("Folder")) then
+			return entry
 		end
 	end
 	return nil
+end
+
+--[[
+	One model out of whatever was supplied.
+
+	A FOLDER of variants is a first-class case, not a fallback: studio-scripts/
+	OrganizeAssets lays every infected kind out as Assets/Infected/<Kind>/ holding
+	however many rigs the artist made, precisely so a horde of thirteen commons
+	reads as a crowd instead of a clone army. Rolling per request is what turns
+	that folder into that crowd.
+]]
+local function pickVariant(entry: Instance): Model?
+	if entry:IsA("Model") then
+		return entry
+	end
+	local candidates = {}
+	for _, child in entry:GetChildren() do
+		if child:IsA("Model") then
+			table.insert(candidates, child)
+		end
+	end
+	if #candidates == 0 then
+		return nil
+	end
+	return candidates[variantRandom:NextInteger(1, #candidates)]
 end
 
 --[[ Fetches a template, building and caching it on the first request. The cache
@@ -118,7 +146,10 @@ end
 local function template(category: string, name: string, build: () -> Model?): Model?
 	local supplied = findSupplied(category, name)
 	if supplied then
-		return supplied
+		local chosen = pickVariant(supplied)
+		if chosen then
+			return chosen
+		end
 	end
 	local built = build()
 	if not built then
@@ -209,6 +240,7 @@ local RIGHT_ARM =
 local UPPER_BODY = table.freeze({
 	"UpperTorso",
 	"Head",
+	"@Waist",
 	"@Neck",
 	"@LeftShoulder",
 	"@RightShoulder",
@@ -397,12 +429,12 @@ local SHAPES = {
      off an R15 body actually exists on this rig with a Motor6D behind it. A rig
      that quietly loses a joint name would show up much later as "dismemberment
      stopped working on Chargers", which is a miserable thing to debug. ]]
-local verifiedSeverable = false
-local function verifySeverable(model: Model)
-	if verifiedSeverable then
+local verifiedSeverable: { [string]: boolean } = {}
+local function verifySeverable(key: string, model: Model)
+	if verifiedSeverable[key] then
 		return
 	end
-	verifiedSeverable = true
+	verifiedSeverable[key] = true
 
 	local motors: { [string]: boolean } = {}
 	for _, descendant in model:GetDescendants() do
@@ -411,19 +443,28 @@ local function verifySeverable(model: Model)
 		end
 	end
 
+	-- GoreConfig's Severable list carries both namings. A rig only has to satisfy
+	-- the one it actually uses, so the R6 aliases (the names with a space in them)
+	-- are the checklist for an R6 rig and the rest are the checklist for an R15
+	-- one. Holding a hand-made R6 model to the R15 list would report thirteen
+	-- missing joints on a rig that is perfectly fine.
+	local isR6 = model:FindFirstChild("UpperTorso") == nil
 	local missing = {}
 	for _, name in GoreConfig.Dismemberment.Severable do
-		-- The R6 aliases in that list are there for hand-made models; an R15 rig
-		-- is not expected to carry them.
-		if not string.find(name, " ") and not motors[name] then
+		local isAlias = string.find(name, " ") ~= nil
+		if isAlias == isR6 and name ~= "Head" and not motors[name] then
 			table.insert(missing, name)
 		end
+	end
+	if not motors.Head then
+		table.insert(missing, "Head")
 	end
 	if #missing > 0 then
 		warn(
 			string.format(
-				"[PlaceholderFactory] rig is missing severable joints: %s — GoreService will "
+				"[PlaceholderFactory] the %s rig is missing severable joints: %s — GoreService will "
 					.. "silently refuse to dismember those parts",
+				key,
 				table.concat(missing, ", ")
 			)
 		)
@@ -534,8 +575,10 @@ local function buildRig(kind: string): Model?
 		return CFrame.Angles(-math.rad(degrees), 0, 0)
 	end
 
-	bend(LEFT_ARM, V(-spread, shoulderY, 0), pitch(shape.armPitch))
-	bend(RIGHT_ARM, V(spread, shoulderY, 0), pitch(shape.armPitch))
+	-- A pitch is a rotation about X, so only the pivot's height and depth matter;
+	-- both shoulders swing about the same horizontal line through the chest.
+	bend(LEFT_ARM, V(0, shoulderY, 0), pitch(shape.armPitch))
+	bend(RIGHT_ARM, V(0, shoulderY, 0), pitch(shape.armPitch))
 	bend({ "Head" }, V(0, shoulderTopY, 0), pitch(shape.headTilt))
 	bend(UPPER_BODY, V(0, waistY, 0), pitch(shape.hunch))
 	if shape.roll ~= 0 then
@@ -676,7 +719,6 @@ local function buildRig(kind: string): Model?
 		should be authored unscaled and will scale through RigUtil as intended.
 	]]
 
-	verifySeverable(model)
 	return model
 end
 
@@ -692,6 +734,10 @@ function PlaceholderFactory:buildInfectedRig(kind: string): Model?
 	if not source then
 		return nil
 	end
+	-- Checked here rather than inside buildRig so a rig the USER supplied is held
+	-- to the same joint contract, and hears about it the first time it spawns
+	-- rather than the first time somebody shoots its arm off and nothing happens.
+	verifySeverable(kind, source)
 	return source:Clone()
 end
 
@@ -1564,7 +1610,12 @@ local function rescueCloset(parent: Instance, center: Vector3, name: string)
 	pointLight(face, UITheme.Color.Accent, 14, 1.4)
 
 	model.WorldPivot = CFrame.new(center + Vector3.new(0, 0, 4))
+
+	-- Tagged on BOTH the model and the face a player will be looking at:
+	-- SurvivorService tests the tag on the exact instance the client sends, and a
+	-- client that raycasts and sends the part it hit must still find a closet.
 	CollectionService:AddTag(model, TAG_CLOSET)
+	CollectionService:AddTag(face, TAG_CLOSET)
 end
 
 --[[
@@ -1619,9 +1670,14 @@ local SPAWN_NODES = table.freeze({
 	-- warehouse: the office, the side door, the far corners of the hall
 	V(310, 4, -50),
 	V(300, 4, -90),
+	V(400, 4, -62),
+	V(430, 18, 66),
 	V(470, 4, -55),
 	V(470, 4, 60),
 	-- rail yard: the lanes between container stacks and outside the fence
+	V(596, 4, -32),
+	V(596, 4, 32),
+	V(700, 4, -30),
 	V(600, 4, 60),
 	V(750, 4, 90),
 	V(605, 4, 180),
@@ -1629,10 +1685,12 @@ local SPAWN_NODES = table.freeze({
 	V(600, 4, 300),
 	V(750, 4, 330),
 	V(618, 4, 440),
-	-- overpass: underneath it, and the far end
+	-- overpass: all three UNDERNEATH it. The deck is a straight road with no
+	-- cover on it, so there is no honest out-of-sight point up there; the horde
+	-- comes up the ramps at either end instead.
 	V(470, 4, 460),
 	V(360, 4, 530),
-	V(600, 14, 505),
+	V(320, 4, 455),
 	-- courtyard: the two horde mouths and the ground outside the walls
 	V(145, 4, 412),
 	V(215, 4, 598),
@@ -1934,6 +1992,17 @@ function PlaceholderFactory:buildTestMap(): Model
 
 	local root = Instance.new("Model")
 	root.Name = MAP_NAME
+
+	--[[
+		Lighting is done entirely with fixtures — lamps, hanging lights, neon
+		signs, hazard lamps — and never by touching the Lighting service. The
+		project file already sets ClockTime 4.25, a near-black Ambient and fog
+		from 60 to 620 studs, and an Atmosphere instance would silently OVERRIDE
+		those FogStart/FogEnd values. So the map is lit to suit that setup rather
+		than allowed to fight it: warm amber where the team is safe, red where
+		something is about to go wrong, and long unlit stretches in between so the
+		fog has somewhere to hide a horde.
+	]]
 
 	-- One ground plane under everything. Cheaper than patching floor into every
 	-- pocket the spawn nodes sit in, and it means a survivor who walks off the

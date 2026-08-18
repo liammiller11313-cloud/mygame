@@ -1,0 +1,928 @@
+--!nonstrict
+--[[
+	OverlayController — everything the screen does TO the player.
+
+	Six jobs, all of them full-frame, all of them driven by state the server
+	already publishes:
+
+	  1. HEALTH VIGNETTE   the edges redden below UITheme.Vignette.HurtStart and
+	                       pulse under it, capped at MaxIntensity
+	  2. DOWNED / DEAD     desaturation, a heavy vignette, and the one line that
+	                       matters ("WAITING FOR HELP"), plus the black-and-white
+	                       warning that the next down is the last one
+	  3. ROUND CARDS       team wipe and victory, from RoundStateChanged
+	  4. CHAPTER CARDS     the one place the game is allowed to look like a movie
+	                       poster, in UITheme.Font.Stencil
+	  5. SCREEN EFFECTS    Boomer bile, blood on the lens, the adrenaline shift
+	  6. DAMAGE ARROWS     which direction that came from, in screen space
+
+	── RESTRAINT ───────────────────────────────────────────────────────────────
+	A full red wash at the exact moment the player most needs to read the screen
+	is a failure, not feedback. The vignette lives at the edges, the bile leaves
+	the middle of the frame usable, and the blood is droplets rather than a
+	sheet. Every ceiling here comes from UITheme.Vignette and
+	GoreConfig.ScreenBlood; none of them are decorative.
+
+	── DESATURATION ────────────────────────────────────────────────────────────
+	Roblox GUIs cannot desaturate what is behind them, so the grey of being
+	downed comes from a ColorCorrectionEffect this controller owns. Nothing else
+	in the game touches Lighting (PlaceholderFactory lights the level with
+	fixtures on purpose), so the effect is safe to own outright.
+
+	── PERFORMANCE ─────────────────────────────────────────────────────────────
+	One RenderStepped. Every droplet, blob and arrow is pooled at init and
+	recycled; a horde beating on the team allocates nothing here.
+]]
+
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
+local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
+local GoreConfig = require(Shared.Config.GoreConfig)
+local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
+local Trove = require(Shared.Util.Trove)
+local UITheme = require(Shared.Config.UITheme)
+
+local COLOR = UITheme.Color
+local FONT = UITheme.Font
+local INDICATOR = UITheme.DamageIndicator
+local LAYOUT = UITheme.Layout
+local MOTION = UITheme.Motion
+local TEXT = UITheme.TextSize
+local VIGNETTE = UITheme.Vignette
+
+local GA = Attributes.Game
+local PA = Attributes.Player
+local ROUND = Enums.RoundState
+local STATE = Enums.SurvivorState
+
+local SCREEN_BLOOD = GoreConfig.ScreenBlood
+local MAX_HEALTH = GameConfig.Survivor.MaxHealth
+
+-- Effect names carried by Remotes.Event.ScreenEffect. SurvivorService sends
+-- "Adrenaline"; Boomer.lua sends "Bile". Anything else is ignored in silence.
+local EFFECT = table.freeze({
+	Bile = "Bile",
+	Adrenaline = "Adrenaline",
+	Blood = "Blood",
+})
+
+-- How fast the full-frame values chase their targets. Fast enough to feel like
+-- a reaction, slow enough that a stream of small hits does not strobe.
+local VIGNETTE_CHASE = 7
+local GRADE_CHASE = 3.5
+
+-- A hit punches the vignette briefly on top of whatever the health level says.
+local HIT_FLASH = 0.28
+local HIT_FLASH_TIME = 0.35
+
+local CHAPTER_HOLD = 2.6
+local CARD_SLIDE = 26 -- pixels the card title drifts as it fades in
+
+local BILE_BLOBS = 9
+
+local OverlayController = {}
+
+local player = Players.LocalPlayer
+local trove = Trove.new()
+local random = Random.new()
+
+local vignetteGui: ScreenGui
+local overlayGui: ScreenGui
+local edges: { Frame } = {}
+local scrim: Frame
+local droplets: { any } = {}
+local dropletCursor = 1
+local bileLayer: Frame
+local bileBlobs: { Frame } = {}
+local tintLayer: Frame
+local grade: ColorCorrectionEffect
+
+local indicators: { any } = {}
+local indicatorCursor = 1
+
+local statusPanel: Frame
+local statusTitle: TextLabel
+local statusLine: TextLabel
+local statusWarning: TextLabel
+local statusProgress: Frame
+local statusProgressFill: Frame
+
+local cardPanel: Frame
+local cardBack: Frame
+local cardTitle: TextLabel
+local cardSubtitle: TextLabel
+
+local state = {
+	survivorState = STATE.Spectating,
+	blackAndWhite = false,
+	healthFraction = 1,
+
+	vignette = 0,
+	vignetteApplied = -1,
+	hitFlashUntil = 0,
+
+	bileUntil = 0,
+	bileDuration = SCREEN_BLOOD.BoomerBileFadeTime,
+	adrenalineUntil = 0,
+	adrenalineDuration = 1,
+
+	saturation = 0,
+	tint = Color3.new(1, 1, 1),
+	brightness = 0,
+
+	chapter = -1,
+	card = nil :: any,
+	cardPhase = "idle",
+	cardClock = 0,
+	cardAlpha = 0,
+	cinematic = false,
+
+	roundState = ROUND.Lobby,
+}
+
+-- ── construction ────────────────────────────────────────────────────────────
+
+local function newFrame(parent: Instance, name: string, color: Color3, transparency: number): Frame
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BackgroundColor3 = color
+	frame.BackgroundTransparency = transparency
+	frame.BorderSizePixel = 0
+	frame.Parent = parent
+	return frame
+end
+
+local function newLabel(
+	parent: Instance,
+	name: string,
+	font: Enum.Font,
+	size: number,
+	color: Color3
+): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.BackgroundTransparency = 1
+	label.Font = font
+	label.TextSize = size
+	label.TextColor3 = color
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.Text = ""
+	label.Parent = parent
+	return label
+end
+
+--[[ One edge of the vignette: a band of Vignette.Color whose gradient runs from
+     opaque at the screen edge to nothing a third of the way in. Four bands read
+     as a ring and cost four frames; an image would cost an asset upload and a
+     texture fetch. ]]
+local function buildEdge(name: string, size: UDim2, position: UDim2, anchor: Vector2, rotation: number)
+	local frame = newFrame(vignetteGui, name, VIGNETTE.Color, 1)
+	frame.Size = size
+	frame.Position = position
+	frame.AnchorPoint = anchor
+
+	local gradient = Instance.new("UIGradient")
+	gradient.Rotation = rotation
+	gradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.5, 0.7),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	gradient.Parent = frame
+
+	table.insert(edges, frame)
+end
+
+local function buildVignette()
+	buildEdge("Top", UDim2.fromScale(1, 0.34), UDim2.fromScale(0, 0), Vector2.new(0, 0), 90)
+	buildEdge("Bottom", UDim2.fromScale(1, 0.34), UDim2.fromScale(0, 1), Vector2.new(0, 1), 270)
+	buildEdge("Left", UDim2.fromScale(0.26, 1), UDim2.fromScale(0, 0), Vector2.new(0, 0), 0)
+	buildEdge("Right", UDim2.fromScale(0.26, 1), UDim2.fromScale(1, 0), Vector2.new(1, 0), 180)
+end
+
+local function buildBlood()
+	for index = 1, SCREEN_BLOOD.MaxDroplets do
+		local drop = newFrame(vignetteGui, "Droplet" .. index, COLOR.Blood, 1)
+		drop.AnchorPoint = Vector2.new(0.5, 0.5)
+		drop.Size = UDim2.fromOffset(30, 30)
+		drop.Visible = false
+
+		local shape = Instance.new("UICorner")
+		-- A full-radius corner on a non-square frame gives a lozenge, which is
+		-- what a droplet on glass actually looks like.
+		shape.CornerRadius = UDim.new(1, 0)
+		shape.Parent = drop
+
+		droplets[index] = { frame = drop, age = math.huge, peak = 0 }
+	end
+end
+
+local function buildBile()
+	bileLayer = newFrame(vignetteGui, "Bile", COLOR.Bile, 1)
+	bileLayer.Size = UDim2.fromScale(1, 1)
+	bileLayer.Visible = false
+
+	for index = 1, BILE_BLOBS do
+		local blob = newFrame(bileLayer, "Blob" .. index, COLOR.Bile, 0.1)
+		blob.AnchorPoint = Vector2.new(0.5, 0.5)
+		local size = random:NextNumber(0.18, 0.42)
+		blob.Size = UDim2.fromScale(size, size * random:NextNumber(0.6, 1.2))
+		blob.Position = UDim2.fromScale(random:NextNumber(0.05, 0.95), random:NextNumber(0.05, 0.95))
+		blob.Rotation = random:NextNumber(0, 180)
+
+		local shape = Instance.new("UICorner")
+		shape.CornerRadius = UDim.new(1, 0)
+		shape.Parent = blob
+
+		bileBlobs[index] = blob
+	end
+end
+
+local function buildIndicators()
+	for index = 1, INDICATOR.MaxSimultaneous do
+		local arrow = newFrame(overlayGui, "Damage" .. index, INDICATOR.Color, 1)
+		arrow.AnchorPoint = Vector2.new(0.5, 0.5)
+		arrow.Size = UDim2.fromOffset(INDICATOR.Width, INDICATOR.Height)
+		arrow.Visible = false
+
+		-- Faded at both ends so the bar reads as an arc of the damage ring
+		-- rather than as a floating rectangle.
+		local gradient = Instance.new("UIGradient")
+		gradient.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.5, 0),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		gradient.Parent = arrow
+
+		indicators[index] = { frame = arrow, position = Vector3.zero, age = math.huge }
+	end
+end
+
+local function buildStatus()
+	statusPanel = newFrame(overlayGui, "Status", COLOR.Background, 1)
+	statusPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+	statusPanel.Position = UDim2.fromScale(0.5, 0.58)
+	statusPanel.Size = UDim2.fromOffset(760, 120)
+	statusPanel.Visible = false
+
+	statusTitle = newLabel(statusPanel, "Title", FONT.Display, TEXT.Heading, COLOR.TextPrimary)
+	statusTitle.Position = UDim2.fromScale(0, 0)
+	statusTitle.Size = UDim2.new(1, 0, 0, 38)
+
+	statusLine = newLabel(statusPanel, "Line", FONT.Body, TEXT.Body, COLOR.TextSecondary)
+	statusLine.Position = UDim2.new(0, 0, 0, 42)
+	statusLine.Size = UDim2.new(1, 0, 0, 24)
+
+	statusWarning = newLabel(statusPanel, "Warning", FONT.Heading, TEXT.Body, COLOR.Danger)
+	statusWarning.Position = UDim2.new(0, 0, 0, 70)
+	statusWarning.Size = UDim2.new(1, 0, 0, 24)
+
+	--[[ Somebody is picking you up. This is the single most important thing a
+	     downed player can know, and it is the difference between holding still
+	     and crawling away from the person helping. ]]
+	statusProgress = newFrame(statusPanel, "Revive", COLOR.Background, 0.3)
+	statusProgress.AnchorPoint = Vector2.new(0.5, 0)
+	statusProgress.Position = UDim2.new(0.5, 0, 0, 100)
+	statusProgress.Size = UDim2.fromOffset(240, 4)
+	statusProgress.Visible = false
+
+	statusProgressFill = newFrame(statusProgress, "Fill", COLOR.AccentBright, 0)
+	statusProgressFill.Size = UDim2.new(0, 0, 1, 0)
+end
+
+local function buildCard()
+	cardPanel = newFrame(overlayGui, "Card", COLOR.Background, 1)
+	cardPanel.Size = UDim2.fromScale(1, 1)
+	cardPanel.Visible = false
+
+	cardBack = newFrame(cardPanel, "Scrim", COLOR.Background, 1)
+	cardBack.Size = UDim2.fromScale(1, 1)
+
+	cardTitle = newLabel(cardPanel, "Title", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
+	cardTitle.AnchorPoint = Vector2.new(0.5, 1)
+	cardTitle.Position = UDim2.fromScale(0.5, 0.5)
+	cardTitle.Size = UDim2.new(0, 1100, 0, TEXT.Title + 12)
+	cardTitle.TextTransparency = 1
+
+	cardSubtitle = newLabel(cardPanel, "Subtitle", FONT.Heading, TEXT.Large, COLOR.TextSecondary)
+	cardSubtitle.AnchorPoint = Vector2.new(0.5, 0)
+	cardSubtitle.Position = UDim2.new(0.5, 0, 0.5, LAYOUT.ElementGap * 2)
+	cardSubtitle.Size = UDim2.new(0, 900, 0, 32)
+	cardSubtitle.TextTransparency = 1
+end
+
+local function build()
+	vignetteGui = Instance.new("ScreenGui")
+	vignetteGui.Name = "FL_Vignette"
+	vignetteGui.ResetOnSpawn = false
+	vignetteGui.IgnoreGuiInset = true
+	vignetteGui.DisplayOrder = UITheme.DisplayOrder.Vignette
+	vignetteGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	vignetteGui.Parent = player:WaitForChild("PlayerGui")
+	trove:add(vignetteGui)
+
+	overlayGui = Instance.new("ScreenGui")
+	overlayGui.Name = "FL_Overlay"
+	overlayGui.ResetOnSpawn = false
+	overlayGui.IgnoreGuiInset = true
+	overlayGui.DisplayOrder = UITheme.DisplayOrder.Overlay
+	overlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	overlayGui.Parent = player:WaitForChild("PlayerGui")
+	trove:add(overlayGui)
+
+	-- Behind the edges: the flat darkening that being downed or dead adds.
+	scrim = newFrame(vignetteGui, "Scrim", COLOR.Background, 1)
+	scrim.Size = UDim2.fromScale(1, 1)
+
+	buildVignette()
+	buildBlood()
+	buildBile()
+
+	tintLayer = newFrame(vignetteGui, "Tint", COLOR.Accent, 1)
+	tintLayer.Size = UDim2.fromScale(1, 1)
+	tintLayer.Visible = false
+
+	buildIndicators()
+	buildStatus()
+	buildCard()
+
+	grade = Instance.new("ColorCorrectionEffect")
+	grade.Name = "FL_Overlay"
+	grade.Enabled = false
+	grade.Saturation = 0
+	grade.TintColor = Color3.new(1, 1, 1)
+	grade.Parent = Lighting
+	trove:add(grade)
+end
+
+-- ── vignette and grade ──────────────────────────────────────────────────────
+
+local function refreshHealth()
+	local health = math.max(Attributes.get(player, PA.Health, MAX_HEALTH), 0)
+	local temp = math.max(Attributes.get(player, PA.TempHealth, 0), 0)
+	state.healthFraction = math.clamp((health + temp) / MAX_HEALTH, 0, 1)
+end
+
+--[[ The revive clock, as seen by the person on the floor. ]]
+local function refreshReviveProgress()
+	local downed = state.survivorState == STATE.Incapacitated or state.survivorState == STATE.LedgeHanging
+	local progress = if downed then Attributes.get(player, PA.ReviveProgress, 0) else 0
+	statusProgress.Visible = progress > 0
+	statusProgressFill.Size = UDim2.new(math.clamp(progress, 0, 1), 0, 1, 0)
+end
+
+local function refreshState()
+	state.survivorState = Attributes.get(player, PA.State, STATE.Spectating)
+	state.blackAndWhite = Attributes.get(player, PA.IsBlackAndWhite, false)
+
+	local downed = state.survivorState == STATE.Incapacitated or state.survivorState == STATE.LedgeHanging
+	local dead = state.survivorState == STATE.Dead
+
+	statusPanel.Visible = downed or dead
+	if dead then
+		statusTitle.Text = "YOU ARE DEAD"
+		statusTitle.TextColor3 = COLOR.Danger
+		statusLine.Text = if GameConfig.RespawnClosetsEnabled
+			then "WAITING FOR RESCUE"
+			else "WAITING FOR A DEFIBRILLATOR"
+		statusWarning.Text = ""
+	elseif downed then
+		statusTitle.Text = if state.survivorState == STATE.LedgeHanging then "HANGING ON" else "YOU ARE DOWN"
+		statusTitle.TextColor3 = COLOR.HealthIncap
+		statusLine.Text = "WAITING FOR HELP"
+		-- Black and white is the difference between "get me up" and "get me up
+		-- or that is the campaign", so it says so in as many words.
+		statusWarning.Text = if state.blackAndWhite then "BLACK AND WHITE — THE NEXT DOWN IS FATAL" else ""
+	end
+	refreshReviveProgress()
+end
+
+local function updateVignette(dt: number, now: number)
+	local target = 0
+	local downed = state.survivorState == STATE.Incapacitated or state.survivorState == STATE.LedgeHanging
+
+	if downed then
+		target = VIGNETTE.IncapIntensity
+	elseif state.survivorState == STATE.Dead or state.survivorState == STATE.Spectating then
+		target = 0
+	elseif state.healthFraction < VIGNETTE.HurtStart then
+		local hurt = 1 - state.healthFraction / VIGNETTE.HurtStart
+		target = VIGNETTE.MaxIntensity * hurt
+		-- Under the hurt line the edges breathe. It is the visual half of the
+		-- heartbeat the audio plays, and it is what makes low health feel like
+		-- a condition rather than a number.
+		target *= 0.82 + 0.18 * math.sin(now * VIGNETTE.PulseSpeed * math.pi * 2)
+	end
+
+	if now < state.hitFlashUntil then
+		target = math.min(target + HIT_FLASH, VIGNETTE.IncapIntensity)
+	end
+
+	state.vignette += (target - state.vignette) * math.min(dt * VIGNETTE_CHASE, 1)
+	if math.abs(state.vignette - state.vignetteApplied) > 0.004 then
+		state.vignetteApplied = state.vignette
+		local transparency = 1 - state.vignette
+		for _, edge in edges do
+			edge.BackgroundTransparency = transparency
+		end
+	end
+
+	local scrimTarget = if state.survivorState == STATE.Dead then 0.35 elseif downed then 0.82 else 1
+	if math.abs(scrim.BackgroundTransparency - scrimTarget) > 0.004 then
+		scrim.BackgroundTransparency += (scrimTarget - scrim.BackgroundTransparency) * math.min(
+			dt * VIGNETTE_CHASE,
+			1
+		)
+	end
+end
+
+local function updateGrade(dt: number, now: number)
+	local saturation = 0
+	local tint = Color3.new(1, 1, 1)
+	local brightness = 0
+
+	if state.survivorState == STATE.Dead then
+		saturation = -1
+		brightness = -0.05
+	elseif state.survivorState == STATE.Incapacitated or state.survivorState == STATE.LedgeHanging then
+		-- Downed drains the colour out of the world; black and white takes the
+		-- last of it, so the two states are never confusable.
+		saturation = if state.blackAndWhite then -1 else -0.75
+	end
+
+	local bile = if now < state.bileUntil
+		then math.clamp((state.bileUntil - now) / state.bileDuration, 0, 1)
+		else 0
+	if bile > 0 then
+		tint = tint:Lerp(COLOR.Bile, 0.45 * bile)
+		saturation -= 0.25 * bile
+	end
+
+	local adrenaline = if now < state.adrenalineUntil
+		then math.clamp((state.adrenalineUntil - now) / state.adrenalineDuration, 0, 1)
+		else 0
+	if adrenaline > 0 then
+		-- Adrenaline warms and sharpens rather than washing: the point of the
+		-- item is that everything gets easier to read, not harder.
+		tint = tint:Lerp(COLOR.AccentBright, 0.2 * adrenaline)
+		saturation += 0.35 * adrenaline
+		brightness += 0.03 * adrenaline
+	end
+
+	local alpha = math.min(dt * GRADE_CHASE, 1)
+	state.saturation += (saturation - state.saturation) * alpha
+	state.brightness += (brightness - state.brightness) * alpha
+	state.tint = state.tint:Lerp(tint, alpha)
+
+	local active = math.abs(state.saturation) > 0.01 or math.abs(state.brightness) > 0.005
+	if active then
+		grade.Enabled = true
+		grade.Saturation = state.saturation
+		grade.Brightness = state.brightness
+		grade.TintColor = state.tint
+	elseif grade.Enabled then
+		grade.Enabled = false
+		grade.Saturation = 0
+		grade.Brightness = 0
+		grade.TintColor = Color3.new(1, 1, 1)
+	end
+
+	-- The bile layer itself: green on the lens, thickest at the edges, always
+	-- leaving the middle of the frame usable.
+	if bile > 0 then
+		bileLayer.Visible = true
+		bileLayer.BackgroundTransparency = 1 - 0.35 * bile
+		for _, blob in bileBlobs do
+			blob.BackgroundTransparency = 1 - 0.75 * bile
+		end
+	elseif bileLayer.Visible then
+		bileLayer.Visible = false
+	end
+
+	if adrenaline > 0 then
+		tintLayer.Visible = true
+		tintLayer.BackgroundTransparency = 1 - 0.06 * adrenaline
+	elseif tintLayer.Visible then
+		tintLayer.Visible = false
+	end
+end
+
+-- ── blood on the lens ───────────────────────────────────────────────────────
+
+local function spawnDroplets(count: number)
+	if not SCREEN_BLOOD.Enabled then
+		return
+	end
+	for _ = 1, count do
+		local entry = droplets[dropletCursor]
+		dropletCursor = (dropletCursor % #droplets) + 1
+
+		local size = random:NextNumber(16, 54)
+		entry.frame.Size = UDim2.fromOffset(size, size * random:NextNumber(0.5, 1.1))
+		entry.frame.Position = UDim2.fromScale(random:NextNumber(0.04, 0.96), random:NextNumber(0.04, 0.96))
+		entry.frame.Rotation = random:NextNumber(0, 180)
+		entry.peak = random:NextNumber(0.25, 0.55)
+		entry.age = 0
+		entry.frame.Visible = true
+		entry.frame.BackgroundTransparency = entry.peak
+	end
+end
+
+local function updateDroplets(dt: number)
+	for _, entry in droplets do
+		if entry.age < SCREEN_BLOOD.FadeTime then
+			entry.age += dt
+			local alpha = math.clamp(entry.age / SCREEN_BLOOD.FadeTime, 0, 1)
+			entry.frame.BackgroundTransparency = entry.peak + (1 - entry.peak) * alpha
+			if alpha >= 1 then
+				entry.frame.Visible = false
+			end
+		end
+	end
+end
+
+-- ── damage indicators ───────────────────────────────────────────────────────
+
+local function addIndicator(position: Vector3)
+	local entry = indicators[indicatorCursor]
+	indicatorCursor = (indicatorCursor % #indicators) + 1
+	entry.position = position
+	entry.age = 0
+	entry.frame.Visible = true
+end
+
+local function updateIndicators(dt: number)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local cframe = camera.CFrame
+
+	for _, entry in indicators do
+		if entry.age < INDICATOR.Duration then
+			entry.age += dt
+			local alpha = math.clamp(entry.age / INDICATOR.Duration, 0, 1)
+			if alpha >= 1 then
+				entry.frame.Visible = false
+			else
+				--[[ Recomputed every frame against the live camera: an arrow
+				     that stays where it was drawn while the player spins to face
+				     the thing hitting them is worse than no arrow. ]]
+				local relative = cframe:PointToObjectSpace(entry.position)
+				local angle = math.atan2(relative.X, -relative.Z)
+				entry.frame.Position = UDim2.new(
+					0.5,
+					math.sin(angle) * INDICATOR.Radius,
+					0.5,
+					-math.cos(angle) * INDICATOR.Radius
+				)
+				entry.frame.Rotation = math.deg(angle)
+				entry.frame.BackgroundTransparency = alpha * alpha
+			end
+		end
+	end
+end
+
+-- ── cards ───────────────────────────────────────────────────────────────────
+
+local function broadcastCinematic(value: boolean)
+	if state.cinematic == value then
+		return
+	end
+	state.cinematic = value
+	for _, name in { "HudController", "CrosshairController", "PromptController", "SubtitleController" } do
+		local controller = Registry.find(name)
+		if controller and typeof(controller.setCinematic) == "function" then
+			pcall(controller.setCinematic, controller, value)
+		end
+	end
+end
+
+--[[
+	Shows a full-frame card.
+
+	`persist` cards (the end of a run) stay until something replaces them;
+	everything else holds for `hold` seconds and leaves. `takeover` cards hide
+	the HUD, because a card the HUD shows through reads as a bug — a chapter
+	title does NOT, since the game is still being played underneath it.
+]]
+local function showCard(config: any)
+	state.card = config
+	state.cardPhase = "in"
+	state.cardClock = 0
+
+	cardTitle.Text = string.upper(config.title or "")
+	cardTitle.Font = config.font or FONT.Display
+	cardTitle.TextSize = config.titleSize or TEXT.Display
+	cardTitle.TextColor3 = config.color or COLOR.TextPrimary
+	cardSubtitle.Text = string.upper(config.subtitle or "")
+	cardSubtitle.Visible = (config.subtitle or "") ~= ""
+	cardPanel.Visible = true
+
+	if config.takeover then
+		broadcastCinematic(true)
+	end
+end
+
+local function hideCard()
+	state.card = nil
+	state.cardPhase = "idle"
+	cardPanel.Visible = false
+	broadcastCinematic(false)
+end
+
+local function updateCard(dt: number)
+	local card = state.card
+	if not card then
+		return
+	end
+
+	state.cardClock += dt
+	local fadeIn = card.fadeIn or MOTION.Normal
+	local fadeOut = card.fadeOut or MOTION.Slow
+
+	if state.cardPhase == "in" then
+		state.cardAlpha = math.clamp(state.cardClock / fadeIn, 0, 1)
+		if state.cardAlpha >= 1 then
+			state.cardPhase = "hold"
+			state.cardClock = 0
+		end
+	elseif state.cardPhase == "hold" then
+		state.cardAlpha = 1
+		if not card.persist and state.cardClock >= (card.hold or CHAPTER_HOLD) then
+			state.cardPhase = "out"
+			state.cardClock = 0
+		end
+	elseif state.cardPhase == "out" then
+		state.cardAlpha = 1 - math.clamp(state.cardClock / fadeOut, 0, 1)
+		if state.cardAlpha <= 0 then
+			hideCard()
+			return
+		end
+	end
+
+	local fade = 1 - state.cardAlpha
+	cardTitle.TextTransparency = fade
+	cardSubtitle.TextTransparency = math.min(fade * 1.4, 1)
+	cardBack.BackgroundTransparency = 1 - (card.scrim or 0.5) * state.cardAlpha
+	-- The title settles into place as it arrives. Small, and the only motion on
+	-- a card that is otherwise deliberately still.
+	cardTitle.Position = UDim2.new(0.5, 0, 0.5, CARD_SLIDE * fade)
+end
+
+-- ── event handling ──────────────────────────────────────────────────────────
+
+local function onDamageTaken(payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	state.hitFlashUntil = os.clock() + HIT_FLASH_TIME
+
+	if typeof(payload.sourcePosition) == "Vector3" then
+		addIndicator(payload.sourcePosition)
+	end
+	spawnDroplets(SCREEN_BLOOD.DropletsPerHit)
+end
+
+local function onScreenEffect(payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local effect = tostring(payload.effect or "")
+	local duration = if typeof(payload.duration) == "number" and payload.duration > 0
+		then payload.duration
+		else nil
+
+	if effect == EFFECT.Bile then
+		state.bileDuration = duration or SCREEN_BLOOD.BoomerBileFadeTime
+		state.bileUntil = os.clock() + state.bileDuration
+	elseif effect == EFFECT.Adrenaline then
+		state.adrenalineDuration = duration or GameConfig.Survivor.AdrenalineDuration
+		state.adrenalineUntil = os.clock() + state.adrenalineDuration
+	elseif effect == EFFECT.Blood then
+		spawnDroplets(SCREEN_BLOOD.DropletsPerHit)
+	end
+end
+
+--[[
+	LevelService rides the chapter on RoundStateChanged rather than inventing a
+	second remote, and it sends the safe room's INDEX — a number — plus the room
+	model. So: an explicit `chapterTitle` string wins, then an FL_Title attribute
+	on the room (the one hook a map builder has for naming a leg), then plain
+	"CHAPTER n". Returns nil when the payload carries no chapter at all.
+]]
+local function chapterFrom(payload: any): (string?, string?, number?)
+	local explicit = payload.chapterTitle
+	if typeof(explicit) == "string" and explicit ~= "" then
+		return explicit, payload.chapterSubtitle, tonumber(payload.chapter)
+	end
+
+	local chapter = payload.chapter
+	if typeof(chapter) == "string" and chapter ~= "" then
+		return chapter, payload.chapterSubtitle, nil
+	end
+	if typeof(chapter) ~= "number" or chapter <= 0 then
+		return nil, nil, nil
+	end
+
+	local room = payload.safeRoom
+	local named = if typeof(room) == "Instance" then room:GetAttribute("FL_Title") else nil
+	if typeof(named) == "string" and named ~= "" then
+		return named, string.format("CHAPTER %d", chapter), chapter
+	end
+	return string.format("CHAPTER %d", chapter), payload.chapterSubtitle, chapter
+end
+
+--[[ Both the remote and the Workspace attribute report the same transition, so
+     this deduplicates on the state itself: whichever arrives first draws the
+     card and the other is a no-op. ]]
+local function onRoundState(newState: string, payload: any)
+	if newState == state.roundState then
+		return
+	end
+	state.roundState = newState
+
+	if newState == ROUND.TeamWipe then
+		showCard({
+			title = "THE SURVIVORS DIDN'T MAKE IT",
+			subtitle = (typeof(payload) == "table" and payload.subtitle) or "",
+			color = COLOR.Danger,
+			titleSize = TEXT.Display,
+			persist = true,
+			takeover = true,
+			scrim = 0.85,
+			fadeIn = MOTION.Cinematic,
+		})
+	elseif newState == ROUND.Victory then
+		showCard({
+			title = "SAFE ROOM REACHED",
+			subtitle = (typeof(payload) == "table" and payload.subtitle) or "EVERYONE INSIDE",
+			color = COLOR.Success,
+			titleSize = TEXT.Display,
+			persist = true,
+			takeover = true,
+			scrim = 0.8,
+			fadeIn = MOTION.Cinematic,
+		})
+	elseif state.card and state.card.persist then
+		hideCard()
+	end
+end
+
+-- ── frame loop ──────────────────────────────────────────────────────────────
+
+local function update(dt: number)
+	local now = os.clock()
+	updateVignette(dt, now)
+	updateGrade(dt, now)
+	updateDroplets(dt)
+	updateIndicators(dt)
+	updateCard(dt)
+end
+
+-- ── public API ──────────────────────────────────────────────────────────────
+
+--[[
+	The movie-poster moment. Stencil type, no HUD takeover: the chapter title
+	appears OVER a game that is still being played, exactly as it does in L4D.
+
+	No remote in the manifest carries a chapter change, so this is also the entry
+	point LevelService's presentation should reach for — via RoundStateChanged's
+	payload (`chapter`/`chapterTitle`) or a DirectorEvent of kind "Chapter",
+	both of which are wired below.
+]]
+function OverlayController:showChapterCard(title: string, subtitle: string?)
+	if typeof(title) ~= "string" or title == "" then
+		return
+	end
+	showCard({
+		title = title,
+		subtitle = subtitle or "",
+		font = FONT.Stencil,
+		titleSize = TEXT.Title,
+		color = COLOR.TextPrimary,
+		hold = CHAPTER_HOLD,
+		scrim = 0.35,
+		fadeIn = MOTION.Cinematic,
+		fadeOut = MOTION.Cinematic,
+	})
+end
+
+function OverlayController:showCard(title: string, subtitle: string?, color: Color3?)
+	showCard({
+		title = title,
+		subtitle = subtitle or "",
+		color = color or COLOR.TextPrimary,
+		titleSize = TEXT.Display,
+		hold = CHAPTER_HOLD,
+		scrim = 0.5,
+	})
+end
+
+function OverlayController:clearCard()
+	if state.card then
+		hideCard()
+	end
+end
+
+function OverlayController:isCinematic(): boolean
+	return state.cinematic
+end
+
+--[[ Points an arrow at a world position for UITheme.DamageIndicator.Duration.
+     Public so a future melee or special-attack path can flag a direction the
+     damage remote does not describe. ]]
+function OverlayController:addDamageIndicator(position: Vector3)
+	if typeof(position) == "Vector3" then
+		addIndicator(position)
+	end
+end
+
+function OverlayController:screenEffect(effect: string, duration: number?, intensity: number?)
+	onScreenEffect({ effect = effect, duration = duration, intensity = intensity })
+end
+
+-- ── lifecycle ───────────────────────────────────────────────────────────────
+
+function OverlayController:init()
+	build()
+	refreshHealth()
+	refreshState()
+
+	for _, attribute in { PA.Health, PA.TempHealth } do
+		trove:connect(player:GetAttributeChangedSignal(attribute), refreshHealth)
+	end
+	for _, attribute in { PA.State, PA.IsBlackAndWhite } do
+		trove:connect(player:GetAttributeChangedSignal(attribute), refreshState)
+	end
+	trove:connect(player:GetAttributeChangedSignal(PA.ReviveProgress), refreshReviveProgress)
+end
+
+function OverlayController:start()
+	trove:connect(Remotes.Event.DamageTaken.OnClientEvent, onDamageTaken)
+	trove:connect(Remotes.Event.ScreenEffect.OnClientEvent, onScreenEffect)
+
+	trove:connect(Remotes.Event.RoundStateChanged.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local body = if typeof(payload.payload) == "table" then payload.payload else payload
+		local title, subtitle, index = chapterFrom(body)
+		-- The round is published twice on the way in (Starting, then InProgress)
+		-- and again on every leg, all carrying the chapter. The card belongs to
+		-- the LEG, so it fires when that number actually moves.
+		local terminal = payload.state == ROUND.Victory or payload.state == ROUND.TeamWipe
+		if title and not terminal and (index == nil or index ~= state.chapter) then
+			state.chapter = index or state.chapter
+			OverlayController:showChapterCard(title, subtitle)
+		end
+		if typeof(payload.state) == "string" then
+			onRoundState(payload.state, body)
+		end
+	end)
+
+	--[[ The round state is also an attribute, which is the only thing a player
+	     joining into a finished round will ever see. ]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
+		onRoundState(Attributes.get(Workspace, GA.RoundState, ROUND.Lobby), nil)
+	end)
+
+	trove:connect(Remotes.Event.DirectorEvent.OnClientEvent, function(payload: any)
+		if typeof(payload) == "table" and payload.kind == "Chapter" then
+			local body = payload.payload
+			if typeof(body) == "table" then
+				OverlayController:showChapterCard(tostring(body.title or ""), body.subtitle)
+			end
+		end
+	end)
+
+	trove:connect(RunService.RenderStepped, update)
+end
+
+function OverlayController:onInitialState(payload: any)
+	refreshHealth()
+	refreshState()
+	-- Routed through the normal path rather than assigned: somebody joining into
+	-- a finished round has to see the card everyone else is already looking at.
+	if typeof(payload) == "table" and typeof(payload.roundState) == "string" then
+		onRoundState(payload.roundState, nil)
+	end
+end
+
+function OverlayController:destroy()
+	broadcastCinematic(false)
+	trove:destroy()
+end
+
+Registry.register("OverlayController", OverlayController)
+
+return OverlayController

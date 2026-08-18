@@ -48,6 +48,7 @@ local Attributes = require(Shared.Net.Attributes)
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
+local GameModeConfig = require(Shared.Config.GameModeConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -86,12 +87,17 @@ local FLOW_CACHE_TIME = 0.1
 local DOOR_TWEEN = TweenInfo.new(1.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 --[[
-	Two timings the contract has no config home for, kept local and named rather
-	than sprinkled as literals. If a round service is ever written, they belong in
-	GameConfig next to the rest of the round rules.
+	Round timings, borrowed from GameModeConfig rather than invented.
+
+	That file describes a wave-based mode and states outright that there are no
+	safe rooms — see this module's report; it and ARCHITECTURE.md disagree about
+	what a round is. These two numbers are the part that is mode-independent
+	either way: how long the team gets before the pressure starts, and how long a
+	result screen holds before the server resets. Reusing them means one place
+	still owns the pacing of a round's edges.
 ]]
-local START_DELAY = 3 -- lobby -> in progress, so a joining team is together
-local RESTART_DELAY = 14 -- how long a wipe or a victory screen holds before a reset
+local START_DELAY = GameModeConfig.Classic.PrepDuration
+local RESTART_DELAY = GameModeConfig.Matchmaking.PostRoundDuration
 
 --[[ Items are stocked this far ahead of the team. Borrowed from the Director's
      own spawn window on purpose: it is already the distance at which the game
@@ -534,17 +540,22 @@ function LevelService:_setDoor(record, open: boolean)
 	}):Play()
 end
 
---[[ A standing spot inside a room, found by dropping onto its floor rather than
-     assuming one — a hand-built safe room's bounding box bottom is wherever its
-     lowest wall happens to end. ]]
+--[[
+	A standing spot inside a room: spread around the middle, dropped onto whatever
+	floor is actually under that spot, facing the door.
+
+	The cast starts at the middle of the room and goes DOWN rather than starting
+	above and falling in — a safe room has a ceiling, and a search that begins
+	outside the box lands every survivor on the roof.
+]]
 local function standingCFrame(record, slot: number): CFrame
 	local centre = record.box.Position
 	local bearing = (slot - 1) * (math.pi * 2 / math.max(GameConfig.MaxSurvivors, 1))
 	local spread = math.min(record.size.X, record.size.Z) * 0.22
 	local point = centre + Vector3.new(math.cos(bearing) * spread, 0, math.sin(bearing) * spread)
 
-	local ground = RaycastUtil.groundAt(point, record.size.Y, {})
-	local y = if ground then ground.Y else record.box.Position.Y - record.size.Y * 0.5
+	local floor = workspace:Raycast(point, Vector3.new(0, -record.size.Y, 0), RaycastUtil.excluding({}))
+	local y = if floor then floor.Position.Y else record.box.Position.Y - record.size.Y * 0.5
 	local stand = Vector3.new(point.X, y + 3.5, point.Z)
 
 	local door = record.door
@@ -627,8 +638,12 @@ function LevelService:onSafeRoomReached(room: Model)
 	currentChapter = record.index
 
 	self:_setDoor(record, false)
-	self:_resupply(record)
 	playUi(AudioConfig.UI.SafeRoomReached)
+	-- Off the tick: resupply respawns the dead, and LoadCharacter yields. The
+	-- shared loop must not be held open waiting for four characters to stream in.
+	task.spawn(function()
+		self:_resupply(record)
+	end)
 
 	local isFinal = record.order >= #safeRooms
 	self.chapterChanged:fire(record.index, room, isFinal)
@@ -667,12 +682,28 @@ function LevelService:_beginRound()
 		return
 	end
 
-	roundGeneration += 1
-	local generation = roundGeneration
-
 	if safeDirty then
 		rebuildSafeRooms()
 	end
+	--[[
+		A map with no safe rooms is not a campaign map, so this module has no
+		business deciding when its round starts or ends. It keeps answering flow,
+		spawn-node and objective questions and leaves FL_RoundState entirely
+		alone, so a wave-based mode service can own the round without two systems
+		writing the same attribute. See the report: GameModeConfig describes
+		exactly that mode and ARCHITECTURE.md describes this one.
+	]]
+	if #safeRooms == 0 then
+		warnOnce(
+			"noroundowner",
+			"no FL_SafeRoom models in the map, so the round is left to whoever else owns it"
+		)
+		return
+	end
+
+	roundGeneration += 1
+	local generation = roundGeneration
+
 	sectionsDirty = true
 	for _, record in safeRooms do
 		record.completed = false
@@ -873,15 +904,23 @@ function LevelService:_step()
 		return
 	end
 
-	local living = gatherSurvivorPositions()
-	if living > 0 then
+	local survivors = Registry.find("SurvivorService")
+	if not survivors then
+		return
+	end
+
+	-- Read from survivor STATE, never from whether a character exists: a
+	-- character is briefly nil across every respawn, and a wipe declared in that
+	-- gap would end the round while the team was still alive.
+	if #survivors:getAliveSurvivors() > 0 then
 		sawLivingSurvivor = true
-	elseif sawLivingSurvivor and #Players:GetPlayers() > 0 then
-		-- Nobody left standing and nobody in a closet to be let out of.
+	elseif sawLivingSurvivor and #Players:GetPlayers() > 0 and GameModeConfig.Classic.EndOnTeamWipe then
+		-- Nobody left standing, and nobody left to open a rescue closet.
 		self:_finishRound(Enums.RoundState.TeamWipe, TEXT.Wipe)
 		return
 	end
 
+	gatherSurvivorPositions()
 	self:_checkSafeRooms()
 	self:_checkPanic()
 	self:_checkSections(self:getSurvivorFlow())
