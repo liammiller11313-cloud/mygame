@@ -1,0 +1,1174 @@
+--!nonstrict
+--[[
+	GoreService — the quarter-second the rest of the combat loop exists to reach.
+
+	Three outcomes, chosen by GoreConfig.Scoring and nothing else: a clean
+	ragdoll, a limb coming off, or the body replaced by chunks. Nothing in this
+	file invents a balance number; every threshold, count, lifetime and ceiling
+	is read from GoreConfig, InfectedConfig or WeaponConfig.
+
+	── WHO OWNS WHAT ───────────────────────────────────────────────────────────
+	The server/client split here is deliberate, and it is the reason forty-six
+	bodies can come apart in the same second without the frame budget dying.
+
+	The SERVER owns everything four players must AGREE on:
+	  * ragdoll physics — a corpse is a real object at a real position, and two
+	    players looking at a different pile of bodies is a bug
+	  * severed limbs — a leg on the floor is world state, not decoration
+	  * every budget, every lifetime, and the outgoing event throttle
+
+	The CLIENT owns pure decoration, which is an order of magnitude cheaper
+	rendered locally and which nobody has to agree on:
+	  * blood spray, mist, and the wall decals that make a room remember a fight
+	  * blood pools under settled bodies
+	  * gib chunks
+
+	Gib chunks are the important one. Nine parts per body across a horde is
+	thousands of networked physics objects for something that is on screen for
+	twelve seconds. So a gib does NOT replicate as parts: the server hides the
+	body, decides the chunk count against its own budget, and sends ONE
+	GoreEvent carrying a seed. Every client in range builds the same chunks from
+	the same shared GoreConfig and the same seed, so the explosion reads
+	identically for everyone without a single replicated instance.
+
+	── THE GoreEvent PAYLOAD ───────────────────────────────────────────────────
+	Remotes.fireInRange("GoreEvent", position, GoreConfig.Budget.CullDistance, {
+	    model     Model?    the body, nil for an incidental blood hit
+	    level     string    Enums.GoreLevel — None / Dismember / Gib / Incinerate
+	    part      string?   severed part name (Dismember), or the struck part
+	    position  Vector3   where it happened; also the cull origin
+	    normal    Vector3   surface normal at the impact, for spray direction
+	    direction Vector3   unit direction of travel, for decal projection
+	    force     number    impulse magnitude actually applied, studs/sec
+	    scale     number    blood volume multiplier on GoreConfig.Blood counts
+	    seed      number    deterministic chunk/spatter seed
+	    count     number?   gib chunk count the server's budget allows
+	    decal     boolean   the server already rolled DecalChance; just draw it
+	    pool      boolean   a settled body: grow a pool here over PoolGrowTime
+	    kill      boolean   false for an incidental hit
+	    hitStop   number    seconds of freeze, 0 for none
+	    timeScale number    how far the world slows during that freeze
+	    attacker  Player?   ONLY this player freezes — see below
+	})
+
+	Hit-stop is the cheapest trick in the satisfaction toolbox and the reason a
+	kill lands physically instead of just resolving. But it belongs to the player
+	who earned it: freezing all four survivors every time one of them kills a
+	Common would be unreadable during a horde. The event is fired in range to
+	everyone because everyone needs the blood; `attacker` tells one client that
+	the freeze is theirs.
+
+	── PERFORMANCE ─────────────────────────────────────────────────────────────
+	One Heartbeat connection for the whole subsystem, sweeping at SWEEP_INTERVAL.
+	No per-corpse connection, no per-frame allocation, and every ceiling in
+	GoreConfig.Budget enforced by recycling the OLDEST object rather than by
+	refusing to render — a shot that produces no gore feels broken, and feeling
+	broken is worse than costing a frame.
+]]
+
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+
+local AudioConfig = require(Shared.Config.AudioConfig)
+local Attributes = require(Shared.Net.Attributes)
+local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
+local GoreConfig = require(Shared.Config.GoreConfig)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
+local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
+local RigUtil = require(Shared.Util.RigUtil)
+local Trove = require(Shared.Util.Trove)
+local Types = require(Shared.Types)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
+
+local SCORING = GoreConfig.Scoring
+local LIMBS = GoreConfig.Dismemberment
+local GIBS = GoreConfig.Gibs
+local BLOOD = GoreConfig.Blood
+local HITSTOP = GoreConfig.HitStop
+local BUDGET = GoreConfig.Budget
+local REGION = Enums.HitRegion
+local LEVEL = Enums.GoreLevel
+
+-- GameConfig.Corpses restates three of GoreConfig.Budget's ceilings, currently
+-- with identical values. Rather than pick a winner and let the other drift into
+-- a lie, take the tighter of each pair: whichever file is edited, the number
+-- that protects the frame is the one that wins.
+local MAX_RAGDOLLS = math.min(BUDGET.MaxActiveRagdolls, GameConfig.Corpses.MaxRagdolls)
+local MAX_GIBS = math.min(BUDGET.MaxActiveGibs, GameConfig.Corpses.MaxGibs)
+local MAX_DECALS = math.min(BUDGET.MaxActiveDecals, GameConfig.Corpses.MaxBloodDecals)
+
+local random = Random.new()
+
+-- ── constants that are physics or plumbing, not balance ─────────────────────
+-- Anything a designer would want to tune lives in GoreConfig. These are the
+-- numbers that exist only because Roblox physics needs them.
+
+local GORE_FOLDER = "FL_Gore"
+
+-- Corpses expire on human timescales, so sweeping at 5Hz instead of 60 is the
+-- same behaviour for a twelfth of the cost.
+local SWEEP_INTERVAL = 0.2
+
+-- Roughly the mass of a default humanoid rig. WeaponConfig.knockback is
+-- expressed in studs/sec against a body this heavy; a Charger, several times
+-- heavier, moves proportionally less from the same round. This is the one
+-- number that converts "knockback" into a velocity, and it is here rather than
+-- in GoreConfig because it describes Roblox's mass units, not the game.
+local REFERENCE_BODY_MASS = 14
+
+-- A hard ceiling on launch speed. Without it a light or badly-scaled rig hit by
+-- a shotgun leaves the map, and a corpse nobody can find is not gore.
+local MAX_RAGDOLL_SPEED = 140
+
+-- Bodies and limbs get a little lift so they tumble instead of sliding. Gibs
+-- have GoreConfig.Gibs.UpwardBias for this; ragdolls need far less of it or a
+-- kill reads as a cartoon launch.
+local RAGDOLL_LIFT = 0.22
+
+-- A limb never flies slower than LimbImpulse and never faster than this many
+-- times it, no matter what the weapon's knockback claims.
+local LIMB_IMPULSE_CEILING = 3
+
+-- Blood volume multipliers handed to the client as `scale`. They multiply
+-- GoreConfig.Blood's particle counts and decal size; the counts themselves stay
+-- in the config where they belong.
+local BLOOD_SCALE_HIT = 1.0
+local BLOOD_SCALE_KILL = 1.35
+local BLOOD_SCALE_DISMEMBER = 1.8
+local BLOOD_SCALE_GIB = 2.6
+
+-- A body is "settled" once it stops moving for this long, which is when a pool
+-- starts growing under it.
+local SETTLE_SPEED = 2.0
+local SETTLE_TIME = 0.6
+
+-- Slack past a managed lifetime before Debris takes over. The sweep normally
+-- gets there first; this only matters if this service is ever torn down or
+-- throws mid-round, and a severed arm that outlives the server is a haunting.
+local DEBRIS_GRACE = 6
+
+-- Kill-grade events may overdraw the throttle; incidental spray may not.
+local PRIORITY_BLOOD = 1
+local PRIORITY_KILL = 2
+
+-- No infected kind attribute means no per-kind lifetime, so a stray body falls
+-- back to the Common's rather than to a number invented here.
+local FALLBACK_CORPSE_LIFETIME = InfectedConfig.Definitions[Enums.Infected.Common].corpseLifetime
+
+--[[
+	Ragdoll joint limits, keyed by Motor6D name so R6 and R15 both resolve.
+
+	The point of the asymmetry is that a body should bend like a body. A uniform
+	ball socket everywhere gives you the classic dropped-marionette corpse, with
+	elbows folding the wrong way and a neck that rotates like an owl's — which
+	reads as comedy at exactly the moment the game wants weight. Elbows and knees
+	therefore get a narrow cone and a one-way twist range; shoulders and hips get
+	room; the neck gets very little.
+
+	Twist sign depends on the rig's C0 orientation. If a rig's knees hinge the
+	wrong way, flip that row rather than widening it — a symmetric range hides
+	the bug and brings the marionette back.
+]]
+local JOINT_LIMITS = table.freeze({
+	Neck = { upper = 40, twistLow = -45, twistHigh = 45 },
+	Waist = { upper = 26, twistLow = -30, twistHigh = 30 },
+
+	LeftShoulder = { upper = 85, twistLow = -60, twistHigh = 60 },
+	RightShoulder = { upper = 85, twistLow = -60, twistHigh = 60 },
+	["Left Shoulder"] = { upper = 85, twistLow = -60, twistHigh = 60 },
+	["Right Shoulder"] = { upper = 85, twistLow = -60, twistHigh = 60 },
+
+	LeftElbow = { upper = 12, twistLow = -4, twistHigh = 95 },
+	RightElbow = { upper = 12, twistLow = -4, twistHigh = 95 },
+	LeftWrist = { upper = 28, twistLow = -25, twistHigh = 25 },
+	RightWrist = { upper = 28, twistLow = -25, twistHigh = 25 },
+
+	LeftHip = { upper = 62, twistLow = -35, twistHigh = 35 },
+	RightHip = { upper = 62, twistLow = -35, twistHigh = 35 },
+	["Left Hip"] = { upper = 62, twistLow = -35, twistHigh = 35 },
+	["Right Hip"] = { upper = 62, twistLow = -35, twistHigh = 35 },
+
+	LeftKnee = { upper = 10, twistLow = -100, twistHigh = 2 },
+	RightKnee = { upper = 10, twistLow = -100, twistHigh = 2 },
+	LeftAnkle = { upper = 24, twistLow = -20, twistHigh = 20 },
+	RightAnkle = { upper = 24, twistLow = -20, twistHigh = 20 },
+})
+
+local DEFAULT_JOINT_LIMIT = table.freeze({ upper = 45, twistLow = -35, twistHigh = 35 })
+
+-- The root joint is left alone: HumanoidRootPart is a collision box, not a body
+-- part, and freeing it just adds a floating brick to every corpse.
+local ROOT_JOINTS = table.freeze({ Root = true, RootJoint = true })
+
+local SEVERABLE: { [string]: boolean } = {}
+for _, name in LIMBS.Severable do
+	SEVERABLE[name] = true
+end
+table.freeze(SEVERABLE)
+
+--[[
+	Which parts a region may cost you, best first. Uppers come first on purpose:
+	taking the whole arm off is what a player expects from a hit anywhere on it,
+	and it is what looks right.
+]]
+local REGION_PARTS = table.freeze({
+	[REGION.Head] = table.freeze({ "Head" }),
+	[REGION.Arm] = table.freeze({
+		"RightUpperArm",
+		"LeftUpperArm",
+		"Right Arm",
+		"Left Arm",
+		"RightLowerArm",
+		"LeftLowerArm",
+	}),
+	[REGION.Leg] = table.freeze({
+		"RightUpperLeg",
+		"LeftUpperLeg",
+		"Right Leg",
+		"Left Leg",
+		"RightLowerLeg",
+		"LeftLowerLeg",
+	}),
+})
+
+local EMPTY_LIST = table.freeze({})
+
+local function unitOr(vector: Vector3, fallback: Vector3): Vector3
+	if vector.Magnitude < 1e-4 then
+		return fallback
+	end
+	return vector.Unit
+end
+
+local function randomSpin(magnitude: number): Vector3
+	local raw = Vector3.new(random:NextNumber(-1, 1), random:NextNumber(-1, 1), random:NextNumber(-1, 1))
+	return unitOr(raw, Vector3.yAxis) * magnitude
+end
+
+--[[ Walks a rig ONCE and returns its parts and its motors keyed by the part they
+     hold on. Every path in this file that needs both would otherwise pay for two
+     or three separate GetDescendants passes on every single death. ]]
+local function collectRig(model: Model): ({ BasePart }, { [string]: Motor6D })
+	local parts: { BasePart } = {}
+	local motors: { [string]: Motor6D } = {}
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			if not descendant:FindFirstAncestorWhichIsA("Accessory") then
+				table.insert(parts, descendant)
+			end
+		elseif descendant:IsA("Motor6D") then
+			local part1 = descendant.Part1
+			if part1 then
+				motors[part1.Name] = descendant
+			end
+		end
+	end
+	return parts, motors
+end
+
+local GoreService = {}
+
+GoreService._trove = Trove.new()
+GoreService._folder = nil :: Folder?
+
+-- FIFO, oldest first. Recycling means "destroy index 1", which is why these are
+-- arrays and not sets.
+GoreService._ragdolls = {} :: { any }
+GoreService._limbs = {} :: { any }
+GoreService._gibBatches = {} :: { any }
+GoreService._decals = {} :: { any }
+
+GoreService._gibCount = 0
+GoreService._decalCount = 0
+
+-- Survivor bodies are ragdolled but never recycled and never destroyed: they
+-- are defibrillator targets, and deleting one deletes a teammate's only way
+-- back into the round. Held as a list purely so the sweep can drop the ones
+-- SurvivorService replaced on a respawn and keep the counts honest.
+GoreService._survivorBodies = {} :: { Model }
+
+-- Weak keys throughout: a model destroyed by another service must not pin its
+-- bookkeeping in memory for the rest of the round.
+GoreService._processed = setmetatable({}, { __mode = "k" })
+GoreService._ragdolled = setmetatable({}, { __mode = "k" })
+GoreService._joints = setmetatable({}, { __mode = "k" })
+GoreService._decapitating = setmetatable({}, { __mode = "k" })
+
+GoreService._tokens = BUDGET.MaxGoreEventsPerSecond
+GoreService._tokensAt = os.clock()
+GoreService._suppressed = 0
+GoreService._sweepAccumulator = 0
+
+-- ── lifecycle ───────────────────────────────────────────────────────────────
+
+function GoreService:init()
+	local folder = Workspace:FindFirstChild(GORE_FOLDER)
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = GORE_FOLDER
+		folder.Parent = Workspace
+	end
+	self._folder = folder :: Folder
+	self._trove:add(folder)
+end
+
+function GoreService:start()
+	-- ONE connection for every corpse, limb and pool in the game. Per-body
+	-- connections are how a horde turns into a slideshow.
+	self._trove:add(RunService.Heartbeat:Connect(function(deltaTime: number)
+		self._sweepAccumulator += deltaTime
+		if self._sweepAccumulator >= SWEEP_INTERVAL then
+			local elapsed = self._sweepAccumulator
+			self._sweepAccumulator = 0
+			self:_sweep(elapsed)
+		end
+	end))
+end
+
+-- ── the roll ────────────────────────────────────────────────────────────────
+
+--[[
+	GoreConfig.Scoring's formula, verbatim:
+
+	    score = overkillRatio * OverkillWeight
+	          + weapon.gibPower * WeaponGibWeight
+	          + RegionBonus[region]
+	          + ContactBonus            (when distance < ContactRange)
+
+	Everything after the arithmetic is a gate, in strict precedence order. The
+	gates matter as much as the score: they are what keeps a Tank falling in one
+	piece and a Boomer never doing so.
+]]
+function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: number): (string, string?)
+	if not GoreConfig.Enabled or not model then
+		return LEVEL.None, nil
+	end
+
+	-- A survivor's corpse is a defibrillator target and a place their team
+	-- remembers. It ragdolls and it bleeds, but it never comes apart, because a
+	-- gibbed body is a teammate who cannot be brought back.
+	if RigUtil.isSurvivor(model) then
+		return LEVEL.None, nil
+	end
+
+	local definition = InfectedConfig.get(model:GetAttribute(Attributes.Infected.Kind) or "")
+	local weapon = if ctx.weaponId then WeaponConfig.get(ctx.weaponId) else nil
+
+	local overkillRatio = math.max(overkill, 0) / math.max(maxHealth, 1)
+	local score = overkillRatio * SCORING.OverkillWeight
+	if weapon then
+		score += weapon.gibPower * SCORING.WeaponGibWeight
+	end
+	score += SCORING.RegionBonus[ctx.region] or 0
+	if ctx.distance < SCORING.ContactRange then
+		score += SCORING.ContactBonus
+	end
+
+	-- Fire never gibs and never severs: a burned body has to stay recognisably
+	-- a body, which is the whole reason Incinerate is its own gore level. This
+	-- gate runs first so that even a body which cannot come apart still reads as
+	-- having burned rather than as having simply fallen over.
+	if ctx.damageType == Enums.DamageType.Fire then
+		return (if SCORING.FireNeverGibs then LEVEL.Incinerate else LEVEL.Gib), nil
+	end
+
+	-- A body that cannot come apart cannot come apart, and this beats every
+	-- other rule including ExplosiveAlwaysGibs. "A Tank falls in one piece; it
+	-- earned that" is a statement about the Tank, not about grenades.
+	if definition and not definition.dismemberable then
+		return LEVEL.None, nil
+	end
+
+	if ctx.damageType == Enums.DamageType.Explosive and SCORING.ExplosiveAlwaysGibs then
+		return LEVEL.Gib, nil
+	end
+
+	-- gibThreshold is a SUFFICIENT condition, not an extra gate on the score:
+	-- "overkill damage past which the body comes apart". Reading it as an extra
+	-- AND would make the Boomer's threshold of 1 mean nothing, and the Boomer
+	-- always coming apart is the joke that field was written for.
+	if score >= SCORING.GibScore or (definition and overkill >= definition.gibThreshold) then
+		return LEVEL.Gib, nil
+	end
+
+	if score >= SCORING.DismemberScore then
+		local part = self:_pickSeverablePart(model, ctx)
+		if part then
+			return LEVEL.Dismember, part
+		end
+	end
+
+	return LEVEL.None, nil
+end
+
+--[[ Which part actually comes off. The struck part is always the best answer —
+     a player who shot a forearm expects to see that forearm leave. ]]
+function GoreService:_pickSeverablePart(model: Model, ctx): string?
+	local candidates = REGION_PARTS[ctx.region]
+	if not candidates then
+		return nil -- torso hits do not sever anything; they gib or they do not
+	end
+
+	local _, motors = collectRig(model)
+
+	local hitPart = ctx.hitPart
+	if hitPart and SEVERABLE[hitPart.Name] and motors[hitPart.Name] then
+		return hitPart.Name
+	end
+
+	-- Otherwise pick a limb of the right region that this rig actually has,
+	-- starting at a random index so an unlucky ricochet does not always take the
+	-- same arm off every zombie in the horde.
+	local count = #candidates
+	local start = random:NextInteger(1, count)
+	for offset = 0, count - 1 do
+		local name = candidates[(start + offset - 1) % count + 1]
+		if motors[name] then
+			return name
+		end
+	end
+	return nil
+end
+
+-- ── the kill ────────────────────────────────────────────────────────────────
+
+--[[
+	Everything that happens to a body at the moment it stops working. Called by
+	DamageService once per death, with the level already decided by evaluate.
+]]
+function GoreService:processKill(model: Model, ctx, result)
+	if not GoreConfig.Enabled or not model or not model.Parent then
+		return
+	end
+	-- A corpse must never be worth gore twice. Two pellets from the same blast
+	-- land on the same frame, and both of them resolve as kills.
+	if self._processed[model] then
+		return
+	end
+	self._processed[model] = true
+
+	ctx = ctx or Types.newDamageContext()
+	local level = (result and result.goreLevel) or LEVEL.None
+	local severed = result and result.severedPart
+
+	-- The level normally arrives already decided by evaluate, but DamageService
+	-- independently force-sets Gib for every explosive kill as a backstop. That
+	-- would beat InfectedConfig.dismemberable, so the rule is re-checked on the
+	-- way in: whoever names the level, a body that cannot come apart does not.
+	local kind = model:GetAttribute(Attributes.Infected.Kind)
+	local archetype = InfectedConfig.get(kind or "")
+	if archetype and not archetype.dismemberable and level ~= LEVEL.Incinerate then
+		level = LEVEL.None
+		severed = nil
+	end
+
+	-- RigUtil.isAlive gates on this attribute, so a body that reaches here
+	-- without it would keep absorbing bullets and producing more gore. The
+	-- owning service normally sets it first; this is the belt to that braces.
+	if
+		kind ~= nil
+		and model:GetAttribute(Attributes.Infected.IsDead) ~= true
+		and RigUtil.isInfected(model)
+	then
+		model:SetAttribute(Attributes.Infected.IsDead, true)
+	end
+
+	local root = RigUtil.getRoot(model)
+	local position = if ctx.hitPosition ~= Vector3.zero
+		then ctx.hitPosition
+		else (root and root.Position or Vector3.zero)
+	local direction = unitOr(ctx.direction, Vector3.new(0, 0, -1))
+	local normal = unitOr(ctx.hitNormal, -direction)
+
+	local weapon = if ctx.weaponId then WeaponConfig.get(ctx.weaponId) else nil
+	-- No weapon means fire, a fall or a special's claws. Those bodies crumple
+	-- where they stand rather than flying, which is correct: nothing pushed them.
+	local knockback = if weapon then weapon.knockback else 0
+
+	if level == LEVEL.Gib then
+		self:gib(model, position, direction, ctx.attacker)
+		return
+	end
+
+	local applied = self:ragdoll(model, direction * knockback)
+
+	if level == LEVEL.Dismember then
+		severed = severed or self:_pickSeverablePart(model, ctx)
+		if severed then
+			-- The limb leaves faster than the body it came off, always.
+			self:dismember(model, severed, direction, math.max(knockback, LIMBS.LimbImpulse), ctx.attacker)
+		else
+			level = LEVEL.None
+		end
+	end
+
+	if level ~= LEVEL.Dismember then
+		local audio = Registry.find("AudioService")
+		if audio then
+			audio:playAt(AudioConfig.Gore.BodyFall, position)
+		end
+		self:_emit({
+			model = model,
+			level = level,
+			part = if ctx.hitPart then ctx.hitPart.Name else nil,
+			position = position,
+			normal = normal,
+			direction = direction,
+			force = applied,
+			scale = BLOOD_SCALE_KILL,
+			seed = random:NextInteger(1, 2 ^ 31 - 1),
+			decal = self:_rollDecal(BLOOD.DecalChanceOnKill),
+			pool = false,
+			kill = true,
+			hitStop = self:_hitStopFor(level, ctx),
+			timeScale = HITSTOP.TimeScale,
+			attacker = ctx.attacker,
+		}, PRIORITY_KILL)
+	end
+end
+
+--[[ Which freeze this kill earns. Gib beats headshot beats plain kill; the
+     numbers themselves are GoreConfig.HitStop's and are not negotiable here. ]]
+function GoreService:_hitStopFor(level: string, ctx): number
+	if not HITSTOP.Enabled then
+		return 0
+	end
+	if level == LEVEL.Gib then
+		return HITSTOP.GibSeconds
+	end
+	if ctx.region == REGION.Head then
+		return HITSTOP.HeadshotKillSeconds
+	end
+	return HITSTOP.KillSeconds
+end
+
+-- ── ragdoll ─────────────────────────────────────────────────────────────────
+
+--[[
+	Turns a rig into a corpse and returns the launch speed actually applied.
+
+	Motor6Ds are DISABLED rather than destroyed. A disabled motor stops holding
+	its joint exactly as a destroyed one would, but it survives for dismember()
+	to destroy properly and leaves the door open to un-ragdolling a body later —
+	which RigUtil's comments assume is possible.
+]]
+function GoreService:ragdoll(model: Model, impulse: Vector3?): number
+	if not model or not model.Parent or self._ragdolled[model] then
+		return 0
+	end
+	self._ragdolled[model] = true
+
+	local parts, motors = collectRig(model)
+	-- Mass is read BEFORE makeDebris, which marks parts massless. A Common and a
+	-- Charger have to answer the same shot differently, and this is the number
+	-- that makes them.
+	local mass = RigUtil.getMass(model)
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		-- Every one of these matters: a Humanoid left enabled will fight the
+		-- constraints, try to stand its corpse back up, and keep playing the
+		-- walk animation on a body lying face down.
+		humanoid.BreakJointsOnDeath = false
+		humanoid.RequiresNeck = false
+		humanoid.AutoRotate = false
+		humanoid.PlatformStand = true
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Running, false)
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+
+		local animator = humanoid:FindFirstChildOfClass("Animator")
+		if animator then
+			for _, track in animator:GetPlayingAnimationTracks() do
+				track:Stop(0)
+			end
+		end
+	end
+
+	local joints: { [string]: BallSocketConstraint } = {}
+	for partName, motor in motors do
+		if ROOT_JOINTS[motor.Name] then
+			continue
+		end
+		local constraint = self:_replaceMotor(motor)
+		if constraint then
+			joints[partName] = constraint
+		end
+	end
+	self._joints[model] = joints
+
+	-- Contract call: corpses must never block a doorway, answer a raycast meant
+	-- for a live target, or shove a survivor off a ledge.
+	RigUtil.makeDebris(model)
+
+	local root = RigUtil.getRoot(model)
+	local isSurvivorBody = RigUtil.isSurvivor(model)
+	for _, part in parts do
+		-- makeDebris clears CanCollide, which would drop every corpse through
+		-- the floor. The Debris collision group already stops bodies colliding
+		-- with survivors, infected, gibs and each other, so putting world
+		-- collision back is what the group was for — it only restores the floor.
+		if part ~= root then
+			part.CanCollide = true
+		end
+		-- A dead survivor is an interaction target for the rest of the round, so
+		-- their body stays queryable or the defib prompt can never find it.
+		if isSurvivorBody then
+			part.CanQuery = true
+		end
+	end
+
+	local speed = 0
+	if impulse and impulse.Magnitude > 0 then
+		-- Distributing one velocity across the body, rather than an impulse on
+		-- one part, is what stops a corpse tearing itself inside out on the
+		-- frame it dies. Mass decides how much of the weapon's knockback the
+		-- body actually takes.
+		speed = math.min(impulse.Magnitude * (REFERENCE_BODY_MASS / mass), MAX_RAGDOLL_SPEED)
+		local velocity = unitOr(impulse, Vector3.new(0, 0, -1)) * speed + Vector3.yAxis * speed * RAGDOLL_LIFT
+		-- Adding to the velocity rather than setting it keeps the momentum a
+		-- sprinting Common already had, so a body shot mid-stride carries. Once
+		-- per ASSEMBLY though: parts that are still joined share one velocity,
+		-- and applying it per part would multiply the launch by the number of
+		-- them and fire the corpse out of the level.
+		local boosted: { [BasePart]: boolean } = {}
+		for _, part in parts do
+			local assembly = part.AssemblyRootPart
+			if assembly and not boosted[assembly] then
+				boosted[assembly] = true
+				assembly.AssemblyLinearVelocity += velocity
+			end
+		end
+		if root then
+			root.AssemblyAngularVelocity += randomSpin(speed * RAGDOLL_LIFT)
+		end
+	end
+
+	if isSurvivorBody then
+		table.insert(self._survivorBodies, model)
+		return speed
+	end
+
+	local definition = InfectedConfig.get(model:GetAttribute(Attributes.Infected.Kind) or "")
+	local lifetime = if definition then definition.corpseLifetime else FALLBACK_CORPSE_LIFETIME
+
+	-- FIFO recycling. Past the ceiling the OLDEST body goes, never the newest:
+	-- the corpse a player is looking at right now is the one that matters, and
+	-- refusing to make it would read as the gore system being broken.
+	while #self._ragdolls >= MAX_RAGDOLLS do
+		local oldest = table.remove(self._ragdolls, 1)
+		if oldest and oldest.model then
+			oldest.model:Destroy()
+		end
+	end
+
+	table.insert(self._ragdolls, {
+		model = model,
+		root = root,
+		expiresAt = os.clock() + lifetime,
+		stillFor = 0,
+		pooled = false,
+	})
+	Debris:AddItem(model, lifetime + DEBRIS_GRACE)
+
+	return speed
+end
+
+--[[ One Motor6D becomes one BallSocketConstraint at exactly the same place. The
+     attachments are built from C0/C1 so the joint sits where the rig's author
+     put it, whatever the rig type or scale. ]]
+function GoreService:_replaceMotor(motor: Motor6D): BallSocketConstraint?
+	local part0, part1 = motor.Part0, motor.Part1
+	if not part0 or not part1 then
+		return nil
+	end
+
+	local a0 = Instance.new("Attachment")
+	a0.Name = "FL_RagdollA0"
+	a0.CFrame = motor.C0
+	a0.Parent = part0
+
+	local a1 = Instance.new("Attachment")
+	a1.Name = "FL_RagdollA1"
+	a1.CFrame = motor.C1
+	a1.Parent = part1
+
+	local limit = JOINT_LIMITS[motor.Name] or DEFAULT_JOINT_LIMIT
+	local socket = Instance.new("BallSocketConstraint")
+	socket.Name = "FL_Ragdoll"
+	socket.Attachment0 = a0
+	socket.Attachment1 = a1
+	socket.LimitsEnabled = true
+	socket.TwistLimitsEnabled = true
+	socket.UpperAngle = limit.upper
+	socket.TwistLowerAngle = limit.twistLow
+	socket.TwistUpperAngle = limit.twistHigh
+	-- Parented to the CHILD part so that severing that part takes its joint with
+	-- it, and so a limb reparented out of the body carries its own constraints.
+	socket.Parent = part1
+
+	motor.Enabled = false
+	return socket
+end
+
+-- ── dismemberment ───────────────────────────────────────────────────────────
+
+--[[
+	Takes a part off, along with everything downstream of it. Returns whether the
+	limb actually came away, so callers can fall back to a plain ragdoll.
+
+	`attacker` is optional and decides nothing about the physics — it is only who
+	gets the hit-stop freeze. A caller outside processKill may leave it out; the
+	limb still comes off, nobody's screen just stutters for it.
+]]
+function GoreService:dismember(
+	model: Model,
+	partName: string,
+	direction: Vector3,
+	force: number,
+	attacker: Player?
+): boolean
+	if not GoreConfig.Enabled or not model or not model.Parent or not SEVERABLE[partName] then
+		return false
+	end
+
+	local motor = RigUtil.findMotorForPart(model, partName)
+	if not motor or not motor.Part1 or not motor.Part0 then
+		return false
+	end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and partName == "Head" then
+		-- Roblox kills a Humanoid the instant it loses its head, which would take
+		-- the death outside DamageService entirely: no kill feed, no Director
+		-- intensity, no gore roll. The decapitation still kills — through the
+		-- funnel, at the bottom of this function — but it kills on our terms.
+		humanoid.RequiresNeck = false
+	end
+
+	local limbRoot = motor.Part1
+	local anchorPart = motor.Part0
+	-- The joint's own world position: a stump should bleed from the socket, not
+	-- from the middle of the limb that just left.
+	local stump = (anchorPart.CFrame * motor.C0).Position
+	local away = unitOr(limbRoot.Position - anchorPart.Position, Vector3.yAxis)
+
+	-- The whole chain leaves together. Blowing off an upper arm and leaving the
+	-- forearm hanging in mid-air is the failure mode GoreConfig.Children exists
+	-- to prevent.
+	local freed: { BasePart } = { limbRoot }
+	for _, childName in LIMBS.Children[partName] or EMPTY_LIST do
+		local child = model:FindFirstChild(childName, true)
+		if child and child:IsA("BasePart") then
+			table.insert(freed, child)
+		end
+	end
+
+	motor:Destroy()
+	local joints = self._joints[model]
+	if joints and joints[partName] then
+		joints[partName]:Destroy()
+		joints[partName] = nil
+	end
+	-- Backstop for a limb severed off a body that was never ragdolled: the
+	-- constraint is always parented to the child part and always named.
+	local stale = limbRoot:FindFirstChild("FL_Ragdoll")
+	if stale then
+		stale:Destroy()
+	end
+
+	-- Workspace is the fallback only if init() never ran; a limb parented to nil
+	-- would vanish on the frame it was severed.
+	local folder = self._folder or Workspace
+	local speed = math.clamp(force, LIMBS.LimbImpulse, LIMBS.LimbImpulse * LIMB_IMPULSE_CEILING)
+	local velocity = unitOr(direction, away) * speed
+		+ away * speed * RAGDOLL_LIFT
+		+ Vector3.yAxis * speed * RAGDOLL_LIFT
+	local spin = randomSpin(LIMBS.LimbSpin)
+
+	for _, part in freed do
+		-- Out of the character and into the gore folder, so the limb outlives or
+		-- outdies its body on its own LimbLifetime rather than being taken with
+		-- the corpse whenever that gets recycled.
+		part.Parent = folder
+		part.CanCollide = true
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Massless = false
+		part.CollisionGroup = "Debris"
+		part.AssemblyLinearVelocity = velocity
+		part.AssemblyAngularVelocity = spin
+	end
+
+	while #self._limbs >= BUDGET.MaxActiveLimbs do
+		local oldest = table.remove(self._limbs, 1)
+		if oldest then
+			for _, part in oldest.parts do
+				part:Destroy()
+			end
+		end
+	end
+	table.insert(self._limbs, { parts = freed, expiresAt = os.clock() + LIMBS.LimbLifetime })
+	for _, part in freed do
+		Debris:AddItem(part, LIMBS.LimbLifetime + DEBRIS_GRACE)
+	end
+
+	local isHead = partName == "Head"
+	local audio = Registry.find("AudioService")
+	if audio then
+		audio:playAt(if isHead then AudioConfig.Gore.Decapitate else AudioConfig.Gore.Dismember, stump)
+	end
+
+	self:_emit({
+		model = model,
+		level = LEVEL.Dismember,
+		part = partName,
+		position = stump,
+		normal = away,
+		direction = unitOr(direction, away),
+		force = speed,
+		scale = BLOOD_SCALE_DISMEMBER,
+		seed = random:NextInteger(1, 2 ^ 31 - 1),
+		decal = self:_rollDecal(BLOOD.DecalChanceOnKill),
+		pool = false,
+		kill = true,
+		hitStop = if HITSTOP.Enabled then HITSTOP.KillSeconds else 0,
+		timeScale = HITSTOP.TimeScale,
+		attacker = attacker,
+	}, PRIORITY_KILL)
+
+	if isHead and LIMBS.DecapitationIsLethal then
+		self:_killByDecapitation(model, direction)
+	end
+
+	return true
+end
+
+--[[
+	A body with no head is dead, whatever the damage arithmetic said. It has to
+	die through the damage funnel and not by writing to a Humanoid, because every
+	consumer of a death — the kill feed, the Director's intensity, the round
+	tally — hangs off DamageService, and a body that quietly stopped existing
+	would be invisible to all of them.
+]]
+function GoreService:_killByDecapitation(model: Model, direction: Vector3)
+	if self._decapitating[model] or not RigUtil.isAlive(model) then
+		return
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local damageService = Registry.find("DamageService")
+	if not damageService then
+		return
+	end
+
+	self._decapitating[model] = true
+	local root = RigUtil.getRoot(model)
+	local definition = InfectedConfig.get(model:GetAttribute(Attributes.Infected.Kind) or "")
+	local resistance = if definition then math.max(definition.damageResistance, 0.01) else 1
+
+	-- Region Torso, and exactly the health remaining once the funnel's own
+	-- resistance multiplier has been divided back out. Lethal to the point and
+	-- no further: the head is already off, and an inflated number here would
+	-- roll an overkill big enough to gib a body that has just been dismembered.
+	damageService:applyDamage(
+		model,
+		humanoid.Health / resistance,
+		Types.newDamageContext({
+			damageType = Enums.DamageType.Melee,
+			region = REGION.Torso,
+			hitPosition = if root then root.Position else Vector3.zero,
+			hitNormal = -direction,
+			direction = direction,
+		})
+	)
+end
+
+-- ── gibbing ─────────────────────────────────────────────────────────────────
+
+--[[
+	The body stops existing and becomes chunks. The chunks themselves are built
+	on each client from the seed below — see the header for why they are not
+	replicated parts. `attacker` is optional and only decides who freezes.
+]]
+function GoreService:gib(model: Model, origin: Vector3, direction: Vector3, attacker: Player?)
+	if not GoreConfig.Enabled or not model or not model.Parent then
+		return
+	end
+
+	local parts = collectRig(model)
+	local root = RigUtil.getRoot(model)
+	local position = if root then root.Position else origin
+	local dir = unitOr(direction, Vector3.new(0, 0, -1))
+
+	-- Hidden, not destroyed on the spot: the model is the client's handle for
+	-- the body that just stopped existing, and destroying it in the same frame
+	-- the event goes out can beat the event to the client.
+	for _, part in parts do
+		part.Transparency = 1
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		humanoid.PlatformStand = true
+	end
+
+	-- A gibbed body is no longer a ragdoll and must not hold a ragdoll slot.
+	self:_forgetRagdoll(model)
+	self._ragdolled[model] = true
+	Debris:AddItem(model, SWEEP_INTERVAL)
+
+	-- The budget decides the count, and it decides it downward rather than
+	-- refusing: fewer chunks still reads as an explosion, no chunks reads as a
+	-- bug. Never below CountMin — the floor is what keeps a gib a gib.
+	local wanted = random:NextInteger(GIBS.CountMin, GIBS.CountMax)
+	local headroom = MAX_GIBS - self._gibCount
+	local count = math.clamp(math.min(wanted, math.max(headroom, 0)), GIBS.CountMin, GIBS.CountMax)
+
+	while self._gibCount + count > MAX_GIBS and #self._gibBatches > 0 do
+		local oldest = table.remove(self._gibBatches, 1)
+		self._gibCount -= oldest.count
+	end
+	self._gibCount += count
+	table.insert(self._gibBatches, { count = count, expiresAt = os.clock() + GIBS.Lifetime })
+
+	local audio = Registry.find("AudioService")
+	if audio then
+		audio:playAt(AudioConfig.Gore.Gib, position)
+	end
+
+	self:_emit({
+		model = model,
+		level = LEVEL.Gib,
+		part = nil,
+		position = position,
+		normal = -dir,
+		direction = dir,
+		force = GIBS.ImpulseMax,
+		scale = BLOOD_SCALE_GIB,
+		seed = random:NextInteger(1, 2 ^ 31 - 1),
+		count = count,
+		decal = self:_rollDecal(BLOOD.DecalChanceOnKill),
+		pool = false,
+		kill = true,
+		hitStop = if HITSTOP.Enabled then HITSTOP.GibSeconds else 0,
+		timeScale = HITSTOP.TimeScale,
+		attacker = attacker,
+	}, PRIORITY_KILL)
+end
+
+-- ── blood ───────────────────────────────────────────────────────────────────
+
+--[[
+	The three layers of GoreConfig.Blood, from one event: spray along the surface
+	normal, a mist that hangs for an instant, and a decal projected down the shot
+	line onto whatever was behind the target.
+
+	This is the incidental-hit entry point — DamageService calls it for every
+	flesh hit that did not kill. Kills emit their own richer event rather than
+	calling through here, so a single death is one packet and not three.
+]]
+function GoreService:spawnBlood(position: Vector3, normal: Vector3, direction: Vector3, scale: number)
+	if not GoreConfig.Enabled then
+		return
+	end
+	self:_emit({
+		model = nil,
+		level = LEVEL.None,
+		part = nil,
+		position = position,
+		normal = unitOr(normal, Vector3.yAxis),
+		direction = unitOr(direction, -unitOr(normal, Vector3.yAxis)),
+		force = 0,
+		scale = (scale or 1) * BLOOD_SCALE_HIT,
+		seed = random:NextInteger(1, 2 ^ 31 - 1),
+		decal = self:_rollDecal(BLOOD.DecalChanceOnHit),
+		pool = false,
+		kill = false,
+		hitStop = if HITSTOP.Enabled then HITSTOP.NormalHitSeconds else 0,
+		timeScale = HITSTOP.TimeScale,
+		attacker = nil,
+	}, PRIORITY_BLOOD)
+end
+
+--[[
+	Rolls the decal chance ONCE, on the server, so every client in range agrees
+	on whether this hit left a mark. The projection raycast itself happens on the
+	client — it is the same geometry there and it costs the server nothing.
+
+	Returns false when the decal ceiling is full rather than recycling a specific
+	decal: the client owns the actual instances and applies the same FIFO cap
+	from the same shared config, so the ledger here only has to stay honest for
+	getActiveCounts and for the throttle.
+]]
+function GoreService:_rollDecal(chance: number): boolean
+	if not BLOOD.DecalEnabled or random:NextNumber() > chance then
+		return false
+	end
+	while self._decalCount >= MAX_DECALS and #self._decals > 0 do
+		table.remove(self._decals, 1)
+		self._decalCount -= 1
+	end
+	self._decalCount += 1
+	table.insert(self._decals, os.clock() + BLOOD.DecalLifetime)
+	return true
+end
+
+-- ── throttle and sweep ──────────────────────────────────────────────────────
+
+--[[
+	MaxGoreEventsPerSecond, as a token bucket with an overdraft.
+
+	During a 46-strong horde dying to an auto shotgun this is the difference
+	between a firefight and a network stall. But a throttle that drops kills
+	would delete the payoff exactly when there is most of it, so kills may
+	overdraw the bucket by a full second's worth and incidental spray may not.
+	The debt is real: a horde wipe borrows against the next second, and what goes
+	quiet is background blood, which nobody was looking at anyway.
+]]
+function GoreService:_takeToken(priority: number): boolean
+	local now = os.clock()
+	local rate = BUDGET.MaxGoreEventsPerSecond
+	self._tokens = math.min(rate, self._tokens + (now - self._tokensAt) * rate)
+	self._tokensAt = now
+
+	local floor = if priority >= PRIORITY_KILL then -rate else 0
+	if self._tokens - 1 < floor then
+		self._suppressed += 1
+		return false
+	end
+	self._tokens -= 1
+	return true
+end
+
+function GoreService:_emit(payload, priority: number): boolean
+	if not self:_takeToken(priority) then
+		return false
+	end
+	-- Gore beyond CullDistance is never sent: a firefight across the map must
+	-- not cost a client bandwidth and particles for something it cannot see.
+	Remotes.fireInRange("GoreEvent", payload.position, BUDGET.CullDistance, payload)
+	return true
+end
+
+function GoreService:_forgetRagdoll(model: Model)
+	for index, record in self._ragdolls do
+		if record.model == model then
+			table.remove(self._ragdolls, index)
+			return
+		end
+	end
+end
+
+--[[ The one loop. Expiry for corpses, limbs and ledger entries, plus the pool
+     check — a few dozen records at 5Hz, allocating nothing except on the frame
+     a body actually settles and sends its pool event. ]]
+function GoreService:_sweep(deltaTime: number)
+	local now = os.clock()
+
+	for index = #self._ragdolls, 1, -1 do
+		local record = self._ragdolls[index]
+		local model = record.model
+		if not model or not model.Parent then
+			table.remove(self._ragdolls, index)
+			continue
+		end
+		if now >= record.expiresAt then
+			table.remove(self._ragdolls, index)
+			model:Destroy()
+			continue
+		end
+
+		-- Pooling. A body that has stopped moving starts bleeding into the
+		-- floor, which is what makes a room look fought-in a minute later.
+		if BLOOD.PoolEnabled and not record.pooled then
+			local root = record.root
+			if root and root.AssemblyLinearVelocity.Magnitude < SETTLE_SPEED then
+				record.stillFor += deltaTime
+				if record.stillFor >= SETTLE_TIME then
+					record.pooled = true
+					self:_emit({
+						model = model,
+						level = LEVEL.None,
+						part = nil,
+						position = root.Position,
+						normal = Vector3.yAxis,
+						direction = Vector3.yAxis * -1,
+						force = 0,
+						scale = BLOOD_SCALE_HIT,
+						seed = random:NextInteger(1, 2 ^ 31 - 1),
+						decal = false,
+						pool = true,
+						kill = false,
+						hitStop = 0,
+						timeScale = HITSTOP.TimeScale,
+						attacker = nil,
+					}, PRIORITY_BLOOD)
+				end
+			else
+				record.stillFor = 0
+			end
+		end
+	end
+
+	for index = #self._survivorBodies, 1, -1 do
+		local body = self._survivorBodies[index]
+		if not body or not body.Parent then
+			table.remove(self._survivorBodies, index)
+		end
+	end
+
+	for index = #self._limbs, 1, -1 do
+		local record = self._limbs[index]
+		if now >= record.expiresAt then
+			table.remove(self._limbs, index)
+			for _, part in record.parts do
+				part:Destroy()
+			end
+		end
+	end
+
+	-- The ledgers hold no instances, only counts: the client owns the chunks and
+	-- decals themselves and expires them from the same shared config.
+	while #self._gibBatches > 0 and now >= self._gibBatches[1].expiresAt do
+		local oldest = table.remove(self._gibBatches, 1)
+		self._gibCount -= oldest.count
+	end
+	while #self._decals > 0 and now >= self._decals[1] do
+		table.remove(self._decals, 1)
+		self._decalCount -= 1
+	end
+end
+
+-- ── introspection ───────────────────────────────────────────────────────────
+
+--[[ What the budget is currently holding. Cheap enough for a debug overlay to
+     poll; `suppressed` is the count of gore events the throttle has ever
+     dropped, which is the number to watch if a horde ever looks bloodless. ]]
+function GoreService:getActiveCounts()
+	return {
+		ragdolls = #self._ragdolls + #self._survivorBodies,
+		gibs = self._gibCount,
+		limbs = #self._limbs,
+		decals = self._decalCount,
+		suppressed = self._suppressed,
+	}
+end
+
+Registry.register("GoreService", GoreService)
+
+return GoreService

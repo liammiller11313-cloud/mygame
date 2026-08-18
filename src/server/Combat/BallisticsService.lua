@@ -1,0 +1,596 @@
+--!strict
+--[[
+	BallisticsService — where a trigger pull becomes a hit.
+
+	The client fires the instant you click: muzzle flash, tracer, recoil, ammo
+	count, all predicted locally so the gun feels connected to the mouse. None of
+	that is a hit. This service decides what was actually struck, and it assumes
+	every field in the packet is a lie until it survives GameConfig.HitValidation.
+
+	── THE SHARED CONE ─────────────────────────────────────────────────────────
+	Read Shared/Util/ShotPattern.lua's header first. The client sends ONE integer
+	seed; both machines feed it to Random.new() and get the identical pellet
+	spread, which is the only reason ten shotgun tracers land where the ten
+	pellets resolved. That contract has two halves and this file owns the second:
+
+	  * the seed comes from the client (and is rejected unless it is an integer
+	    inside ShotPattern.generateSeed's range — a client can pick WHICH
+	    deterministic pattern it gets, never WHERE the pellets go)
+	  * the spread does NOT come from the client. It is recomputed here, from the
+	    weapon definition and the shooter's own accumulated bloom:
+
+	        base   = isAiming and spreadAim or spreadHip
+	        base  += spreadMoving          while the shooter is actually moving
+	        cone   = min(base + bloom, spreadMax)
+	        bloom += bloomPerShot          after the shot, capped at spreadMax
+	        bloom -= bloomRecovery * dt    continuously since the last shot
+
+	    WeaponController must mirror that formula exactly. If the two sides
+	    disagree on the cone angle, the same seed produces different directions
+	    and the deterministic-pattern guarantee is worth nothing. The resolved
+	    cone is echoed back in the WeaponFired payload so remote clients can
+	    reproduce it without guessing.
+
+	── PERFORMANCE ─────────────────────────────────────────────────────────────
+	A four-survivor firefight is up to 88 accepted shots a second, and a shotgun
+	shot is ten pierce casts. Nothing in the hot loop allocates that it does not
+	have to: the pierce predicate is a module-level function with no upvalues, the
+	rate limiter is a fixed circular buffer, and effect replication is capped per
+	shot and range-culled rather than broadcast.
+
+	Melee weapons are not handled here at all — MeleeService owns fireMode
+	"Melee", and a swing that arrived on this remote is dropped.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
+local AudioConfig = require(Shared.Config.AudioConfig)
+local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
+local GoreConfig = require(Shared.Config.GoreConfig)
+local RaycastUtil = require(Shared.Util.RaycastUtil)
+local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
+local RigUtil = require(Shared.Util.RigUtil)
+local ShotPattern = require(Shared.Util.ShotPattern)
+local Trove = require(Shared.Util.Trove)
+local Types = require(Shared.Types)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
+
+type WeaponDefinition = WeaponConfig.WeaponDefinition
+
+--[[ Everything the server tracks about one shooter. Bloom lives here rather than
+     on the character so switching weapons or dying does not hand the player a
+     free reset of a cone they blew out a quarter of a second ago. ]]
+type ShooterState = {
+	rateTimes: { number }, -- circular buffer of the last N accepted shot times
+	rateCursor: number,
+	lastFireAt: number,
+	bloom: number, -- degrees of cone added by recent shots
+	bloomAt: number, -- when bloom was last brought up to date
+	bloomWeaponId: string?,
+	isAiming: boolean,
+}
+
+local BallisticsService = {}
+
+local VALIDATION = GameConfig.HitValidation
+
+-- One slot per shot allowed in the window, so the check is a single compare
+-- against the oldest of the last N shots. No table churn, no sorting, no drift.
+local RATE_SLOTS = math.max(math.floor(VALIDATION.MaxShotsPerSecond), 1)
+local RATE_WINDOW = 1.0
+
+--[[
+	The global rate cap lets an auto shotgun through at seven times its real fire
+	rate, so the weapon's own rpm is enforced too. The leniency exists because a
+	client firing at exactly 60/rpm will sometimes have two packets arrive
+	bunched by jitter, and silently eating a legitimate shot is a far worse bug
+	than letting a cheater gain 15%.
+]]
+local FIRE_DELAY_LENIENCY = 0.85
+
+-- Mirrors ShotPattern.generateSeed's range. A seed outside it is not a client
+-- this build produced.
+local SEED_MIN = 1
+local SEED_MAX = 2147483646
+
+-- Held-trigger intent, from the humanoid rather than from velocity, plus a
+-- velocity fallback for being carried, shoved or falling. A shooter drifting at
+-- walking-pace-over-ten is not "moving" for accuracy purposes.
+local MOVE_INTENT_EPSILON = 0.1
+local MOVING_SPEED_SQUARED = 9 -- (3 studs/s)^2
+
+--[[
+	Ten tracers from one shotgun blast read as one cone of light and cost ten
+	remote events to draw it. Three is enough to sell the spread; index 1 is
+	ShotPattern's guaranteed centre pellet, so the shot always draws where the
+	crosshair was. Impacts are capped for the same reason — a wall full of pellet
+	marks is worth something, ten remote events per trigger pull is not.
+]]
+local MAX_TRACER_EVENTS_PER_SHOT = 3
+local MAX_IMPACT_EVENTS_PER_SHOT = 4
+
+-- Effects beyond this are never sent. Same distance gore uses, for the same
+-- reason: a firefight across the map must not cost a distant client anything.
+local EFFECT_RADIUS = GoreConfig.Budget.CullDistance
+
+local EPSILON = 1e-4
+
+--[[ States in which a survivor cannot fire at all. Incapacitated is deliberately
+     absent: being down means the pistol only, which is checked separately. ]]
+local CANNOT_FIRE_STATES: { [string]: boolean } = {
+	[Enums.SurvivorState.Dead] = true,
+	[Enums.SurvivorState.Spectating] = true,
+	[Enums.SurvivorState.LedgeHanging] = true,
+	-- Pinned survivors cannot shoot their way out. That is the whole point of a
+	-- pin: it costs the team a second player's attention to answer.
+	[Enums.SurvivorState.Pinned] = true,
+}
+
+--[[ Roblox material -> AudioConfig.Impact key. Purely a naming bridge; the mix
+     numbers all live in AudioConfig. ]]
+local MATERIAL_SOUND: { [Enum.Material]: string } = {
+	[Enum.Material.Concrete] = "Concrete",
+	[Enum.Material.Brick] = "Concrete",
+	[Enum.Material.Cobblestone] = "Concrete",
+	[Enum.Material.Rock] = "Concrete",
+	[Enum.Material.Slate] = "Concrete",
+	[Enum.Material.Pavement] = "Concrete",
+	[Enum.Material.Limestone] = "Concrete",
+	[Enum.Material.Metal] = "Metal",
+	[Enum.Material.DiamondPlate] = "Metal",
+	[Enum.Material.CorrodedMetal] = "Metal",
+	[Enum.Material.Foil] = "Metal",
+	[Enum.Material.Wood] = "Wood",
+	[Enum.Material.WoodPlanks] = "Wood",
+	[Enum.Material.Glass] = "Glass",
+	[Enum.Material.Ice] = "Glass",
+	[Enum.Material.Water] = "Water",
+	[Enum.Material.Grass] = "Dirt",
+	[Enum.Material.LeafyGrass] = "Dirt",
+	[Enum.Material.Ground] = "Dirt",
+	[Enum.Material.Mud] = "Dirt",
+	[Enum.Material.Sand] = "Dirt",
+	[Enum.Material.Snow] = "Dirt",
+}
+local DEFAULT_MATERIAL_SOUND = "Concrete"
+
+local shooters: { [Player]: ShooterState } = {}
+local trove = Trove.new()
+local warned: { [string]: boolean } = {}
+
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn("[BallisticsService] " .. message)
+end
+
+local function isFiniteNumber(value: any): boolean
+	return typeof(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local function isFiniteVector(value: any): boolean
+	if typeof(value) ~= "Vector3" then
+		return false
+	end
+	local vector = value :: Vector3
+	return isFiniteNumber(vector.X) and isFiniteNumber(vector.Y) and isFiniteNumber(vector.Z)
+end
+
+local function isValidSeed(seed: any): boolean
+	return isFiniteNumber(seed) and seed >= SEED_MIN and seed <= SEED_MAX and math.floor(seed) == seed
+end
+
+local function stateFor(player: Player): ShooterState
+	local state = shooters[player]
+	if not state then
+		state = {
+			rateTimes = table.create(RATE_SLOTS, 0),
+			rateCursor = 0,
+			lastFireAt = 0,
+			bloom = 0,
+			bloomAt = 0,
+			bloomWeaponId = nil,
+			isAiming = false,
+		}
+		shooters[player] = state
+	end
+	return state :: ShooterState
+end
+
+--[[
+	True when this shot fits under MaxShotsPerSecond. The slot about to be
+	overwritten holds the Nth-most-recent shot; if that was under a second ago,
+	N shots already landed inside the window and this one is dropped. Silently —
+	an over-rate client is either lagging or cheating, and erroring at it tells a
+	cheater exactly which check they tripped.
+]]
+local function admitRate(state: ShooterState, now: number): boolean
+	local slot = (state.rateCursor % RATE_SLOTS) + 1
+	if now - state.rateTimes[slot] < RATE_WINDOW then
+		return false
+	end
+	state.rateTimes[slot] = now
+	state.rateCursor = slot
+	return true
+end
+
+--[[ Brings bloom up to the present. Switching weapons clears it: the cone
+     belongs to the gun that blew it out, not to the player. ]]
+local function decayBloom(state: ShooterState, definition: WeaponDefinition, now: number)
+	if state.bloomWeaponId ~= definition.id then
+		state.bloomWeaponId = definition.id
+		state.bloom = 0
+	else
+		local elapsed = math.max(now - state.bloomAt, 0)
+		state.bloom = math.max(state.bloom - definition.bloomRecovery * elapsed, 0)
+	end
+	state.bloomAt = now
+end
+
+local function isMoving(character: Model, humanoid: Humanoid): boolean
+	if humanoid.MoveDirection.Magnitude > MOVE_INTENT_EPSILON then
+		return true
+	end
+	local root = RigUtil.getRoot(character)
+	if not root then
+		return false
+	end
+	local velocity = root.AssemblyLinearVelocity
+	return velocity.X * velocity.X + velocity.Z * velocity.Z > MOVING_SPEED_SQUARED
+end
+
+--[[ The cone, in degrees of half-angle. Pure read — call decayBloom first. ]]
+local function coneFor(
+	state: ShooterState,
+	definition: WeaponDefinition,
+	character: Model,
+	humanoid: Humanoid
+): number
+	local base = if state.isAiming then definition.spreadAim else definition.spreadHip
+	if isMoving(character, humanoid) then
+		base += definition.spreadMoving
+	end
+	-- max() guards a definition whose spreadMax is under its own base spread:
+	-- bloom may only ever widen the cone, never tighten it.
+	return math.min(base + state.bloom, math.max(definition.spreadMax, base))
+end
+
+--[[
+	What one round does when it meets a surface. No upvalues, so this is created
+	once for the whole server rather than per shot.
+
+	  true   the round passes through and spends one point of penetration
+	  false  the round stops here
+
+	Corpses, gibs and severed limbs return true unconditionally. RigUtil.makeDebris
+	already sets CanQuery = false on them so they should never appear at all; this
+	covers the frame between a humanoid reaching zero and GoreService taking the
+	body, during which a fresh corpse must not eat the bullet meant for the Common
+	standing behind it.
+]]
+local function isPierceable(result: RaycastResult): boolean
+	local instance = result.Instance
+	local group = instance.CollisionGroup
+	if group == "Debris" or group == "Gib" then
+		return true
+	end
+
+	local model, humanoid = RigUtil.getCharacterFromPart(instance)
+	if not model or not humanoid then
+		-- Scenery. Walls stop rounds; that is what makes cover mean anything.
+		return false
+	end
+	if model:GetAttribute(Attributes.Infected.IsDead) == true or humanoid.Health <= 0 then
+		return true
+	end
+	if Players:GetPlayerFromCharacter(model) then
+		-- A round stops in a teammate. Letting a rifle thread the whole team is
+		-- how friendly fire goes from a tense mistake to a wipe.
+		return false
+	end
+	return true
+end
+
+local function headPositionOf(character: Model): Vector3?
+	local head = character:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then
+		return head.Position
+	end
+	local root = RigUtil.getRoot(character)
+	return if root then root.Position else nil
+end
+
+function BallisticsService:init()
+	trove:add(Players.PlayerRemoving:Connect(function(player: Player)
+		shooters[player] = nil
+	end))
+end
+
+function BallisticsService:start()
+	trove:add(Remotes.Event.FireWeapon.OnServerEvent:Connect(function(player: Player, payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		-- clientTime rides along in the payload and is deliberately ignored:
+		-- nothing in this build records a position history to rewind against, so
+		-- honouring HitValidation.MaxRewindTime would be theatre. See the report.
+		BallisticsService:resolveShot(player, payload.origin, payload.direction, payload.seed)
+	end))
+
+	--[[
+		Aim state is tracked here because the cone depends on it and the cone is
+		this service's to compute. Other services are free to connect to the same
+		remote; Roblox delivers to every listener.
+	]]
+	trove:add(Remotes.Event.SetAimState.OnServerEvent:Connect(function(player: Player, isAiming: any)
+		if typeof(isAiming) ~= "boolean" then
+			return
+		end
+		stateFor(player).isAiming = isAiming
+	end))
+end
+
+--[[ True while the player is aiming down sights, as the server understands it. ]]
+function BallisticsService:isAiming(player: Player): boolean
+	local state = shooters[player]
+	return state ~= nil and state.isAiming
+end
+
+--[[ The cone the player's next shot would use, in degrees. For the crosshair's
+     server-side twin, debug overlays and tests — resolveShot does not use it. ]]
+function BallisticsService:getEffectiveSpread(player: Player): number
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not character or not humanoid then
+		return 0
+	end
+
+	local inventory = Registry.find("InventoryService")
+	if not inventory then
+		return 0
+	end
+	local _, definition = inventory:getActiveWeapon(player)
+	if not definition then
+		return 0
+	end
+
+	local state = stateFor(player)
+	decayBloom(state, definition, os.clock())
+	return coneFor(state, definition, character, humanoid)
+end
+
+--[[
+	Resolves one trigger pull. Returns the hits, newest cast last, so a caller
+	can read the shot without listening for anything.
+
+	Every rejection returns an empty array and says nothing to the client. The
+	client already drew its own tracer; it reconciles from the ammo attributes and
+	the absence of a hitmarker, which is quieter and far harder to probe than an
+	error would be.
+]]
+function BallisticsService:resolveShot(
+	shooter: Player,
+	origin: Vector3,
+	direction: Vector3,
+	seed: number
+): { Types.HitRecord }
+	local records: { Types.HitRecord } = {}
+
+	-- ── shape of the packet ──────────────────────────────────────────────────
+	if typeof(shooter) ~= "Instance" or not shooter:IsA("Player") then
+		return records
+	end
+	if not isFiniteVector(origin) or not isFiniteVector(direction) then
+		return records
+	end
+	if direction.Magnitude < EPSILON then
+		return records
+	end
+	if not isValidSeed(seed) then
+		return records
+	end
+
+	-- ── is this player in a position to shoot at all ─────────────────────────
+	local character = shooter.Character
+	if not character or not character.Parent then
+		return records
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return records
+	end
+
+	local now = os.clock()
+	local state = stateFor(shooter)
+	if not admitRate(state, now) then
+		return records
+	end
+
+	local inventory = Registry.find("InventoryService")
+	if not inventory then
+		warnOnce("inventory", "InventoryService is not registered; every shot is being dropped")
+		return records
+	end
+
+	local weaponId, definition = inventory:getActiveWeapon(shooter)
+	if typeof(weaponId) ~= "string" or typeof(definition) ~= "table" then
+		return records
+	end
+	if definition.fireMode == "Melee" then
+		-- MeleeService owns the swing. A machete arriving on FireWeapon is a
+		-- confused client, not an attack.
+		return records
+	end
+
+	local survivors = Registry.find("SurvivorService")
+	if survivors then
+		if CANNOT_FIRE_STATES[survivors:getState(shooter)] then
+			return records
+		end
+		-- Down means the pistol, and only the pistol. Firing a rifle from the
+		-- floor would remove the entire cost of going down.
+		if survivors:isIncapacitated(shooter) and weaponId ~= GameConfig.Survivor.IncapWeapon then
+			return records
+		end
+	end
+
+	if now - state.lastFireAt < WeaponConfig.getFireDelay(definition) * FIRE_DELAY_LENIENCY then
+		return records
+	end
+
+	-- ── is the shot coming from where the shooter says it is ─────────────────
+	local headPosition = headPositionOf(character)
+	if not headPosition then
+		return records
+	end
+	if (origin - headPosition).Magnitude > VALIDATION.PositionTolerance then
+		return records
+	end
+	if
+		VALIDATION.RequireLineOfSight
+		and not RaycastUtil.hasLineOfSight(headPosition, origin, { character })
+	then
+		-- Within tolerance but through a wall: the muzzle has been pushed into
+		-- the room next door.
+		return records
+	end
+
+	-- Ammo is InventoryService's, always. It is also the last check, so a shot
+	-- rejected for any other reason costs the player nothing.
+	if not inventory:consumeAmmo(shooter, 1) then
+		return records
+	end
+
+	-- ── the cone ─────────────────────────────────────────────────────────────
+	local unit = direction.Unit
+	decayBloom(state, definition, now)
+	local spread = coneFor(state, definition, character, humanoid)
+	state.bloom = math.min(state.bloom + definition.bloomPerShot, math.max(definition.spreadMax, 0))
+	state.lastFireAt = now
+
+	--[[
+		Told to everyone else before a single ray is cast. Remote muzzle flash and
+		gunfire are how a player knows a teammate is engaging something, and the
+		couple of milliseconds the resolution takes is time that feedback does not
+		need to spend waiting. `spread` rides along so a remote client can rebuild
+		the identical cone from the seed.
+	]]
+	Remotes.fireAllExcept("WeaponFired", shooter, {
+		shooter = shooter,
+		weaponId = weaponId,
+		origin = origin,
+		direction = unit,
+		seed = seed,
+		spread = spread,
+	})
+
+	local audio = Registry.find("AudioService")
+	if audio then
+		audio:playAt(AudioConfig.WeaponFire[weaponId], origin)
+	end
+
+	-- ── resolution ───────────────────────────────────────────────────────────
+	local damageService = Registry.get("DamageService")
+	local damageType = if definition.pellets > 1 then Enums.DamageType.Pellet else Enums.DamageType.Bullet
+	local maxDistance = definition.maxRange * VALIDATION.MaxRangeSlack
+	local directions = ShotPattern.generate(unit, seed, definition.pellets, spread)
+	local ignore: { Instance } = { character }
+
+	local tracersSent = 0
+	local impactsSent = 0
+
+	for _, pelletDirection in directions do
+		local hits = RaycastUtil.pierce(
+			origin,
+			pelletDirection,
+			maxDistance,
+			definition.penetration,
+			ignore,
+			isPierceable
+		)
+
+		local last = hits[#hits]
+		local endPosition = if last then last.position else origin + pelletDirection * maxDistance
+		local piercedBodies = 0
+
+		for _, hit in hits do
+			local model, targetHumanoid = RigUtil.getCharacterFromPart(hit.instance)
+
+			if model and targetHumanoid and RigUtil.isAlive(model) then
+				local region = RigUtil.getHitRegion(hit.instance)
+				local result = damageService:applyDamage(
+					model,
+					definition.damage,
+					Types.newDamageContext({
+						attacker = shooter,
+						weaponId = weaponId,
+						damageType = damageType,
+						region = region,
+						hitPart = hit.instance,
+						hitPosition = hit.position,
+						hitNormal = hit.normal,
+						direction = pelletDirection,
+						distance = hit.distance,
+						piercedCount = piercedBodies,
+					})
+				)
+
+				if not result.blocked then
+					table.insert(records, {
+						model = model,
+						part = hit.instance,
+						position = hit.position,
+						normal = hit.normal,
+						distance = hit.distance,
+						region = region,
+						result = result,
+					})
+				end
+
+				piercedBodies += 1
+			elseif not model then
+				-- Scenery. Blood on flesh is GoreService's; sparks and dust on the
+				-- world are this one's.
+				if impactsSent < MAX_IMPACT_EVENTS_PER_SHOT then
+					impactsSent += 1
+					Remotes.fireInRange("ImpactEffect", hit.position, EFFECT_RADIUS, {
+						position = hit.position,
+						normal = hit.normal,
+						material = hit.material,
+						damageType = damageType,
+					})
+				end
+				if audio then
+					audio:playAt(
+						AudioConfig.Impact[MATERIAL_SOUND[hit.material] or DEFAULT_MATERIAL_SOUND],
+						hit.position
+					)
+				end
+			end
+		end
+
+		if tracersSent < MAX_TRACER_EVENTS_PER_SHOT then
+			tracersSent += 1
+			-- Ranged from the middle of the beam: a tracer that crosses a room is
+			-- worth drawing to a client standing at either end of it.
+			Remotes.fireInRange("TracerEffect", (origin + endPosition) * 0.5, EFFECT_RADIUS, {
+				origin = origin,
+				endPosition = endPosition,
+				weaponId = weaponId,
+			})
+		end
+	end
+
+	return records
+end
+
+Registry.register("BallisticsService", BallisticsService)
+
+return BallisticsService
