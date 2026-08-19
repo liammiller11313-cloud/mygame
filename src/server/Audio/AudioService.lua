@@ -230,7 +230,9 @@ end
 
 --[[
 	One emitter per listener, in that listener's own PlayerGui, so the excluded
-	player genuinely never receives the instance.
+	player never receives the instance at all. That container is the only
+	server-side replication filter Roblox offers; there is no way to make a
+	single Workspace emitter inaudible to one client.
 
 	The sample and the pitch are chosen ONCE and shared: this is one event in the
 	world, and two survivors standing together hearing two different waveforms of
@@ -238,7 +240,8 @@ end
 
 	Returns nil — and costs nothing at all — when nobody is left to hear it,
 	which is the whole of solo play. `_admit` is deliberately called after that
-	check so an unheard sound never spends a voice.
+	check so an unheard sound never spends a voice. The out-of-earshot skip is
+	what keeps this affordable at 22 rounds a second.
 ]]
 function AudioService:_playExcluding(definition: SoundDefinition, position: Vector3, exclude: Player): Sound?
 	if definition == nil then
@@ -258,7 +261,9 @@ function AudioService:_playExcluding(definition: SoundDefinition, position: Vect
 	local reach = (definition.rollOffMax or 200) + AUDIBLE_SLACK
 	local reachSquared = reach * reach
 
-	local listeners: { Player } = {}
+	-- The GUIs rather than the players: the second loop would otherwise look each
+	-- one up again, and a player who left in between would be a nil parent.
+	local guis: { Instance } = {}
 	for _, player in Players:GetPlayers() do
 		if player == exclude then
 			continue
@@ -274,10 +279,10 @@ function AudioService:_playExcluding(definition: SoundDefinition, position: Vect
 			-- emitter for someone who cannot hear it is pure instance churn.
 			continue
 		end
-		table.insert(listeners, player)
+		table.insert(guis, playerGui)
 	end
 
-	if #listeners == 0 then
+	if #guis == 0 then
 		return nil
 	end
 
@@ -289,14 +294,10 @@ function AudioService:_playExcluding(definition: SoundDefinition, position: Vect
 	local id = AudioConfig.pickId(definition)
 	local pitch = random:NextNumber(definition.pitchMin or 1, definition.pitchMax or 1)
 
-	local holders = table.create(#listeners)
+	local holders = table.create(#guis)
 	local primary: Sound? = nil
 
-	for _, player in listeners do
-		local playerGui = player:FindFirstChildOfClass("PlayerGui")
-		if not playerGui then
-			continue
-		end
+	for _, playerGui in guis do
 		local holder = self:_buildEmitter(position)
 		local sound = self:_buildSound(definition, id, pitch)
 		sound.Parent = holder
@@ -309,13 +310,7 @@ function AudioService:_playExcluding(definition: SoundDefinition, position: Vect
 		primary = primary or sound
 	end
 
-	if not primary then
-		-- Everyone left between the two loops. Give the voice slot straight back.
-		self._categoryCounts[category] = math.max((self._categoryCounts[category] or 1) - 1, 0)
-		return nil
-	end
-
-	self:_track(primary, holders, category, definition)
+	self:_track(primary :: Sound, holders, category, definition)
 	return primary
 end
 

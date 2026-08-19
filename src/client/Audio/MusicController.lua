@@ -334,7 +334,18 @@ local function stepLoop(voice: Voice, cue: any, deltaTime: number)
 	end
 
 	local length = head.TimeLength
+	if length <= 0 then
+		--[[ Still streaming in, or an id that will never resolve. Either way
+		     there is nothing to schedule an overlap against, and nothing to
+		     restart — a "restart it because it is not playing" fallback here
+		     would call Play() twenty times a second forever on a broken id. ]]
+		return
+	end
+
 	if #voice.sounds < 2 or overlap <= 0 or length <= overlap then
+		-- A track shorter than its own crossfade, or one the config asked not to
+		-- overlap. A hard restart sounds worse and is still better than a cue
+		-- going silent halfway through a horde.
 		if not head.IsPlaying and not head.Looped then
 			head.TimePosition = 0
 			head:Play()

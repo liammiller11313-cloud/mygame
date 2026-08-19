@@ -105,6 +105,34 @@ local MAX_SCALE = 1.35
 local MENU_SCRIM = 0.04
 local RESULTS_SCRIM = 0.02
 
+--[[
+	Victory confetti. Fired from the two bottom corners like a pair of cannons
+	rather than dropped from the top: a burst reads as celebration, a drizzle
+	reads as snow, and this screen only ever appears when a team survived all
+	seventeen minutes.
+
+	Kept on the palette — orange, white and gold, the same three the survivor
+	outlines use — so the one genuinely joyful moment in the game still looks
+	like it belongs to it.
+
+	Everything is pooled and driven off the single RenderStepped this controller
+	already owns. The pieces are plain Frames with a UIStroke-free fill, because
+	a hundred ImageLabels would cost real frame time on a phone for something the
+	player looks at for four seconds.
+]]
+local CONFETTI_COUNT = 108
+local CONFETTI_GRAVITY = 1.05 -- screen heights per second squared
+local CONFETTI_SPEED_MIN = 0.95
+local CONFETTI_SPEED_MAX = 1.65
+local CONFETTI_SPREAD = 0.42 -- radians either side of straight up
+local CONFETTI_DRAG = 0.72
+local CONFETTI_SWAY = 0.22 -- horizontal flutter amplitude
+local CONFETTI_SWAY_RATE = 3.4
+local CONFETTI_LIFETIME = 4.2
+local CONFETTI_FADE_AT = 0.65 -- fraction of life before it starts fading
+local CONFETTI_WIDTH = 7
+local CONFETTI_HEIGHT = 11
+
 local BLUR_SIZE = 26
 -- UITheme's durations, expressed as the chase rates the frame loop wants.
 local BLUR_SPEED = 1 / MOTION.Normal
@@ -244,6 +272,9 @@ local menuRoot: Frame
 local menuLayer: Frame
 local resultsRoot: Frame
 local resultsLayer: Frame
+local confettiLayer: Frame
+local confetti: { any } = {}
+local confettiActive = 0
 local teleportRoot: Frame
 local teleportLayer: Frame
 
@@ -904,6 +935,112 @@ local function fillRows(scores: any)
 	end
 end
 
+--[[ Builds the pool once. Pieces live hidden until a burst claims them. ]]
+local function buildConfetti()
+	local palette = UITheme.SurvivorColors
+	for index = 1, CONFETTI_COUNT do
+		local piece = newFrame(confettiLayer, "Piece" .. index, palette[((index - 1) % #palette) + 1], 0)
+		piece.AnchorPoint = Vector2.new(0.5, 0.5)
+		piece.Size = UDim2.fromOffset(CONFETTI_WIDTH, CONFETTI_HEIGHT)
+		piece.Visible = false
+		piece.ZIndex = 3
+		confetti[index] = {
+			frame = piece,
+			x = 0,
+			y = 0,
+			vx = 0,
+			vy = 0,
+			age = 0,
+			phase = 0,
+			spin = 0,
+			alive = false,
+		}
+	end
+end
+
+--[[ Claims the whole pool and throws it from both bottom corners. ]]
+local function burstConfetti()
+	confettiActive = 0
+	for index, piece in confetti do
+		-- Alternate cannons so both corners fill at the same rate.
+		local fromLeft = index % 2 == 1
+		local angle = (if fromLeft then -math.pi / 2 else -math.pi / 2)
+			+ (if fromLeft then 1 else -1) * (CONFETTI_SPREAD * (0.35 + math.random() * 0.65))
+		local speed = CONFETTI_SPEED_MIN + math.random() * (CONFETTI_SPEED_MAX - CONFETTI_SPEED_MIN)
+
+		piece.x = if fromLeft then -0.02 else 1.02
+		piece.y = 1.02
+		piece.vx = math.cos(angle) * speed * (if fromLeft then -1.6 else 1.6)
+		piece.vy = math.sin(angle) * speed
+		piece.age = -(index % 9) * 0.035 -- stagger, so it reads as a burst not a wall
+		piece.phase = math.random() * math.pi * 2
+		piece.spin = (math.random() * 2 - 1) * 420
+		piece.alive = true
+		confettiActive += 1
+
+		piece.frame.Visible = false
+		piece.frame.BackgroundTransparency = 0
+	end
+end
+
+local function clearConfetti()
+	for _, piece in confetti do
+		piece.alive = false
+		piece.frame.Visible = false
+	end
+	confettiActive = 0
+end
+
+--[[ One integration step for the whole pool. Returns early once everything has
+     landed, so the result screen costs nothing to leave open. ]]
+local function updateConfetti(dt: number)
+	if confettiActive <= 0 then
+		return
+	end
+
+	for _, piece in confetti do
+		if not piece.alive then
+			continue
+		end
+
+		piece.age += dt
+		if piece.age < 0 then
+			continue -- still waiting its turn in the stagger
+		end
+
+		if piece.age >= CONFETTI_LIFETIME then
+			piece.alive = false
+			piece.frame.Visible = false
+			confettiActive -= 1
+			continue
+		end
+
+		piece.vy += CONFETTI_GRAVITY * dt
+		piece.vx -= piece.vx * CONFETTI_DRAG * dt
+		piece.x += (piece.vx + math.sin(piece.age * CONFETTI_SWAY_RATE + piece.phase) * CONFETTI_SWAY) * dt
+		piece.y += piece.vy * dt
+
+		-- A piece that has fallen well clear of the screen is done early.
+		if piece.y > 1.15 and piece.vy > 0 then
+			piece.alive = false
+			piece.frame.Visible = false
+			confettiActive -= 1
+			continue
+		end
+
+		local life = piece.age / CONFETTI_LIFETIME
+		local fade = if life <= CONFETTI_FADE_AT
+			then 0
+			else (life - CONFETTI_FADE_AT) / (1 - CONFETTI_FADE_AT)
+
+		local frame = piece.frame
+		frame.Visible = true
+		frame.Position = UDim2.fromScale(piece.x, piece.y)
+		frame.Rotation = piece.age * piece.spin
+		frame.BackgroundTransparency = fade
+	end
+end
+
 --[[ The result screen. SURVIVED is white and quiet; WIPED OUT is the one place
      on this screen red belongs, and it gets the poster voice — the team did not
      lose a match, the light went out on them. ]]
@@ -943,6 +1080,14 @@ local function showResults(payload: any)
 
 	fillRows(payload and payload.scores)
 
+	-- Confetti is the one flourish this game gets, and it is earned: surviving
+	-- all seven waves is meant to be uncommon.
+	if survived then
+		burstConfetti()
+	else
+		clearConfetti()
+	end
+
 	state.results = true
 	state.open = false
 	state.returnAt = os.clock() + GameModeConfig.Matchmaking.PostRoundDuration
@@ -980,6 +1125,7 @@ local function dismissResults()
 		return
 	end
 	state.results = false
+	clearConfetti()
 	playUi(AudioConfig.UI.MenuBack)
 	MainMenuController:open()
 end
@@ -1109,7 +1255,9 @@ local function update(dt: number)
 		return
 	end
 
-	-- Result screen: the only thing moving is the clock back to the menu.
+	-- Result screen: the clock back to the menu, and any confetti still in the air.
+	updateConfetti(dt)
+
 	local remaining = math.max(math.ceil(state.returnAt - now), 0)
 	if remaining ~= state.returnShown then
 		state.returnShown = remaining
@@ -1388,6 +1536,15 @@ local function buildResults()
 	resultsRoot.Visible = false
 	resultsLayer = newLayer(resultsRoot)
 
+	--[[ Confetti sits in its own unscaled layer directly on the results root, not
+	     inside the scaled poster layout: a burst should fill the actual screen at
+	     any resolution rather than being shrunk along with the type. ]]
+	confettiLayer = newFrame(resultsRoot, "Confetti", COLOR.Background, 1)
+	confettiLayer.Size = UDim2.fromScale(1, 1)
+	confettiLayer.ClipsDescendants = true
+	confettiLayer.ZIndex = 3
+	buildConfetti()
+
 	resultOutcome = newLabel(resultsLayer, "Outcome", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
 	resultOutcome.Position = UDim2.new(COLUMN_X, 0, 0.14, 0)
 	resultOutcome.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
@@ -1448,7 +1605,7 @@ local function buildResults()
 	resultContinue.Position = UDim2.fromOffset(0, LAYOUT.PanelPadding)
 	resultContinue.Size = UDim2.new(1, 0, 0, TEXT.Display + 4)
 	resultContinue.ZIndex = 2
-	resultContinue.Text = "CONTINUE"
+	resultContinue.Text = "MAIN MENU"
 
 	trove:connect(continue.MouseEnter, function()
 		resultContinue.TextColor3 = COLOR.AccentBright

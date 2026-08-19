@@ -201,7 +201,12 @@ local BILE_NOISE_WEIGHT = 9.0
 
 local BILE_POOL_SIZE = 12
 local BILE_CELLS = 7
+local BILE_MIST_RATE = 14
 local BILE_FADE_TIME = 2.0
+
+-- Same ceiling and same reasoning as the fire pools: the oldest splash is
+-- retired rather than a thrown jar refused.
+local MAX_BILE_ZONES = 4
 
 -- ── shared visuals ──────────────────────────────────────────────────────────
 
@@ -336,13 +341,26 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 function ProjectileService:init()
-	local folder = Workspace:FindFirstChild("FL_Projectiles")
+	self:_container()
+end
+
+--[[ One folder in Workspace holding every part this service is responsible for,
+     so a developer can see at a glance what is still burning — and so a bad boot
+     order can never leave a thrown object unparented and silently gone. ]]
+function ProjectileService:_container(): Instance
+	local folder = self._folder
+	if folder and folder.Parent then
+		return folder
+	end
+
+	folder = Workspace:FindFirstChild("FL_Projectiles")
 	if not folder then
 		folder = Instance.new("Folder")
 		folder.Name = "FL_Projectiles"
 		folder.Parent = Workspace
 	end
 	self._folder = folder
+	return folder
 end
 
 function ProjectileService:start()
@@ -431,13 +449,19 @@ function ProjectileService:throw(
 	     throw would cost the player an item they will swear they threw. The
 	     claim is replaced with the server's own muzzle instead. ]]
 	local from = muzzle
-	if isFiniteVector(origin) and (origin :: Vector3 - muzzle).Magnitude <= VALIDATION.PositionTolerance then
-		from = origin :: Vector3
+	if isFiniteVector(origin) then
+		local claimed = origin :: Vector3
+		if (claimed - muzzle).Magnitude <= VALIDATION.PositionTolerance then
+			from = claimed
+		end
 	end
 
 	local aim = root.CFrame.LookVector
-	if isFiniteVector(direction) and (direction :: Vector3).Magnitude > EPSILON then
-		aim = (direction :: Vector3).Unit
+	if isFiniteVector(direction) then
+		local aimed = direction :: Vector3
+		if aimed.Magnitude > EPSILON then
+			aim = aimed.Unit
+		end
 	end
 
 	local strength = 1
@@ -469,7 +493,7 @@ function ProjectileService:_spawnProjectile(
 	character: Model?
 )
 	if #self._live >= MAX_LIVE_PROJECTILES then
-		self:_retireProjectile(1, false)
+		self:_retireProjectile(1)
 	end
 
 	local trove = Trove.new()
@@ -538,7 +562,7 @@ function ProjectileService:_spawnProjectile(
 		body.Material = Enum.Material.Neon
 	end
 
-	body.Parent = self._folder
+	body.Parent = self:_container()
 	trove:add(body)
 
 	body.AssemblyLinearVelocity = aim * (THROW_SPEED * strength) + Vector3.yAxis * THROW_LIFT
@@ -580,6 +604,7 @@ function ProjectileService:_spawnProjectile(
 		endsAt = os.clock() + fuse,
 		lureAt = 0,
 		beepAt = 0,
+		lit = false,
 		-- A bottle ends on its first contact; a pipe bomb ends on its fuse and
 		-- contact only decides where it rolls to next.
 		shattersOnContact = not bounces,
@@ -609,7 +634,7 @@ end
 function ProjectileService:_stepProjectile(record: any, index: number, now: number)
 	local body = record.body
 	if not body or not body.Parent then
-		self:_retireProjectile(index, false)
+		self:_retireProjectile(index)
 		return
 	end
 
@@ -684,10 +709,10 @@ function ProjectileService:_detonate(record: any, index: number, position: Vecto
 		self:_spawnBileZone(owner, position, record.body)
 	end
 
-	self:_retireProjectile(index, true)
+	self:_retireProjectile(index)
 end
 
-function ProjectileService:_retireProjectile(index: number, _detonated: boolean)
+function ProjectileService:_retireProjectile(index: number)
 	local record = self._live[index]
 	if not record then
 		return
@@ -772,7 +797,7 @@ function ProjectileService:_blastEffect(position: Vector3)
 	flash.Material = Enum.Material.Neon
 	flash.Position = position
 	decorate(flash)
-	flash.Parent = self._folder
+	flash.Parent = self:_container()
 
 	local glow = Instance.new("PointLight")
 	glow.Color = COLOR.AccentBright
@@ -842,7 +867,7 @@ function ProjectileService:_spawnFirePool(owner: Player?, position: Vector3, bod
 	anchor.Transparency = 1
 	anchor.Position = origin
 	decorate(anchor)
-	anchor.Parent = self._folder
+	anchor.Parent = self:_container()
 	trove:add(anchor)
 
 	local light = Instance.new("PointLight")
@@ -974,6 +999,10 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 function ProjectileService:_spawnBileZone(owner: Player?, position: Vector3, body: BasePart?)
+	if #self._biles >= MAX_BILE_ZONES then
+		self:_retireBile(1)
+	end
+
 	local ignore: { Instance } = if body then { body } else {}
 	local origin = groundedAt(position, ignore) + Vector3.new(0, 0.2, 0)
 
@@ -988,7 +1017,7 @@ function ProjectileService:_spawnBileZone(owner: Player?, position: Vector3, bod
 	anchor.Material = Enum.Material.Neon
 	anchor.Transparency = 0.35
 	decorate(anchor)
-	anchor.Parent = self._folder
+	anchor.Parent = self:_container()
 	trove:add(anchor)
 
 	for _ = 1, BILE_CELLS do
@@ -1019,7 +1048,7 @@ function ProjectileService:_spawnBileZone(owner: Player?, position: Vector3, bod
 		NumberSequenceKeypoint.new(1, 1),
 	})
 	mist.Lifetime = NumberRange.new(1.5, 3)
-	mist.Rate = 14
+	mist.Rate = BILE_MIST_RATE
 	mist.Speed = NumberRange.new(1, 4)
 	mist.SpreadAngle = Vector2.new(60, 60)
 	mist.Parent = anchor
@@ -1049,22 +1078,21 @@ function ProjectileService:_stepBile(record: any, index: number, now: number, bo
 	end
 
 	local remaining = record.endsAt - now
+	local infected = Registry.find("InfectedService")
 
-	if now >= record.lureAt then
+	if infected and now >= record.lureAt then
 		record.lureAt = now + BILE_LURE_REFRESH
-		local infected = Registry.find("InfectedService")
-		if infected then
-			infected:lure(record.origin, BILE_LURE_RADIUS, remaining)
-		end
+		--[[ Re-issued for the same reason a pipe bomb's is: commons that spawn
+		     into the wave after the jar broke have to come running too. The hold
+		     shrinks with the splash, so the crowd releases as it dries. ]]
+		infected:lure(record.origin, BILE_LURE_RADIUS, remaining)
 	end
 
 	if remaining <= BILE_FADE_TIME then
 		local fade = math.clamp(remaining / BILE_FADE_TIME, 0, 1)
-		record.mist.Rate = 14 * fade
+		record.mist.Rate = BILE_MIST_RATE * fade
 		record.anchor.Transparency = 1 - 0.65 * fade
 	end
-
-	local infected = Registry.find("InfectedService")
 
 	for _, entry in bodies.survivors do
 		if not withinColumn(record.origin, entry.position, BILE_SPLASH_RADIUS, BILE_HEIGHT) then
@@ -1205,7 +1233,7 @@ end
      a round reset: the next round must not begin inside the last one's fire. ]]
 function ProjectileService:clearAll()
 	for index = #self._live, 1, -1 do
-		self:_retireProjectile(index, false)
+		self:_retireProjectile(index)
 	end
 	for index = #self._fires, 1, -1 do
 		self:_retireFire(index)
