@@ -90,6 +90,62 @@ local function liveFolder(): Folder
 end
 
 --[[
+	Everything in a supplied map that must not come into the world with it.
+
+	The same argument PlaceholderFactory makes about rigs, for the same reason: a
+	map downloaded from the Toolbox is somebody else's code, and a Script inside
+	it runs on OUR server with full permissions the moment it is parented. It does
+	not have to be malicious to be a problem — the Zombieville build shipped with
+	a `GM.Script` whose first line waits forever on a child that does not exist,
+	which is a thread hung for the life of the server.
+
+	Deliberately NARROWER than the rig rule. That one also strips Sounds, because
+	forty-six rigs each carrying a looping moan blows the voice budget on its own;
+	a map's sounds are authored ambience and are left alone. What goes is
+	behaviour that either endangers the server or competes with a system this game
+	already owns:
+
+	  * every kind of script — the security case, and the hang above
+	  * ProximityPrompt and ClickDetector — the game has its own interact system,
+	    and a second one on the same geometry is a prompt the player can press
+	    that nothing is listening to
+]]
+local MAP_STRIPPED = { "LuaSourceContainer", "ProximityPrompt", "ClickDetector" }
+
+local function sanitise(root: Instance, mapId: string)
+	local removed = 0
+	local names: { string } = {}
+
+	for _, descendant in root:GetDescendants() do
+		for _, className in MAP_STRIPPED do
+			if descendant:IsA(className) then
+				if #names < 6 then
+					table.insert(names, descendant:GetFullName())
+				end
+				descendant:Destroy()
+				removed += 1
+				break
+			end
+		end
+	end
+
+	--[[ Printed rather than silent. Somebody who put a script in their map on
+	     purpose should find out from the game rather than from it not working,
+	     and the names are what turn "something was removed" into "that one". ]]
+	if removed > 0 then
+		print(
+			string.format(
+				"[MapService] stripped %d script/prompt instance(s) from %s: %s%s",
+				removed,
+				mapId,
+				table.concat(names, ", "),
+				if removed > #names then string.format(" (+%d more)", removed - #names) else ""
+			)
+		)
+	end
+end
+
+--[[
 	Finds a map's source model.
 
 	Also looks in Workspace.Maps, because that is where a level designer
@@ -204,6 +260,9 @@ function MapService:load(mapId: string): boolean
 		clone = source:Clone()
 	end
 	clone.Name = mapId
+	--[[ Before it is parented, not after. A Script runs the instant it enters the
+	     world, so stripping afterwards is a race this would sometimes lose. ]]
+	sanitise(clone, mapId)
 	clone.Parent = liveFolder()
 
 	currentRoot = clone

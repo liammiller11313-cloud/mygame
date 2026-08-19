@@ -909,6 +909,20 @@ local function refreshItems()
 end
 
 --[[
+	How many kill feed rows are allowed right now.
+
+	Declared HERE, above applyTouchLayout, and not down with the rest of the kill
+	feed where it reads more naturally. A Lua closure can only see the locals that
+	exist at the point it is WRITTEN — a `local function` further down the file is
+	a different variable the closure never binds to, so calling it resolves a nil
+	global at runtime and nothing says so until that line executes. It shipped
+	exactly that way: the HUD died at start() and took every screen with it.
+]]
+local function feedLimit(): number
+	return if state.touch then TOUCH_FEED_LIMIT else KILLFEED_HARD_MAX
+end
+
+--[[
 	Moves the HUD out of the way of the controls a touchscreen adds.
 
 	Two changes, both about the fact that a phone in landscape is around 390
@@ -1042,12 +1056,9 @@ end
 
 --[[ A free row, or the oldest one if every row is spoken for. Losing the top
      line to the newest kill is the right way round: under a horde the bottom of
-     the feed is the only part still true. ]]
-local function feedLimit(): number
-	return if state.touch then TOUCH_FEED_LIMIT else KILLFEED_HARD_MAX
-end
+     the feed is the only part still true.
 
---[[ Recycles the oldest row once the feed is at its limit, rather than only once
+     Recycles the oldest row once the feed is at its limit, rather than only once
      the pool runs dry. The pool is sized for the desktop limit and stays that
      size, so a player who picks up a controller mid-round gets the full feed back
      without anything being rebuilt. ]]

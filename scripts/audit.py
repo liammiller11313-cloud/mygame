@@ -341,6 +341,46 @@ for p, text in sources.items():
             )
 
 
+# ── 9c. Local functions called before they are declared ─────────────────────
+# The bug this exists for: `applyTouchLayout` at line 926 calling `feedLimit()`,
+# which is `local function feedLimit` at line 1046. A Lua closure binds only the
+# locals that EXIST where it is written — a local declared further down is a
+# different variable the closure never sees, so the name resolves to a global and
+# is nil. Nothing complains until that line runs, and it ran in start(): the HUD
+# died and took every screen with it.
+#
+# Check 8 misses this because the name IS defined in the file, just too late.
+#
+# A bare forward declaration (`local f` early, `f = function()` later) is the
+# correct way to do this deliberately, so a call after one of those is fine.
+for p, text in sources.items():
+    lines = text.split("\n")
+
+    declared_at = {}          # name -> line of `local function name`
+    forward_at = {}           # name -> line of a bare `local name` declaration
+    for index, line in enumerate(lines, start=1):
+        m = re.match(r'\s*local function ([A-Za-z_]\w*)', line)
+        if m and m.group(1) not in declared_at:
+            declared_at[m.group(1)] = index
+        m = re.match(r'\s*local ([A-Za-z_]\w*)\s*(?::\s*[^=]+)?$', line)
+        if m and m.group(1) not in forward_at:
+            forward_at[m.group(1)] = index
+
+    for name, decl_line in declared_at.items():
+        forward = forward_at.get(name)
+        if forward and forward < decl_line:
+            continue          # properly forward-declared
+        for index, line in enumerate(lines[: decl_line - 1], start=1):
+            if re.match(r'\s*(--|\])', line):
+                continue
+            if re.search(r'(?<![.:\w])' + re.escape(name) + r'\s*\(', line):
+                problems.append(
+                    f"{rel(p)}:{index}  calls {name}() but `local function {name}` is not until "
+                    f"line {decl_line} — the closure binds a nil global, not that local"
+                )
+                break
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no
