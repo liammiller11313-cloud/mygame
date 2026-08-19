@@ -59,6 +59,12 @@ type Spot = {
 	index: number,
 	name: string,
 	cframe: CFrame,
+	--[[ The folder the kit was found in, and where both the ghost and every
+	     refill go back. It has to be this rather than Workspace: everything
+	     inside the live map is destroyed when the map unloads, and a ghost
+	     parented to the world root would outlive its map and stack up one copy
+	     per round for the life of the server. ]]
+	folder: Instance,
 	template: Model,
 	live: Model?, -- the kit currently sitting here, if any
 	ghost: Model?, -- the faint outline shown while it is gone
@@ -133,7 +139,7 @@ local function makeGhost(spot: Spot): Model?
 		end
 	end
 	ghost:PivotTo(spot.cframe)
-	ghost.Parent = spot.live and spot.live.Parent or Workspace
+	ghost.Parent = spot.folder
 	return ghost
 end
 
@@ -145,10 +151,15 @@ local function clearGhost(spot: Spot)
 end
 
 --[[ Puts a kit back at a spot. Idempotent: called from the tick, so it has to be
-     safe to reach with a kit already there. ]]
-local function place(spot: Spot, parent: Instance)
+     safe to reach with a kit already there. Returns false when the spot's folder
+     has gone, which means the map it belonged to was unloaded and this spot is
+     about to be rebuilt out of existence anyway. ]]
+local function place(spot: Spot): boolean
 	if spot.live and spot.live.Parent then
-		return
+		return true
+	end
+	if not spot.folder or not spot.folder.Parent then
+		return false
 	end
 	clearGhost(spot)
 
@@ -156,11 +167,12 @@ local function place(spot: Spot, parent: Instance)
 	model.Name = spot.name
 	model:PivotTo(spot.cframe)
 	dressAsPickup(model, spot.index)
-	model.Parent = parent
+	model.Parent = spot.folder
 
 	spot.live = model
 	spot.refillAt = 0
 	spot.carrier = nil
+	return true
 end
 
 --[[ Marks a spot empty. The clock does not start here — `taken` is the state
@@ -272,6 +284,7 @@ function MedkitService:rebuild(): number
 			index = indexFromName(model.Name, order),
 			name = model.Name,
 			cframe = model:GetPivot(),
+			folder = folder,
 			template = template,
 			live = model,
 			ghost = nil,
@@ -349,8 +362,6 @@ end
 
 function MedkitService:_step()
 	local now = serverNow()
-	local mapService = Registry.find("MapService")
-	local root = mapService and mapService:getCurrentRoot()
 
 	for _, spot in spots do
 		--[[ A carrier who left took the kit with them and will never spend it.
@@ -361,7 +372,7 @@ function MedkitService:_step()
 		end
 
 		if spot.refillAt > 0 and now >= spot.refillAt then
-			place(spot, root or Workspace)
+			place(spot)
 		end
 	end
 end

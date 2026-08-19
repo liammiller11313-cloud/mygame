@@ -74,6 +74,49 @@ event — so tag those two by hand when you want them.
 
 ---
 
+## Medkits
+
+Inside **each** map, put a folder called `Medkits`:
+
+```
+Zombieville/
+    Medkits/
+        Medkit 1
+        Medkit 2
+        ...
+        Medkit 11
+```
+
+**You don't tag anything.** Same rule as the crates — the game finds the folder by
+name when the map loads and does the rest. Naming is forgiving: `Medkit 3`,
+`Medkit3` and `medkit 3` all work, and the folder can be `Medkits` or `medkits`.
+Eleven is what you have; nothing enforces a count.
+
+### How they behave
+
+- **Walk up and take it.** Instant, like any other pickup — no hold. It lands in
+  your Health slot and shows in the hotbar.
+- **It rides on your back**, visible to the whole team. That is the point: in
+  Left 4 Dead the most useful thing you know about a teammate is whether they
+  still have a kit, and you learn it by looking at them.
+- **Use it** (H on desktop, or press the medkit slot again on a controller or
+  phone) for a five-second heal worth 80% of the health you are missing — so the
+  kit is worth most to whoever is worst off.
+- **The spawn point refills thirty seconds after the kit is spent**, not thirty
+  seconds after it is taken. Carrying an unused kit does not quietly restock the
+  map behind you. A faint ghost is left where it was, so a player who has learned
+  the map can plan around a kit that is not there yet.
+- If the person carrying it **disconnects**, the spawn point refills on the same
+  clock rather than the map being one medkit poorer for the rest of the round.
+
+The prop on the back is scaled down from your own model, and anything larger than
+`MapConfig.Medkits.CarryMaxSize` is scaled to fit rather than by the fixed factor
+— the supplied models are built to be read on the floor, not worn, and a big one
+would otherwise become a wardrobe on somebody's shoulder. `CarryOffset` in
+`MapConfig` moves it if it sits wrong on your rig.
+
+---
+
 ## Ammo crates
 
 Inside **each** map, put a folder called `Ammo Crate`:

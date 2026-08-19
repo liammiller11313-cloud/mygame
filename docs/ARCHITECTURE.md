@@ -442,6 +442,19 @@ MatchmakingService:advertise()
   wrap every call in `pcall` and fall back to "run it on this server". A developer
   pressing Play must always get a round, never a matchmaking error.
 
+### `Level/MedkitService.lua` → `"MedkitService"`
+
+Owns the `Medkits` folder in the live map: dresses each model as a pickup, and
+refills a spawn point 30s after the kit it produced is **spent**. Listens to
+`InventoryService.pickedUp` and `.itemConsumed` — not `.changed`, which cannot
+tell a spend from a drop, a swap or a death, and refilling on those would print
+medkits.
+
+### `Survivors/CarryVisualService.lua` → `"CarryVisualService"`
+
+Mirrors the Health slot onto the character, so the kit is visible on a survivor's
+back to the whole team.
+
 ### `Level/AtmosphereService.lua` → `"AtmosphereService"`
 The game is called Fading Light. Make that literal: the round opens at dusk and is
 pitch dark by wave 7, driven off `RoundService:getElapsed()` rather than a free-
@@ -476,6 +489,28 @@ Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes 
 | `UI/InfectedController.lua` | `"InfectedController"` | Versus special-infected class picker |
 | `UI/MapVoteController.lua` | `"MapVoteController"` | end-of-round and fresh-server map vote |
 | `UI/ScaleLayer.lua` | *(none — a helper, not a controller)* | resolution independence for every ScreenGui |
+| `UI/GamepadFocus.lua` | *(none — a helper)* | GuiService.SelectedObject, so a controller can reach a screen |
+| `UI/TouchController.lua` | `"TouchController"` | the on-screen pad, only under the touch scheme |
+
+### Input schemes
+
+`InputController:getScheme()` returns `"Desktop"`, `"Touch"` or `"Gamepad"` —
+which input the player is **using**, not what the device has, because a laptop
+with a touchscreen and a pad plugged in is all three. It follows the last
+deliberate press and fires `schemeChanged`. Anything that draws a key glyph,
+sizes a tap target, or decides whether to put buttons on screen reads it.
+
+Two rules follow from it:
+
+- **A screen a player must act on captures gamepad focus when it opens and
+  releases it when it closes** (`GamepadFocus`). Without that, a controller has
+  no cursor and the screen is dead — every button present, none reachable. A
+  release that never happens is worse: selection stuck on a hidden button eats
+  every D-pad press in the game afterwards.
+- **On-screen buttons call `InputController:raise(action, down)`**, never a
+  remote directly. That keeps one definition of what a verb costs — the disabled
+  check, the held-state bookkeeping and the forward are the same code for a
+  finger as for a trigger.
 
 ### Screen layout contract
 

@@ -386,18 +386,56 @@ local CONSUMABLE_SLOTS: { [string]: boolean } = {
 	[Enums.Slot.Pills] = true,
 }
 
+--[[
+	Which slot the player has ASKED for, which is not the same as the one the
+	server has confirmed.
+
+	LA.ActiveSlot only moves once SwitchSlot has been there and back. Two quick
+	presses on a bad connection would therefore both read the old slot, both send
+	SwitchSlot, and nothing would ever be used — on precisely the platforms
+	press-again-to-use exists for, which are also the ones most likely to be on a
+	phone network. Remembering the request for a round trip's worth of time is
+	the whole fix.
+
+	The window is generous because being wrong is nearly free: the second press
+	sends a UseItem for a slot the server may not agree is selected, and the
+	server ignores it.
+]]
+local SELECT_MEMORY = 1.0
+local lastSelect = { slot = "", at = 0 }
+
+local function selectedSlot(): string
+	if lastSelect.slot ~= "" and os.clock() - lastSelect.at < SELECT_MEMORY then
+		return lastSelect.slot
+	end
+	return activeSlot()
+end
+
 local function forward(action: string)
 	local binding = bindingFor[action]
 	if binding and binding.slot then
-		--[[ Re-selecting a consumable commits it. The server decides whether that
-		     is legal — an empty slot, a defibrillator with nothing to point it
-		     at, a survivor already mid-heal — so this only has to express the
-		     intent, and a UseItem for a slot holding nothing costs one ignored
-		     remote. ]]
-		if CONSUMABLE_SLOTS[binding.slot] and activeSlot() == binding.slot then
+		--[[
+			Re-selecting a consumable commits it — but only where the player has
+			no better way to say so.
+
+			On a controller and on a phone this is the only way to use an item at
+			all: the D-pad is full and there is no room on screen for five more
+			buttons. On a desktop there is a dedicated key, and adding a hidden
+			second meaning to the number row would mean a player who double-tapped
+			4 to make sure it registered had just burned their medkit. Same rule,
+			applied only where it is the difference between usable and not.
+		]]
+		-- The upvalue, not getScheme(): same answer, and it does not depend on a
+		-- method that is assigned further down the file than this closure.
+		local pressAgain = scheme == Scheme.Gamepad or scheme == Scheme.Touch
+		if pressAgain and CONSUMABLE_SLOTS[binding.slot] and selectedSlot() == binding.slot then
 			Remotes.Event.UseItem:FireServer(binding.slot)
+			lastSelect.slot = ""
 			return
 		end
+
+		lastSelect.slot = binding.slot
+		lastSelect.at = os.clock()
 		Remotes.Event.SwitchSlot:FireServer(binding.slot)
 		return
 	end
@@ -406,8 +444,10 @@ local function forward(action: string)
 		--[[ One press covers both weapon slots, which is what frees the D-pad for
 		     the consumables. From anything that is not a weapon it lands on the
 		     primary: coming off a medkit you almost always want the rifle. ]]
-		local current = activeSlot()
+		local current = selectedSlot()
 		local target = if current == Enums.Slot.Primary then Enums.Slot.Secondary else Enums.Slot.Primary
+		lastSelect.slot = target
+		lastSelect.at = os.clock()
 		Remotes.Event.SwitchSlot:FireServer(target)
 		return
 	end
