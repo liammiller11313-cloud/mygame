@@ -26,6 +26,7 @@ local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -99,20 +100,6 @@ local function newLabel(
 	return label
 end
 
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local sound = Instance.new("Sound")
-	sound.SoundId = AudioConfig.pickId(definition)
-	sound.Volume = definition.volume
-	sound.Parent = game:GetService("SoundService")
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
-end
-
 local function releaseCards()
 	for _, card in cards do
 		card.frame:Destroy()
@@ -125,7 +112,7 @@ local function castVote(mapId: string)
 		return
 	end
 	state.myVote = mapId
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 	Remotes.Event.CastMapVote:FireServer(mapId)
 	MapVoteController:_refresh()
 end
@@ -208,7 +195,7 @@ local function buildCard(option: any, index: number, total: number)
 	trove:connect(button.MouseEnter, function()
 		if not state.resolved and state.myVote ~= card.id then
 			stroke.Color = COLOR.BorderBright
-			playUi(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.UI.MenuHover)
 		end
 	end)
 	trove:connect(button.MouseLeave, function()
@@ -297,7 +284,7 @@ local function onVoteStarted(payload: any)
 
 	MapVoteController:_refresh()
 	setVisible(true)
-	playUi(AudioConfig.UI.ObjectiveChange)
+	UiSound.play(AudioConfig.UI.ObjectiveChange)
 end
 
 local function onVoteUpdated(payload: any)
@@ -341,7 +328,7 @@ local function onVoteResult(payload: any)
 	state.closeAt = os.clock() + RESULT_HOLD
 
 	MapVoteController:_refresh()
-	playUi(AudioConfig.UI.WaveCleared)
+	UiSound.play(AudioConfig.UI.WaveCleared)
 end
 
 --[[ The map swap itself. Kept on this screen rather than given its own, because

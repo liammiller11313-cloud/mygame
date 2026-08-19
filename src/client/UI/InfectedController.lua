@@ -36,6 +36,7 @@ local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -118,20 +119,6 @@ local function newFrame(parent: Instance, name: string, color: Color3, transpare
 	return frame
 end
 
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local sound = Instance.new("Sound")
-	sound.SoundId = AudioConfig.pickId(definition)
-	sound.Volume = definition.volume
-	sound.Parent = game:GetService("SoundService")
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
-end
-
 --[[ Asks the server for a kind. The server is the authority on whether it is
      still available — this only stops the obvious local nonsense. ]]
 local function request(kind: string)
@@ -144,7 +131,7 @@ local function request(kind: string)
 	end
 	state.lastSentAt = now
 	state.selected = kind
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 	Remotes.Event.RequestInfectedSpawn:FireServer(kind)
 end
 
@@ -217,7 +204,7 @@ local function buildRows()
 			if entry.available then
 				stroke.Color = COLOR.Accent
 				name.TextColor3 = COLOR.AccentBright
-				playUi(AudioConfig.UI.MenuHover)
+				UiSound.play(AudioConfig.UI.MenuHover)
 			end
 		end)
 		trove:connect(button.MouseLeave, function()

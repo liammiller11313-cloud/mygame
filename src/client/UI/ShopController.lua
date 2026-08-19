@@ -31,7 +31,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -45,6 +44,7 @@ local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 local WeaponPreview = require(script.Parent.WeaponPreview)
 local Widgets = require(script.Parent.Widgets)
 
@@ -186,21 +186,6 @@ end
 
 local function profile(): any
 	return Registry.find("ProfileController")
-end
-
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local sound = Instance.new("Sound")
-	sound.Name = "FL_Shop"
-	sound.SoundId = AudioConfig.pickId(definition)
-	sound.Volume = definition.volume
-	sound.Parent = SoundService
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
 end
 
 local function isTouch(): boolean
@@ -411,7 +396,7 @@ local function buildRow(entry: any, index: number)
 	Widgets.rowHover(rowTrove, button, refreshRows)
 	rowTrove:connect(button.Activated, function()
 		if state.selected ~= entry.id then
-			playUi(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.UI.MenuHover)
 			select(entry.id)
 		end
 	end)
@@ -464,7 +449,7 @@ local function attemptBuy()
 		return
 	end
 	if store:buy(entry.id) then
-		playUi(AudioConfig.UI.MenuConfirm)
+		UiSound.play(AudioConfig.UI.MenuConfirm)
 		refreshBuy()
 	end
 end
@@ -488,7 +473,7 @@ local function buildTab(category: string, index: number, total: number)
 
 	trove:connect(holder.Activated, function()
 		if state.category ~= category then
-			playUi(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.UI.MenuHover)
 			renderCategory(category)
 		end
 	end)
@@ -799,7 +784,7 @@ function ShopController:open()
 	refreshBalance()
 	preview:setTurning(true)
 	GamepadFocus.capture(state.firstRow)
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
 
 function ShopController:close()
@@ -816,7 +801,7 @@ function ShopController:close()
 	if menuIsOpen() then
 		callController("MainMenuController", "reassertSuppression")
 	end
-	playUi(AudioConfig.UI.MenuBack)
+	UiSound.play(AudioConfig.UI.MenuBack)
 end
 
 function ShopController:toggle()
@@ -852,7 +837,7 @@ function ShopController:start()
 				return
 			end
 			if ok then
-				playUi(AudioConfig.UI.WaveCleared)
+				UiSound.play(AudioConfig.UI.WaveCleared)
 				showMessage("PURCHASED", COLOR.Accent)
 				--[[ Re-selected rather than merely redrawn: buying the thing you
 				     are looking at changes its price line, its buy button and its
@@ -862,7 +847,7 @@ function ShopController:start()
 					select(itemId)
 				end
 			else
-				playUi(AudioConfig.UI.MenuBack)
+				UiSound.play(AudioConfig.UI.MenuBack)
 				showMessage(reason, COLOR.Danger)
 			end
 			refreshBalance()

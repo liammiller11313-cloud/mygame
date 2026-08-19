@@ -30,7 +30,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -48,6 +47,7 @@ local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 local WeaponPreview = require(script.Parent.WeaponPreview)
 local Widgets = require(script.Parent.Widgets)
 
@@ -233,21 +233,6 @@ local function callController(name: string, method: string, ...: any)
 	end
 end
 
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local sound = Instance.new("Sound")
-	sound.Name = "FL_Loadout"
-	sound.SoundId = AudioConfig.pickId(definition)
-	sound.Volume = definition.volume
-	sound.Parent = SoundService
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
-end
-
 local function isTouch(): boolean
 	local input = Registry.find("InputController")
 	if not input or typeof(input.isTouchScheme) ~= "function" then
@@ -381,7 +366,7 @@ local function chooseWeapon(slot: string, weaponId: string)
 	next_[slot] = weaponId
 
 	store:setLoadout(state.editing, next_)
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 	LoadoutController:_closePicker()
 end
 
@@ -428,7 +413,7 @@ local function buildPickRow(slot: string, weaponId: string, index: number)
 			--[[ A locked row is not a dead row. Pressing it opens the shop on
 			     the thing you just tried to equip, which is the only useful
 			     thing it could do. ]]
-			playUi(AudioConfig.UI.MenuBack)
+			UiSound.play(AudioConfig.UI.MenuBack)
 			LoadoutController:close()
 			callController("ShopController", "open")
 		end
@@ -550,7 +535,7 @@ local function choosePicker(index: number)
 		store:setActive(wanted)
 	end
 	state.pickerLocked = true
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 	refreshPickerButtons()
 	--[[ Held for a beat rather than closed on the press. The card says LOCKED IN
 	     and then goes: a strip that vanishes the instant you click it leaves you
@@ -646,7 +631,7 @@ local function buildCard(index: number, parent: Frame)
 			return
 		end
 		state.editing = index
-		playUi(AudioConfig.UI.MenuHover)
+		UiSound.play(AudioConfig.UI.MenuHover)
 		LoadoutController:_closePicker()
 	end)
 end
@@ -684,7 +669,7 @@ local function buildSlotRow(index: number, slot: string)
 	slotRows[index] = { slot = slot, button = button, value = value, detail = detail, stroke = stroke }
 
 	trove:connect(button.Activated, function()
-		playUi(AudioConfig.UI.MenuHover)
+		UiSound.play(AudioConfig.UI.MenuHover)
 		LoadoutController:_openPicker(slot)
 	end)
 	Widgets.outlineHover(trove, button, stroke)
@@ -741,7 +726,7 @@ local function buildPanel(layer: Frame)
 		local store = profile()
 		if store and store:getActiveIndex() ~= state.editing then
 			store:setActive(state.editing)
-			playUi(AudioConfig.UI.MenuConfirm)
+			UiSound.play(AudioConfig.UI.MenuConfirm)
 			refreshCards()
 		end
 	end)
@@ -763,7 +748,7 @@ local function buildPanel(layer: Frame)
 	backLabel.Text = "BACK"
 	Widgets.hover(trove, pickBack, backLabel)
 	trove:connect(pickBack.Activated, function()
-		playUi(AudioConfig.UI.MenuBack)
+		UiSound.play(AudioConfig.UI.MenuBack)
 		LoadoutController:_closePicker()
 	end)
 
@@ -836,7 +821,7 @@ local function buildPicker()
 	editLabel.Text = "EDIT"
 	Widgets.hover(trove, edit, editLabel)
 	trove:connect(edit.Activated, function()
-		playUi(AudioConfig.UI.MenuConfirm)
+		UiSound.play(AudioConfig.UI.MenuConfirm)
 		--[[ The picker goes rather than sitting behind the panel counting down.
 		     A deadline running while the player is three clicks deep in an editor
 		     is a deadline that expires on them mid-decision. ]]
@@ -1006,7 +991,7 @@ function LoadoutController:open()
 	self:_closePicker()
 	preview:setTurning(true)
 	GamepadFocus.capture(state.firstCard)
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
 
 function LoadoutController:close()
@@ -1020,7 +1005,7 @@ function LoadoutController:close()
 	if menuIsOpen() then
 		callController("MainMenuController", "reassertSuppression")
 	end
-	playUi(AudioConfig.UI.MenuBack)
+	UiSound.play(AudioConfig.UI.MenuBack)
 end
 
 function LoadoutController:toggle()
@@ -1178,7 +1163,7 @@ function LoadoutController:start()
 			     from what you already run — is a single key. ]]
 			local from = if state.pickerCursor > 0 then state.pickerCursor else activeIndex()
 			state.pickerCursor = LoadoutConfig.clampIndex(from + step)
-			playUi(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.UI.MenuHover)
 			refreshPickerButtons()
 			return
 		end

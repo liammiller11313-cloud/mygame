@@ -62,6 +62,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AudioConfig = require(Shared.Config.AudioConfig)
 local Attributes = require(Shared.Net.Attributes)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
@@ -74,6 +75,7 @@ local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
 
 local COLOR = UITheme.Color
@@ -2046,6 +2048,19 @@ function HudController:start()
 		notice.label.TextStrokeTransparency = 0.4
 		notice.label.Visible = true
 		notice.until_ = os.clock() + NOTICE_SECONDS
+
+		--[[
+			A stinger, for the notices that are a moment rather than a line.
+
+			Only the boss-down notice sets it today. The point is that a Tank going
+			down is heard by the WHOLE TEAM: the killer already gets the boss kill
+			cue at their crosshair, and the other three — who spent the last minute
+			shooting the same thing — used to get a line of orange text and
+			silence. Four people fight a Tank, four people should hear it stop.
+		]]
+		if payload.sting == true then
+			UiSound.play(AudioConfig.UI.BossKillMarker)
+		end
 	end)
 
 	--[[

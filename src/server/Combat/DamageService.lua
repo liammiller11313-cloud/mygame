@@ -301,6 +301,11 @@ local function pushKillFeed(attacker: Player, definition: any, ctx: DamageContex
 			Remotes.Event.Notice:FireAllClients({
 				text = string.upper(definition.displayName) .. " DOWN",
 				tone = "Good",
+				--[[ The client plays a stinger for this one. A flag rather than a
+				     sound id, because which sound a notice makes is a client
+				     presentation decision and the server has no business holding
+				     an asset id. ]]
+				sting = true,
 			})
 		end
 		return

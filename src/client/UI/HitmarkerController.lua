@@ -29,7 +29,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local SoundService = game:GetService("SoundService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -40,6 +39,7 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -70,7 +70,6 @@ local HitmarkerController = {}
 
 local player = Players.LocalPlayer
 local trove = Trove.new()
-local random = Random.new()
 
 local gui: ScreenGui
 --[[ The scaled content layer. A hitmarker is sized in reference pixels like
@@ -79,9 +78,6 @@ local root: Frame
 local marks: { [string]: any } = {}
 local numbers: { any } = {}
 local numberCursor = 1
-
-local sounds: { [any]: Sound } = {}
-local lastPlayed: { [any]: number } = {}
 
 local streakLabel: TextLabel
 
@@ -284,37 +280,6 @@ end
 
 -- ── audio ───────────────────────────────────────────────────────────────────
 
---[[
-	UI hitmarker sounds are 2D and belong to this client alone, so they are
-	created here rather than routed through AudioService (which is server-side
-	and spatial). Every id in AudioConfig ships empty, so this is silent until
-	somebody fills the bank in — never an error, exactly as the config promises.
-]]
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local now = os.clock()
-	if now - (lastPlayed[definition] or 0) < AudioConfig.Mix.MinRetriggerInterval then
-		return
-	end
-	lastPlayed[definition] = now
-
-	local sound = sounds[definition]
-	if not sound then
-		sound = Instance.new("Sound")
-		sound.Name = "FL_UI"
-		sound.SoundId = definition.id
-		sound.Volume = definition.volume * AudioConfig.Mix.MasterVolume
-		sound.Parent = SoundService
-		sounds[definition] = sound
-		trove:add(sound)
-	end
-	sound.PlaybackSpeed = random:NextNumber(definition.pitchMin, definition.pitchMax)
-	sound.TimePosition = 0
-	sound:Play()
-end
-
 -- ── marks ───────────────────────────────────────────────────────────────────
 
 --[[
@@ -458,7 +423,7 @@ function HitmarkerController:mark(
 		     — had to be READ off the crosshair, and in a horde the crosshair is
 		     covered in bodies. The boss cue is a separate, lower band again: a
 		     Tank going down is the loudest thing that happens in a round. ]]
-		playUi(if weight >= 1 then AudioConfig.UI.BossKillMarker else AudioConfig.UI.KillMarker)
+		UiSound.play(if weight >= 1 then AudioConfig.UI.BossKillMarker else AudioConfig.UI.KillMarker)
 		--[[ And the camera. A Common kill is deliberately zero trauma — they die
 		     three hundred times a round and anything that moves the screen for
 		     them is motion sickness by wave four. ]]
@@ -470,7 +435,7 @@ function HitmarkerController:mark(
 		end
 	else
 		punch(if isHeadshot then marks.Headshot else marks.Hit)
-		playUi(if isHeadshot then AudioConfig.UI.HeadshotMarker else AudioConfig.UI.Hitmarker)
+		UiSound.play(if isHeadshot then AudioConfig.UI.HeadshotMarker else AudioConfig.UI.Hitmarker)
 	end
 
 	if damage then

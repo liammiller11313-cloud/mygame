@@ -30,7 +30,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -43,6 +42,7 @@ local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
 
 local COLOR = UITheme.Color
@@ -113,21 +113,6 @@ local function callController(name: string, method: string, ...: any)
 	if controller and typeof(controller[method]) == "function" then
 		pcall(controller[method], controller, ...)
 	end
-end
-
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local sound = Instance.new("Sound")
-	sound.Name = "FL_Pause"
-	sound.SoundId = AudioConfig.pickId(definition)
-	sound.Volume = definition.volume
-	sound.Parent = SoundService
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
 end
 
 local function menuIsOpen(): boolean
@@ -284,7 +269,7 @@ local function buildEntry(index: number, definition: any)
 		title.TextColor3 = COLOR.TextPrimary
 	end)
 	trove:connect(button.Activated, function()
-		playUi(AudioConfig.UI.MenuConfirm)
+		UiSound.play(AudioConfig.UI.MenuConfirm)
 		activate(definition.id)
 	end)
 end
@@ -365,7 +350,7 @@ function PauseController:open()
 	setSuppressed(not menuIsOpen())
 	refreshButton()
 	GamepadFocus.capture(entries[1] and entries[1].button)
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
 
 function PauseController:close()
@@ -383,7 +368,7 @@ function PauseController:close()
 		callController("MainMenuController", "reassertSuppression")
 	end
 	refreshButton()
-	playUi(AudioConfig.UI.MenuBack)
+	UiSound.play(AudioConfig.UI.MenuBack)
 end
 
 function PauseController:toggle()

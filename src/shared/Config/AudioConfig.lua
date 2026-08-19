@@ -128,7 +128,28 @@ local ID = table.freeze({
 	ImpactWater = "rbxassetid://126105529228330",
 	ImpactDirt = "rbxassetid://9114109952",
 
+	--[[ Melee. One swing per weapon rather than one shared whoosh pitched five
+	     ways, which is what these replaced — an axe and a knife cutting air are
+	     not the same sound, and no amount of pitch-shifting made them one.
+	     SwordSwing is kept as the fallback for a melee added without its own. ]]
 	SwordSwing = "rbxassetid://138283030240531",
+	AxeSwing = "rbxassetid://101868407541328",
+	PipeSwing = "rbxassetid://135932118153895",
+	BatSwing = "rbxassetid://9113305619",
+	KnifeSlash = "rbxassetid://101542904500316",
+	MacheteSwing = "rbxassetid://115206275821196",
+
+	--[[ What a melee sounds like when it LANDS, split by what did the landing.
+	     Every melee hit used to be the generic body-shot sample, so a pipe and a
+	     machete connecting were the same event to the ear. ]]
+	BluntFlesh = "rbxassetid://94957229024343",
+	BladeFlesh = "rbxassetid://135341970445862",
+
+	--[[ A Tank or a Witch going down: long enough to be a moment rather than a
+	     tick, and played for the whole team, not just whoever landed the shot. ]]
+	BossKillSting = "rbxassetid://72245120500468",
+	MeleeDraw = "rbxassetid://117878219790008",
+	MenuPage = "rbxassetid://9120984892",
 
 	HorrorAmbience = "rbxassetid://118673335791387",
 	ActionDrums = "rbxassetid://1837842521",
@@ -171,27 +192,26 @@ AudioConfig.WeaponFire = {
 	[Enums.Weapon.M1AEBR] = sound(ID.SniperShot, 1.0, 0.94, 1.0, 700, 5),
 
 	--[[
-		Melee swings.
+		Melee swings — one sample each.
 
-		All five share ID.SwordSwing, separated by pitch and volume: heavier things
-		lower and louder, the knife high and quiet. That is a stopgap and it is
-		marked as one — a bat hitting air and a fire axe hitting air genuinely
-		sound different, and no amount of pitch-shifting one whoosh fixes that.
+		These briefly all shared ID.SwordSwing across five non-overlapping pitch
+		bands, which was the best available answer to "five weapons, one whoosh":
+		heavier lower, knife higher, and at least tellable apart by ear. They are
+		real samples now, so the pitch is back to a natural few percent of
+		variation and the DISTINCTION lives in the recording, where it belongs.
 
-		The five bands do not overlap — 0.60-0.70, 0.74-0.84, 0.86-0.94, 0.98-1.10,
-		1.24-1.40 — so even sharing one sample the five are tellable apart by ear,
-		which is the part that actually matters mid-horde. verify_melee fails the
-		build if two ever collide.
+		Volume and roll-off still carry the weight, because those are properties of
+		the swing rather than of the file: the axe is the loudest and carries the
+		furthest, the knife is the quietest and barely leaves your own hands.
 
-		Each is a one-line swap when a real id arrives; the bands are set so a
-		dedicated sample drops straight in without retuning anything else. The impact is separate and already real — MeleeService plays
-		AudioConfig.Impact.Flesh on the first body an arc connects with.
+		The impact is separate and now split by what did the landing — see
+		AudioConfig.MeleeImpact below.
 	]]
-	[Enums.Weapon.Machete] = sound(ID.SwordSwing, 0.55, 0.98, 1.10, 70, 3),
-	[Enums.Weapon.FireAxe] = sound(ID.SwordSwing, 0.72, 0.60, 0.70, 80, 3),
-	[Enums.Weapon.LeadPipe] = sound(ID.SwordSwing, 0.66, 0.74, 0.84, 75, 3),
-	[Enums.Weapon.BaseballBat] = sound(ID.SwordSwing, 0.6, 0.86, 0.94, 75, 3),
-	[Enums.Weapon.Knife] = sound(ID.SwordSwing, 0.42, 1.24, 1.40, 55, 2),
+	[Enums.Weapon.Machete] = sound(ID.MacheteSwing, 0.55, 0.95, 1.06, 70, 3),
+	[Enums.Weapon.FireAxe] = sound(ID.AxeSwing, 0.72, 0.94, 1.04, 80, 3),
+	[Enums.Weapon.LeadPipe] = sound(ID.PipeSwing, 0.66, 0.94, 1.06, 75, 3),
+	[Enums.Weapon.BaseballBat] = sound(ID.BatSwing, 0.6, 0.95, 1.07, 75, 3),
+	[Enums.Weapon.Knife] = sound(ID.KnifeSlash, 0.42, 0.96, 1.1, 55, 2),
 } :: { [string]: SoundDefinition }
 
 AudioConfig.WeaponReload = {
@@ -219,6 +239,40 @@ AudioConfig.Impact = {
 	Water = sound(ID.ImpactWater, 0.45, 0.92, 1.08, 100, 1),
 	Dirt = sound(ID.ImpactDirt, 0.45, 0.9, 1.14, 100, 1),
 } :: { [string]: SoundDefinition }
+
+--[[
+	What a melee sounds like landing on a body, by what did the landing.
+
+	Every melee hit used to play Impact.Flesh — the same generic body-shot sample
+	a bullet uses — so a lead pipe and a machete connecting were indistinguishable
+	events. They should not be: a blade is the sound that goes with a body coming
+	apart, and a blunt weapon is the sound that goes with one being thrown.
+
+	Keyed by weapon rather than by a field on WeaponConfig, because this is purely
+	an audio decision and WeaponConfig is about what a weapon DOES. `meleeImpact`
+	below resolves it, and anything unlisted falls back to the bullet sound rather
+	than to silence.
+]]
+AudioConfig.MeleeImpact = {
+	Blunt = sound(ID.BluntFlesh, 0.82, 0.92, 1.08, 140, 5),
+	Blade = sound(ID.BladeFlesh, 0.78, 0.94, 1.06, 140, 5),
+} :: { [string]: SoundDefinition }
+
+local MELEE_IMPACT_KIND: { [string]: string } = {
+	[Enums.Weapon.BaseballBat] = "Blunt",
+	[Enums.Weapon.LeadPipe] = "Blunt",
+	[Enums.Weapon.Machete] = "Blade",
+	[Enums.Weapon.FireAxe] = "Blade",
+	[Enums.Weapon.Knife] = "Blade",
+}
+
+--[[ The impact for a weapon, or the generic flesh hit for anything that is not
+     a melee at all — which is what the shove, and any melee added without a row
+     above, should sound like rather than nothing. ]]
+function AudioConfig.meleeImpact(weaponId: string?): SoundDefinition
+	local kind = if typeof(weaponId) == "string" then MELEE_IMPACT_KIND[weaponId] else nil
+	return if kind then AudioConfig.MeleeImpact[kind] else AudioConfig.Impact.Flesh
+end
 
 --[[ Gore. Falls back to the body-shot samples pitched down hard, which reads as
      a heavier, wetter version of the same event — better than silence, and
@@ -310,10 +364,18 @@ AudioConfig.UI = {
 		hits live at 0.97-1.05, a kill at 0.74-0.80, a boss kill at 0.58-0.62.
 	]]
 	KillMarker = sound(ID.HitmarkerTick, 0.46, 0.74, 0.8, 24, 4),
-	--[[ A Tank or a Witch. Lower and louder again, and audible from further away,
-	     because the whole team has been fighting it and the whole team should hear
-	     it stop. ]]
-	BossKillMarker = sound(ID.HeadshotTick, 0.62, 0.58, 0.62, 60, 6),
+
+	--[[ Drawing the melee. Short, and quiet enough that toggling it twice in a
+	     panic is not louder than the thing that caused the panic. ]]
+	MeleeDraw = sound(ID.MeleeDraw, 0.4, 0.97, 1.05, 20, 2),
+	--[[ The main menu turning a page. Near-silent by design — it confirms the
+	     press happened, it is not an event. ]]
+	MenuPage = sound(ID.MenuPage, 0.3, 0.98, 1.04, 20, 2),
+	--[[ A Tank or a Witch. A real stinger rather than a tick, long enough to be a
+	     moment, and played for the WHOLE TEAM rather than only for whoever landed
+	     the last shot — see the boss branch in HudController's Notice handler.
+	     Four people fight a Tank; four people should hear it stop. ]]
+	BossKillMarker = sound(ID.BossKillSting, 0.7, 0.98, 1.02, 90, 6),
 
 	-- Menu. Hover is deliberately near-silent: if you notice it, it is too loud.
 	MenuHover = sound(ID.MenuHover, 0.18, 0.98, 1.04, 20, 1),

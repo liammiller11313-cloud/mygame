@@ -363,6 +363,14 @@ local function refreshLoadout(force: boolean)
 			-- Drawing costs time; a swap that fires instantly is how a player
 			-- learns to quick-swap out of every reload in the game.
 			state.nextFireAt = os.clock() + definition.drawTime
+
+			--[[ Melee only, and deliberately. Every slot switch making a noise
+			     would be a sound three times a fight for no information; the melee
+			     key is a toggle you press mid-panic without looking, and the cue
+			     is how you know it took. ]]
+			if definition.slot == Enums.Slot.Melee then
+				playLocal(AudioConfig.UI.MeleeDraw)
+			end
 		end
 		pushWeapon()
 		WeaponController.weaponChanged:fire(state.weaponId, definition)

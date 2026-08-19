@@ -78,6 +78,7 @@ local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local Widgets = require(script.Parent.Widgets)
+local UiSound = require(script.Parent.UiSound)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -304,7 +305,6 @@ local resultContinueButton: TextButton? = nil
 local resultReturn: TextLabel
 
 local masterGroup: SoundGroup
-local uiSounds: { [string]: Sound } = {}
 
 -- Defined down with the build helpers; declared here so `start` can reach it.
 local watchViewport: () -> ()
@@ -424,28 +424,6 @@ local function newLayer(parent: Instance): Frame
 
 	table.insert(layers, { frame = frame, scale = scale })
 	return frame
-end
-
---[[ Menu blips, played locally. Mode clicks stay silent here on purpose:
-     MatchmakingService answers an accepted request with MenuConfirm through
-     AudioService, and two copies of the same sample one frame apart sounds like
-     a bug rather than like confirmation. ]]
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local existing = uiSounds[definition.id]
-	if not existing then
-		existing = Instance.new("Sound")
-		existing.Name = "FL_Menu"
-		existing.SoundId = definition.id
-		existing.Volume = definition.volume
-		existing.SoundGroup = masterGroup
-		existing.Parent = SoundService
-		uiSounds[definition.id] = trove:add(existing)
-	end
-	existing.PlaybackSpeed = definition.pitchMin + math.random() * (definition.pitchMax - definition.pitchMin)
-	existing:Play()
 end
 
 -- ── the master bus ──────────────────────────────────────────────────────────
@@ -1172,7 +1150,7 @@ local function dismissResults()
 	end
 	state.results = false
 	clearConfetti()
-	playUi(AudioConfig.UI.MenuBack)
+	UiSound.play(AudioConfig.UI.MenuBack)
 	MainMenuController:open()
 end
 
@@ -1372,13 +1350,13 @@ local function buildPlay()
 
 	trove:connect(button.MouseEnter, function()
 		label.TextColor3 = COLOR.AccentBright
-		playUi(AudioConfig.UI.MenuHover)
+		UiSound.play(AudioConfig.UI.MenuHover)
 	end)
 	trove:connect(button.MouseLeave, function()
 		label.TextColor3 = COLOR.TextPrimary
 	end)
 	trove:connect(button.Activated, function()
-		playUi(AudioConfig.UI.MenuConfirm)
+		UiSound.play(AudioConfig.UI.MenuConfirm)
 		setPage("Modes")
 	end)
 
@@ -1388,7 +1366,7 @@ local function buildPlay()
 	backLabel.Text = "‹  BACK"
 	Widgets.hover(trove, backButton, backLabel)
 	trove:connect(backButton.Activated, function()
-		playUi(AudioConfig.UI.MenuBack)
+		UiSound.play(AudioConfig.UI.MenuBack)
 		setPage("Root")
 	end)
 	backButton.Visible = false
@@ -1442,7 +1420,7 @@ local function buildModes()
 		trove:connect(button.MouseEnter, function()
 			entry.hovered = true
 			title.TextColor3 = COLOR.AccentBright
-			playUi(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.UI.MenuHover)
 		end)
 		trove:connect(button.MouseLeave, function()
 			entry.hovered = false
@@ -1671,7 +1649,7 @@ local function buildNav()
 
 		if not definition.soon then
 			trove:connect(holder.Activated, function()
-				playUi(AudioConfig.UI.MenuConfirm)
+				UiSound.play(AudioConfig.UI.MenuConfirm)
 				callController(definition.controller, "open")
 			end)
 			trove:connect(holder.MouseEnter, function()
@@ -2116,6 +2094,11 @@ local function build()
 	masterGroup.Volume = AudioConfig.Mix.MasterVolume
 	masterGroup.Parent = SoundService
 	trove:add(masterGroup)
+	--[[ Handed to UiSound so every cue in the interface routes through it. Only
+	     the menu's own sounds used to, which meant the master volume setting
+	     silently did not apply to the hitmarker, the shop, the pause menu or any
+	     of the other five — they each made their own ungrouped Sound. ]]
+	UiSound.setGroup(masterGroup)
 
 	buildTitle()
 	buildPlay()
@@ -2258,7 +2241,7 @@ function MainMenuController:start()
 			return
 		end
 		if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.ButtonB then
-			playUi(AudioConfig.UI.MenuBack)
+			UiSound.play(AudioConfig.UI.MenuBack)
 			setPage("Root")
 		end
 	end)
@@ -2335,7 +2318,6 @@ function MainMenuController:destroy()
 	table.clear(modeEntries)
 	table.clear(navEntries)
 	table.clear(resultRows)
-	table.clear(uiSounds)
 	trove:destroy()
 end
 

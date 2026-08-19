@@ -709,6 +709,26 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 		end
 	end
 
+	--[[
+		A swing that connects makes a noise, and the noise says what hit.
+
+		One sound for the whole arc rather than one per body, for the same reason
+		the shove has one: five overlapping thuds from a single swing is noise, and
+		AudioConfig.Mix would spend five voices on it. It plays at the FIRST body —
+		the one in your face, since the candidates are sorted nearest-first — which
+		is where the player is looking.
+
+		This did not exist at all before there were five melee weapons. The swing
+		whooshed, the body took damage, and the only thing you heard on contact was
+		whatever the bullet impact path happened to produce.
+	]]
+	if records[1] then
+		local audio = Registry.find("AudioService")
+		if audio then
+			audio:playAt(AudioConfig.meleeImpact(weaponId), records[1].position)
+		end
+	end
+
 	-- A swing that meets a wall should mark the wall. One ray, only on a whiff,
 	-- and only for geometry — blood on flesh belongs to GoreService.
 	if #records == 0 then
@@ -835,6 +855,8 @@ function MeleeService:shove(player: Player, origin: Vector3, direction: Vector3)
 
 	-- One sound for the shove, not one per body: six overlapping thuds from a
 	-- single arm is noise, and AudioConfig.Mix would spend six voices on it.
+	-- Deliberately the generic flesh hit rather than a melee impact — a shove is
+	-- an open hand, and it is the one melee verb with no weapon behind it.
 	if firstContact then
 		local audio = Registry.find("AudioService")
 		if audio then

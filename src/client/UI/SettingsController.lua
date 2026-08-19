@@ -46,7 +46,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local SoundService = game:GetService("SoundService")
 local TeleportService = game:GetService("TeleportService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -63,6 +62,7 @@ local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
 
 local COLOR = UITheme.Color
@@ -160,21 +160,6 @@ local function callController(name: string, method: string, ...: any)
 	if controller and typeof(controller[method]) == "function" then
 		pcall(controller[method], controller, ...)
 	end
-end
-
-local function playUi(definition: any)
-	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local sound = Instance.new("Sound")
-	sound.Name = "FL_Settings"
-	sound.SoundId = AudioConfig.pickId(definition)
-	sound.Volume = definition.volume
-	sound.Parent = SoundService
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
 end
 
 local function isTouch(): boolean
@@ -561,7 +546,7 @@ local function setValue(key: string, raw: any, silent: boolean?)
 		end
 	end
 	if not silent then
-		playUi(AudioConfig.UI.MenuHover)
+		UiSound.play(AudioConfig.UI.MenuHover)
 	end
 	SettingsController.changed:fire(key, value)
 end
@@ -660,7 +645,7 @@ local function completeCapture(key: any)
 	     key back to the one it started on, say — so the row is refreshed here
 	     rather than relying on it. ]]
 	refreshRow(row)
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
 
 -- ── rows ────────────────────────────────────────────────────────────────────
@@ -881,7 +866,7 @@ function SettingsController:open()
 	renderCategory(state.category)
 	setSuppressed(not menuIsOpen())
 	GamepadFocus.capture(firstRowButton)
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
 
 function SettingsController:close()
@@ -901,7 +886,7 @@ function SettingsController:close()
 	if menuIsOpen() then
 		callController("MainMenuController", "reassertSuppression")
 	end
-	playUi(AudioConfig.UI.MenuBack)
+	UiSound.play(AudioConfig.UI.MenuBack)
 end
 
 function SettingsController:toggle()
@@ -943,7 +928,7 @@ function SettingsController:resetDefaults()
 		setValue(definition.key, definition.default, true)
 	end
 	renderCategory(state.category)
-	playUi(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
 
 -- ── build ───────────────────────────────────────────────────────────────────
@@ -967,7 +952,7 @@ local function buildTab(category: string, index: number, total: number)
 	trove:connect(holder.Activated, function()
 		if state.category ~= category then
 			renderCategory(category)
-			playUi(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.UI.MenuHover)
 		end
 	end)
 	table.insert(tabs, tab)
