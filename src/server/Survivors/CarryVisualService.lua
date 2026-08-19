@@ -63,8 +63,10 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AnimationConfig = require(Shared.Config.AnimationConfig)
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
 local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local RigUtil = require(Shared.Util.RigUtil)
@@ -73,6 +75,7 @@ local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local KIT = MapConfig.Medkits
 local LA = Attributes.Loadout
+local TORCH = GameConfig.Flashlight
 
 local CarryVisualService = {}
 
@@ -124,6 +127,11 @@ local HAND_SLOTS: { [string]: string } = {
      thing can be skipped — and `refresh` is called for every slot change. ]]
 type Worn = { model: Model, key: string }
 local worn: { [Player]: { [string]: Worn } } = {}
+
+--[[ The hold pose, per character rather than per player: the track belongs to
+     an Animator that dies with the rig, and keeping it keyed by the model is
+     what stops a respawn playing into a corpse. ]]
+local holding: { [Player]: { character: Model, track: AnimationTrack? } } = {}
 
 --[[ Anything that would make the prop behave like a scripted object rather than
      like a decal you can see from across a room. Mirrors PlaceholderFactory's
@@ -262,6 +270,9 @@ local function removeAll(player: Player)
 		removeMount(player, mount)
 	end
 	worn[player] = nil
+	--[[ Not stopped, dropped. removeAll runs on death, and the rig it would be
+	     writing to is on its way to being a ragdoll or a corpse. ]]
+	holding[player] = nil
 end
 
 --[[ Makes a prop safe to wear: no collisions, no ray hits, no weight, and no
@@ -322,6 +333,59 @@ local function buildWeaponModel(itemId: string): Model?
 	end
 	tame(model)
 	return model
+end
+
+--[[
+	The flashlight, on the weapon, for everybody else to see.
+
+	Its own attachment rather than the Muzzle, for one reason: a supplied model's
+	Muzzle attachment is copied from whatever the artist authored and its
+	ROTATION is not guaranteed to follow the barrel-down-minus-Z convention this
+	codebase grips every weapon by. Borrowing its POSITION is safe and useful —
+	the beam should start at the barrel, not inside the receiver — and taking the
+	handle's orientation keeps the beam pointing the same way the gun does.
+
+	`NormalId.Front` is -Z, which is that convention. A model that ignores it
+	points its barrel somewhere odd too, so the light and the gun stay wrong
+	together rather than in different directions.
+]]
+local function addBeam(model: Model)
+	if not TORCH.Enabled then
+		return
+	end
+	local handle = model.PrimaryPart
+	if not handle then
+		return
+	end
+
+	local muzzlePosition = Vector3.zero
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("Attachment") and descendant.Name == "Muzzle" then
+			local host = descendant.Parent
+			if host and host:IsA("BasePart") then
+				muzzlePosition = handle.CFrame:ToObjectSpace(host.CFrame * descendant.CFrame).Position
+			end
+			break
+		end
+	end
+
+	local beam = Instance.new("Attachment")
+	beam.Name = "FL_Beam"
+	beam.CFrame = CFrame.new(muzzlePosition)
+	beam.Parent = handle
+
+	local light = Instance.new("SpotLight")
+	light.Name = "FL_Torch"
+	light.Angle = TORCH.Angle
+	light.Brightness = TORCH.Brightness
+	light.Range = TORCH.Range
+	light.Color = TORCH.Color
+	light.Face = Enum.NormalId.Front
+	--[[ Four shadow-casting spotlights in a horde is the most expensive thing
+	     this game could ask a phone to draw, and against fog this thick the
+	     shadows are invisible anyway. ]]
+	light.Shadows = false
+	light.Parent = beam
 end
 
 --[[
@@ -398,6 +462,14 @@ local function attach(player: Player, mount: string, kind: string, itemId: strin
 		if not model then
 			return nil
 		end
+		--[[ Weapons only. The torch is on the GUN, so a survivor who has pulled
+		     their medkit out has no beam for the length of the heal — which is
+		     the correct read rather than a gap: they are not covering anybody
+		     while they are patching themselves up, and their own view light is
+		     unaffected, so nobody is ever left in the dark by it. ]]
+		if kind == "Weapon" then
+			addBeam(model)
+		end
 		local pose = gripPose(model, handGrip(limb))
 		if not pose then
 			--[[ A model with no grip cannot be held in any defensible place, and
@@ -420,6 +492,76 @@ local function attach(player: Player, mount: string, kind: string, itemId: strin
 	end
 	local pose = anchor.CFrame * KIT.CarryOffset
 	return if place(character, anchor, model, pose, mount) then model else nil
+end
+
+--[[
+	The arm pose for a survivor holding something.
+
+	Loaded on the server so it replicates to every client, which is the whole
+	point: the swing this fixes is the one OTHER players see. Roblox's own
+	ToolNone clip, which keys the right arm at Action priority and leaves the
+	gait alone — see AnimationConfig.SurvivorHold.
+
+	Everything here is best-effort. A rig with no Animator, an id that will not
+	load, a clip authored for the other build: all of them end with no pose and a
+	gun that swings, which is exactly where this started. None of them is worth
+	failing a mount over.
+]]
+local function setHoldPose(player: Player, wanted: boolean)
+	local character = player.Character
+	local entry = holding[player]
+
+	--[[ A new character invalidates the old track outright. Stopping it would be
+	     writing to an Animator inside a rig that is being destroyed. ]]
+	if entry and entry.character ~= character then
+		entry = nil
+		holding[player] = nil
+	end
+
+	if not wanted then
+		if entry and entry.track then
+			entry.track:Stop(0.15)
+		end
+		return
+	end
+	if not character or not character.Parent then
+		return
+	end
+
+	if entry and entry.track then
+		if not entry.track.IsPlaying then
+			entry.track:Play(0.15)
+		end
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		return
+	end
+
+	local id = AnimationConfig.SurvivorHold[AnimationConfig.rigOf(character)]
+	if not id then
+		return
+	end
+
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://" .. tostring(id)
+
+	local ok, track = pcall(animator.LoadAnimation, animator, animation)
+	animation:Destroy()
+	if not ok or not track then
+		return
+	end
+	--[[ Stated rather than inherited. The clip ships at Action priority and that
+	     is what makes it win the shoulder against the walk cycle, but a reupload
+	     or a swapped id could arrive at Idle and silently do nothing. ]]
+	track.Priority = Enum.AnimationPriority.Action
+	track.Looped = true
+	track:Play(0.15)
+
+	holding[player] = { character = character, track = track }
 end
 
 --[[ One mount, brought in line with what it should be showing. Split out of
@@ -489,6 +631,11 @@ function CarryVisualService:refresh(player: Player)
 
 	applyMount(player, entry, MOUNT.Back, backKey)
 	applyMount(player, entry, MOUNT.Hands, handsKey)
+
+	--[[ Keyed off what was actually MOUNTED rather than off what was wanted: a
+	     weapon whose model failed to build leaves the hands empty, and posing an
+	     empty arm as though it were holding a rifle is worse than not posing it. ]]
+	setHoldPose(player, entry[MOUNT.Hands] ~= nil)
 end
 
 function CarryVisualService:init() end
@@ -543,6 +690,7 @@ function CarryVisualService:start()
 	serviceTrove:connect(Players.PlayerAdded, watch)
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		worn[player] = nil
+		holding[player] = nil
 	end)
 
 	local survivors = Registry.find("SurvivorService")

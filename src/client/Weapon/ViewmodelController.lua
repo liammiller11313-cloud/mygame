@@ -1597,6 +1597,13 @@ end
 
 	LocalTransparencyModifier rather than Transparency, because Transparency
 	replicates and would hide the gun for everybody else too.
+
+	The TORCH on it goes with the model, for a different reason. This player has
+	their own beam from the eye — see FlashlightController — and leaving their
+	gun's lit as well would be two coincident lights, doubling their brightness
+	and nobody else's. A client writing to a replicated instance changes only its
+	own copy, so switching it off here takes it off for this player and leaves
+	every teammate's view of it alone.
 ]]
 local CARRIED_PREFIX = "FL_Carried"
 
@@ -1620,9 +1627,11 @@ local function hideOwnWorldWeapon(hidden: boolean)
 	end
 	for _, child in character:GetChildren() do
 		if child:IsA("Model") and string.sub(child.Name, 1, #CARRIED_PREFIX) == CARRIED_PREFIX then
-			for _, part in child:GetDescendants() do
-				if part:IsA("BasePart") then
-					part.LocalTransparencyModifier = if hidden then 1 else 0
+			for _, descendant in child:GetDescendants() do
+				if descendant:IsA("BasePart") then
+					descendant.LocalTransparencyModifier = if hidden then 1 else 0
+				elseif descendant:IsA("Light") then
+					descendant.Enabled = not hidden
 				end
 			end
 		end

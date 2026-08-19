@@ -55,6 +55,9 @@ local CONTROLLERS = {
 	"Weapon/ViewmodelController",
 	"Effects/ImpactController",
 	"Effects/GoreController",
+	--[[ The map is pitch dark by wave 7 and the atmosphere ramp was pointed at
+	     nothing until this existed. See GameConfig.Flashlight. ]]
+	"Effects/FlashlightController",
 	"Effects/OutlineController",
 	-- The horde's walk cycle. Client-side because a continuous gait replicated
 	-- from the server would be a quarter of a million property writes a second.

@@ -565,6 +565,31 @@ change on the client at all.
 camera is third-person rather than to whether the viewmodel is up — a downed
 survivor's viewmodel goes away while their camera stays at their head.
 
+### The flashlight
+
+`AtmosphereService` opens the round under a low orange sun and is pitch dark by
+wave 7. Until this existed that ramp was pointed at nothing — the map went black
+and the survivors had no way to see into it.
+
+Two lights per survivor, and they are not the same light:
+
+- **The world beam** hangs off the weapon in their hands (`CarryVisualService`),
+  so a teammate's beam sweeping a doorway is a real read from forty studs. Only
+  weapons carry one: a survivor who has pulled their medkit out goes dark for the
+  length of the heal.
+- **The view beam** is the local player's own, carried by the camera
+  (`Client/Effects/FlashlightController`), because a gun points where the ARM
+  points and a player aims with the CAMERA. `ViewmodelController` switches off
+  the owner's world beam for them alone, so nobody sees two coincident lights.
+
+It is always on, with no toggle — a toggle needs a key, and only a keyboard has
+one to spare. `GameConfig.Flashlight` carries the reasoning and the numbers, both
+shared by the two lights so they cannot drift apart.
+
+Shadows are off on both: four shadow-casting spotlights in a horde is the most
+expensive thing this game could ask a phone to draw, and against fog that thick
+the shadows are invisible.
+
 ### Settings
 
 `Shared/Config/SettingsConfig.lua` declares WHAT the options are — key, kind,

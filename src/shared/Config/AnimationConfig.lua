@@ -133,6 +133,32 @@ local ZOMBIE_R15: AnimationSet = {
 }
 
 --[[
+	SURVIVORS — one clip, and it is not a gait.
+
+	Survivors run Roblox's own Animate script, which owns their walk, run, jump
+	and idle and does a better job of it than anything here would. The one thing
+	it will not do is pose the arm for something held, because that is the
+	`toolnone` overlay it plays only for a real Tool — and this game's inventory
+	is not built on Tools.
+
+	These are Roblox's own ToolNone clips, one per rig build. Two properties make
+	them the right answer rather than a hack:
+
+	  * they key the RIGHT ARM and nothing else, so the legs keep walking, the
+	    torso keeps leaning, and only the arm holding the gun is overridden;
+	  * they are authored at Action priority, which is above Movement, so the
+	    walk cycle does not fight them for the shoulder.
+
+	Without one, a welded rifle swings from a running survivor's hand like a
+	carried shopping bag. CarryVisualService plays it while the hands mount has
+	something in it and stops it when the hands are empty.
+]]
+AnimationConfig.SurvivorHold = table.freeze({
+	R6 = 182393478,
+	R15 = 507768375,
+})
+
+--[[
 	Keyed by the rig, because that is what actually decides whether a clip can
 	play at all. A kind only needs naming when it should move differently from
 	every other zombie of the same build — and none of them do.

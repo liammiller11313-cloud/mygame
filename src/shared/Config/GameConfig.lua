@@ -170,6 +170,58 @@ GameConfig.Survivor = table.freeze({
 	ClosetRescueTime = 1.5,
 })
 
+--[[
+	THE FLASHLIGHT.
+
+	AtmosphereService opens the round under a low orange sun and is pitch dark by
+	wave 7. That ramp is the game's whole arc and it was, until this existed,
+	pointed at nothing: the map goes black and the survivors have no way to see
+	into it. This is the other half of the sentence the title is making.
+
+	It is ALWAYS ON, and there is no toggle. Not an oversight — a decision:
+
+	  * A toggle needs a key, and a keyboard has one to spare while a gamepad and
+	    a phone do not. A light that only desktop players can turn back on is a
+	    difficulty setting disguised as a control.
+	  * There is no reason to want it off. It costs nothing, hides nothing, and
+	    attracts nothing. The only outcome a toggle buys is a player who turned it
+	    off by accident in a pitch-dark finale and does not know why they cannot
+	    see. (If the Witch ever cares about being looked at, that changes, and
+	    this is where the switch goes.)
+
+	Two lights per survivor and they are not the same light. Everybody's gun
+	carries one, so a teammate's beam sweeping a doorway is a real read at forty
+	studs — that is the read L4D's flashlights actually buy. But a gun points
+	where the ARM points and a player aims with the CAMERA, so the local player
+	gets their own from the eye and suppresses their gun's. See
+	Client/Effects/FlashlightController.
+
+	Shadows are off on both, deliberately. Four shadow-casting spotlights in a
+	horde is the single most expensive thing this game could ask a phone to draw,
+	and the shadows themselves are invisible against fog this thick.
+]]
+GameConfig.Flashlight = table.freeze({
+	Enabled = true,
+
+	--[[ Wide, and not very bright. A tight bright cone reads as a searchlight and
+	     blows out the first wall it touches; this is a hand torch in fog. The
+	     range is deliberately shorter than the fog is deep, so the dark still
+	     wins at distance and the light tells you about the room you are in. ]]
+	Angle = 64,
+	Brightness = 2.4,
+	Range = 58,
+
+	-- Tungsten, not white. A cold beam in an already-cold grade reads as a bug.
+	Color = Color3.fromRGB(255, 241, 208),
+
+	--[[ Where the view light sits relative to the eye: slightly right, slightly
+	     down, slightly forward. Off-axis on purpose — a beam projected exactly
+	     from the eye lights nothing you can perceive as lit, because every
+	     surface it reaches is one you are looking at head-on with no shading
+	     gradient at all. Moving it a hand's width sideways puts shape back. ]]
+	ViewOffset = CFrame.new(0.45, -0.35, -0.5),
+})
+
 --[[ The shove. L4D's most underrated verb: costs nothing, buys you a second. ]]
 GameConfig.Shove = table.freeze({
 	Range = 12,
