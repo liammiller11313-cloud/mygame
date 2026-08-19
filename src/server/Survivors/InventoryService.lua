@@ -73,6 +73,19 @@ local InventoryService = {}
 
 InventoryService.changed = Signal.new() -- (player, slot)
 
+--[[ (player, slot, itemId, model) — fired the instant a world pickup is taken,
+     while the model is still alive. Anything that owns the SPOT a pickup came
+     from needs to know it went and who has it, and by the time the slot change
+     lands the model has already been destroyed. ]]
+InventoryService.pickedUp = Signal.new()
+
+--[[ (player, slot, itemId) — fired when an item is SPENT, as opposed to dropped,
+     swapped away or lost on death. All four end with an empty slot and a
+     `changed`, and a medkit spawn point may only refill for the first: the other
+     three leave the kit somewhere in the world, and restocking on those would
+     quietly print medkits. ]]
+InventoryService.itemConsumed = Signal.new()
+
 local records: { [Player]: any } = {}
 local serviceTrove = Trove.new()
 
@@ -448,6 +461,7 @@ function InventoryService:useItem(player: Player, slot: string): boolean
 			return false
 		end
 		self:_clearSlot(record, slot)
+		self.itemConsumed:fire(player, slot, entry.itemId)
 		return true
 	end
 
@@ -488,6 +502,7 @@ function InventoryService:useItem(player: Player, slot: string): boolean
 		end
 		if projectiles:throw(player, entry.itemId) then
 			self:_clearSlot(record, slot)
+			self.itemConsumed:fire(player, slot, entry.itemId)
 			return true
 		end
 		return false
@@ -648,6 +663,10 @@ function InventoryService:pickup(player: Player, model: Instance): boolean
 	if not granted then
 		return false
 	end
+
+	-- Before the Destroy, not after: a listener that wants to know where this
+	-- came from has to be able to read the model.
+	self.pickedUp:fire(player, slot, itemId, model)
 
 	model:Destroy()
 	playAt(AudioConfig.UI.Pickup, rootOf(player))
@@ -858,6 +877,7 @@ function InventoryService:_stepUse(record, dt: number, survivors)
 	Remotes.Event.InteractPromptChanged:FireClient(player, { visible = false })
 	if survivors and survivors:applyMedkitHeal(player) then
 		self:_clearSlot(record, use.slot)
+		self.itemConsumed:fire(player, use.slot, use.itemId)
 	end
 end
 

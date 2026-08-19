@@ -73,6 +73,63 @@ MapConfig.AmmoCrates = table.freeze({
 	GhostColor = Color3.fromRGB(58, 54, 48),
 })
 
+--[[
+	Medkits placed in the map.
+
+	Found the same way the crates are — a folder called "Medkits" holding models
+	called "Medkit 1" through "Medkit 11" — for the same reason: naming is
+	something a level designer already does, and tagging is something they have to
+	remember to do.
+
+	Unlike a crate, a medkit is CARRIED. You take it, it rides on your back where
+	the rest of the team can see it, and it stays yours until you spend it. That
+	visibility is most of the point: in Left 4 Dead the single most useful thing
+	you know about a teammate is whether they still have a kit, and you learn it
+	by looking at them rather than by opening a menu.
+
+	The spawn point refills thirty seconds after the kit it produced is spent —
+	not thirty seconds after it is TAKEN. Carrying a kit you have not used yet
+	should not also be quietly restocking the map behind you.
+]]
+MapConfig.Medkits = table.freeze({
+	FolderName = "Medkits",
+	Tag = "FL_Medkit",
+
+	--[[ Only used in the "you have not set this up yet" warning, so it names the
+	     right range of models. Nothing enforces a count — eleven or three or
+	     twenty all work. ]]
+	ExpectedCount = 11,
+
+	RespawnSeconds = 30,
+
+	--[[ There is deliberately no Range here. A medkit is a PICKUP, not a
+	     station, so both the prompt and the server's reach come from
+	     GameConfig.Interaction.PickupRange — the same number every other pickup
+	     in the game uses. A second copy of it would only ever be the one that
+	     was forgotten. ]]
+
+	--[[ A taken spawn point leaves a faint ghost, exactly as a spent crate does.
+	     A player who has learned the map should be able to plan around a kit that
+	     is not there yet. ]]
+	LeaveGhost = true,
+	GhostTransparency = 0.86,
+
+	--[[ How the kit sits on a survivor's back. Studs, in torso space: back from
+	     the spine, up towards the shoulders, and turned so the flat face of the
+	     kit lies against them rather than the edge.
+
+	     Scale shrinks a map-sized prop down to something a person could actually
+	     wear — the supplied models are built to be seen on the floor from three
+	     studs away, not strapped to a shoulder blade. ]]
+	CarryOffset = CFrame.new(0, 0.35, 0.85) * CFrame.Angles(0, math.rad(180), 0),
+	CarryScale = 0.7,
+
+	--[[ Above this size in studs the kit is scaled to fit rather than by
+	     CarryScale. A supplied prop that happens to be huge would otherwise
+	     become a wardrobe on somebody's back. ]]
+	CarryMaxSize = 2.6,
+})
+
 --[[ The end-of-round vote. Short on purpose: the scoreboard is already up, and
      a long vote is dead time between two rounds. ]]
 MapConfig.Vote = table.freeze({
