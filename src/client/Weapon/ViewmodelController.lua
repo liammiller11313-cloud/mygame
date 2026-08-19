@@ -239,6 +239,13 @@ local KICK_PITCH_PER_STUD = 26
 local KICK_AIM_SCALE = 0.5
 
 local FLASH_SECONDS = 0.035 -- roughly two frames; any longer reads as a flare
+
+--[[ Particles per shot at a muzzleFlashSize of 1, scaled by the weapon's own.
+     Small numbers on purpose: at 1100rpm even eight sparks a shot is 150 live
+     particles, and the point is a suggestion of burning powder rather than a
+     firework. ]]
+local MUZZLE_SPARKS = 8
+local MUZZLE_SMOKE = 2
 local FLASH_LIGHT_RANGE = 14
 local FLASH_LIGHT_BRIGHTNESS = 5
 
@@ -272,6 +279,8 @@ local model: Model? = nil
 local muzzle: Attachment? = nil
 local flashPart: BasePart? = nil
 local flashLight: PointLight? = nil
+local flashSparks: ParticleEmitter? = nil
+local flashSmoke: ParticleEmitter? = nil
 local flashUntil = 0
 
 local swayPosition = Spring.new(Vector3.zero, SWAY_SPEED, SWAY_DAMPING)
@@ -888,6 +897,8 @@ local function destroyModel()
 	muzzle = nil
 	flashPart = nil
 	flashLight = nil
+	flashSparks = nil
+	flashSmoke = nil
 	flashUntil = 0
 	current.sightOffset = nil
 end
@@ -923,8 +934,71 @@ local function buildFlash(definition: any)
 	light.Shadows = false
 	light.Parent = part
 
+	--[[
+		The two particle layers that make a shot read as a shot.
+
+		Sparks are the fast, bright, directional half — unburnt powder thrown
+		forward down the barrel line, gone inside a tenth of a second. Smoke is
+		the slow half: a small puff that lingers just long enough to still be
+		there for the next round, so sustained fire builds a haze at the muzzle
+		instead of each shot looking identical and separate.
+
+		Both are Emit()-on-demand with Rate 0, so they cost nothing between shots
+		and never need to be enabled and disabled. One pair per weapon, built
+		here with the flash and destroyed with it — at the Vector's 1100rpm,
+		creating emitters per shot is eighteen instances a second and eighteen
+		more for the collector.
+	]]
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Name = "FL_MuzzleSparks"
+	sparks.Rate = 0
+	sparks.Enabled = false
+	sparks.Speed = NumberRange.new(14 * size, 26 * size)
+	sparks.Lifetime = NumberRange.new(0.04, 0.11)
+	sparks.Rotation = NumberRange.new(0, 360)
+	sparks.RotSpeed = NumberRange.new(-220, 220)
+	sparks.SpreadAngle = Vector2.new(14, 14)
+	sparks.Acceleration = Vector3.new(0, -28, 0)
+	sparks.LightEmission = 1
+	sparks.LightInfluence = 0
+	sparks.Color = ColorSequence.new(definition.tracerColor)
+	sparks.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.22 * size),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	sparks.Transparency = NumberSequence.new(0)
+	sparks.Parent = part
+
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Name = "FL_MuzzleSmoke"
+	smoke.Rate = 0
+	smoke.Enabled = false
+	smoke.Speed = NumberRange.new(2.5 * size, 5 * size)
+	smoke.Lifetime = NumberRange.new(0.25, 0.55)
+	smoke.Rotation = NumberRange.new(0, 360)
+	smoke.RotSpeed = NumberRange.new(-40, 40)
+	smoke.SpreadAngle = Vector2.new(22, 22)
+	--[[ Drifts UP, not down. Hot gas rises, and a puff that falls reads as dust
+	     kicked off the gun rather than as something that just burned. ]]
+	smoke.Acceleration = Vector3.new(0, 4, 0)
+	smoke.LightEmission = 0.15
+	smoke.LightInfluence = 1
+	smoke.Color = ColorSequence.new(Color3.fromRGB(96, 92, 88))
+	smoke.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.18 * size),
+		NumberSequenceKeypoint.new(1, 1.1 * size),
+	})
+	smoke.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.55),
+		NumberSequenceKeypoint.new(0.35, 0.72),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	smoke.Parent = part
+
 	flashPart = part
 	flashLight = light
+	flashSparks = sparks
+	flashSmoke = smoke
 end
 
 --[[
@@ -1356,6 +1430,17 @@ function ViewmodelController:onFired(definition: any, _seed: number)
 		flashPart.Transparency = 0.1
 		flashLight.Enabled = true
 		flashUntil = os.clock() + FLASH_SECONDS
+
+		--[[ Scaled by the weapon's own flash size, so a .357 throws a handful of
+		     sparks and the shotgun throws a fistful. A shell-fed gun that emitted
+		     the same count as a Vector would read as identical at every calibre. ]]
+		local scale = definition.muzzleFlashSize
+		if flashSparks then
+			flashSparks:Emit(math.max(math.floor(MUZZLE_SPARKS * scale), 3))
+		end
+		if flashSmoke then
+			flashSmoke:Emit(math.max(math.floor(MUZZLE_SMOKE * scale), 1))
+		end
 	end
 
 	if definition.shellEject then
@@ -1365,6 +1450,27 @@ end
 
 --[[ The empty click has to be felt before the number is read. A short downward
      nudge is enough: the weapon dips, nothing happens, and the player knows. ]]
+--[[
+	Where the barrel actually is, in world space, or nil when nothing is drawn.
+
+	WeaponController raycasts from the CAMERA — you shoot where you look, and
+	that must not change — but a tracer drawn from the camera appears to leave
+	the player's face, because in first person the gun sits below and to the
+	right of the eye. The hit point is the same either way; only the line
+	between differs, and drawing it from here is what makes a shot look like it
+	came out of the gun.
+
+	Nil while the viewmodel is hidden (third person, spectating, downed with no
+	model), and the caller falls back to the camera rather than skipping the
+	tracer — a tracer from slightly the wrong place beats no tracer at all.
+]]
+function ViewmodelController:getMuzzlePosition(): Vector3?
+	if not model or not muzzle then
+		return nil
+	end
+	return muzzle.WorldPosition
+end
+
 function ViewmodelController:onDryFire()
 	local speed = kickPosition.speed
 	kickPosition:impulse(Vector3.new(0, -0.05 * speed * IMPULSE_GAIN, 0.02 * speed * IMPULSE_GAIN))

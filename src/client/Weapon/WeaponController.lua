@@ -505,6 +505,29 @@ local function drawTracers(origin: Vector3, direction: Vector3, seed: number, sp
 		return
 	end
 
+	--[[
+		The ray starts at the camera; the LINE starts at the barrel.
+
+		Those are two different questions and they used to share one answer. You
+		shoot where you look, so the raycast has to come from the camera or the
+		shot would not land under the crosshair — but in first person the gun sits
+		below and to the right of the eye, so a tracer drawn from the camera
+		visibly leaves the player's face. Same hit point, different line, and the
+		line is the only part anybody sees.
+
+		Falls back to the camera when there is no viewmodel — third person,
+		spectating — which is also the case where the two are close enough not to
+		matter.
+	]]
+	local visualOrigin = origin
+	local viewmodel = Registry.find("ViewmodelController")
+	if viewmodel and typeof(viewmodel.getMuzzlePosition) == "function" then
+		local ok, muzzlePosition = pcall(viewmodel.getMuzzlePosition, viewmodel)
+		if ok and typeof(muzzlePosition) == "Vector3" then
+			visualOrigin = muzzlePosition
+		end
+	end
+
 	local directions = ShotPattern.generate(direction, seed, definition.pellets, spread)
 	local count = math.min(#directions, MAX_PREDICTED_TRACERS)
 	local range = definition.maxRange
@@ -514,7 +537,7 @@ local function drawTracers(origin: Vector3, direction: Vector3, seed: number, sp
 		local pellet = directions[index]
 		local hit = Workspace:Raycast(origin, pellet * range, params)
 		local endPosition = if hit then hit.Position else origin + pellet * range
-		impacts:drawTracer(origin, endPosition, definition.id)
+		impacts:drawTracer(visualOrigin, endPosition, definition.id)
 	end
 end
 

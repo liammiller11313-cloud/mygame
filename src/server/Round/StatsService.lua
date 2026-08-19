@@ -65,6 +65,94 @@ local function recordFor(player: Player): { [string]: number }
 	return record
 end
 
+--[[
+	The Roblox player list, which is a different audience from the scoreboard.
+
+	The end-of-round card is a report on the round you just played; this is the
+	thing anybody can pull up mid-fight with one key to see how the team is
+	doing, and it survives the round because leaderstats are per-session rather
+	than per-round. Two numbers only: what you killed, and how many times you
+	went down for good. A player list with ten columns is a player list nobody
+	reads.
+
+	"Wipeouts" rather than "Deaths" because that is this game's word for it — the
+	round ends in a team wipeout, and a survivor who did not get up was wiped
+	out. Consistency with what the game says everywhere else is worth more than
+	the more obvious noun.
+]]
+local LEADERBOARD: { { key: string, title: string } } = {
+	{ key = "kills", title = "Kills" },
+	{ key = "deaths", title = "Wipeouts" },
+}
+
+local function leaderboardFor(player: Player): Folder?
+	local existing = player:FindFirstChild("leaderstats")
+	if existing then
+		return existing :: Folder
+	end
+	if not player.Parent then
+		return nil
+	end
+
+	--[[ Named exactly "leaderstats". Roblox looks that folder up by name to
+	     build the player list, and any other name is a folder nobody ever
+	     sees. ]]
+	local folder = Instance.new("Folder")
+	folder.Name = "leaderstats"
+	for _, column in LEADERBOARD do
+		local value = Instance.new("IntValue")
+		value.Name = column.title
+		value.Value = 0
+		value.Parent = folder
+	end
+	folder.Parent = player
+	return folder
+end
+
+--[[
+	Session totals, which are NOT the per-round counters above.
+
+	`stats` is cleared at the start of every round, because the scoreboard is a
+	report on the round that just happened. The player list is the opposite: it
+	is what somebody checks in the middle of their fourth round to see how the
+	team has been doing all evening, and a column that silently zeroes every
+	seventeen minutes is worse than no column.
+
+	So the two are kept apart. Reading the player list off `stats` would have
+	looked correct and quietly reset itself.
+]]
+local session: { [Player]: { [string]: number } } = {}
+
+local function sessionFor(player: Player): { [string]: number }
+	local record = session[player]
+	if not record then
+		record = {}
+		for _, column in LEADERBOARD do
+			record[column.key] = 0
+		end
+		session[player] = record
+	end
+	return record
+end
+
+--[[ Mirrors one player's session totals onto their leaderstats. Cheap and
+     idempotent: an IntValue only replicates when the number actually changes,
+     so calling this on every bump costs a comparison rather than a network
+     write. ]]
+local function pushLeaderboard(player: Player)
+	local folder = leaderboardFor(player)
+	if not folder then
+		return
+	end
+	local record = sessionFor(player)
+	for _, column in LEADERBOARD do
+		local value = folder:FindFirstChild(column.title)
+		if value and value:IsA("IntValue") then
+			value.Value = math.floor(record[column.key] or 0)
+		end
+	end
+end
+
 local function bump(player: Player?, key: string, amount: number)
 	if not player or amount == 0 then
 		return
@@ -72,6 +160,16 @@ local function bump(player: Player?, key: string, amount: number)
 	local record = recordFor(player)
 	record[key] += amount
 	dirty = true
+
+	-- Only the two columns the player list shows; every other counter changes
+	-- many times a second and none of them are on it.
+	for _, column in LEADERBOARD do
+		if column.key == key then
+			sessionFor(player)[key] += amount
+			pushLeaderboard(player)
+			break
+		end
+	end
 end
 
 --[[ Name-keyed snapshot, which is the shape both `StatsUpdated` and
@@ -97,6 +195,9 @@ end
 
 --[[ Wipes the board. Called by RoundService when a round starts, so a scoreboard
      never shows last round's numbers. ]]
+--[[ Wipes the per-round counters. The player list is deliberately NOT reset:
+     leaderstats are the session total, which is the whole reason to look at
+     them rather than at the scoreboard that just cleared itself. ]]
 function StatsService:reset()
 	table.clear(stats)
 	for _, player in Players:GetPlayers() do
@@ -184,10 +285,19 @@ function StatsService:start()
 
 	serviceTrove:connect(Players.PlayerAdded, function(player)
 		recordFor(player)
+		pushLeaderboard(player)
 		dirty = true
 	end)
+	for _, player in Players:GetPlayers() do
+		--[[ Anybody already here when this service started. In Studio the local
+		     player joins during boot, so without this the first player of every
+		     test session has no row until their first kill. ]]
+		recordFor(player)
+		pushLeaderboard(player)
+	end
 	serviceTrove:connect(Players.PlayerRemoving, function(player)
 		stats[player] = nil
+		session[player] = nil
 	end)
 
 	serviceTrove:connect(RunService.Heartbeat, function(dt)
