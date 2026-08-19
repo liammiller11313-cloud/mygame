@@ -28,9 +28,49 @@ joins the vote automatically.
 
 ### Tagging a map
 
-Both maps need the same tags as before (`FL_FlowNode` ordered by `FL_Order`,
-`FL_SpawnNode`, `FL_ItemSpawn`, `FL_SurvivorSpawn`, `FL_BossZone`). Nothing about
-that changed.
+**Run `studio-scripts/TagMap.lua` in the Studio command bar. That is the whole
+job.** It reads the geometry and writes every tag the level system needs.
+
+Until a map is tagged, the game runs entirely on fallbacks: the Director cannot
+tell what is ahead of the team so it spawns purely by distance from whoever it
+can see, items scatter instead of stocking the route, and survivors start in a
+ring wherever the fallback picks rather than where a round should begin. It is
+playable and it is noticeably worse.
+
+What the script does: it casts a downward ray over a grid across the map, keeps
+the cells with standing room, finds the largest connected walkable region, and
+measures the longest route across it. On a street map that route lands on the
+street, because the buildings were never walkable cells. Everything else is
+placed relative to that route.
+
+| Tag | Where it puts them |
+|---|---|
+| `FL_FlowNode` | along the route, ~42 studs apart, numbered with `FL_Order` |
+| `FL_SurvivorSpawn` | four spots at one end of it |
+| `FL_SpawnNode` | 22–110 studs off the route — alleys, side streets, back rooms |
+| `FL_ItemSpawn` | 6–55 studs off it, spread along its length, flush with the floor |
+
+Everything it creates goes in one `FL_Nodes` folder inside the map. Re-running
+deletes the previous folder first, so it is safe to run twice, and deleting that
+folder undoes it completely. It never touches, moves or modifies a part of your
+build.
+
+**Which end the round starts at** is the one thing the geometry cannot tell it.
+It pins the start to the end of the route nearest the world origin and prints
+both endpoints when it runs — so if the team spawns at the wrong end of the
+street, set `REVERSE_ROUTE = true` at the top of the script and run it again.
+The choice is deterministic either way, so an unrelated edit to the map will
+never quietly move your spawn to the other side of it.
+
+Treat it as a first pass, not a level designer. Open `FL_Nodes/Flow`, look at
+where the chain went, and drag nodes that landed somewhere silly — the order
+comes from `FL_Order`, not from position, so moving one can never break the
+chain. Same for the spawn nodes: the script only knows "off the route", it does
+not know that one of those alleys is visible from the whole street.
+
+`FL_BossZone` and `FL_PanicTrigger` are not written automatically. Both are
+authored decisions — where the Witch should be, which doorway starts a panic
+event — so tag those two by hand when you want them.
 
 ---
 

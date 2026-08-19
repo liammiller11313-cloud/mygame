@@ -12,8 +12,13 @@ if ! command -v stylua >/dev/null 2>&1; then
 fi
 
 MODE="${1:-format}"
-FILES=$(find src -name '*.lua' -type f | sort)
-[ -z "$FILES" ] && { echo "no .lua files under src/"; exit 0; }
+# studio-scripts/ is included deliberately. Those are paste-into-the-command-bar
+# scripts, so a syntax error in one is not caught by anything else and only shows
+# up as a wall of red in Studio at exactly the moment someone is trying to get
+# unblocked. audit.py still only looks at src/ — the cross-references it checks
+# are game modules, and a command-bar script has none of them.
+FILES=$(find src studio-scripts -name '*.lua' -type f 2>/dev/null | sort)
+[ -z "$FILES" ] && { echo "no .lua files under src/ or studio-scripts/"; exit 0; }
 
 TOTAL=$(echo "$FILES" | wc -l | tr -d ' ')
 FAILED=0
