@@ -586,6 +586,10 @@ It is always on, with no toggle — a toggle needs a key, and only a keyboard ha
 one to spare. `GameConfig.Flashlight` carries the reasoning and the numbers, both
 shared by the two lights so they cannot drift apart.
 
+The `brightness` setting is the other half of playing in the dark: a client-side
+`ColorCorrectionEffect` owned by `OverlayController`, lifting mid-tones without
+opening the fog, so a phone in daylight is not a different game.
+
 Shadows are off on both: four shadow-casting spotlights in a horde is the most
 expensive thing this game could ask a phone to draw, and against fog that thick
 the shadows are invisible.

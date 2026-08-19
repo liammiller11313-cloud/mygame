@@ -506,6 +506,8 @@ end
 local function applySetting(key: string, value: any)
 	if key == "quality" or key == "gore" then
 		applyGoreBudget()
+	elseif key == "brightness" then
+		callController("OverlayController", "setBrightness", value)
 	elseif key == "screenShake" then
 		callController("CameraController", "setShakeEnabled", value == true)
 	elseif key == "damageNumbers" then

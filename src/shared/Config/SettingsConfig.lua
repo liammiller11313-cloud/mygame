@@ -94,6 +94,21 @@ SettingsConfig.Definitions = table.freeze({
 		default = "FULL",
 		blurb = "Dismemberment and gibbing.",
 	},
+	--[[ The one setting most likely to be the difference between playing this
+	     game and giving up on it. AtmosphereService ends the round in the dark,
+	     and that ramp is tuned against one screen in one room — a phone in
+	     daylight is a different game. Above 1.0 as well as below, because the
+	     problem is nearly always not enough light rather than too much. ]]
+	{
+		key = "brightness",
+		label = "BRIGHTNESS",
+		category = "GRAPHICS",
+		kind = "slider",
+		default = 1.0,
+		min = 0.8,
+		max = 1.6,
+		blurb = "Lifts the picture without opening the fog. 100% is as designed.",
+	},
 	{
 		key = "screenShake",
 		label = "SCREEN SHAKE",

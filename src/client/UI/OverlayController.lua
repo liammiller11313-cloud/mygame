@@ -17,6 +17,9 @@
 	                       way for MainMenuController
 	  5. SCREEN EFFECTS    Boomer bile, blood on the lens, the adrenaline shift
 	  6. DAMAGE ARROWS     which direction that came from, in screen space
+	  7. PERSONAL GAMMA    the brightness setting, as a client-side grade — see
+	                       setBrightness, and GameConfig.Flashlight for why a
+	                       game that ends in the dark needs one
 
 	── RESTRAINT ───────────────────────────────────────────────────────────────
 	A full red wash at the exact moment the player most needs to read the screen
@@ -138,6 +141,12 @@ local bileLayer: Frame
 local bileBlobs: { Frame } = {}
 local tintLayer: Frame
 local grade: ColorCorrectionEffect
+
+--[[ The player's own brightness, as a SECOND grade. Separate from `grade` above
+     because that one is state — downed, black-and-white, bile — and is switched
+     off the moment the state clears; this one is a preference and has to survive
+     that. See setBrightness. ]]
+local personalGrade: ColorCorrectionEffect
 
 local indicators: { any } = {}
 local indicatorCursor = 1
@@ -509,6 +518,12 @@ local function build()
 	grade.TintColor = Color3.new(1, 1, 1)
 	grade.Parent = Lighting
 	trove:add(grade)
+
+	personalGrade = Instance.new("ColorCorrectionEffect")
+	personalGrade.Name = "FL_PlayerBrightness"
+	personalGrade.Enabled = false
+	personalGrade.Parent = Lighting
+	trove:add(personalGrade)
 end
 
 -- ── vignette and grade ──────────────────────────────────────────────────────
@@ -1124,6 +1139,43 @@ end
      the gore setting; see `bloodEnabled`. ]]
 function OverlayController:setBloodEnabled(value: boolean)
 	bloodEnabled = value ~= false
+end
+
+--[[
+	The player's own brightness, for a game that ends in the dark.
+
+	AtmosphereService takes the map from a low orange sun to pitch black over
+	seven waves, and that ramp is tuned against one screen in one room. A phone
+	in daylight, a cheap panel, or somebody who simply cannot see into the gloom
+	all end up playing a different game. This is the lever for that, and it is
+	deliberately a CLIENT-side grade: it changes nothing for anybody else, and
+	the server's own look — which is where the atmosphere lives — is untouched.
+
+	`scale` is 1.0 for the game as designed. It drives Brightness rather than
+	Exposure because exposure lifts the whole image including the fog, which
+	turns the dark into grey soup; brightness lifts the mid-tones and leaves the
+	fog where the artist put it. The matching contrast trim keeps the blacks from
+	going flat as it opens up.
+
+	Disabled outright at 1.0 rather than left running at zero: a ColorCorrection
+	that is enabled costs a full-frame pass whatever its values are, and most
+	players will never move this.
+]]
+local BRIGHTNESS_GAIN = 0.30
+local BRIGHTNESS_CONTRAST = 0.16
+
+function OverlayController:setBrightness(scale: number)
+	if not personalGrade then
+		return
+	end
+	local wanted = if typeof(scale) == "number" and scale == scale then math.clamp(scale, 0.5, 2) else 1
+	if math.abs(wanted - 1) < 0.01 then
+		personalGrade.Enabled = false
+		return
+	end
+	personalGrade.Brightness = (wanted - 1) * BRIGHTNESS_GAIN
+	personalGrade.Contrast = (wanted - 1) * BRIGHTNESS_CONTRAST
+	personalGrade.Enabled = true
 end
 
 function OverlayController:screenEffect(effect: string, duration: number?, intensity: number?)
