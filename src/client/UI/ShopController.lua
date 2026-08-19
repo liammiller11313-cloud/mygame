@@ -246,10 +246,26 @@ end
 
 -- ── drawing ─────────────────────────────────────────────────────────────────
 
+--[[ A colour as RichText wants it. One place, so the header caption cannot end
+     up a different grey from the theme's. ]]
+local function hex(color: Color3): string
+	return string.format(
+		"#%02X%02X%02X",
+		math.floor(color.R * 255 + 0.5),
+		math.floor(color.G * 255 + 0.5),
+		math.floor(color.B * 255 + 0.5)
+	)
+end
+
 local function refreshBalance()
 	local store = profile()
 	local dollars = if store then store:getDollars() else 0
-	balanceLabel.Text = EconomyConfig.format(dollars)
+	balanceLabel.Text = string.format(
+		'<font size="%d" color="%s">BALANCE  </font>%s',
+		TEXT.Small,
+		hex(COLOR.TextDim),
+		EconomyConfig.format(dollars)
+	)
 
 	local degraded = store and store:isDegraded()
 	warningLabel.Visible = degraded == true
@@ -582,8 +598,13 @@ local function build()
 	balanceLabel = Widgets.label(panel, "Balance", FONT.Numeric, TEXT.Heading, COLOR.Accent)
 	balanceLabel.AnchorPoint = Vector2.new(1, 0)
 	balanceLabel.Position = UDim2.new(1, -balanceInset, 0, 0)
-	balanceLabel.Size = UDim2.new(0.4, 0, 0, PANEL.HeaderHeight)
+	balanceLabel.Size = UDim2.new(0.5, 0, 0, PANEL.HeaderHeight)
 	balanceLabel.TextXAlignment = Enum.TextXAlignment.Right
+	--[[ The word BALANCE rides in the same label rather than in one beside it,
+	     because the number's width changes with the number and a separate caption
+	     would have to be repositioned every time it did. RichText is one string
+	     and one right edge. ]]
+	balanceLabel.RichText = true
 
 	--[[ In the footer, not stacked under the balance.
 

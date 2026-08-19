@@ -147,6 +147,26 @@ local COLUMN_X = 0.09
 local TITLE_LINE = TEXT.Title + 6
 local TITLE_RULE_WIDTH = 300
 
+--[[
+	PLAY, and the page behind it.
+
+	The menu used to open straight onto the mode list, which put a decision in
+	front of a player before they had been shown anything: two entries with
+	nothing above them but a title, and nothing to suggest that SHOP and LOADOUTS
+	were things you might want to do FIRST. The mode list is one press deep now,
+	behind a single button that says what the game is for.
+
+	Nothing about matchmaking changed — pressing a mode still sends RequestMode
+	and the server still decides which server or round you land in. This only
+	moved WHEN the question is asked.
+]]
+local PLAY_HEIGHT = 110
+local PLAY_HEIGHT_COMPACT = 64
+--[[ Under LAYOUT.ScreenMargin, because that gap is where it lives — see where it
+     is positioned. Wide to stay tappable at the height that leaves it. ]]
+local BACK_HEIGHT = 18
+local BACK_WIDTH = 0.26
+
 local ENTRY_HEIGHT = 88
 local ENTRY_GAP = 20
 local ENTRY_WIDTH = 0.44
@@ -277,6 +297,9 @@ local resultContinue: TextLabel
      only two answers and searching the tree for them every time would be a
      lookup that can silently start returning the wrong thing. ]]
 local firstModeButton: TextButton? = nil
+local playButton: TextButton? = nil
+local playLine: TextLabel? = nil
+local backButton: TextButton? = nil
 local resultContinueButton: TextButton? = nil
 local resultReturn: TextLabel
 
@@ -293,6 +316,10 @@ local state = {
 	results = false,
 	suppressed = false,
 	committed = false, -- the server has admitted this player to the round
+	--[[ Which page of the menu is up: "Root" is PLAY plus the nav row, "Modes"
+	     is the mode list. One field rather than a pile of booleans, so the menu
+	     can never be half way between the two. ]]
+	page = "Root",
 	teleporting = false,
 	roundState = ROUND.Lobby,
 	--[[ A map vote is on screen. Pushed in by MapVoteController rather than
@@ -551,10 +578,49 @@ local function refreshVisibility()
 	elseif state.results then
 		GamepadFocus.capture(resultContinueButton)
 	elseif lobbyVisible then
-		GamepadFocus.capture(firstModeButton)
+		--[[ Whichever page is up. Pointing a pad at a mode entry that PLAY has not
+		     revealed yet is pointing it at a hidden button, which eats every D-pad
+		     press in the menu. ]]
+		GamepadFocus.capture(if state.page == "Modes" then firstModeButton else playButton)
 	else
 		GamepadFocus.release(nil)
 	end
+end
+
+--[[
+	Shows one page of the menu.
+
+	Root is PLAY; Modes is the list behind it. Everything else on the screen —
+	title, nav row, lobby panel, briefing — belongs to both and is untouched
+	here, because those are the things a player should be able to reach from
+	either page.
+
+	Called on open as well as on the press, so a menu reopened after a round
+	always comes back on Root rather than wherever it was left.
+]]
+local function setPage(page: string)
+	state.page = page
+	local modes = page == "Modes"
+
+	if playButton then
+		playButton.Visible = not modes
+	end
+	if backButton then
+		backButton.Visible = modes
+	end
+	for _, entry in modeEntries do
+		entry.button.Visible = modes
+	end
+
+	--[[ No relayout here on purpose: PLAY and the mode stack are both centred in
+	     the same band and BACK lives outside it, so the geometry is identical on
+	     both pages and only what is VISIBLE changes. That is also what makes the
+	     swap read as one screen rather than two. ]]
+
+	--[[ Selection has to move with the page for the same reason the buttons do:
+	     a pad left pointing at a hidden entry eats every press. refreshVisibility
+	     owns which button that is. ]]
+	refreshVisibility()
 end
 
 -- ── lobby presentation ──────────────────────────────────────────────────────
@@ -1052,6 +1118,10 @@ function MainMenuController:open()
 	     showing what the LAST round paid while it waits for its own remote. ]]
 	payoutShown = nil
 	state.countdownShown = -1
+	--[[ Always back on PLAY. A menu reopened after a round that resumed on the
+	     mode list would be showing a decision the player has just finished
+	     making. ]]
+	setPage("Root")
 	refreshLobby()
 	refreshVisibility()
 end
@@ -1268,6 +1338,60 @@ local function buildTitle()
 	titleRule.Position =
 		UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE * 2 + LAYOUT.PanelPadding)
 	titleRule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
+end
+
+--[[
+	PLAY, and the way back from what it opens.
+
+	Deliberately the only thing on the root page below the title: the whole point
+	of the change is that a player who has just loaded in sees one obvious verb
+	and four quiet options, rather than a fork they have no information to answer.
+
+	Both sit in the same column and the same vertical band as the mode stack, so
+	the page swap is a change of content rather than a change of layout — nothing
+	jumps.
+]]
+local function buildPlay()
+	local button = Widgets.button(menuLayer, "Play")
+	playButton = button
+
+	local rule = Widgets.rule(button, "Rule", COLOR.Accent)
+
+	local bar = Widgets.frame(button, "Bar", COLOR.Accent, 0)
+	bar.Position = UDim2.fromOffset(0, LAYOUT.BorderThickness)
+	bar.Size = UDim2.new(0, ENTRY_BAR_WIDTH, 1, -LAYOUT.BorderThickness)
+
+	local label = Widgets.label(button, "Label", FONT.Display, TEXT.Title, COLOR.TextPrimary)
+	label.Position = UDim2.fromOffset(ENTRY_TEXT_INSET, LAYOUT.PanelPadding)
+	label.Text = "PLAY"
+
+	playLine = Widgets.label(button, "Line", FONT.Body, TEXT.Body, COLOR.TextSecondary)
+	playLine.Position = UDim2.fromOffset(ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding)
+	playLine.Text = "CHOOSE A MODE AND FIND A ROUND"
+	playLine.TextTransparency = 0.35
+
+	trove:connect(button.MouseEnter, function()
+		label.TextColor3 = COLOR.AccentBright
+		playUi(AudioConfig.UI.MenuHover)
+	end)
+	trove:connect(button.MouseLeave, function()
+		label.TextColor3 = COLOR.TextPrimary
+	end)
+	trove:connect(button.Activated, function()
+		playUi(AudioConfig.UI.MenuConfirm)
+		setPage("Modes")
+	end)
+
+	backButton = Widgets.button(menuLayer, "Back")
+	local backLabel = Widgets.label(backButton, "Label", FONT.Heading, TEXT.Body, COLOR.TextDim)
+	backLabel.Size = UDim2.fromScale(1, 1)
+	backLabel.Text = "‹  BACK"
+	Widgets.hover(trove, backButton, backLabel)
+	trove:connect(backButton.Activated, function()
+		playUi(AudioConfig.UI.MenuBack)
+		setPage("Root")
+	end)
+	backButton.Visible = false
 end
 
 local function buildModes()
@@ -1835,7 +1959,55 @@ local function layoutColumns(referenceHeight: number)
 	local stack = count * height + (count - 1) * ENTRY_GAP
 	--[[ Centred in the room rather than pinned to the top of it, so a desktop
 	     keeps the deliberate gap under the title that the 0.52 anchor gave it. ]]
-	local entryTop = titleBottom + LAYOUT.ScreenMargin + math.max((room - stack) * 0.5, 0)
+	local bandTop = titleBottom + LAYOUT.ScreenMargin
+	local entryTop = bandTop + math.max((room - stack) * 0.5, 0)
+
+	--[[ PLAY is centred in the same band the mode stack fills, so the page swap
+	     is a change of content rather than a change of layout. A button that
+	     jumps when you press it reads as two different screens. ]]
+	if playButton then
+		local playHeight = if compact then PLAY_HEIGHT_COMPACT else PLAY_HEIGHT
+		playButton.Position = UDim2.new(COLUMN_X, 0, 0, bandTop + math.max((room - playHeight) * 0.5, 0))
+		playButton.Size = UDim2.new(ENTRY_WIDTH, 0, 0, playHeight)
+		local label = playButton:FindFirstChild("Label") :: TextLabel?
+		if label then
+			label.TextSize = if compact then TEXT.Display else TEXT.Title
+			label.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, label.TextSize + 6)
+		end
+		if playLine then
+			--[[ The strapline goes on a phone for the same reason a mode entry's
+			     does: in a 64-pixel button it is a second line of type sitting on
+			     the first. ]]
+			playLine.Visible = not compact
+			playLine.Position = UDim2.fromOffset(
+				ENTRY_TEXT_INSET + 2,
+				LAYOUT.PanelPadding + (if label then label.TextSize else TEXT.Title) + 8
+			)
+			playLine.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, TEXT.Body + 4)
+		end
+	end
+
+	--[[
+		BACK goes in the margin between the title rule and the band, not in the
+		band itself.
+
+		It wanted a row of its own and it cannot have one. On the smallest phone
+		this game supports — 480 reference pixels tall — the whole band between
+		the title and the nav row is about 109 pixels, and two mode entries with
+		30-pixel titles already need every one of them. Taking BACK_HEIGHT plus a
+		gap out of that pushed the second entry straight through the nav row, which
+		is what verify_menu caught.
+
+		The margin gap is exactly ScreenMargin on every viewport, so a BACK_HEIGHT
+		under that always fits with room either side. It is wide rather than tall
+		to stay tappable, and Escape and B do the same job for the two schemes
+		that have them.
+	]]
+	if backButton then
+		backButton.Position =
+			UDim2.new(COLUMN_X, 0, 0, titleBottom + (LAYOUT.ScreenMargin - BACK_HEIGHT) * 0.5)
+		backButton.Size = UDim2.new(BACK_WIDTH, 0, 0, BACK_HEIGHT)
+	end
 
 	for index, entry in modeEntries do
 		entry.button.Position = UDim2.new(COLUMN_X, 0, 0, entryTop + (index - 1) * (height + ENTRY_GAP))
@@ -1946,6 +2118,7 @@ local function build()
 	trove:add(masterGroup)
 
 	buildTitle()
+	buildPlay()
 	buildModes()
 	buildBriefing()
 	buildLobby()
@@ -1954,6 +2127,10 @@ local function build()
 	buildResults()
 	buildTeleport()
 
+	--[[ The root page is the built state, not just the opened one: the mode
+	     entries are constructed visible and would show through the first frame
+	     of the menu otherwise. ]]
+	setPage("Root")
 	refreshScale()
 end
 
@@ -2063,6 +2240,28 @@ function MainMenuController:start()
 	trove:connect(Remotes.Event.MapLoading.OnClientEvent, refreshMapLine)
 	refreshMapLine()
 	trove:connect(Remotes.Event.HitConfirmed.OnClientEvent, onHitConfirmed)
+
+	--[[
+		The way back off the mode page without a mouse.
+
+		Escape and B are what every other screen in this game closes on, and the
+		mode list is a page rather than a panel, so they step back one instead of
+		closing anything. On the root page they do nothing at all — the main menu
+		in the lobby is not something a player should be able to dismiss into an
+		empty screen.
+
+		`processed` is respected so Escape going to the Roblox menu is not also a
+		page change.
+	]]
+	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
+		if processed or not state.open or state.page ~= "Modes" then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.ButtonB then
+			playUi(AudioConfig.UI.MenuBack)
+			setPage("Root")
+		end
+	end)
 	trove:connect(Remotes.Event.DamageTaken.OnClientEvent, onDamageTaken)
 	trove:connect(Remotes.Event.SurvivorStateChanged.OnClientEvent, onSurvivorStateChanged)
 
