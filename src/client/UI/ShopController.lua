@@ -51,26 +51,30 @@ local Widgets = require(script.Parent.Widgets)
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
+local PANEL = UITheme.Panel
 local TEXT = UITheme.TextSize
 
 local player = Players.LocalPlayer
 
 -- ── layout, in reference pixels ─────────────────────────────────────────────
+--[[ Only the two numbers that are genuinely this screen's: how wide two columns
+     of weapon want to be, and how tall it is worth growing on a big display.
+     Header, tabs, footer, scrim, rows and panel treatment all come from
+     UITheme.Panel, which is what makes this look like the same game as the
+     settings panel next to it. ]]
 local PANEL_WIDTH = 860
-local PANEL_HEIGHT_SCALE = 0.86
 local PANEL_MAX_HEIGHT = 620
-local HEADER_HEIGHT = 44
-local TAB_HEIGHT = 30
-local FOOTER_HEIGHT = 40
-local SCRIM = 0.45
+
+local HEADER_HEIGHT = PANEL.HeaderHeight
+local TAB_HEIGHT = PANEL.TabHeight
+local FOOTER_HEIGHT = PANEL.FooterHeight
 
 --[[ The list on the left and the detail on the right. A fraction rather than an
      offset so the split holds on a phone, where the whole panel is narrower. ]]
 local LIST_WIDTH = 0.36
 
-local ROW_HEIGHT = 42
-local ROW_HEIGHT_TOUCH = 54
-local SCROLLBAR_WIDTH = 3
+local ROW_HEIGHT = PANEL.RowHeight
+local ROW_HEIGHT_TOUCH = PANEL.RowHeightTouch
 
 --[[ How tall the 3D preview is, as a fraction of the detail column. The rest is
      price, name, stats and the buy button — and the weapon is the reason the
@@ -104,6 +108,7 @@ local gui: ScreenGui
 local panel: Frame
 local balanceLabel: TextLabel
 local warningLabel: TextLabel
+local hintLabel: TextLabel
 local tabHolder: Frame
 local list: ScrollingFrame
 local detail: Frame
@@ -249,6 +254,7 @@ local function refreshBalance()
 	local degraded = store and store:isDegraded()
 	warningLabel.Visible = degraded == true
 	warningLabel.Text = if degraded then "OFFLINE — NOTHING BOUGHT NOW WILL BE SAVED" else ""
+	hintLabel.Visible = not degraded
 end
 
 local function refreshRows()
@@ -359,7 +365,7 @@ end
 local function buildRow(entry: any, index: number)
 	local height = rowHeight()
 	local button = Widgets.button(list, entry.id)
-	button.Size = UDim2.new(1, -(SCROLLBAR_WIDTH + LAYOUT.ElementGap), 0, height)
+	button.Size = UDim2.new(1, -(PANEL.ScrollBarWidth + LAYOUT.ElementGap), 0, height)
 	button.LayoutOrder = index
 	button.BackgroundColor3 = COLOR.TextPrimary
 
@@ -383,6 +389,10 @@ local function buildRow(entry: any, index: number)
 	rule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
 
 	local row = { entry = entry, button = button, name = name, status = status, bar = bar }
+	--[[ refreshRows rather than a bare clear: a SELECTED row rests at 0.9, and
+	     wiping it to transparent on mouse-leave would drop the selection
+	     highlight until something else happened to redraw. ]]
+	Widgets.rowHover(rowTrove, button, refreshRows)
 	rowTrove:connect(button.Activated, function()
 		if state.selected ~= entry.id then
 			playUi(AudioConfig.UI.MenuHover)
@@ -527,7 +537,7 @@ local function buildDetail(parent: Frame)
 	buyButton.Position = UDim2.new(1, 0, 1, 0)
 	buyButton.Size = UDim2.fromOffset(220, 40)
 	buyButton.BackgroundColor3 = COLOR.PanelRaised
-	buyButton.BackgroundTransparency = 0.15
+	buyButton.BackgroundTransparency = PANEL.ActionFill
 
 	Widgets.stroke(buyButton, COLOR.Border)
 	buyLabel = Widgets.label(buyButton, "Label", FONT.Heading, TEXT.Body, COLOR.AccentBright)
@@ -554,54 +564,52 @@ local function build()
 	trove:add(gui)
 
 	local layer = ScaleLayer.new(gui, "Scaled")
-	local scrim = Widgets.scrim(layer, SCRIM)
-	trove:connect(scrim.Activated, function()
+
+	local chrome = Widgets.panel(layer, trove, "SHOP", function()
 		ShopController:close()
 	end)
-
-	panel = Widgets.frame(layer, "Panel", COLOR.Panel, 0.04)
-	panel.AnchorPoint = Vector2.new(0.5, 0.5)
-	panel.Position = UDim2.fromScale(0.5, 0.5)
-	Widgets.stroke(panel, COLOR.Border)
+	panel = chrome.frame
 
 	local inner = Widgets.frame(panel, "Inner", COLOR.Panel, 1)
 	inner.Position = UDim2.fromOffset(LAYOUT.PanelPadding, HEADER_HEIGHT + TAB_HEIGHT + 6)
 	inner.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 1, -(HEADER_HEIGHT + TAB_HEIGHT + FOOTER_HEIGHT + 10))
 
-	local title = Widgets.label(panel, "Title", FONT.Display, TEXT.Heading, COLOR.TextPrimary)
-	title.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 6)
-	title.Size = UDim2.new(0.4, 0, 0, TEXT.Heading)
-	title.Text = "SHOP"
-
+	--[[ The balance sits in the header between the title and CLOSE, right-aligned
+	     against the inside edge of the CLOSE button. It is the number a player
+	     checks before every other decision on this screen, so it is the second
+	     thing in reading order rather than something in a footer. ]]
+	local balanceInset = LAYOUT.PanelPadding + PANEL.CloseWidth + LAYOUT.ElementGap
 	balanceLabel = Widgets.label(panel, "Balance", FONT.Numeric, TEXT.Heading, COLOR.Accent)
 	balanceLabel.AnchorPoint = Vector2.new(1, 0)
-	balanceLabel.Position = UDim2.new(1, -(LAYOUT.PanelPadding + 90), 0, 6)
-	balanceLabel.Size = UDim2.new(0.4, 0, 0, TEXT.Heading)
+	balanceLabel.Position = UDim2.new(1, -balanceInset, 0, 0)
+	balanceLabel.Size = UDim2.new(0.4, 0, 0, PANEL.HeaderHeight)
 	balanceLabel.TextXAlignment = Enum.TextXAlignment.Right
 
-	warningLabel = Widgets.label(panel, "Warning", FONT.Body, TEXT.Tiny, COLOR.Danger)
-	warningLabel.AnchorPoint = Vector2.new(1, 0)
-	warningLabel.Position = UDim2.new(1, -(LAYOUT.PanelPadding + 90), 0, 6 + TEXT.Heading)
-	warningLabel.Size = UDim2.new(0.7, 0, 0, TEXT.Body)
-	warningLabel.TextXAlignment = Enum.TextXAlignment.Right
+	--[[ In the footer, not stacked under the balance.
+
+	     The panel has always reserved FOOTER_HEIGHT at the bottom and drawn
+	     nothing in it, while this warning was crammed into the header where it
+	     ran through the accent rule and over the tabs. A warning about the whole
+	     screen belongs across the whole width of it. ]]
+	local footRule = Widgets.frame(panel, "FootRule", COLOR.Border, 0)
+	footRule.AnchorPoint = Vector2.new(0, 1)
+	footRule.Position = UDim2.new(0, 0, 1, -FOOTER_HEIGHT)
+	footRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
+
+	warningLabel = Widgets.label(panel, "Warning", FONT.Body, TEXT.Small, COLOR.Danger)
+	warningLabel.AnchorPoint = Vector2.new(0, 1)
+	warningLabel.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, 0)
+	warningLabel.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, FOOTER_HEIGHT)
 	warningLabel.Visible = false
 
-	local closeButton = Widgets.button(panel, "Close")
-	closeButton.AnchorPoint = Vector2.new(1, 0)
-	closeButton.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 4)
-	closeButton.Size = UDim2.fromOffset(84, HEADER_HEIGHT - 10)
-	local closeLabel = Widgets.label(closeButton, "Label", FONT.Heading, TEXT.Body, COLOR.TextSecondary)
-	closeLabel.Size = UDim2.fromScale(1, 1)
-	closeLabel.TextXAlignment = Enum.TextXAlignment.Right
-	closeLabel.Text = "CLOSE"
-	Widgets.hover(trove, closeButton, closeLabel)
-	trove:connect(closeButton.Activated, function()
-		ShopController:close()
-	end)
-
-	local headRule = Widgets.frame(panel, "HeadRule", COLOR.BorderBright, 0)
-	headRule.Position = UDim2.fromOffset(0, HEADER_HEIGHT)
-	headRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
+	--[[ What the footer says when there is nothing wrong. It occupies the same
+	     line as the warning and gives way to it, because a player who is about to
+	     lose a purchase does not also need to be told purchases are permanent. ]]
+	hintLabel = Widgets.label(panel, "Hint", FONT.Body, TEXT.Small, COLOR.TextDim)
+	hintLabel.AnchorPoint = Vector2.new(0, 1)
+	hintLabel.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, 0)
+	hintLabel.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, FOOTER_HEIGHT)
+	hintLabel.Text = "EVERYTHING YOU BUY IS YOURS PERMANENTLY. EQUIP IT FROM LOADOUTS."
 
 	tabHolder = Widgets.frame(panel, "Tabs", COLOR.Panel, 1)
 	tabHolder.Position = UDim2.fromOffset(0, HEADER_HEIGHT + 2)
@@ -610,16 +618,8 @@ local function build()
 		buildTab(category, index, #EconomyConfig.Categories)
 	end
 
-	list = Instance.new("ScrollingFrame")
-	list.Name = "List"
-	list.BackgroundTransparency = 1
-	list.BorderSizePixel = 0
+	list = Widgets.scroller(inner, "List")
 	list.Size = UDim2.new(LIST_WIDTH, 0, 1, 0)
-	list.CanvasSize = UDim2.fromOffset(0, 0)
-	list.ScrollBarThickness = SCROLLBAR_WIDTH
-	list.ScrollBarImageColor3 = COLOR.Border
-	list.ScrollingDirection = Enum.ScrollingDirection.Y
-	list.Parent = inner
 	Widgets.list(list)
 
 	buildDetail(inner)
@@ -742,7 +742,7 @@ local function refreshPanelSize()
 		math.max((if viewport then viewport.X else PANEL_WIDTH) - LAYOUT.ScreenMargin * 2, 280)
 	)
 	local height =
-		math.min(PANEL_MAX_HEIGHT, (if viewport then viewport.Y else PANEL_MAX_HEIGHT) * PANEL_HEIGHT_SCALE)
+		math.min(PANEL_MAX_HEIGHT, (if viewport then viewport.Y else PANEL_MAX_HEIGHT) * PANEL.HeightScale)
 	panel.Size = UDim2.fromOffset(width, height)
 	--[[ Deferred: the detail column's AbsoluteSize is a fraction of the panel
 	     that was just resized, and Roblox has not laid it out yet this frame. ]]

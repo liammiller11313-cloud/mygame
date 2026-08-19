@@ -53,17 +53,20 @@ local Widgets = require(script.Parent.Widgets)
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
+local PANEL = UITheme.Panel
 local TEXT = UITheme.TextSize
 local ROUND = Enums.RoundState
 
 local player = Players.LocalPlayer
 
 -- ── layout, in reference pixels ─────────────────────────────────────────────
+--[[ The two numbers that are this screen's own: three cards beside a preview
+     column, and how tall that is worth growing. The chrome around them comes
+     from UITheme.Panel. ]]
 local PANEL_WIDTH = 820
 local PANEL_MAX_HEIGHT = 520
-local PANEL_HEIGHT_SCALE = 0.82
-local HEADER_HEIGHT = 44
-local SCRIM = 0.45
+
+local HEADER_HEIGHT = PANEL.HeaderHeight
 
 local CARD_WIDTH = 0.32
 local CARD_HEIGHT = 96
@@ -72,7 +75,6 @@ local CARD_GAP = 10
 local SLOT_HEIGHT = 52
 local PICK_ROW_HEIGHT = 38
 local PICK_ROW_HEIGHT_TOUCH = 50
-local SCROLLBAR_WIDTH = 3
 
 local PREVIEW_HEIGHT = 0.44
 
@@ -264,7 +266,7 @@ local function buildPickRow(slot: string, weaponId: string, index: number)
 	local height = if isTouch() then PICK_ROW_HEIGHT_TOUCH else PICK_ROW_HEIGHT
 
 	local button = Widgets.button(pickList, weaponId)
-	button.Size = UDim2.new(1, -(SCROLLBAR_WIDTH + LAYOUT.ElementGap), 0, height)
+	button.Size = UDim2.new(1, -(PANEL.ScrollBarWidth + LAYOUT.ElementGap), 0, height)
 	button.LayoutOrder = index
 	button.BackgroundColor3 = COLOR.TextPrimary
 	button.Selectable = owned == true
@@ -305,6 +307,12 @@ local function buildPickRow(slot: string, weaponId: string, index: number)
 			callController("ShopController", "open")
 		end
 	end)
+	--[[ Only what can be picked lights up. A LOCKED row that highlights under the
+	     cursor is a row promising something it will not do. It still updates the
+	     preview, because seeing what you have not bought yet is the point. ]]
+	if owned then
+		Widgets.rowHover(rowTrove, button)
+	end
 	rowTrove:connect(button.MouseEnter, function()
 		showPreviewFor(weaponId)
 	end)
@@ -383,7 +391,7 @@ local function buildCard(index: number, parent: Frame)
 	button.Position = UDim2.new(0, 0, 0, (index - 1) * (CARD_HEIGHT + CARD_GAP))
 	button.Size = UDim2.new(1, 0, 0, CARD_HEIGHT)
 	button.BackgroundColor3 = COLOR.PanelRaised
-	button.BackgroundTransparency = 0.3
+	button.BackgroundTransparency = PANEL.RaisedFill
 	local stroke = Widgets.stroke(button, COLOR.Border)
 
 	local title = Widgets.label(button, "Title", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
@@ -432,7 +440,7 @@ local function buildSlotRow(index: number, slot: string)
 	button.Position = UDim2.new(0, 0, PREVIEW_HEIGHT, (index - 1) * (SLOT_HEIGHT + 6))
 	button.Size = UDim2.new(1, 0, 0, SLOT_HEIGHT)
 	button.BackgroundColor3 = COLOR.PanelRaised
-	button.BackgroundTransparency = 0.35
+	button.BackgroundTransparency = PANEL.RaisedFill
 	local stroke = Widgets.stroke(button, COLOR.Border)
 
 	local label = Widgets.label(button, "Label", FONT.Body, TEXT.Tiny, COLOR.TextDim)
@@ -463,42 +471,17 @@ local function buildSlotRow(index: number, slot: string)
 		playUi(AudioConfig.UI.MenuHover)
 		LoadoutController:_openPicker(slot)
 	end)
+	Widgets.outlineHover(trove, button, stroke)
 	trove:connect(button.MouseEnter, function()
-		stroke.Color = COLOR.BorderBright
 		showPreviewFor(editing()[slot])
-	end)
-	trove:connect(button.MouseLeave, function()
-		stroke.Color = COLOR.Border
 	end)
 end
 
 local function buildPanel(layer: Frame)
-	panel = Widgets.frame(layer, "Panel", COLOR.Panel, 0.04)
-	panel.AnchorPoint = Vector2.new(0.5, 0.5)
-	panel.Position = UDim2.fromScale(0.5, 0.5)
-	Widgets.stroke(panel, COLOR.Border)
-
-	local title = Widgets.label(panel, "Title", FONT.Display, TEXT.Heading, COLOR.TextPrimary)
-	title.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 6)
-	title.Size = UDim2.new(0.5, 0, 0, TEXT.Heading)
-	title.Text = "LOADOUTS"
-
-	local closeButton = Widgets.button(panel, "Close")
-	closeButton.AnchorPoint = Vector2.new(1, 0)
-	closeButton.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 4)
-	closeButton.Size = UDim2.fromOffset(84, HEADER_HEIGHT - 10)
-	local closeLabel = Widgets.label(closeButton, "Label", FONT.Heading, TEXT.Body, COLOR.TextSecondary)
-	closeLabel.Size = UDim2.fromScale(1, 1)
-	closeLabel.TextXAlignment = Enum.TextXAlignment.Right
-	closeLabel.Text = "CLOSE"
-	Widgets.hover(trove, closeButton, closeLabel)
-	trove:connect(closeButton.Activated, function()
+	local chrome = Widgets.panel(layer, trove, "LOADOUTS", function()
 		LoadoutController:close()
 	end)
-
-	local headRule = Widgets.frame(panel, "HeadRule", COLOR.BorderBright, 0)
-	headRule.Position = UDim2.fromOffset(0, HEADER_HEIGHT)
-	headRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
+	panel = chrome.frame
 
 	local body = Widgets.frame(panel, "Body", COLOR.Panel, 1)
 	body.Position = UDim2.fromOffset(LAYOUT.PanelPadding, HEADER_HEIGHT + LAYOUT.PanelPadding)
@@ -533,7 +516,7 @@ local function buildPanel(layer: Frame)
 	activeButton.Position = UDim2.new(1, 0, 1, 0)
 	activeButton.Size = UDim2.fromOffset(230, 38)
 	activeButton.BackgroundColor3 = COLOR.PanelRaised
-	activeButton.BackgroundTransparency = 0.15
+	activeButton.BackgroundTransparency = PANEL.ActionFill
 	Widgets.stroke(activeButton, COLOR.Border)
 	activeLabel = Widgets.label(activeButton, "Label", FONT.Heading, TEXT.Body, COLOR.AccentBright)
 	activeLabel.Size = UDim2.fromScale(1, 1)
@@ -568,18 +551,10 @@ local function buildPanel(layer: Frame)
 		LoadoutController:_closePicker()
 	end)
 
-	pickList = Instance.new("ScrollingFrame")
-	pickList.Name = "PickList"
-	pickList.BackgroundTransparency = 1
-	pickList.BorderSizePixel = 0
+	pickList = Widgets.scroller(right, "PickList")
 	pickList.Position = UDim2.new(0, 0, PREVIEW_HEIGHT, TEXT.Large + 6)
 	pickList.Size = UDim2.new(1, 0, 1 - PREVIEW_HEIGHT, -(TEXT.Large + 6))
-	pickList.CanvasSize = UDim2.fromOffset(0, 0)
-	pickList.ScrollBarThickness = SCROLLBAR_WIDTH
-	pickList.ScrollBarImageColor3 = COLOR.Border
-	pickList.ScrollingDirection = Enum.ScrollingDirection.Y
 	pickList.Visible = false
-	pickList.Parent = right
 	Widgets.list(pickList)
 end
 
@@ -671,7 +646,7 @@ local function refreshPanelSize()
 		math.max((if viewport then viewport.X else PANEL_WIDTH) - LAYOUT.ScreenMargin * 2, 280)
 	)
 	local height =
-		math.min(PANEL_MAX_HEIGHT, (if viewport then viewport.Y else PANEL_MAX_HEIGHT) * PANEL_HEIGHT_SCALE)
+		math.min(PANEL_MAX_HEIGHT, (if viewport then viewport.Y else PANEL_MAX_HEIGHT) * PANEL.HeightScale)
 	panel.Size = UDim2.fromOffset(width, height)
 end
 
@@ -742,11 +717,6 @@ function LoadoutController:init()
 	trove:add(gui)
 
 	local layer = ScaleLayer.new(gui, "Scaled")
-	local scrim = Widgets.scrim(layer, SCRIM)
-	trove:connect(scrim.Activated, function()
-		LoadoutController:close()
-	end)
-
 	buildPanel(layer)
 	buildPicker()
 end

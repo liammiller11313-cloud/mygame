@@ -149,6 +149,68 @@ UITheme.Layout = table.freeze({
 	PauseButtonSize = 40,
 })
 
+--[[
+	Modal panel chrome — the shape every full-screen panel in this game shares.
+
+	Settings, the shop, the loadout screen and the pause menu were each built
+	from their own private copy of these numbers, and they drifted: three
+	different header heights (38, 44, 44), four different scrim opacities (0.35,
+	0.45, 0.45, 0.55), three panel transparencies, two row heights. Nobody
+	notices any single one of those. Everybody notices that the screens do not
+	feel like they came from the same game.
+
+	One definition, four readers. A screen still owns its own WIDTH and its own
+	maximum height — a shop with two columns genuinely needs more room than a
+	pause menu with three buttons — but nothing below that line is a per-screen
+	decision, and Client/UI/Widgets.panel is what actually builds it.
+]]
+UITheme.Panel = table.freeze({
+	--[[ How much of the world a modal hides. Deep enough that type over it stays
+	     readable against a muzzle flash, shallow enough that a player can still
+	     see the horde arriving behind it. ]]
+	Scrim = 0.45,
+
+	--[[ Not quite opaque. A hair of the world coming through is what keeps a
+	     panel reading as something laid OVER the game rather than as a screen the
+	     game was replaced by. ]]
+	Transparency = 0.04,
+
+	--[[ The title bar: name on the left, CLOSE on the right, an accent rule
+	     underneath. 44 is sized by the CLOSE button rather than by the type — it
+	     is the panel's way out on a phone, and a thumb needs something to hit. ]]
+	HeaderHeight = 44,
+	TabHeight = 30,
+	FooterHeight = 40,
+	CloseWidth = 84,
+
+	--[[ A list row, by input scheme. A finger is not a cursor. On the phone where
+	     the touch height matters, the whole panel is being drawn at the 0.75 scale
+	     floor — so 56 reference pixels is 42 real ones, not 56. ]]
+	RowHeight = 44,
+	RowHeightTouch = 56,
+
+	--[[ The two fills anything raised off a panel is allowed to have.
+
+	     `RaisedFill` is a surface you can PICK — a loadout card, a weapon slot, a
+	     pause entry. `ActionFill` is the one thing on a panel that COMMITS: BUY,
+	     SET ACTIVE. It is denser so that on a screen full of pickable rows the
+	     button that spends money is not just another row.
+
+	     These were 0.3, 0.35, 0.35 and 0.15, 0.15, 0 across four files. ]]
+	RaisedFill = 0.3,
+	ActionFill = 0.15,
+
+	--[[ Hairline. A scrollbar here is a position readout rather than a control:
+	     every scrolling surface in this interface is also draggable and
+	     wheel-driven, so the bar only has to say where you are. ]]
+	ScrollBarWidth = 3,
+
+	--[[ How much of the viewport height a panel may take. The remainder is scrim,
+	     and seeing some of it is how a player knows the thing is a panel and that
+	     clicking outside will close it. ]]
+	HeightScale = 0.86,
+})
+
 -- ── Crosshair ───────────────────────────────────────────────────────────────
 -- Four ticks that open with the weapon's current cone of fire. The crosshair IS
 -- the spread readout; a player should never have to be told their accuracy.

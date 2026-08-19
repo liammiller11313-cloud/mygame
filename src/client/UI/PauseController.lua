@@ -48,6 +48,7 @@ local Widgets = require(script.Parent.Widgets)
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
+local PANEL = UITheme.Panel
 local TEXT = UITheme.TextSize
 local PA = Attributes.Player
 local STATE = Enums.SurvivorState
@@ -64,10 +65,15 @@ local BAR_WIDTH = 4
 local BAR_HEIGHT = 16
 local BAR_GAP = 6
 
+--[[ Deliberately NOT the header-and-CLOSE panel the shop, the settings screen
+     and the loadout screen share. This one is not a dialog laid over a screen —
+     it IS the screen, three choices centred on black, and giving it a title bar
+     with a CLOSE in the corner would make the way out of every other panel look
+     like the way out of the game. What it does share is the scrim: a modal in
+     this game dims the world by exactly one amount. ]]
 local PANEL_WIDTH = 340
 local ENTRY_HEIGHT = 54
 local ENTRY_GAP = 8
-local SCRIM = 0.55
 
 local ENTRIES = {
 	{ id = "Resume", title = "RESUME", line = "Back to it." },
@@ -250,7 +256,7 @@ local function buildEntry(index: number, definition: any)
 	button.Position = UDim2.new(0, 0, 0, (index - 1) * (ENTRY_HEIGHT + ENTRY_GAP))
 	button.Size = UDim2.new(1, 0, 0, ENTRY_HEIGHT)
 	button.BackgroundColor3 = COLOR.PanelRaised
-	button.BackgroundTransparency = 0.35
+	button.BackgroundTransparency = PANEL.RaisedFill
 	local stroke = Widgets.stroke(button, COLOR.Border)
 
 	local bar = Widgets.frame(button, "Bar", COLOR.Accent, 1)
@@ -268,13 +274,12 @@ local function buildEntry(index: number, definition: any)
 
 	entries[index] = { button = button, stroke = stroke, bar = bar, title = title }
 
+	Widgets.outlineHover(trove, button, stroke)
 	trove:connect(button.MouseEnter, function()
-		stroke.Color = COLOR.BorderBright
 		bar.BackgroundTransparency = 0
 		title.TextColor3 = COLOR.AccentBright
 	end)
 	trove:connect(button.MouseLeave, function()
-		stroke.Color = COLOR.Border
 		bar.BackgroundTransparency = 1
 		title.TextColor3 = COLOR.TextPrimary
 	end)
@@ -299,7 +304,7 @@ local function build()
 	trove:add(gui)
 
 	local layer = ScaleLayer.new(gui, "Scaled")
-	local scrim = Widgets.scrim(layer, SCRIM)
+	local scrim = Widgets.scrim(layer, PANEL.Scrim)
 	trove:connect(scrim.Activated, function()
 		PauseController:close()
 	end)

@@ -63,32 +63,33 @@ local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local Widgets = require(script.Parent.Widgets)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
+local PANEL = UITheme.Panel
 local TEXT = UITheme.TextSize
 
 local player = Players.LocalPlayer
 
 -- ── layout, in reference pixels ─────────────────────────────────────────────
+--[[ The only number that is this panel's own: how wide a label-and-control row
+     wants to be. Everything else — header, tabs, footer, scrim, rows — is
+     UITheme.Panel, shared with the shop and the loadout screen. This panel used
+     to be six pixels shorter in the header and four in the footer than those
+     two, which nobody could name and everybody could feel. ]]
 local PANEL_WIDTH = 620
-local PANEL_HEIGHT_SCALE = 0.84
-local HEADER_HEIGHT = 38
-local TAB_HEIGHT = 30
-local FOOTER_HEIGHT = 34
-local SCRIM = 0.35
 
---[[ Row heights, by scheme. A finger is not a cursor: 46 reference pixels is a
-     comfortable mouse target and a cramped thumb one, and on the phone where
-     that matters the whole panel is being drawn at the 0.75 scale floor. ]]
-local ROW_HEIGHT = 46
-local ROW_HEIGHT_TOUCH = 58
+local HEADER_HEIGHT = PANEL.HeaderHeight
+local TAB_HEIGHT = PANEL.TabHeight
+local FOOTER_HEIGHT = PANEL.FooterHeight
+
+local ROW_HEIGHT = PANEL.RowHeight
+local ROW_HEIGHT_TOUCH = PANEL.RowHeightTouch
 
 local STEP_BUTTON = 30
 local STEP_BUTTON_TOUCH = 40
-
-local SCROLLBAR_WIDTH = 3
 
 --[[ How many presses it takes to cross a slider end to end. Twenty is fine
      enough that nobody feels the steps and coarse enough that a volume can be
@@ -121,7 +122,6 @@ local trove = Trove.new()
 local rowTrove = Trove.new()
 
 local gui: ScreenGui
-local scrim: TextButton
 local panel: Frame
 local tabHolder: Frame
 local list: ScrollingFrame
@@ -160,49 +160,6 @@ local function callController(name: string, method: string, ...: any)
 	if controller and typeof(controller[method]) == "function" then
 		pcall(controller[method], controller, ...)
 	end
-end
-
-local function newFrame(parent: Instance, name: string, color: Color3?, transparency: number?): Frame
-	local frame = Instance.new("Frame")
-	frame.Name = name
-	frame.BackgroundColor3 = color or COLOR.Panel
-	frame.BackgroundTransparency = transparency or 0
-	frame.BorderSizePixel = 0
-	frame.Parent = parent
-	return frame
-end
-
-local function newLabel(
-	parent: Instance,
-	name: string,
-	font: Enum.Font,
-	size: number,
-	color: Color3
-): TextLabel
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.BackgroundTransparency = 1
-	label.BorderSizePixel = 0
-	label.Font = font
-	label.TextSize = size
-	label.TextColor3 = color
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextYAlignment = Enum.TextYAlignment.Center
-	label.Text = ""
-	label.Parent = parent
-	return label
-end
-
-local function newButton(parent: Instance, name: string): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.BackgroundTransparency = 1
-	button.BorderSizePixel = 0
-	button.AutoButtonColor = false
-	button.Text = ""
-	button.Parent = parent
-	GamepadFocus.style(button)
-	return button
 end
 
 local function playUi(definition: any)
@@ -271,7 +228,7 @@ local function refreshPanelSize()
 
 	local chrome = HEADER_HEIGHT + TAB_HEIGHT + FOOTER_HEIGHT + 8
 	local wanted = chrome + tallestCategory() * rowHeight()
-	local ceiling = if viewport then viewport.Y * PANEL_HEIGHT_SCALE else wanted
+	local ceiling = if viewport then viewport.Y * PANEL.HeightScale else wanted
 
 	panel.Size = UDim2.fromOffset(width, math.min(wanted, ceiling))
 end
@@ -710,13 +667,13 @@ end
 
 local function buildRow(definition: any, index: number): any
 	local height = rowHeight()
-	local holder = newButton(list, definition.key)
+	local holder = Widgets.button(list, definition.key)
 	--[[ Short of the full width by the scrollbar, so a value hard against the
 	     right edge is not half-covered by it on the categories that scroll. ]]
-	holder.Size = UDim2.new(1, -(SCROLLBAR_WIDTH + LAYOUT.ElementGap), 0, height)
+	holder.Size = UDim2.new(1, -(PANEL.ScrollBarWidth + LAYOUT.ElementGap), 0, height)
 	holder.LayoutOrder = index
 
-	local label = newLabel(holder, "Label", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	local label = Widgets.label(holder, "Label", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
 	label.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 0)
 
 	--[[ A row with a line of explanation stacks; one without centres. Two layouts
@@ -726,7 +683,7 @@ local function buildRow(definition: any, index: number): any
 		label.Size = UDim2.new(0.55, 0, 0, TEXT.Large + 4)
 		label.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 4)
 
-		local blurb = newLabel(holder, "Blurb", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		local blurb = Widgets.label(holder, "Blurb", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 		blurb.Position = UDim2.fromOffset(LAYOUT.PanelPadding, TEXT.Large + 2)
 		blurb.Size = UDim2.new(0.62, 0, 0, TEXT.Body)
 		blurb.Text = definition.blurb
@@ -735,13 +692,13 @@ local function buildRow(definition: any, index: number): any
 	end
 	label.Text = definition.label
 
-	local value = newLabel(holder, "Value", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	local value = Widgets.label(holder, "Value", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
 	value.AnchorPoint = Vector2.new(1, 0)
 	value.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 0)
 	value.Size = UDim2.new(0.3, 0, 1, 0)
 	value.TextXAlignment = Enum.TextXAlignment.Right
 
-	local rule = newFrame(holder, "Rule", COLOR.Border, 0.4)
+	local rule = Widgets.frame(holder, "Rule", COLOR.Border, 0.4)
 	rule.AnchorPoint = Vector2.new(0, 1)
 	rule.Position = UDim2.new(0, 0, 1, 0)
 	rule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
@@ -762,19 +719,25 @@ local function buildRow(definition: any, index: number): any
 		value.Position = UDim2.new(1, -(LAYOUT.PanelPadding + buttonSize * 2 + LAYOUT.ElementGap * 2), 0, 0)
 		value.Size = UDim2.new(0, 70, 1, 0)
 
-		local track = newFrame(holder, "Track", COLOR.Border, 0.2)
+		local track = Widgets.frame(holder, "Track", COLOR.Border, 0.2)
 		track.Position = UDim2.fromOffset(LAYOUT.PanelPadding, height - 10)
 		track.Size = UDim2.new(0.55, 0, 0, LAYOUT.BorderThickness * 2)
-		row.fill = newFrame(track, "Fill", COLOR.Accent, 0)
+		row.fill = Widgets.frame(track, "Fill", COLOR.Accent, 0)
 		row.fill.Size = UDim2.new(0, 0, 1, 0)
 
 		local function stepButton(name: string, text: string, offsetFromRight: number, direction: number)
-			local step = newButton(holder, name)
+			local step = Widgets.button(holder, name)
 			step.AnchorPoint = Vector2.new(1, 0.5)
 			step.Position = UDim2.new(1, -offsetFromRight, 0.5, 0)
 			step.Size = UDim2.fromOffset(buttonSize, buttonSize)
 			step.BackgroundColor3 = COLOR.PanelRaised
-			step.BackgroundTransparency = 0
+			step.BackgroundTransparency = PANEL.RaisedFill
+			--[[ Outlined, like every other raised surface in this interface. It
+			     used to be an opaque tile with no border, which was the only
+			     pressable thing in the game drawn that way — and at the shared
+			     fill an unbordered tile is nearly invisible against the panel. The
+			     border is what says "button" at 30 pixels square. ]]
+			Widgets.outlineHover(rowTrove, step, Widgets.stroke(step, COLOR.Border))
 			step.Font = FONT.Heading
 			step.TextSize = TEXT.Large
 			step.TextColor3 = COLOR.TextPrimary
@@ -802,13 +765,7 @@ local function buildRow(definition: any, index: number): any
 		end)
 	end
 
-	rowTrove:connect(holder.MouseEnter, function()
-		holder.BackgroundTransparency = 0.88
-		holder.BackgroundColor3 = COLOR.TextPrimary
-	end)
-	rowTrove:connect(holder.MouseLeave, function()
-		holder.BackgroundTransparency = 1
-	end)
+	Widgets.rowHover(rowTrove, holder)
 
 	refreshRow(row)
 	return row
@@ -992,16 +949,16 @@ end
 -- ── build ───────────────────────────────────────────────────────────────────
 
 local function buildTab(category: string, index: number, total: number)
-	local holder = newButton(tabHolder, category)
+	local holder = Widgets.button(tabHolder, category)
 	holder.Size = UDim2.new(1 / total, 0, 1, 0)
 	holder.Position = UDim2.new((index - 1) / total, 0, 0, 0)
 
-	local label = newLabel(holder, "Label", FONT.Heading, TEXT.Small, COLOR.TextSecondary)
+	local label = Widgets.label(holder, "Label", FONT.Heading, TEXT.Small, COLOR.TextSecondary)
 	label.Size = UDim2.fromScale(1, 1)
 	label.TextXAlignment = Enum.TextXAlignment.Center
 	label.Text = category
 
-	local underline = newFrame(holder, "Underline", COLOR.Accent, 1)
+	local underline = Widgets.frame(holder, "Underline", COLOR.Accent, 1)
 	underline.AnchorPoint = Vector2.new(0.5, 1)
 	underline.Position = UDim2.new(0.5, 0, 1, 0)
 	underline.Size = UDim2.new(0.7, 0, 0, LAYOUT.BorderThickness * 2)
@@ -1029,112 +986,51 @@ local function build()
 
 	local layer = ScaleLayer.new(gui, "Scaled")
 
-	--[[ A button rather than a frame, so a click that misses the panel is eaten
-	     here instead of landing on the menu — or on the trigger — behind it. ]]
-	scrim = Instance.new("TextButton")
-	scrim.Name = "Scrim"
-	scrim.BackgroundColor3 = COLOR.Background
-	scrim.BackgroundTransparency = SCRIM
-	scrim.BorderSizePixel = 0
-	scrim.AutoButtonColor = false
-	scrim.Text = ""
-	--[[ TextButtons are selectable by default, and a full-screen one would be a
-	     place the D-pad could land — one press of A on it closes the panel the
-	     player was trying to walk through. ]]
-	scrim.Selectable = false
-	scrim.Size = UDim2.fromScale(1, 1)
-	scrim.Parent = layer
-	trove:connect(scrim.Activated, function()
+	local chrome = Widgets.panel(layer, trove, "SETTINGS", function()
 		SettingsController:close()
 	end)
+	panel = chrome.frame
+	--[[ A real size arrives from refreshPanelSize at the bottom of this function;
+	     this is only so the first frame is not zero-by-zero. ]]
+	panel.Size = UDim2.new(0, PANEL_WIDTH, PANEL.HeightScale, 0)
 
-	panel = newFrame(layer, "Panel", COLOR.Panel, 0.05)
-	panel.AnchorPoint = Vector2.new(0.5, 0.5)
-	panel.Position = UDim2.fromScale(0.5, 0.5)
-	panel.Size = UDim2.new(0, PANEL_WIDTH, PANEL_HEIGHT_SCALE, 0)
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = COLOR.Border
-	stroke.Thickness = LAYOUT.BorderThickness
-	stroke.Parent = panel
-
-	local title = newLabel(panel, "Title", FONT.Display, TEXT.Heading, COLOR.TextPrimary)
-	title.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 4)
-	title.Size = UDim2.new(1, -120, 0, TEXT.Heading)
-	title.Text = "SETTINGS"
-
-	local closeButton = newButton(panel, "Close")
-	closeButton.AnchorPoint = Vector2.new(1, 0)
-	closeButton.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 4)
-	--[[ The full header height rather than the height of its own text: this is
-	     the panel's way out on a phone, and a thumb needs something to hit. ]]
-	closeButton.Size = UDim2.fromOffset(96, HEADER_HEIGHT - 6)
-	closeButton.Font = FONT.Heading
-	closeButton.TextSize = TEXT.Body
-	closeButton.TextColor3 = COLOR.TextSecondary
-	closeButton.TextXAlignment = Enum.TextXAlignment.Right
-	closeButton.Text = "CLOSE"
-	trove:connect(closeButton.Activated, function()
-		SettingsController:close()
-	end)
-	trove:connect(closeButton.MouseEnter, function()
-		closeButton.TextColor3 = COLOR.AccentBright
-	end)
-	trove:connect(closeButton.MouseLeave, function()
-		closeButton.TextColor3 = COLOR.TextSecondary
-	end)
-
-	local headRule = newFrame(panel, "HeadRule", COLOR.BorderBright, 0)
-	headRule.Position = UDim2.fromOffset(0, HEADER_HEIGHT)
-	headRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
-
-	tabHolder = newFrame(panel, "Tabs", COLOR.Panel, 1)
+	tabHolder = Widgets.frame(panel, "Tabs", COLOR.Panel, 1)
 	tabHolder.Position = UDim2.fromOffset(0, HEADER_HEIGHT + 2)
 	tabHolder.Size = UDim2.new(1, 0, 0, TAB_HEIGHT)
 	for index, category in SettingsConfig.Categories do
 		buildTab(category, index, #SettingsConfig.Categories)
 	end
 
-	list = Instance.new("ScrollingFrame")
-	list.Name = "Rows"
-	list.BackgroundTransparency = 1
-	list.BorderSizePixel = 0
+	list = Widgets.scroller(panel, "Rows")
 	list.Position = UDim2.fromOffset(0, HEADER_HEIGHT + TAB_HEIGHT + 6)
 	list.Size = UDim2.new(1, 0, 1, -(HEADER_HEIGHT + TAB_HEIGHT + FOOTER_HEIGHT + 8))
-	list.CanvasSize = UDim2.fromOffset(0, 0)
-	list.ScrollBarThickness = SCROLLBAR_WIDTH
-	list.ScrollBarImageColor3 = COLOR.Border
-	list.ScrollingDirection = Enum.ScrollingDirection.Y
-	list.Parent = panel
+	Widgets.list(list)
 
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = list
+	--[[ The footer, drawn the way the shop's is: a hairline across the panel, a
+	     hint on the left, one action on the right. Both were floating against the
+	     bottom edge with nothing separating them from the last row. ]]
+	local footRule = Widgets.frame(panel, "FootRule", COLOR.Border, 0)
+	footRule.AnchorPoint = Vector2.new(0, 1)
+	footRule.Position = UDim2.new(0, 0, 1, -FOOTER_HEIGHT)
+	footRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
 
-	hint = newLabel(panel, "Hint", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	hint = Widgets.label(panel, "Hint", FONT.Body, TEXT.Small, COLOR.TextDim)
 	hint.AnchorPoint = Vector2.new(0, 1)
-	hint.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, -LAYOUT.PanelPadding)
-	hint.Size = UDim2.new(0.65, 0, 0, TEXT.Body)
+	hint.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, 0)
+	hint.Size = UDim2.new(0.62, 0, 0, FOOTER_HEIGHT)
 	hint.Text = ""
 
-	local reset = newButton(panel, "Reset")
+	local reset = Widgets.button(panel, "Reset")
 	reset.AnchorPoint = Vector2.new(1, 1)
-	reset.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, -LAYOUT.PanelPadding + 4)
-	reset.Size = UDim2.fromOffset(120, TEXT.Large)
-	reset.Font = FONT.Body
-	reset.TextSize = TEXT.Small
-	reset.TextColor3 = COLOR.TextDim
-	reset.TextXAlignment = Enum.TextXAlignment.Right
-	reset.Text = "RESET DEFAULTS"
+	reset.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, 0)
+	reset.Size = UDim2.fromOffset(140, FOOTER_HEIGHT)
+	local resetLabel = Widgets.label(reset, "Label", FONT.Body, TEXT.Small, COLOR.TextDim)
+	resetLabel.Size = UDim2.fromScale(1, 1)
+	resetLabel.TextXAlignment = Enum.TextXAlignment.Right
+	resetLabel.Text = "RESET DEFAULTS"
+	Widgets.hover(trove, reset, resetLabel, COLOR.Accent)
 	trove:connect(reset.Activated, function()
 		SettingsController:resetDefaults()
-	end)
-	trove:connect(reset.MouseEnter, function()
-		reset.TextColor3 = COLOR.Accent
-	end)
-	trove:connect(reset.MouseLeave, function()
-		reset.TextColor3 = COLOR.TextDim
 	end)
 
 	refreshPanelSize()

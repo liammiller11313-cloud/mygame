@@ -74,6 +74,7 @@ local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local Widgets = require(script.Parent.Widgets)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -303,37 +304,6 @@ local function stroke(instance: Instance, color: Color3?): UIStroke
 	return line
 end
 
-local function newFrame(parent: Instance, name: string, color: Color3?, transparency: number?): Frame
-	local frame = Instance.new("Frame")
-	frame.Name = name
-	frame.BackgroundColor3 = color or COLOR.Panel
-	frame.BackgroundTransparency = transparency or 0
-	frame.BorderSizePixel = 0
-	frame.Parent = parent
-	return frame
-end
-
-local function newLabel(
-	parent: Instance,
-	name: string,
-	font: Enum.Font,
-	size: number,
-	color: Color3
-): TextLabel
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.BackgroundTransparency = 1
-	label.BorderSizePixel = 0
-	label.Font = font
-	label.TextSize = size
-	label.TextColor3 = color
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextYAlignment = Enum.TextYAlignment.Center
-	label.Text = ""
-	label.Parent = parent
-	return label
-end
-
 --[[ Rec. 601 luma. A flat channel average turns the blue survivor into mud and
      the green one into paper, which defeats the point of desaturating. ]]
 local function desaturate(color: Color3): Color3
@@ -470,57 +440,57 @@ local function createPanel(target: Player)
 	local index = assignIndex(target)
 	local identity = UITheme.getSurvivorColor(index)
 
-	local frame = newFrame(panelHolder, "Survivor_" .. target.Name, COLOR.Panel, 0.12)
+	local frame = Widgets.frame(panelHolder, "Survivor_" .. target.Name, COLOR.Panel, 0.12)
 	frame.AnchorPoint = Vector2.new(0, 1)
 	frame.Size = UDim2.fromOffset(LAYOUT.SurvivorPanelWidth, LAYOUT.SurvivorPanelHeight)
 	frame.Position = UDim2.fromOffset(0, 0)
 	corner(frame)
 	local border = stroke(frame, target == player and COLOR.BorderBright or COLOR.Border)
 
-	local stripe = newFrame(frame, "Stripe", identity)
+	local stripe = Widgets.frame(frame, "Stripe", identity)
 	stripe.Size = UDim2.new(0, STRIPE_WIDTH, 1, 0)
 
 	local contentX = STRIPE_WIDTH + LAYOUT.PanelPadding
 	local rightInset = contentX + LAYOUT.PanelPadding
 
-	local name = newLabel(frame, "Name", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	local name = Widgets.label(frame, "Name", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
 	name.Position = UDim2.fromOffset(contentX, 3)
 	name.Size = UDim2.new(1, -(rightInset + 72), 0, 18)
 	name.TextTruncate = Enum.TextTruncate.AtEnd
 	name.Text = string.upper(target.DisplayName)
 
-	local status = newLabel(frame, "Status", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
+	local status = Widgets.label(frame, "Status", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
 	status.AnchorPoint = Vector2.new(1, 0)
 	status.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 4)
 	status.Size = UDim2.fromOffset(70, 16)
 	status.TextXAlignment = Enum.TextXAlignment.Right
 
-	local barBg = newFrame(frame, "Bar", COLOR.Background)
+	local barBg = Widgets.frame(frame, "Bar", COLOR.Background)
 	barBg.Position = UDim2.new(0, contentX, 1, -(LAYOUT.HealthBarHeight + 7))
 	barBg.Size = UDim2.new(1, -rightInset, 0, LAYOUT.HealthBarHeight)
 	barBg.ClipsDescendants = true
 	corner(barBg)
 
-	local perm = newFrame(barBg, "Permanent", COLOR.HealthGood)
+	local perm = Widgets.frame(barBg, "Permanent", COLOR.HealthGood)
 	perm.Size = UDim2.new(0, 0, 1, 0)
 
 	-- Drawn after (and therefore over) the permanent fill, starting where it
 	-- ends. This is the white pill buffer.
-	local temp = newFrame(barBg, "Temp", COLOR.HealthTemp)
+	local temp = Widgets.frame(barBg, "Temp", COLOR.HealthTemp)
 	temp.Size = UDim2.new(0, 0, 1, 0)
 
 	-- The revive clock, along the bottom edge of the bar so it cannot be
 	-- mistaken for health returning.
-	local revive = newFrame(barBg, "Revive", COLOR.AccentBright)
+	local revive = Widgets.frame(barBg, "Revive", COLOR.AccentBright)
 	revive.AnchorPoint = Vector2.new(0, 1)
 	revive.Position = UDim2.new(0, 0, 1, 0)
 	revive.Size = UDim2.new(0, 0, 0, 3)
 
-	local deadX = newFrame(frame, "DeadX", COLOR.Danger, 1)
+	local deadX = Widgets.frame(frame, "DeadX", COLOR.Danger, 1)
 	deadX.Size = UDim2.new(1, 0, 1, 0)
 	deadX.Visible = false
 	for sign = -1, 1, 2 do
-		local slash = newFrame(deadX, "Slash", COLOR.Danger, 0.25)
+		local slash = Widgets.frame(deadX, "Slash", COLOR.Danger, 0.25)
 		slash.AnchorPoint = Vector2.new(0.5, 0.5)
 		slash.Position = UDim2.fromScale(0.5, 0.5)
 		slash.Size = UDim2.new(1, -8, 0, 2)
@@ -1243,7 +1213,7 @@ end
      one a player has finished reading. ]]
 local function buildEarnPool()
 	for index = 1, EARN_POOL do
-		local label = newLabel(root, "Earn" .. index, FONT.Numeric, TEXT.Large, COLOR.Accent)
+		local label = Widgets.label(root, "Earn" .. index, FONT.Numeric, TEXT.Large, COLOR.Accent)
 		label.AnchorPoint = Vector2.new(0.5, 0.5)
 		label.Position = UDim2.fromScale(0.5, EARN_Y)
 		label.Size = UDim2.new(0, 160, 0, TEXT.Large + 4)
@@ -1412,7 +1382,7 @@ end
 -- ── build ───────────────────────────────────────────────────────────────────
 
 local function buildAmmo()
-	local panel = newFrame(root, "Ammo", COLOR.Panel, 0.12)
+	local panel = Widgets.frame(root, "Ammo", COLOR.Panel, 0.12)
 	panel.AnchorPoint = Vector2.new(1, 1)
 	-- Clear of the hotbar below it, which owns the bottom margin now.
 	panel.Position =
@@ -1425,7 +1395,7 @@ local function buildAmmo()
 	     roster had "SMG". Truncation would hide the half of ".357 Magnum" that
 	     identifies it, so the name scales itself down to TextSize.Tiny instead
 	     and every weapon in the roster fits at a glance. ]]
-	local name = newLabel(panel, "Weapon", FONT.Heading, TEXT.Small, COLOR.TextSecondary)
+	local name = Widgets.label(panel, "Weapon", FONT.Heading, TEXT.Small, COLOR.TextSecondary)
 	name.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 5)
 	name.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, 16)
 	name.TextXAlignment = Enum.TextXAlignment.Right
@@ -1436,7 +1406,7 @@ local function buildAmmo()
 	nameBounds.MinTextSize = TEXT.Tiny
 	nameBounds.Parent = name
 
-	local reloading = newLabel(panel, "Reloading", FONT.Body, TEXT.Small, COLOR.Accent)
+	local reloading = Widgets.label(panel, "Reloading", FONT.Body, TEXT.Small, COLOR.Accent)
 	reloading.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 22)
 	reloading.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, 14)
 	reloading.TextXAlignment = Enum.TextXAlignment.Right
@@ -1448,7 +1418,7 @@ local function buildAmmo()
 	     matter how wide it gets. A PPSh-41 carries "71 / 426"; nothing in the
 	     roster is wider than that, and the size constraints mean nothing could
 	     be. ]]
-	local reserve = newLabel(panel, "Reserve", FONT.Numeric, TEXT.Large, COLOR.TextSecondary)
+	local reserve = Widgets.label(panel, "Reserve", FONT.Numeric, TEXT.Large, COLOR.TextSecondary)
 	reserve.AnchorPoint = Vector2.new(1, 1)
 	reserve.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, -10)
 	reserve.Size = UDim2.fromOffset(RESERVE_WIDTH, TEXT.Large + 4)
@@ -1463,7 +1433,7 @@ local function buildAmmo()
 	--[[ Stencil, not the numeric face. This is the single largest element on the
 	     screen and the one place the in-game HUD gets to carry the same worn,
 	     stamped voice the main menu does. ]]
-	local magazine = newLabel(panel, "Magazine", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
+	local magazine = Widgets.label(panel, "Magazine", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
 	magazine.AnchorPoint = Vector2.new(1, 1)
 	magazine.Position = UDim2.new(1, -(LAYOUT.PanelPadding + RESERVE_WIDTH), 1, -4)
 	magazine.Size =
@@ -1482,13 +1452,13 @@ local function buildAmmo()
 	     bar spanning the whole thing would be promising something the gun does
 	     not owe. Hidden entirely when nothing is reloading — a permanently empty
 	     bar is furniture. ]]
-	local reloadBar = newFrame(panel, "ReloadTrack", COLOR.Border, 0.45)
+	local reloadBar = Widgets.frame(panel, "ReloadTrack", COLOR.Border, 0.45)
 	reloadBar.AnchorPoint = Vector2.new(0.5, 1)
 	reloadBar.Position = UDim2.new(0.5, 0, 1, -2)
 	reloadBar.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, 2)
 	reloadBar.Visible = false
 
-	local reloadFill = newFrame(reloadBar, "Fill", COLOR.Accent)
+	local reloadFill = Widgets.frame(reloadBar, "Fill", COLOR.Accent)
 	reloadFill.Size = UDim2.new(0, 0, 1, 0)
 
 	ammo = {
@@ -1507,7 +1477,7 @@ local function buildItems()
 	     corner is where Left 4 Dead keeps everything about what you are holding,
 	     and keeping the count and the slots together means one glance answers
 	     both "what am I holding" and "what could I switch to". ]]
-	local holder = newFrame(root, "Hotbar", COLOR.Panel, 1)
+	local holder = Widgets.frame(root, "Hotbar", COLOR.Panel, 1)
 	holder.AnchorPoint = Vector2.new(1, 1)
 	holder.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 1, -LAYOUT.ScreenMargin)
 	holder.Size = UDim2.fromOffset(
@@ -1524,7 +1494,7 @@ local function buildItems()
 	layout.Parent = holder
 
 	for order, slot in HOTBAR_SLOTS do
-		local frame = newFrame(holder, slot, COLOR.Panel, 0.55)
+		local frame = Widgets.frame(holder, slot, COLOR.Panel, 0.55)
 		frame.LayoutOrder = order
 		frame.Size = UDim2.fromOffset(HOTBAR_SLOT_WIDTH, HOTBAR_SLOT_HEIGHT)
 		--[[ No rounded corner, deliberately. Every other panel in this interface
@@ -1581,14 +1551,14 @@ local function buildItems()
 		     read — the tile the light is under is the one in your hands — and a
 		     full-width bar survives being caught in peripheral vision, which is
 		     the only way this row is ever actually looked at during a fight. ]]
-		local marker = newFrame(frame, "Marker", COLOR.Accent)
+		local marker = Widgets.frame(frame, "Marker", COLOR.Accent)
 		marker.AnchorPoint = Vector2.new(0, 1)
 		marker.Position = UDim2.new(0, 0, 1, 0)
 		marker.Size = UDim2.new(1, 0, 0, HOTBAR_MARKER_HEIGHT)
 		marker.Visible = false
 
 		-- Stencil digits: the one place in the HUD that gets to look stamped on.
-		local key = newLabel(frame, "Key", FONT.Stencil, TEXT.Small, COLOR.TextDim)
+		local key = Widgets.label(frame, "Key", FONT.Stencil, TEXT.Small, COLOR.TextDim)
 		key.Position = UDim2.fromOffset(6, 4)
 		key.Size = UDim2.fromOffset(16, 14)
 
@@ -1603,7 +1573,7 @@ local function buildItems()
 			for. That also fixed the touch case, where hiding the key glyph used to
 			leave an empty slot with no indication of what it was.
 		]]
-		local label = newLabel(frame, "Label", FONT.Heading, TEXT.Small, COLOR.TextDim)
+		local label = Widgets.label(frame, "Label", FONT.Heading, TEXT.Small, COLOR.TextDim)
 		label.AnchorPoint = Vector2.new(0.5, 0)
 		label.Position = UDim2.new(0.5, 0, 0, 20)
 		label.Size = UDim2.new(1, -10, 0, 17)
@@ -1618,7 +1588,7 @@ local function buildItems()
 		--[[ Bottom-right, above the marker. Only weapon slots ever fill it in, but
 		     it exists on every slot rather than being conditional, so every tile
 		     keeps the same shape and refreshItems never has to check. ]]
-		local count = newLabel(frame, "Count", FONT.Numeric, TEXT.Small, COLOR.TextSecondary)
+		local count = Widgets.label(frame, "Count", FONT.Numeric, TEXT.Small, COLOR.TextSecondary)
 		count.AnchorPoint = Vector2.new(1, 1)
 		count.Position = UDim2.new(1, -6, 1, -(HOTBAR_MARKER_HEIGHT + 3))
 		count.Size = UDim2.new(1, -12, 0, 14)
@@ -1648,7 +1618,7 @@ end
 	the first is no longer the most important thing to say.
 ]]
 local function buildNotice()
-	local label = newLabel(root, "Notice", FONT.Display, TEXT.Heading, COLOR.Danger)
+	local label = Widgets.label(root, "Notice", FONT.Display, TEXT.Heading, COLOR.Danger)
 	label.AnchorPoint = Vector2.new(0.5, 1)
 	label.Position = UDim2.fromScale(0.5, NOTICE_Y)
 	label.Size = UDim2.new(1, -LAYOUT.ScreenMargin * 2, 0, TEXT.Heading + 6)
@@ -1668,25 +1638,25 @@ local function buildNotice()
 end
 
 local function buildObjective()
-	local frame = newFrame(root, "Objective", COLOR.Panel, 1)
+	local frame = Widgets.frame(root, "Objective", COLOR.Panel, 1)
 	frame.AnchorPoint = Vector2.new(0.5, 0)
 	frame.Position = UDim2.new(0.5, 0, 0, state.topInset)
 	frame.Size = UDim2.fromOffset(560, 28)
 	frame.Visible = false
 
-	local label = newLabel(frame, "Text", FONT.Heading, TEXT.Body, COLOR.Accent)
+	local label = Widgets.label(frame, "Text", FONT.Heading, TEXT.Body, COLOR.Accent)
 	label.AnchorPoint = Vector2.new(0.5, 0)
 	label.Position = UDim2.fromScale(0.5, 0)
 	label.Size = UDim2.new(1, 0, 0, 20)
 	label.TextXAlignment = Enum.TextXAlignment.Center
 
-	local bar = newFrame(frame, "Progress", COLOR.Background)
+	local bar = Widgets.frame(frame, "Progress", COLOR.Background)
 	bar.AnchorPoint = Vector2.new(0.5, 0)
 	bar.Position = UDim2.new(0.5, 0, 0, 22)
 	bar.Size = UDim2.fromOffset(220, 2)
 	bar.Visible = false
 
-	local fill = newFrame(bar, "Fill", COLOR.Accent)
+	local fill = Widgets.frame(bar, "Fill", COLOR.Accent)
 	fill.Size = UDim2.new(0, 0, 1, 0)
 
 	objective = { frame = frame, label = label, bar = bar, fill = fill }
@@ -1704,7 +1674,7 @@ local function build()
 
 	root = ScaleLayer.new(gui, "Scaled")
 
-	panelHolder = newFrame(root, "Survivors", COLOR.Panel, 1)
+	panelHolder = Widgets.frame(root, "Survivors", COLOR.Panel, 1)
 	panelHolder.AnchorPoint = Vector2.new(0, 1)
 	panelHolder.Position = UDim2.new(0, LAYOUT.ScreenMargin, 1, -LAYOUT.ScreenMargin)
 	panelHolder.Size = UDim2.fromOffset(
@@ -1715,7 +1685,7 @@ local function build()
 	--[[ Fixed height and clipped, so no volume of kills can grow the feed down
 	     the side of the screen and into the play space. The rows it can hold are
 	     the rows that exist. ]]
-	killFeedHolder = newFrame(root, "KillFeed", COLOR.Panel, 1)
+	killFeedHolder = Widgets.frame(root, "KillFeed", COLOR.Panel, 1)
 	killFeedHolder.AnchorPoint = Vector2.new(1, 0)
 	killFeedHolder.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 0, LAYOUT.ScreenMargin)
 	killFeedHolder.Size = UDim2.fromOffset(KILLFEED_WIDTH, KILLFEED_HARD_MAX * KILLFEED_ROW_HEIGHT)
@@ -1729,7 +1699,7 @@ local function build()
 	feedLayout.Parent = killFeedHolder
 
 	for _ = 1, KILLFEED_HARD_MAX do
-		local row = newLabel(killFeedHolder, "Kill", FONT.Body, TEXT.Small, COLOR.TextPrimary)
+		local row = Widgets.label(killFeedHolder, "Kill", FONT.Body, TEXT.Small, COLOR.TextPrimary)
 		row.RichText = true
 		row.Size = UDim2.new(1, 0, 0, KILLFEED_ROW_HEIGHT)
 		row.TextXAlignment = Enum.TextXAlignment.Right

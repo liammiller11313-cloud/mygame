@@ -77,6 +77,7 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
+local Widgets = require(script.Parent.Widgets)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -375,56 +376,8 @@ local function clockText(seconds: number): string
 	return string.format("%d:%02d", whole // 60, whole % 60)
 end
 
-local function newFrame(parent: Instance, name: string, color: Color3?, transparency: number?): Frame
-	local frame = Instance.new("Frame")
-	frame.Name = name
-	frame.BackgroundColor3 = color or COLOR.Panel
-	frame.BackgroundTransparency = transparency or 0
-	frame.BorderSizePixel = 0
-	frame.Parent = parent
-	return frame
-end
-
 --[[ A hairline. Every division on this screen is one pixel of border or accent —
      never a panel, never a card, and never a drop shadow. ]]
-local function newRule(parent: Instance, name: string, color: Color3?): Frame
-	local rule = newFrame(parent, name, color or COLOR.Border, 0)
-	rule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
-	return rule
-end
-
-local function newLabel(
-	parent: Instance,
-	name: string,
-	font: Enum.Font,
-	size: number,
-	color: Color3
-): TextLabel
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.BackgroundTransparency = 1
-	label.BorderSizePixel = 0
-	label.Font = font
-	label.TextSize = size
-	label.TextColor3 = color
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextYAlignment = Enum.TextYAlignment.Center
-	label.Text = ""
-	label.Parent = parent
-	return label
-end
-
-local function newButton(parent: Instance, name: string): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.BackgroundTransparency = 1
-	button.BorderSizePixel = 0
-	button.AutoButtonColor = false
-	button.Text = ""
-	button.Parent = parent
-	return button
-end
-
 --[[
 	A content layer that keeps its layout at any resolution.
 
@@ -436,7 +389,7 @@ end
 	full screen, and every offset inside it scales with the display.
 ]]
 local function newLayer(parent: Instance): Frame
-	local frame = newFrame(parent, "Layer", COLOR.Background, 1)
+	local frame = Widgets.frame(parent, "Layer", COLOR.Background, 1)
 	frame.Size = UDim2.fromScale(1, 1)
 
 	local scale = Instance.new("UIScale")
@@ -893,7 +846,7 @@ end
 local function buildConfetti()
 	local palette = UITheme.SurvivorColors
 	for index = 1, CONFETTI_COUNT do
-		local piece = newFrame(confettiLayer, "Piece" .. index, palette[((index - 1) % #palette) + 1], 0)
+		local piece = Widgets.frame(confettiLayer, "Piece" .. index, palette[((index - 1) % #palette) + 1], 0)
 		piece.AnchorPoint = Vector2.new(0.5, 0.5)
 		piece.Size = UDim2.fromOffset(CONFETTI_WIDTH, CONFETTI_HEIGHT)
 		piece.Visible = false
@@ -1294,24 +1247,24 @@ end
 -- ── build ───────────────────────────────────────────────────────────────────
 
 local function buildTitle()
-	titleKicker = newLabel(menuLayer, "Kicker", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	titleKicker = Widgets.label(menuLayer, "Kicker", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	local kicker = titleKicker
 	kicker.Position = UDim2.new(COLUMN_X, 0, 0.13, 0)
 	kicker.Size = UDim2.new(0.5, 0, 0, TEXT.Body)
 	kicker.Text = tracked("A CO-OP SURVIVAL SHOOTER")
 
-	titleFading = newLabel(menuLayer, "Fading", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
+	titleFading = Widgets.label(menuLayer, "Fading", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
 	local fading = titleFading
 	fading.Position = UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap)
 	fading.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	fading.Text = "FADING"
 
-	titleLight = newLabel(menuLayer, "Light", FONT.Stencil, TEXT.Title, COLOR.Accent)
+	titleLight = Widgets.label(menuLayer, "Light", FONT.Stencil, TEXT.Title, COLOR.Accent)
 	titleLight.Position = UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE)
 	titleLight.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	titleLight.Text = "LIGHT"
 
-	titleRule = newRule(menuLayer, "TitleRule", COLOR.Accent)
+	titleRule = Widgets.rule(menuLayer, "TitleRule", COLOR.Accent)
 	titleRule.Position =
 		UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE * 2 + LAYOUT.PanelPadding)
 	titleRule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
@@ -1319,32 +1272,31 @@ end
 
 local function buildModes()
 	for index, definition in MODE_ENTRIES do
-		local button = newButton(menuLayer, definition.id)
+		local button = Widgets.button(menuLayer, definition.id)
 		button.Position = UDim2.new(COLUMN_X, 0, 0.52, (index - 1) * (ENTRY_HEIGHT + ENTRY_GAP))
 		button.Size = UDim2.new(ENTRY_WIDTH, 0, 0, ENTRY_HEIGHT)
-		GamepadFocus.style(button)
 		if index == 1 then
 			firstModeButton = button
 		end
 
-		local rule = newRule(button, "Rule", COLOR.Border)
+		local rule = Widgets.rule(button, "Rule", COLOR.Border)
 
-		local bar = newFrame(button, "Bar", COLOR.Accent, 1)
+		local bar = Widgets.frame(button, "Bar", COLOR.Accent, 1)
 		bar.Position = UDim2.fromOffset(0, LAYOUT.BorderThickness)
 		bar.Size = UDim2.new(0, ENTRY_BAR_WIDTH, 1, -LAYOUT.BorderThickness)
 
-		local title = newLabel(button, "Title", FONT.Display, TEXT.Display, COLOR.TextPrimary)
+		local title = Widgets.label(button, "Title", FONT.Display, TEXT.Display, COLOR.TextPrimary)
 		title.Position = UDim2.fromOffset(ENTRY_TEXT_INSET, LAYOUT.PanelPadding)
 		title.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, TEXT.Display + 6)
 		title.Text = definition.title
 
-		local line = newLabel(button, "Line", FONT.Body, TEXT.Body, COLOR.TextSecondary)
+		local line = Widgets.label(button, "Line", FONT.Body, TEXT.Body, COLOR.TextSecondary)
 		line.Position = UDim2.fromOffset(ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding + TEXT.Display + 8)
 		line.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, TEXT.Body + 4)
 		line.Text = definition.line
 		line.TextTransparency = 0.35
 
-		local tag = newLabel(button, "Tag", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		local tag = Widgets.label(button, "Tag", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 		tag.AnchorPoint = Vector2.new(1, 0)
 		tag.Position = UDim2.new(1, 0, 0, LAYOUT.PanelPadding + 6)
 		tag.Size = UDim2.new(0.5, 0, 0, TEXT.Body)
@@ -1417,26 +1369,26 @@ local RULES = {
 }
 
 local function buildBriefing()
-	briefingColumn = newFrame(menuLayer, "Briefing", COLOR.Background, 1)
+	briefingColumn = Widgets.frame(menuLayer, "Briefing", COLOR.Background, 1)
 	local column = briefingColumn
 	column.AnchorPoint = Vector2.new(1, 0.5)
 	column.Position = UDim2.new(1 - COLUMN_X, 0, 0.52, 0)
 	column.Size = UDim2.fromOffset(300, 420)
 
-	local heading = newLabel(column, "Heading", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	local heading = Widgets.label(column, "Heading", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	heading.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	heading.TextXAlignment = Enum.TextXAlignment.Right
 	heading.Text = tracked("CONTROLS")
 
 	local y = TEXT.Body + 8
 	for _, entry in BRIEFING do
-		local key = newLabel(column, "K_" .. entry.key, FONT.Stencil, TEXT.Small, COLOR.Accent)
+		local key = Widgets.label(column, "K_" .. entry.key, FONT.Stencil, TEXT.Small, COLOR.Accent)
 		key.Position = UDim2.fromOffset(0, y)
 		key.Size = UDim2.fromOffset(64, TEXT.Body + 2)
 		key.TextXAlignment = Enum.TextXAlignment.Right
 		key.Text = entry.key
 
-		local text = newLabel(column, "T_" .. entry.key, FONT.Body, TEXT.Small, COLOR.TextSecondary)
+		local text = Widgets.label(column, "T_" .. entry.key, FONT.Body, TEXT.Small, COLOR.TextSecondary)
 		text.Position = UDim2.fromOffset(74, y)
 		text.Size = UDim2.new(1, -74, 0, TEXT.Body + 2)
 		text.Text = entry.text
@@ -1445,13 +1397,13 @@ local function buildBriefing()
 	end
 
 	y += 14
-	local rule = newRule(column, "Rule", COLOR.Border)
+	local rule = Widgets.rule(column, "Rule", COLOR.Border)
 	rule.Position = UDim2.fromOffset(0, y)
 	rule.Size = UDim2.new(1, 0, 0, 1)
 	y += 12
 
 	for index, line in RULES do
-		local label = newLabel(column, "Rule" .. index, FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		local label = Widgets.label(column, "Rule" .. index, FONT.Body, TEXT.Tiny, COLOR.TextDim)
 		label.Position = UDim2.fromOffset(0, y)
 		label.Size = UDim2.new(1, 0, 0, TEXT.Body + 4)
 		label.TextXAlignment = Enum.TextXAlignment.Right
@@ -1462,31 +1414,31 @@ local function buildBriefing()
 end
 
 local function buildLobby()
-	local panel = newFrame(menuLayer, "Lobby", COLOR.Background, 1)
+	local panel = Widgets.frame(menuLayer, "Lobby", COLOR.Background, 1)
 	panel.AnchorPoint = Vector2.new(1, 0)
 	panel.Position = UDim2.new(1 - COLUMN_X, 0, 0.15, 0)
 	panel.Size = UDim2.new(0.3, 0, 0, 260)
 
-	local heading = newLabel(panel, "Heading", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	local heading = Widgets.label(panel, "Heading", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	heading.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	heading.TextXAlignment = Enum.TextXAlignment.Right
 	heading.Text = tracked("LOBBY")
 
-	local rule = newRule(panel, "Rule", COLOR.Border)
+	local rule = Widgets.rule(panel, "Rule", COLOR.Border)
 	rule.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap)
 
-	lobbyBig = newLabel(panel, "Countdown", FONT.Display, TEXT.Title, COLOR.Accent)
+	lobbyBig = Widgets.label(panel, "Countdown", FONT.Display, TEXT.Title, COLOR.Accent)
 	lobbyBig.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 2)
 	lobbyBig.Size = UDim2.new(1, 0, 0, TITLE_LINE)
 	lobbyBig.TextXAlignment = Enum.TextXAlignment.Right
 	lobbyBig.Text = "—"
 
-	lobbyCaption = newLabel(panel, "Caption", FONT.Body, TEXT.Small, COLOR.TextSecondary)
+	lobbyCaption = Widgets.label(panel, "Caption", FONT.Body, TEXT.Small, COLOR.TextSecondary)
 	lobbyCaption.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 2 + TITLE_LINE)
 	lobbyCaption.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	lobbyCaption.TextXAlignment = Enum.TextXAlignment.Right
 
-	lobbyMode = newLabel(panel, "Mode", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
+	lobbyMode = Widgets.label(panel, "Mode", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
 	lobbyMode.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body)
 	lobbyMode.Size = UDim2.new(1, 0, 0, TEXT.Large + 4)
 	lobbyMode.TextXAlignment = Enum.TextXAlignment.Right
@@ -1494,20 +1446,20 @@ local function buildLobby()
 	--[[ Which map is actually loaded. Worth a line of its own: with a map vote
 	     between rounds, "what am I about to play" stops being obvious, and a
 	     player deciding whether to join a round in progress wants to know. ]]
-	lobbyMap = newLabel(panel, "Map", FONT.Body, TEXT.Small, COLOR.TextDim)
+	lobbyMap = Widgets.label(panel, "Map", FONT.Body, TEXT.Small, COLOR.TextDim)
 	lobbyMap.Position =
 		UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body + TEXT.Large + 8)
 	lobbyMap.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	lobbyMap.TextXAlignment = Enum.TextXAlignment.Right
 	lobbyMap.Text = ""
 
-	lobbyPlayers = newLabel(panel, "Players", FONT.Body, TEXT.Small, COLOR.TextSecondary)
+	lobbyPlayers = Widgets.label(panel, "Players", FONT.Body, TEXT.Small, COLOR.TextSecondary)
 	lobbyPlayers.Position =
 		UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body + TEXT.Large + 6)
 	lobbyPlayers.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	lobbyPlayers.TextXAlignment = Enum.TextXAlignment.Right
 
-	lobbyMessage = newLabel(panel, "Message", FONT.Body, TEXT.Small, COLOR.Accent)
+	lobbyMessage = Widgets.label(panel, "Message", FONT.Body, TEXT.Small, COLOR.Accent)
 	lobbyMessage.AnchorPoint = Vector2.new(1, 0)
 	lobbyMessage.Position = UDim2.new(1, 0, 1, LAYOUT.ElementGap)
 	lobbyMessage.Size = UDim2.new(1.6, 0, 0, TEXT.Body * 3)
@@ -1558,38 +1510,39 @@ local NAV_WIDTH = 0.21
 local NAV_GAP = 0.015
 
 local function buildNav()
-	navRow = newFrame(menuLayer, "Nav", COLOR.Background, 1)
+	navRow = Widgets.frame(menuLayer, "Nav", COLOR.Background, 1)
 	local row = navRow
 	row.AnchorPoint = Vector2.new(0, 1)
 	row.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
 	row.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, NAV_HEIGHT)
 
-	local rule = newRule(row, "Rule", COLOR.Border)
+	local rule = Widgets.rule(row, "Rule", COLOR.Border)
 	rule.Position = UDim2.fromOffset(0, -LAYOUT.PanelPadding)
 	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 
 	for index, definition in NAV_ENTRIES do
-		local holder = newButton(row, definition.id)
+		local holder = Widgets.button(row, definition.id)
 		holder.Position = UDim2.new((index - 1) * (NAV_WIDTH + NAV_GAP), 0, 0, 0)
 		holder.Size = UDim2.new(NAV_WIDTH, 0, 1, 0)
 
-		local label = newLabel(holder, "Label", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
+		local label = Widgets.label(holder, "Label", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
 		label.Size = UDim2.new(1, 0, 0, TEXT.Large + 2)
 		label.Text = definition.title
 		if definition.soon then
 			label.TextColor3 = COLOR.TextDim
 		end
 
-		local line = newLabel(holder, "Line", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		local line = Widgets.label(holder, "Line", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 		line.Position = UDim2.fromOffset(0, TEXT.Large + 2)
 		line.Size = UDim2.new(1, 0, 0, TEXT.Body)
 		line.Text = tracked(definition.line)
 
 		table.insert(navEntries, { button = holder, label = label, line = line })
 
-		--[[ Reachable without a cursor. The mode entries take selection when the
-		     menu opens; this row is what a pad walks down to from them. ]]
-		GamepadFocus.style(holder)
+		--[[ Reachable without a cursor: the mode entries take selection when the
+		     menu opens, and this row is what a pad walks down to from them.
+		     Widgets.button has already styled it; only whether it is a legal
+		     landing spot is this screen's to say. ]]
 		holder.Selectable = not definition.soon
 
 		if not definition.soon then
@@ -1610,14 +1563,14 @@ end
 --[[ The balance, top-right, in the one place a player looks before opening the
      shop. Driven by ProfileController's `changed` rather than polled. ]]
 local function buildBalance()
-	balanceLabel = newLabel(menuLayer, "Balance", FONT.Numeric, TEXT.Heading, COLOR.Accent)
+	balanceLabel = Widgets.label(menuLayer, "Balance", FONT.Numeric, TEXT.Heading, COLOR.Accent)
 	balanceLabel.AnchorPoint = Vector2.new(1, 0)
 	balanceLabel.Position = UDim2.new(1 - COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2)
 	balanceLabel.Size = UDim2.fromOffset(240, TEXT.Heading + 4)
 	balanceLabel.TextXAlignment = Enum.TextXAlignment.Right
 	balanceLabel.Text = ""
 
-	local caption = newLabel(menuLayer, "BalanceCaption", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	local caption = Widgets.label(menuLayer, "BalanceCaption", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	caption.AnchorPoint = Vector2.new(1, 0)
 	caption.Position = UDim2.new(1 - COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2 + TEXT.Heading + 2)
 	caption.Size = UDim2.fromOffset(240, TEXT.Body)
@@ -1639,13 +1592,13 @@ local function refreshBalance()
 end
 
 local function buildTeleport()
-	teleportRoot = newFrame(gui, "Teleport", COLOR.Background, 0)
+	teleportRoot = Widgets.frame(gui, "Teleport", COLOR.Background, 0)
 	teleportRoot.Size = UDim2.fromScale(1, 1)
 	teleportRoot.ZIndex = 4
 	teleportRoot.Visible = false
 	teleportLayer = newLayer(teleportRoot)
 
-	local title = newLabel(teleportLayer, "Title", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
+	local title = Widgets.label(teleportLayer, "Title", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
 	title.AnchorPoint = Vector2.new(0.5, 1)
 	title.Position = UDim2.fromScale(0.5, 0.5)
 	title.Size = UDim2.new(0.8, 0, 0, TEXT.Display + 10)
@@ -1653,13 +1606,13 @@ local function buildTeleport()
 	title.ZIndex = 4
 	title.Text = "HOLD ON"
 
-	local rule = newRule(teleportLayer, "Rule", COLOR.Accent)
+	local rule = Widgets.rule(teleportLayer, "Rule", COLOR.Accent)
 	rule.AnchorPoint = Vector2.new(0.5, 0)
 	rule.Position = UDim2.new(0.5, 0, 0.5, LAYOUT.PanelPadding)
 	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 	rule.ZIndex = 4
 
-	local line = newLabel(teleportLayer, "Line", FONT.Body, TEXT.Large, COLOR.TextSecondary)
+	local line = Widgets.label(teleportLayer, "Line", FONT.Body, TEXT.Large, COLOR.TextSecondary)
 	line.AnchorPoint = Vector2.new(0.5, 0)
 	line.Position = UDim2.new(0.5, 0, 0.5, LAYOUT.PanelPadding * 3)
 	line.Size = UDim2.new(0.8, 0, 0, TEXT.Large + 6)
@@ -1669,29 +1622,29 @@ local function buildTeleport()
 end
 
 local function buildResultRow(index: number): any
-	local frame = newFrame(resultsLayer, "Row" .. index, COLOR.Background, 1)
+	local frame = Widgets.frame(resultsLayer, "Row" .. index, COLOR.Background, 1)
 	frame.Position = UDim2.new(COLUMN_X, 0, 0.5, (index - 1) * RESULT_ROW_HEIGHT)
 	frame.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, RESULT_ROW_HEIGHT)
 	frame.Visible = false
 
-	local name = newLabel(frame, "Name", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
+	local name = Widgets.label(frame, "Name", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
 	name.Size = UDim2.new(NAME_WIDTH, 0, 1, 0)
 
 	local cells = {}
 	for column, definition in STAT_COLUMNS do
-		local label = newLabel(frame, definition.key, FONT.Numeric, TEXT.Body, COLOR.TextSecondary)
+		local label = Widgets.label(frame, definition.key, FONT.Numeric, TEXT.Body, COLOR.TextSecondary)
 		label.Position = UDim2.fromScale(NAME_WIDTH + COLUMN_WIDTH * (column - 1), 0)
 		label.Size = UDim2.new(COLUMN_WIDTH, 0, 1, 0)
 		label.TextXAlignment = Enum.TextXAlignment.Right
 		table.insert(cells, { key = definition.key, label = label })
 	end
 
-	local status = newLabel(frame, "Status", FONT.Body, TEXT.Small, COLOR.TextSecondary)
+	local status = Widgets.label(frame, "Status", FONT.Body, TEXT.Small, COLOR.TextSecondary)
 	status.Position = UDim2.fromScale(1 - STATUS_WIDTH, 0)
 	status.Size = UDim2.new(STATUS_WIDTH, 0, 1, 0)
 	status.TextXAlignment = Enum.TextXAlignment.Right
 
-	local rule = newRule(frame, "Rule", COLOR.Border)
+	local rule = Widgets.rule(frame, "Rule", COLOR.Border)
 	rule.Position = UDim2.new(0, 0, 1, -LAYOUT.BorderThickness)
 	rule.BackgroundTransparency = 0.55
 
@@ -1699,7 +1652,7 @@ local function buildResultRow(index: number): any
 end
 
 local function buildResults()
-	resultsRoot = newFrame(gui, "Results", COLOR.Background, RESULTS_SCRIM)
+	resultsRoot = Widgets.frame(gui, "Results", COLOR.Background, RESULTS_SCRIM)
 	resultsRoot.Size = UDim2.fromScale(1, 1)
 	resultsRoot.ZIndex = 2
 	resultsRoot.Visible = false
@@ -1708,33 +1661,33 @@ local function buildResults()
 	--[[ Confetti sits in its own unscaled layer directly on the results root, not
 	     inside the scaled poster layout: a burst should fill the actual screen at
 	     any resolution rather than being shrunk along with the type. ]]
-	confettiLayer = newFrame(resultsRoot, "Confetti", COLOR.Background, 1)
+	confettiLayer = Widgets.frame(resultsRoot, "Confetti", COLOR.Background, 1)
 	confettiLayer.Size = UDim2.fromScale(1, 1)
 	confettiLayer.ClipsDescendants = true
 	confettiLayer.ZIndex = 3
 	buildConfetti()
 
-	resultOutcome = newLabel(resultsLayer, "Outcome", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
+	resultOutcome = Widgets.label(resultsLayer, "Outcome", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
 	resultOutcome.Position = UDim2.new(COLUMN_X, 0, 0.14, 0)
 	resultOutcome.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	resultOutcome.ZIndex = 2
 
-	resultVerdict = newLabel(resultsLayer, "Verdict", FONT.Body, TEXT.Large, COLOR.TextSecondary)
+	resultVerdict = Widgets.label(resultsLayer, "Verdict", FONT.Body, TEXT.Large, COLOR.TextSecondary)
 	resultVerdict.Position = UDim2.new(COLUMN_X, 0, 0.14, TITLE_LINE)
 	resultVerdict.Size = UDim2.new(0.8, 0, 0, TEXT.Large + 6)
 	resultVerdict.ZIndex = 2
 
-	local rule = newRule(resultsLayer, "Rule", COLOR.Accent)
+	local rule = Widgets.rule(resultsLayer, "Rule", COLOR.Accent)
 	rule.Position = UDim2.new(COLUMN_X, 0, 0.14, TITLE_LINE + TEXT.Large + LAYOUT.PanelPadding * 2)
 	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 	rule.ZIndex = 2
 
-	resultWave = newLabel(resultsLayer, "Wave", FONT.Heading, TEXT.Heading, COLOR.TextPrimary)
+	resultWave = Widgets.label(resultsLayer, "Wave", FONT.Heading, TEXT.Heading, COLOR.TextPrimary)
 	resultWave.Position = UDim2.new(COLUMN_X, 0, 0.32, 0)
 	resultWave.Size = UDim2.new(0.8, 0, 0, TEXT.Heading + 6)
 	resultWave.ZIndex = 2
 
-	resultTime = newLabel(resultsLayer, "Time", FONT.Heading, TEXT.Heading, COLOR.TextPrimary)
+	resultTime = Widgets.label(resultsLayer, "Time", FONT.Heading, TEXT.Heading, COLOR.TextPrimary)
 	resultTime.Position = UDim2.new(COLUMN_X, 0, 0.32, TEXT.Heading + LAYOUT.ElementGap)
 	resultTime.Size = UDim2.new(0.8, 0, 0, TEXT.Heading + 6)
 	resultTime.ZIndex = 2
@@ -1746,7 +1699,7 @@ local function buildResults()
 	     arithmetic and should not be inventing it. The one number a player checks
 	     after a round is how much they made, so it is the same size as the
 	     outcome rather than a footnote under it. ]]
-	resultPayout = newLabel(resultsLayer, "Payout", FONT.Numeric, TEXT.Display, COLOR.Accent)
+	resultPayout = Widgets.label(resultsLayer, "Payout", FONT.Numeric, TEXT.Display, COLOR.Accent)
 	resultPayout.AnchorPoint = Vector2.new(1, 0)
 	resultPayout.Position = UDim2.new(1 - COLUMN_X, 0, 0.3, 0)
 	resultPayout.Size = UDim2.new(0.5, 0, 0, TEXT.Display + 6)
@@ -1754,7 +1707,7 @@ local function buildResults()
 	resultPayout.ZIndex = 2
 	resultPayout.Text = ""
 
-	resultPayoutLine = newLabel(resultsLayer, "PayoutLine", FONT.Body, TEXT.Small, COLOR.TextDim)
+	resultPayoutLine = Widgets.label(resultsLayer, "PayoutLine", FONT.Body, TEXT.Small, COLOR.TextDim)
 	resultPayoutLine.AnchorPoint = Vector2.new(1, 0)
 	resultPayoutLine.Position = UDim2.new(1 - COLUMN_X, 0, 0.3, TEXT.Display + 4)
 	resultPayoutLine.Size = UDim2.new(0.6, 0, 0, TEXT.Body * 2)
@@ -1764,17 +1717,17 @@ local function buildResults()
 	resultPayoutLine.Text = ""
 
 	-- Column headings, one row above the first player.
-	local header = newFrame(resultsLayer, "Header", COLOR.Background, 1)
+	local header = Widgets.frame(resultsLayer, "Header", COLOR.Background, 1)
 	header.Position = UDim2.new(COLUMN_X, 0, 0.5, -RESULT_ROW_HEIGHT)
 	header.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, RESULT_ROW_HEIGHT)
 	header.ZIndex = 2
 
-	local headerName = newLabel(header, "Name", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	local headerName = Widgets.label(header, "Name", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	headerName.Size = UDim2.new(NAME_WIDTH, 0, 1, 0)
 	headerName.Text = tracked("SURVIVORS")
 
 	for column, definition in STAT_COLUMNS do
-		local label = newLabel(header, definition.key, FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		local label = Widgets.label(header, definition.key, FONT.Body, TEXT.Tiny, COLOR.TextDim)
 		label.Position = UDim2.fromScale(NAME_WIDTH + COLUMN_WIDTH * (column - 1), 0)
 		label.Size = UDim2.new(COLUMN_WIDTH, 0, 1, 0)
 		label.TextXAlignment = Enum.TextXAlignment.Right
@@ -1785,18 +1738,17 @@ local function buildResults()
 		table.insert(resultRows, buildResultRow(index))
 	end
 
-	local continue = newButton(resultsLayer, "Continue")
-	GamepadFocus.style(continue)
+	local continue = Widgets.button(resultsLayer, "Continue")
 	resultContinueButton = continue
 	continue.AnchorPoint = Vector2.new(0, 1)
 	continue.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
 	continue.Size = UDim2.new(0.3, 0, 0, TEXT.Display + LAYOUT.PanelPadding)
 	continue.ZIndex = 2
 
-	local continueRule = newRule(continue, "Rule", COLOR.Border)
+	local continueRule = Widgets.rule(continue, "Rule", COLOR.Border)
 	continueRule.ZIndex = 2
 
-	resultContinue = newLabel(continue, "Label", FONT.Display, TEXT.Display, COLOR.TextPrimary)
+	resultContinue = Widgets.label(continue, "Label", FONT.Display, TEXT.Display, COLOR.TextPrimary)
 	resultContinue.Position = UDim2.fromOffset(0, LAYOUT.PanelPadding)
 	resultContinue.Size = UDim2.new(1, 0, 0, TEXT.Display + 4)
 	resultContinue.ZIndex = 2
@@ -1810,7 +1762,7 @@ local function buildResults()
 	end)
 	trove:connect(continue.Activated, dismissResults)
 
-	resultReturn = newLabel(resultsLayer, "Return", FONT.Body, TEXT.Small, COLOR.TextDim)
+	resultReturn = Widgets.label(resultsLayer, "Return", FONT.Body, TEXT.Small, COLOR.TextDim)
 	resultReturn.AnchorPoint = Vector2.new(1, 1)
 	resultReturn.Position = UDim2.new(1 - COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
 	resultReturn.Size = UDim2.new(0.4, 0, 0, TEXT.Body)
@@ -1965,7 +1917,7 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
-	menuRoot = newFrame(gui, "Menu", COLOR.Background, MENU_SCRIM)
+	menuRoot = Widgets.frame(gui, "Menu", COLOR.Background, MENU_SCRIM)
 	menuRoot.Size = UDim2.fromScale(1, 1)
 	menuRoot.Visible = false
 	menuLayer = newLayer(menuRoot)
