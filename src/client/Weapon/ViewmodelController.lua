@@ -943,8 +943,6 @@ local function ensureCasingFolder(): Folder
 	return folder
 end
 
---[[ Finds a supplied casing model, or nil. Looked up once per calibre and then
-     cached inside the pool, because this walks ReplicatedStorage. ]]
 --[[
 	Finds a supplied model, or nil. Returns the instance AS IS — a BasePart or a
 	Model — because AmmoFactory builds real multi-part cartridges (a bottleneck
@@ -1055,6 +1053,40 @@ local function setAmmoVisible(parts: { BasePart }, visible: boolean)
 	for _, part in parts do
 		part.Transparency = if visible then 0 else 1
 	end
+end
+
+--[[
+	Builds the pool for one calibre, on first use.
+
+	Per calibre rather than per weapon: sixteen guns share six calibres, so a full
+	loadout costs six pools instead of sixteen, and swapping between two rifles
+	that both eject 5.56 reuses the same brass. Everything is parked anchored and
+	invisible until it is thrown, so an idle pool costs no physics at all.
+]]
+local function buildCasingPool(calibre: string, definition: any): CasingPool
+	local folder = ensureCasingFolder()
+	local template = findAmmoTemplate(AmmoConfig.CasingFolder, definition.model)
+
+	local pool: CasingPool = { slots = {}, expiry = {}, cursor = 0, definition = definition }
+
+	for index = 1, CASING_POOL do
+		local container, root, parts =
+			instantiateAmmo(template, definition.size, definition.color, definition.material)
+
+		container.Name = "FL_Casing_" .. calibre
+		configureAmmo(root, parts, true)
+		setAmmoVisible(parts, false)
+		for _, part in parts do
+			part.Anchored = true
+		end
+		container.Parent = folder
+
+		pool.slots[index] = { container = container, root = root, parts = parts }
+		pool.expiry[index] = 0
+	end
+
+	casingPools[calibre] = pool
+	return pool
 end
 
 local function ejectShell()

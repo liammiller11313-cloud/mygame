@@ -173,6 +173,67 @@ for p, text in sources.items():
     for m in re.finditer(r":FindFirstChild\(\s*\"Humanoid\"\s*\)", text):
         problems.append(f"{rel(p)}:{lineno(text, m.start())}  Humanoid looked up by NAME — the Rusher rig names its Humanoid \"Zombie\"; use FindFirstChildOfClass")
 
+
+# ── 8. Calls to names that are never defined ────────────────────────────────
+# The bug this exists for: an edit deletes a local function while leaving its
+# call sites behind. Luau parses that perfectly happily and it only fails when a
+# player pulls the trigger. Anything not defined in the file, not a parameter,
+# not a loop variable and not a known global is reported.
+LUA_GLOBALS = {
+    "assert","error","getfenv","getmetatable","ipairs","loadstring","newproxy","next",
+    "pairs","pcall","print","rawequal","rawget","rawlen","rawset","require","select",
+    "setmetatable","tonumber","tostring","type","typeof","unpack","warn","xpcall",
+    "collectgarbage","gcinfo","delay","spawn","wait","tick","time","elapsedTime",
+    "settings","version","Instance","Vector2","Vector3","CFrame","Color3","UDim","UDim2",
+    "Ray","Rect","Region3","BrickColor","NumberRange","NumberSequence","ColorSequence",
+    "NumberSequenceKeypoint","ColorSequenceKeypoint","PhysicalProperties","TweenInfo",
+    "Random","Enum","game","workspace","script","shared","string","table","math","os",
+    "coroutine","task","utf8","bit32","debug","buffer","Font","OverlapParams",
+    "RaycastParams","Faces","Axes","DateTime","CatalogSearchParams","FloatCurveKey",
+    "RotationCurveKey","SharedTable","Content","Secret","Path2D","if","then","else",
+    "elseif","end","and","or","not","return","function","local","for","while","do",
+    "repeat","until","break","continue","true","false","nil","in",
+}
+
+DECL_PATTERNS = [
+    r"local\s+function\s+(\w+)",
+    r"local\s+([\w\s,]+?)\s*[:=]",
+    r"function\s+[\w.:]*[.:](\w+)\s*\(",
+    r"function\s+(\w+)\s*\(",
+    r"for\s+([\w\s,]+?)\s+in\b",
+    r"for\s+(\w+)\s*=",
+]
+
+for p, text in sources.items():
+    defined = set(LUA_GLOBALS)
+
+    for pattern in DECL_PATTERNS:
+        for m in re.finditer(pattern, text):
+            for name in re.split(r"[,\s]+", m.group(1)):
+                name = name.strip()
+                if name:
+                    defined.add(name)
+
+    # Every parameter list, including anonymous functions.
+    for m in re.finditer(r"function\s*[\w.:]*\s*\(([^)]*)\)", text):
+        for param in m.group(1).split(","):
+            name = param.split(":")[0].strip().lstrip(".")
+            if name:
+                defined.add(name)
+
+    # Table fields declared as `name = function(...)`.
+    for m in re.finditer(r"(\w+)\s*=\s*function", text):
+        defined.add(m.group(1))
+
+    for m in re.finditer(r"(?<![.:\w\"])(\w+)\s*\(", text):
+        name = m.group(1)
+        if name in defined or name.isdigit():
+            continue
+        problems.append(
+            f"{rel(p)}:{lineno(text, m.start())}  calls {name}() which is never defined in this file"
+        )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")
