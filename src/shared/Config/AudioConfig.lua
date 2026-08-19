@@ -170,7 +170,28 @@ AudioConfig.WeaponFire = {
 	[Enums.Weapon.ScopedMk18] = sound(ID.SniperShot, 0.9, 1.02, 1.06, 620, 5),
 	[Enums.Weapon.M1AEBR] = sound(ID.SniperShot, 1.0, 0.94, 1.0, 700, 5),
 
-	[Enums.Weapon.Machete] = sound(ID.SwordSwing, 0.55, 0.9, 1.12, 70, 3),
+	--[[
+		Melee swings.
+
+		All five share ID.SwordSwing, separated by pitch and volume: heavier things
+		lower and louder, the knife high and quiet. That is a stopgap and it is
+		marked as one — a bat hitting air and a fire axe hitting air genuinely
+		sound different, and no amount of pitch-shifting one whoosh fixes that.
+
+		The five bands do not overlap — 0.60-0.70, 0.74-0.84, 0.86-0.94, 0.98-1.10,
+		1.24-1.40 — so even sharing one sample the five are tellable apart by ear,
+		which is the part that actually matters mid-horde. verify_melee fails the
+		build if two ever collide.
+
+		Each is a one-line swap when a real id arrives; the bands are set so a
+		dedicated sample drops straight in without retuning anything else. The impact is separate and already real — MeleeService plays
+		AudioConfig.Impact.Flesh on the first body an arc connects with.
+	]]
+	[Enums.Weapon.Machete] = sound(ID.SwordSwing, 0.55, 0.98, 1.10, 70, 3),
+	[Enums.Weapon.FireAxe] = sound(ID.SwordSwing, 0.72, 0.60, 0.70, 80, 3),
+	[Enums.Weapon.LeadPipe] = sound(ID.SwordSwing, 0.66, 0.74, 0.84, 75, 3),
+	[Enums.Weapon.BaseballBat] = sound(ID.SwordSwing, 0.6, 0.86, 0.94, 75, 3),
+	[Enums.Weapon.Knife] = sound(ID.SwordSwing, 0.42, 1.24, 1.40, 55, 2),
 } :: { [string]: SoundDefinition }
 
 AudioConfig.WeaponReload = {
