@@ -254,6 +254,37 @@ function MapVoteService:_maybeOpenIdleVote()
 		end
 	end
 
+	--[[
+		And only once somebody has actually committed to going in.
+
+		"The round state is Lobby" is true from the moment the server boots, so
+		this used to fire at a player who had joined and not yet decided
+		anything — a map vote thrown over the main menu while they were still
+		reading the mode list. A vote is a question about the round you are
+		entering, and until a mode is claimed there is no round being entered.
+
+		A live countdown is exactly that commitment: MatchmakingService starts it
+		when a mode is claimed and reports zero otherwise, so this opens as the
+		lobby begins counting down and resolves as it reaches zero. The vote and
+		the countdown are both twenty seconds, which is not a coincidence — and
+		if the lobby shortens itself for a full server, RoundService's finishNow
+		honours the vote as it stands rather than discarding it.
+
+		With no matchmaking at all — a developer pressing Play — there is no
+		countdown to wait for and the old behaviour is right: open immediately,
+		because the round is about to start on player count alone.
+	]]
+	local matchmaking = Registry.find("MatchmakingService")
+	if matchmaking and matchmaking.started and typeof(matchmaking.getLobbyState) == "function" then
+		local ok, lobby = pcall(matchmaking.getLobbyState, matchmaking)
+		if not ok or typeof(lobby) ~= "table" then
+			return
+		end
+		if lobby.inProgress or (tonumber(lobby.countdown) or 0) <= 0 then
+			return
+		end
+	end
+
 	self:beginVote()
 end
 

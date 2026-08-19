@@ -326,6 +326,10 @@ local state = {
 	committed = false, -- the server has admitted this player to the round
 	teleporting = false,
 	roundState = ROUND.Lobby,
+	--[[ A map vote is on screen. Pushed in by MapVoteController rather than
+	     polled, because the menu has no reason to know when votes happen and
+	     every reason to get out of the way when one does. ]]
+	voteOpen = false,
 
 	pending = "", -- the mode we asked for and have not been answered about
 	pendingUntil = 0,
@@ -670,8 +674,25 @@ local function setSuppressed(value: boolean)
 end
 
 local function refreshVisibility()
+	--[[
+		The lobby screen steps aside for a map vote; the results screen does not.
+
+		Those are the two moments a vote happens, and they want opposite things.
+		A vote during the lobby countdown IS the act of loading into the round —
+		the player has already picked a mode and the mode list behind it is
+		nothing but clutter for the twenty seconds they are choosing a map. A vote
+		after a round runs alongside the scoreboard by design: the scoreboard is
+		what they are reading, and the vote is a second thing to do while they
+		read it.
+
+		Nothing else changes. The menu is still "open" underneath — input is still
+		suppressed, the blur is still up, and the mode list comes straight back
+		if the vote resolves before the countdown does.
+	]]
+	local lobbyVisible = state.open and not state.voteOpen
+
 	gui.Enabled = state.open or state.results or state.teleporting
-	menuRoot.Visible = state.open
+	menuRoot.Visible = lobbyVisible
 	resultsRoot.Visible = state.results
 	teleportRoot.Visible = state.teleporting
 	setSuppressed(state.open or state.results)
@@ -680,9 +701,12 @@ local function refreshVisibility()
 	     player cannot press a single button on. Selection follows whichever of
 	     the three screens is up, and is handed back when none of them is —
 	     leaving it on a hidden button eats every D-pad press in the game. ]]
+	--[[ Selection follows whatever is actually on screen. With the lobby hidden
+	     behind a vote the mode buttons are invisible, and leaving a controller
+	     pointed at one would eat every D-pad press the vote wanted. ]]
 	if state.results then
 		GamepadFocus.capture(resultContinueButton)
-	elseif state.open then
+	elseif lobbyVisible then
 		GamepadFocus.capture(firstModeButton)
 	else
 		GamepadFocus.release(nil)
@@ -1171,6 +1195,23 @@ end
 
 function MainMenuController:isOpen(): boolean
 	return state.open or state.results
+end
+
+--[[
+	Tells the menu a map vote is up, so the lobby screen can stand down for it.
+
+	Only the LOBBY hides. The results screen keeps drawing underneath, because a
+	vote after a round is meant to run alongside the scoreboard rather than
+	replace it — that is the whole reason the vote sits above the menu in the
+	display order.
+]]
+function MainMenuController:setVoteOpen(value: boolean)
+	value = value == true
+	if state.voteOpen == value then
+		return
+	end
+	state.voteOpen = value
+	refreshVisibility()
 end
 
 local function dismissResults()

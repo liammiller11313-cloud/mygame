@@ -167,6 +167,25 @@ whether it leaves a ghost.
 
 ## The map vote
 
+It appears at exactly two moments, and nowhere else.
+
+**Loading into a fresh server.** Not while you are sitting on the menu reading
+the mode list — a vote is a question about the round you are entering, and until
+you have picked a mode there is no round being entered. It opens when the lobby
+countdown starts, which is the moment you have committed, and the menu's mode
+list steps aside so the vote *is* the loading screen. Both are twenty seconds,
+so the vote resolves as the countdown reaches zero.
+
+**After a round ends.** Here it draws over the scoreboard rather than replacing
+it: the scoreboard is what you are reading, and the vote is a second thing to do
+while you read it. That is why the vote sits above the menu in the display order
+at all.
+
+If a countdown resets before its round ever starts — the last player leaves,
+matchmaking cancels — the card closes itself after eight seconds rather than
+waiting for a map load that is never coming.
+
+
 Runs automatically as a round ends, underneath the scoreboard, for 20 seconds.
 Click a card or press **1** / **2**. You can change your vote until the clock runs
 out.

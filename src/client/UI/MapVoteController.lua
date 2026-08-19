@@ -41,6 +41,12 @@ local CARD_GAP = 14
 local BAR_HEIGHT = 4
 local BAR_CHASE = 1 / MOTION.Normal
 
+--[[ How long the result card stays up when nothing else closes it. The normal
+     path is the map reporting itself loaded, which is faster and reads as
+     progress; this is the backstop for a vote whose round never starts. Long
+     enough to read the winner, short enough not to feel stuck. ]]
+local RESULT_HOLD = 8
+
 local MapVoteController = {}
 
 local trove = Trove.new()
@@ -60,6 +66,8 @@ local state = {
 	voters = 0,
 	winner = "",
 	resolved = false,
+	--[[ When to close regardless of what the server does next. See RESULT_HOLD. ]]
+	closeAt = 0,
 }
 
 local function newFrame(parent: Instance, name: string, color: Color3, transparency: number?): Frame
@@ -243,6 +251,20 @@ end
 local function setVisible(visible: boolean)
 	state.visible = visible
 	screen.Enabled = visible
+	if not visible then
+		state.closeAt = 0
+	end
+
+	--[[ The menu's lobby screen steps aside while a vote is up. A vote during the
+	     countdown is the act of loading into the round, and the mode list the
+	     player already chose from is nothing but clutter behind it. The results
+	     screen is unaffected — a post-round vote is meant to run alongside the
+	     scoreboard, which is why the vote sits above the menu at all. ]]
+	local menu = Registry.find("MainMenuController")
+	if menu and typeof(menu.setVoteOpen) == "function" then
+		pcall(menu.setVoteOpen, menu, visible)
+	end
+
 	if visible then
 		state.shownClock = -1
 		GamepadFocus.capture(cards[1] and cards[1].button)
@@ -305,6 +327,19 @@ local function onVoteResult(payload: any)
 	clockLabel.Text = "LOADING"
 	clockLabel.TextColor3 = COLOR.Accent
 
+	--[[
+		A deadline, because the fast path is not guaranteed.
+
+		The card normally closes when the map reports itself loaded, which is the
+		right moment and the one that reads as progress. But a fresh-server vote
+		resolves during the lobby countdown, and a countdown can be reset — the
+		last player leaves, matchmaking cancels — in which case no round starts,
+		no map loads, and nothing was ever going to close this. That used to leave
+		a stale card on screen; now the menu's lobby is hiding behind it, so it
+		would leave the player with no way back to the mode list at all.
+	]]
+	state.closeAt = os.clock() + RESULT_HOLD
+
 	MapVoteController:_refresh()
 	playUi(AudioConfig.UI.WaveCleared)
 end
@@ -330,6 +365,11 @@ end
 
 local function update(dt: number)
 	if not state.visible then
+		return
+	end
+
+	if state.closeAt > 0 and os.clock() >= state.closeAt then
+		setVisible(false)
 		return
 	end
 
