@@ -55,6 +55,7 @@ Attributes.Infected = table.freeze({
 	IsBoss = "FL_IsBoss", -- boolean, Tank / Witch
 	IsDead = "FL_IsDead", -- boolean, set before the model lingers as a corpse
 	Target = "FL_Target", -- string, UserId of the survivor being chased, or ""
+	Seed = "FL_Seed", -- number, per-body gait variation; see InfectedPoseController
 	SpawnFlow = "FL_SpawnFlow", -- number, flow distance it spawned at
 	Burning = "FL_Burning", -- boolean, on fire (molotov / gas can)
 })

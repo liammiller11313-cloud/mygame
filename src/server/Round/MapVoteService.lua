@@ -237,6 +237,12 @@ end
 	resolve to nothing and then block the first real player from getting one.
 ]]
 function MapVoteService:_maybeOpenIdleVote()
+	--[[ Off by default. See MapConfig.Vote.OnFreshServer: the lobby countdown
+	     starts on its own, so every second of it is a second the player is on the
+	     main menu, and a vote during it is a vote over the menu. ]]
+	if not MapConfig.Vote.OnFreshServer then
+		return
+	end
 	if active or decided then
 		return
 	end

@@ -134,6 +134,24 @@ MapConfig.Medkits = table.freeze({
      a long vote is dead time between two rounds. ]]
 MapConfig.Vote = table.freeze({
 	DurationSeconds = 20,
+
+	--[[
+		Whether a vote also runs while the lobby is counting down toward the first
+		round of a fresh server.
+
+		Off, because on this server "the lobby is counting down" is not a signal
+		that anybody decided anything. MatchmakingService counts a player who has
+		picked nothing as a vote for the default mode, so the countdown begins
+		within a second of the first join — which means the whole of it is time
+		the player is sitting on the main menu reading the mode list, and a vote
+		thrown over that is a vote thrown over the menu.
+
+		With it off the first round of a server uses DefaultMap, and the vote is
+		purely an end-of-round thing: it appears over the scoreboard, where there
+		is something to decide and nothing it can obscure.
+	]]
+	OnFreshServer = false,
+
 	-- With one map in the roster there is nothing to decide; with two, a tie is
 	-- broken by whichever was NOT just played, so the game never repeats a map
 	-- purely because a vote split evenly.

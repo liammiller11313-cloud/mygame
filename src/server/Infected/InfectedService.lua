@@ -317,6 +317,11 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 	model:SetAttribute(Attributes.Infected.IsDead, false)
 	model:SetAttribute(Attributes.Infected.Target, "")
 	model:SetAttribute(Attributes.Infected.SpawnFlow, flow)
+	--[[ The body's gait variation, rolled once here so every client animates this
+	     zombie the same way. It cannot be derived on the client: the only
+	     per-instance identity a client can see is GetDebugId, which needs plugin
+	     capability and throws in a game script. ]]
+	model:SetAttribute(Attributes.Infected.Seed, random:NextInteger(1, 2147483647))
 	model:SetAttribute(Attributes.Infected.Burning, false)
 
 	-- The caller's point is a FLOOR point, so the rig is lifted by the distance

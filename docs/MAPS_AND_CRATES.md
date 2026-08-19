@@ -169,21 +169,23 @@ whether it leaves a ghost.
 
 It appears at exactly two moments, and nowhere else.
 
-**Loading into a fresh server.** Not while you are sitting on the menu reading
-the mode list — a vote is a question about the round you are entering, and until
-you have picked a mode there is no round being entered. It opens when the lobby
-countdown starts, which is the moment you have committed, and the menu's mode
-list steps aside so the vote *is* the loading screen. Both are twenty seconds,
-so the vote resolves as the countdown reaches zero.
+**After a round ends.** It draws over the scoreboard rather than replacing it:
+the scoreboard is what you are reading, and the vote is a second thing to do
+while you read it. That is why the vote sits above the menu in the display order.
 
-**After a round ends.** Here it draws over the scoreboard rather than replacing
-it: the scoreboard is what you are reading, and the vote is a second thing to do
-while you read it. That is why the vote sits above the menu in the display order
-at all.
+**Not during the lobby.** The first round of a fresh server uses `DefaultMap`.
 
-If a countdown resets before its round ever starts — the last player leaves,
-matchmaking cancels — the card closes itself after eight seconds rather than
-waiting for a map load that is never coming.
+That is `MapConfig.Vote.OnFreshServer`, and it is off for a specific reason worth
+knowing before turning it on: the lobby countdown is *not* a signal that anybody
+chose anything. `MatchmakingService` counts a player who has picked nothing as a
+vote for the default mode, so the countdown starts within a second of the first
+join. Every second of it is a second the player is sitting on the main menu
+reading the mode list — so a vote during the countdown is a vote thrown over the
+menu, which is exactly what it is not supposed to be.
+
+If a vote's round never starts — the last player leaves, matchmaking cancels —
+the card closes itself after eight seconds rather than waiting for a map load
+that is never coming.
 
 
 Runs automatically as a round ends, underneath the scoreboard, for 20 seconds.

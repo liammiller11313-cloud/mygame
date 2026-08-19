@@ -239,11 +239,28 @@ local function rollAxis(motor: Motor6D): Vector3
 	return motor.C0.Rotation:Inverse() * Vector3.zAxis
 end
 
---[[ A stable per-body roll. Seeded from the model's own identity so a body looks
-     the same to every player who sees it, and so it keeps its gait across a
-     rejoin rather than being re-rolled into a different zombie. ]]
+--[[
+	A stable per-body roll.
+
+	Read from the attribute InfectedService stamps at spawn, so every client
+	animates the same zombie the same way and a body keeps its gait for its whole
+	life rather than being re-rolled by whoever happens to look at it.
+
+	This was originally derived on the client from the model's own identity via
+	GetDebugId, which is a plugin-only call: in a game script it throws, once per
+	body per spawn, and the horde filled the output with it.
+
+	The name hash is the fallback for a body that somehow has no attribute — same
+	gait for every zombie sharing a variant name, which is worse variety but
+	still a walk cycle.
+]]
 local function seedFor(model: Model): number
-	local text = model.Name .. tostring(model:GetDebugId(24))
+	local stamped = model:GetAttribute(IA.Seed)
+	if typeof(stamped) == "number" then
+		return stamped
+	end
+
+	local text = model.Name
 	local hash = 2166136261
 	for index = 1, #text do
 		hash = bit32.bxor(hash, string.byte(text, index))
