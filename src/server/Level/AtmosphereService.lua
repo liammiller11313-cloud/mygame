@@ -97,7 +97,11 @@ local TOTAL_DURATION = math.max(GameModeConfig.Classic.TotalDuration, 1)
 --[[ Never let the fog close nearer than the furthest point the Director is
      allowed to spawn from. Inside that distance, "the horde arrived" and "the
      horde appeared" become the same event. ]]
-local MIN_FOG_END = DirectorConfig.Spawning.MaxDistanceFromSurvivor * 1.35
+--[[ The fog can never close nearer than this. Tied to the Director's spawn band
+     so that anything it puts in the world is visible from the moment it starts
+     walking at you — fog that hides a Tank until it is on top of you is not
+     tension, it is an ambush the player had no way to read. ]]
+local MIN_FOG_END = DirectorConfig.Spawning.MaxDistanceFromSurvivor * 2.4
 
 -- Property writes below this delta are skipped; smaller than any of these
 -- properties can express on screen.
@@ -144,10 +148,10 @@ local BOSS_EASE_OUT = 4.5
 --[[ What a Tank or the Witch does to the look, at full blend. Every number here
      is small on purpose — this is unease, not a filter. ]]
 local BOSS = table.freeze({
-	Brightness = 0.86, -- multiplier
-	Ambient = 0.82, -- multiplier on both ambient terms
+	Brightness = 0.90, -- multiplier
+	Ambient = 0.88, -- multiplier on both ambient terms
 	Exposure = -0.06,
-	FogEnd = 0.78, -- multiplier: the street closes in
+	FogEnd = 0.86, -- multiplier: the street closes in
 	FogStart = 0.80,
 	Density = 0.05,
 	Haze = 0.55,
@@ -157,6 +161,33 @@ local BOSS = table.freeze({
 	Tint = Color3.fromRGB(196, 213, 236), -- cold, slightly cyan
 	TintBlend = 0.5,
 })
+
+--[[
+	VISIBILITY — the one number to turn if the game is too dark or too bright.
+
+	Everything below is tuned to be moody but FIGHTABLE: you should be able to
+	pick a Common out of the gloom at the far end of a street and see a Tank
+	coming with time to react. That readability floor beats atmosphere every
+	time — a horror light you cannot shoot in is just a broken game.
+
+	Raise this to brighten the whole ramp at once; lower it to make the night
+	bite harder. 1.0 is the tuned default. It scales the light terms and opens
+	the fog to match, so the look stays coherent instead of turning into a bright
+	room seen through thick soup.
+
+	  0.75  grim. You are relying on the map's own lamps.
+	  1.00  tuned default.
+	  1.35  comfortably readable everywhere; less atmospheric.
+]]
+local VISIBILITY = 1.0
+
+--[[ How much of VISIBILITY each term takes. Fog opens more slowly than the light
+     comes up, because a bright scene with the fog still at your feet reads as a
+     bug rather than as weather. ]]
+local VIS_AMBIENT = 1.0
+local VIS_BRIGHTNESS = 0.75
+local VIS_FOG = 0.55
+local VIS_DENSITY = 0.7 -- inverted: more visibility means less atmosphere
 
 -- ── keyframes ───────────────────────────────────────────────────────────────
 
@@ -176,15 +207,15 @@ local KEYFRAMES = {
 		-- Low sun, long shadows down the street. The one keyframe that is warm,
 		-- so that losing it later actually costs something.
 		clock = 17.2,
-		brightness = 2.1,
-		exposure = 0.12,
-		ambient = Color3.fromRGB(30, 27, 26),
-		outdoor = Color3.fromRGB(104, 78, 58),
-		fogColor = Color3.fromRGB(112, 84, 62),
-		fogStart = 95,
-		fogEnd = 880,
-		density = 0.30,
-		haze = 1.5,
+		brightness = 2.35,
+		exposure = 0.16,
+		ambient = Color3.fromRGB(54, 50, 48),
+		outdoor = Color3.fromRGB(132, 106, 84),
+		fogColor = Color3.fromRGB(118, 92, 70),
+		fogStart = 150,
+		fogEnd = 1150,
+		density = 0.20,
+		haze = 1.05,
 		glare = 0.50,
 		atmColor = Color3.fromRGB(148, 116, 86),
 		tint = Color3.fromRGB(255, 247, 236),
@@ -197,15 +228,15 @@ local KEYFRAMES = {
 		anchor = 3,
 		-- Sun on the horizon. Colour is draining out of everything but the sky.
 		clock = 18.05,
-		brightness = 1.65,
-		exposure = 0.18,
-		ambient = Color3.fromRGB(24, 22, 25),
-		outdoor = Color3.fromRGB(74, 58, 54),
-		fogColor = Color3.fromRGB(80, 56, 48),
-		fogStart = 72,
-		fogEnd = 680,
-		density = 0.34,
-		haze = 1.9,
+		brightness = 2.0,
+		exposure = 0.22,
+		ambient = Color3.fromRGB(48, 46, 50),
+		outdoor = Color3.fromRGB(108, 90, 84),
+		fogColor = Color3.fromRGB(88, 66, 58),
+		fogStart = 128,
+		fogEnd = 960,
+		density = 0.23,
+		haze = 1.3,
 		glare = 0.32,
 		atmColor = Color3.fromRGB(126, 92, 72),
 		tint = Color3.fromRGB(252, 242, 236),
@@ -219,44 +250,44 @@ local KEYFRAMES = {
 		-- Blue hour. Shapes without colour: the most useful horror light there
 		-- is, because a silhouette at 200 studs could be anything.
 		clock = 18.9,
-		brightness = 1.05,
-		exposure = 0.24,
-		ambient = Color3.fromRGB(13, 14, 20),
-		outdoor = Color3.fromRGB(33, 38, 52),
-		fogColor = Color3.fromRGB(26, 30, 41),
-		fogStart = 52,
-		fogEnd = 470,
-		density = 0.39,
-		haze = 2.3,
+		brightness = 1.6,
+		exposure = 0.28,
+		ambient = Color3.fromRGB(40, 42, 52),
+		outdoor = Color3.fromRGB(76, 84, 104),
+		fogColor = Color3.fromRGB(34, 39, 52),
+		fogStart = 104,
+		fogEnd = 780,
+		density = 0.26,
+		haze = 1.55,
 		glare = 0.18,
 		atmColor = Color3.fromRGB(46, 56, 74),
 		tint = Color3.fromRGB(236, 242, 255),
-		contrast = 0.12,
-		saturation = -0.13,
-		envDiffuse = 0.40,
-		envSpecular = 0.45,
+		contrast = 0.10,
+		saturation = -0.10,
+		envDiffuse = 0.50,
+		envSpecular = 0.52,
 	},
 	{
 		anchor = 7,
 		-- Night. The finale opens here, already dark, so wave 7 does not have to
 		-- announce itself twice.
 		clock = 20.4,
-		brightness = 0.62,
-		exposure = 0.30,
-		ambient = Color3.fromRGB(7, 8, 12),
-		outdoor = Color3.fromRGB(18, 21, 30),
-		fogColor = Color3.fromRGB(12, 14, 20),
-		fogStart = 34,
-		fogEnd = 340,
-		density = 0.44,
-		haze = 2.7,
+		brightness = 1.3,
+		exposure = 0.36,
+		ambient = Color3.fromRGB(33, 36, 46),
+		outdoor = Color3.fromRGB(62, 69, 88),
+		fogColor = Color3.fromRGB(20, 23, 32),
+		fogStart = 86,
+		fogEnd = 650,
+		density = 0.30,
+		haze = 1.8,
 		glare = 0.08,
 		atmColor = Color3.fromRGB(22, 28, 40),
 		tint = Color3.fromRGB(224, 234, 255),
-		contrast = 0.15,
-		saturation = -0.20,
-		envDiffuse = 0.30,
-		envSpecular = 0.38,
+		contrast = 0.13,
+		saturation = -0.15,
+		envDiffuse = 0.44,
+		envSpecular = 0.46,
 	},
 	{
 		anchor = "end",
@@ -264,24 +295,34 @@ local KEYFRAMES = {
 		-- term, with the fog at its floor. Whatever you can see here, the map's
 		-- own lamps are paying for.
 		clock = 22.6,
-		brightness = 0.45,
-		exposure = 0.32,
-		ambient = Color3.fromRGB(4, 5, 8),
-		outdoor = Color3.fromRGB(12, 14, 21),
-		fogColor = Color3.fromRGB(7, 8, 12),
-		fogStart = 24,
-		fogEnd = 300,
-		density = 0.48,
-		haze = 3.0,
+		brightness = 1.15,
+		exposure = 0.40,
+		ambient = Color3.fromRGB(29, 32, 42),
+		outdoor = Color3.fromRGB(54, 61, 79),
+		fogColor = Color3.fromRGB(16, 19, 27),
+		fogStart = 76,
+		fogEnd = 580,
+		density = 0.33,
+		haze = 1.95,
 		glare = 0.04,
 		atmColor = Color3.fromRGB(14, 18, 28),
 		tint = Color3.fromRGB(214, 228, 255),
-		contrast = 0.18,
-		saturation = -0.25,
-		envDiffuse = 0.24,
-		envSpecular = 0.32,
+		contrast = 0.15,
+		saturation = -0.18,
+		envDiffuse = 0.40,
+		envSpecular = 0.44,
 	},
 }
+
+--[[ Multiplies a colour's channels, clamped. Used by the visibility bias, which
+     brightens the ambient terms without shifting their hue. ]]
+local function scaleColor(color: Color3, factor: number): Color3
+	return Color3.new(
+		math.clamp(color.R * factor, 0, 1),
+		math.clamp(color.G * factor, 0, 1),
+		math.clamp(color.B * factor, 0, 1)
+	)
+end
 
 local AtmosphereService = {}
 
@@ -611,6 +652,25 @@ local function resolve()
 		target.ambient = target.ambient:Lerp(Color3.new(), (1 - BOSS.Ambient) * blend)
 		target.outdoor = target.outdoor:Lerp(Color3.new(), (1 - BOSS.Ambient) * blend)
 		target.tint = target.tint:Lerp(BOSS.Tint, BOSS.TintBlend * blend)
+	end
+
+	--[[ The visibility bias, applied after the mood so a boss still darkens the
+	     scene by the same proportion at any setting. Ambient does the heavy
+	     lifting: it is the term that decides whether an unlit doorway contains
+	     information or a hole. ]]
+	if VISIBILITY ~= 1 then
+		local light = 1 + (VISIBILITY - 1) * VIS_BRIGHTNESS
+		local amb = 1 + (VISIBILITY - 1) * VIS_AMBIENT
+		local fog = 1 + (VISIBILITY - 1) * VIS_FOG
+		local thin = 1 - (VISIBILITY - 1) * VIS_DENSITY
+
+		target.brightness *= light
+		target.ambient = scaleColor(target.ambient, amb)
+		target.outdoor = scaleColor(target.outdoor, amb)
+		target.fogEnd *= fog
+		target.fogStart *= fog
+		target.density *= math.max(thin, 0)
+		target.haze *= math.max(thin, 0)
 	end
 
 	-- Clamps last, so no combination of keyframe and mood can push a property

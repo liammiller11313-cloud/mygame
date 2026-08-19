@@ -183,9 +183,17 @@ A few worth knowing about:
 ## Development
 
 ```bash
-./scripts/check.sh          # format + syntax-check every Luau file
+./scripts/check.sh          # format, syntax-check, and cross-reference audit
 ./scripts/check.sh --check  # verify without writing
+python3 scripts/audit.py    # the audit on its own
 ```
+
+`check.sh` runs StyLua for formatting and parse errors, then `audit.py` for the
+class of bug that only shows up at runtime: a remote that is not in the manifest,
+an enum key that was renamed in one file and not another, an attribute or service
+looked up under a name nothing registers, a Humanoid found by name rather than by
+class. It also reports remotes that are fired with nothing listening, or listened
+for with nothing firing.
 
 Architecture, module contracts and the rules the codebase follows are in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

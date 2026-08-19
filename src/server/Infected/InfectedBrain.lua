@@ -72,6 +72,7 @@ local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
+local InfectedAnimator = require(script.Parent.InfectedAnimator)
 local RigUtil = require(Shared.Util.RigUtil)
 local Trove = require(Shared.Util.Trove)
 local Types = require(Shared.Types)
@@ -228,6 +229,10 @@ function InfectedBrain.new(model: Model, definition: any)
 		repathAt = now + random:NextNumber(0, REPATH_MAX),
 		wanderUntil = now + random:NextNumber(IDLE_MIN, IDLE_MAX),
 
+		--[[ Built lazily below. nil means this rig shipped no usable animation
+		     ids, which is survivable — it just slides instead of walking. ]]
+		animator = nil,
+
 		path = nil,
 		waypoints = nil :: { PathWaypoint }?,
 		waypointIndex = 1,
@@ -269,6 +274,12 @@ function InfectedBrain.new(model: Model, definition: any)
 
 	humanoid.AutoRotate = true
 	self:_setSpeed(definition.walkSpeed)
+
+	--[[ Loaded once, here, rather than the first time the body moves.
+	     Animator:LoadAnimation yields on an id the server has not seen before,
+	     and paying that cost lazily means a frame spike per new zombie during
+	     exactly the moment a horde is arriving. ]]
+	self.animator = InfectedAnimator.new(model, definition.id)
 
 	return self
 end
@@ -466,6 +477,11 @@ function InfectedBrain:destroy()
 	end
 	self.destroyed = true
 
+	if self.animator then
+		self.animator:destroy()
+		self.animator = nil
+	end
+
 	-- Put the arms back before anything else touches the rig: GoreService is
 	-- about to swap every Motor6D for a constraint, and a corpse frozen in a
 	-- windup pose ragdolls with its arms in the wrong place.
@@ -512,6 +528,11 @@ function InfectedBrain:update(dt: number, snapshot: any)
 	end
 
 	local now = os.clock()
+
+	-- One vector compare per body per tick, on the loop that is already running.
+	if self.animator then
+		self.animator:update(self.definition.runSpeed)
+	end
 
 	-- Staggered bodies do nothing at all. That is the point of a stagger.
 	if now < self.staggerUntil then
@@ -705,6 +726,15 @@ function InfectedBrain:_beginSwing(targetRoot: BasePart, now: number, dt: number
 	-- room or the windup is just latency.
 	self:_setSpeed(self.chaseSpeed * ATTACK_WINDUP_SPEED)
 	self:_setSwingPose(true)
+	-- If the rig shipped an attack animation, play it over the windup so the
+	-- telegraph InfectedConfig asks for is something the player can actually see
+	-- rather than a body standing still for a fifth of a second.
+	if self.animator then
+		self.animator:playOnce(
+			"attack",
+			self.definition.attack.windup + self.definition.attack.cooldown * 0.5
+		)
+	end
 	self:faceTowards(targetRoot.Position, dt)
 	self.waypoints = nil
 	self.moveIssued = nil

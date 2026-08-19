@@ -93,6 +93,7 @@ local SurvivorService = {}
 SurvivorService.stateChanged = Signal.new() -- (player, newState, oldState)
 SurvivorService.damaged = Signal.new() -- (player, amount, ctx)
 SurvivorService.died = Signal.new() -- (player, ctx)
+SurvivorService.revived = Signal.new() -- (player, rescuer) — rescuer is nil for a scripted rescue
 
 local records: { [Player]: any } = {}
 local bodies: { [Model]: Player } = {} -- corpse model -> the player it belongs to
@@ -968,6 +969,10 @@ function SurvivorService:revive(player: Player, rescuer: Player?)
 			self:_cancelInteraction(helperRecord)
 		end
 	end
+
+	-- Fired last, once the record is fully consistent: a listener that reads
+	-- state off this player must not see it halfway between down and standing.
+	SurvivorService.revived:fire(player, rescuer)
 end
 
 --[[ Death. The body stays: it is a defib target, and a team that can see where

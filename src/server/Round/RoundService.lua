@@ -651,6 +651,12 @@ function RoundService:startRound(requestedMode: string?)
 	]]
 	roundState = Enums.RoundState.Starting
 
+	-- A scoreboard showing last round's kills is worse than one showing none.
+	local statsService = Registry.find("StatsService")
+	if statsService then
+		statsService:reset()
+	end
+
 	setGameAttribute(Attributes.Game.Mode, mode)
 	setGameAttribute(Attributes.Game.RoundEndsAt, roundEndsAt)
 
@@ -741,14 +747,37 @@ end
      from service calls: this runs on the frame a round ends, when half the
      services are already tearing state down. ]]
 function RoundService:_buildScores(): { [string]: any }
+	-- Folded in rather than replaced: the attribute-derived fields below are
+	-- readable even while services are tearing down, and the tally is a bonus
+	-- when it is there rather than something the scoreboard depends on.
+	local tally = {}
+	local statsService = Registry.find("StatsService")
+	if statsService then
+		local ok, snapshot = pcall(function()
+			return statsService:snapshot()
+		end)
+		if ok and typeof(snapshot) == "table" then
+			tally = snapshot
+		end
+	end
+
 	local scores = {}
 	for _, player in Players:GetPlayers() do
 		local state = Attributes.get(player, Attributes.Player.State, Enums.SurvivorState.Spectating)
-		scores[player.Name] = {
+		local row = {
 			state = state,
 			alive = state ~= Enums.SurvivorState.Dead and state ~= Enums.SurvivorState.Spectating,
 			incaps = Attributes.get(player, Attributes.Player.IncapCount, 0),
 		}
+		local counted = tally[player.Name]
+		if typeof(counted) == "table" then
+			for key, value in counted do
+				if row[key] == nil then
+					row[key] = value
+				end
+			end
+		end
+		scores[player.Name] = row
 	end
 	return scores
 end

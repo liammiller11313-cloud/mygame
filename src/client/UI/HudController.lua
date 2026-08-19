@@ -568,12 +568,52 @@ local function refreshAmmo()
 	ammo.reserve.Text = if reserve < 0 then "/ ∞" else "/ " .. tostring(reserve)
 end
 
+--[[
+	Pickup feedback. `InventoryChanged` was being broadcast by the server and read
+	by nobody, because every value the HUD renders already arrives as an
+	attribute. The event still carries something the attributes cannot: the fact
+	that a slot changed AT THIS MOMENT, which is exactly what a pickup should feel
+	like. So it drives a brief flash on the slot that changed.
+
+	This is the cheapest kind of game feel there is — the player learns they
+	picked something up from their peripheral vision instead of having to read
+	the panel.
+]]
+local FLASH_SECONDS = 0.45
+local flashUntil: { [string]: number } = {}
+local flashLive = false
+
+local function flashSlot(slot: string)
+	if slot == "" then
+		return
+	end
+	flashUntil[slot] = os.clock() + FLASH_SECONDS
+	flashLive = true
+end
+
+--[[ Returns 0-1: how much of the flash is left on a slot. Sampled by the slot
+     refresh rather than tweened, so no tween per pickup and nothing to cancel
+     when two pickups land in the same frame. ]]
+local function flashAmount(slot: string): number
+	local until_ = flashUntil[slot]
+	if not until_ then
+		return 0
+	end
+	local remaining = until_ - os.clock()
+	if remaining <= 0 then
+		flashUntil[slot] = nil
+		return 0
+	end
+	return remaining / FLASH_SECONDS
+end
+
 -- ── item slots ──────────────────────────────────────────────────────────────
 
 local function refreshItems()
 	local active = Attributes.get(player, LA.ActiveSlot, SLOT.Primary)
 	for _, slot in ITEM_SLOTS do
 		local entry = itemSlots[slot]
+		local flash = flashAmount(slot)
 		local itemId = ""
 		if slot == SLOT.Throwable then
 			itemId = Attributes.get(player, LA.ThrowableId, "")
@@ -588,10 +628,22 @@ local function refreshItems()
 		entry.label.TextColor3 = if filled then COLOR.TextPrimary else COLOR.TextDim
 		entry.key.TextColor3 = if filled then COLOR.TextSecondary else COLOR.TextDim
 		entry.frame.BackgroundTransparency = if filled then 0.15 else 0.55
-		entry.stroke.Color = if slot == active and filled
+
+		local base = if slot == active and filled
 			then COLOR.Accent
 			elseif filled then COLOR.BorderBright
 			else COLOR.Border
+
+		-- The flash rides on top of whatever the slot's resting colour is, so a
+		-- pickup reads the same whether the slot was empty, full, or selected.
+		if flash > 0 then
+			entry.stroke.Color = base:Lerp(COLOR.AccentBright, flash)
+			entry.stroke.Thickness = LAYOUT.BorderThickness + flash * 1.5
+			entry.frame.BackgroundTransparency = (if filled then 0.15 else 0.55) * (1 - flash * 0.6)
+		else
+			entry.stroke.Color = base
+			entry.stroke.Thickness = LAYOUT.BorderThickness
+		end
 	end
 end
 
@@ -747,6 +799,21 @@ end
 
 local function update(dt: number)
 	local now = os.clock()
+
+	--[[ The item slots are attribute-driven and normally only redraw when
+	     something changes. A flash is the one thing that has to animate, so the
+	     loop drives them for its duration and then stops paying for them again. ]]
+	if flashLive then
+		local anyLive = false
+		for _, until_ in flashUntil do
+			if until_ > now then
+				anyLive = true
+				break
+			end
+		end
+		refreshItems()
+		flashLive = anyLive
+	end
 
 	for _, record in panels do
 		local perm = approach(record.permCurrent, record.permTarget, dt)
@@ -1060,6 +1127,13 @@ end
 
 function HudController:start()
 	bindItemKeys()
+
+	trove:connect(Remotes.Event.InventoryChanged.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		flashSlot(tostring(payload.slot or ""))
+	end)
 
 	trove:connect(Remotes.Event.ObjectiveChanged.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" then

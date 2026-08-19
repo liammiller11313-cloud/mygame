@@ -42,3 +42,10 @@ if [ "$FAILED" -gt 0 ]; then
 fi
 rm -f "$ERRLOG"
 echo "all files parse cleanly"
+
+# Parsing is not the same as resolving. audit.py cross-checks the names that
+# only fail at runtime — remotes, enum keys, attributes, service lookups.
+if command -v python3 >/dev/null 2>&1 && [ -f scripts/audit.py ]; then
+  echo
+  python3 scripts/audit.py || exit 1
+fi

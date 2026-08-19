@@ -111,6 +111,8 @@ local MODULES = {
 	"Infected/InfectedService",
 	"Director/ItemPlacer",
 	"Director/DirectorService",
+	-- Stats listens to signals the combat services own, so it loads after them.
+	"Round/StatsService",
 	"Level/AtmosphereService",
 }
 

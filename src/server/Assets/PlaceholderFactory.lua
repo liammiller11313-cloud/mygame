@@ -216,6 +216,70 @@ local STRIPPED_CLASSES = table.freeze({
 	"Sound",
 })
 
+--[[
+	Lifts every Animation id out of a rig into an inert Folder before sanitise()
+	runs, because the ids live as CHILDREN of the Animate script and would be
+	destroyed along with it.
+
+	That mattered more than it looks: stripping scripts is a real security measure
+	(a free-model rig with a `require(<id>)` in it runs with full server
+	permissions), but doing it naively also threw away the walk cycle, which is
+	why the horde slid around instead of walking.
+
+	Roblox's own Animate script nests these as
+	    Animate > <role StringValue> > <Animation>
+	so the PARENT's name is the role — "walk", "run", "idle", "attack". Custom
+	rigs put them in a Configuration or a plain Folder with the same shape, and
+	this reads all of them the same way. The result is a Folder of Folders of
+	Animations: no code, nothing to execute, safe to keep.
+]]
+local ANIMATION_FOLDER = "FL_Animations"
+
+local function harvestAnimations(model: Model): number
+	local found = 0
+	local existing = model:FindFirstChild(ANIMATION_FOLDER)
+	if existing then
+		existing:Destroy()
+	end
+
+	local store: Folder? = nil
+	local buckets: { [string]: Folder } = {}
+
+	for _, descendant in model:GetDescendants() do
+		if not descendant:IsA("Animation") or descendant.AnimationId == "" then
+			continue
+		end
+		local parent = descendant.Parent
+		-- A bare Animation with no meaningful parent name still beats nothing;
+		-- file it under "idle" so at least something plays.
+		local role = if parent and parent ~= model then string.lower(parent.Name) else "idle"
+
+		if not store then
+			-- Built through a local rather than assigning to `store` and then
+			-- opening a paren on the next line: Lua would read that as calling
+			-- the value Instance.new returned.
+			local created = Instance.new("Folder")
+			created.Name = ANIMATION_FOLDER
+			created.Parent = model
+			store = created
+		end
+
+		local bucket = buckets[role]
+		if not bucket then
+			bucket = Instance.new("Folder")
+			bucket.Name = role
+			bucket.Parent = store
+			buckets[role] = bucket
+		end
+
+		local copy = descendant:Clone()
+		copy.Parent = bucket
+		found += 1
+	end
+
+	return found
+end
+
 local function sanitise(instance: Instance): number
 	local removed = 0
 	for _, descendant in instance:GetDescendants() do
@@ -928,7 +992,20 @@ end
 	same way under fire or the grey-box stops being a useful stand-in.
 ]]
 local function adoptRig(model: Model, kind: string, definition, scale: number): Model?
+	-- Order matters: the ids have to be lifted out before the script holding them
+	-- is destroyed.
+	local harvested = harvestAnimations(model)
 	sanitise(model)
+	if harvested == 0 then
+		warnOnce(
+			"noanims:" .. kind,
+			string.format(
+				"the %s rig carries no Animation ids, so it will slide rather than walk. "
+					.. "Give the rig an Animate script (or any Folder of Animations) before it is imported.",
+				kind
+			)
+		)
+	end
 
 	-- NEVER by name. The Rusher's Humanoid is called "Zombie".
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
