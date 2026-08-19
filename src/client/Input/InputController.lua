@@ -48,7 +48,6 @@ type Binding = {
 	slot: string?, -- set on the five slot actions; the slot they select
 	pass: boolean?, -- let the input fall through to Roblox's own controls
 	touch: string?, -- label for the on-screen button, when the verb earns one
-	touchOrder: number?, -- where it sits in the touch pad; see TouchController
 }
 
 --[[ Every verb the player can express. Compare against these, never against a
@@ -102,29 +101,28 @@ local Action = table.freeze({
 	are the buttons and there is no room for five more.
 
 	── TOUCH ────────────────────────────────────────────────────────────────────
-	`touch` marks the verbs that earn an on-screen button and `touchOrder` ranks
-	them; TouchController owns where they actually go, because it is the thing
-	that knows where the HUD already is. A screen covered in buttons is a screen
-	you cannot see a Hunter through, so the pad is deliberately six.
+	`touch` is the label for the verbs that earn an on-screen button. Placement
+	is TouchController's, keyed on the action name, because the arrangement is a
+	thumb arc rather than a list and only the thing that knows where the HUD
+	already sits can decide it. A screen covered in buttons is a screen you cannot
+	see a Hunter through, so the pad is deliberately six — and one of those six
+	only appears when there is something to interact with.
 ]]
 local BINDINGS: { Binding } = {
 	{
 		action = Action.Fire,
 		keys = { Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2 },
 		touch = "FIRE",
-		touchOrder = 1,
 	},
 	{
 		action = Action.Aim,
 		keys = { Enum.UserInputType.MouseButton2, Enum.KeyCode.ButtonL2 },
 		touch = "AIM",
-		touchOrder = 2,
 	},
 	{
 		action = Action.Reload,
 		keys = { Enum.KeyCode.R, Enum.KeyCode.ButtonX },
 		touch = "RELOAD",
-		touchOrder = 3,
 	},
 	-- The panic button. Mouse 3 rather than a letter because it has to be
 	-- reachable without taking a finger off movement.
@@ -132,13 +130,11 @@ local BINDINGS: { Binding } = {
 		action = Action.Shove,
 		keys = { Enum.UserInputType.MouseButton3, Enum.KeyCode.ButtonR1 },
 		touch = "PUSH",
-		touchOrder = 4,
 	},
 	{
 		action = Action.Melee,
 		keys = { Enum.KeyCode.V, Enum.KeyCode.ButtonL1 },
 		touch = "MELEE",
-		touchOrder = 5,
 	},
 	{ action = Action.Sprint, keys = { Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3 } },
 	-- Passed through: Roblox's own control script owns the jump itself, and
@@ -149,7 +145,6 @@ local BINDINGS: { Binding } = {
 		action = Action.Interact,
 		keys = { Enum.KeyCode.E, Enum.KeyCode.ButtonY },
 		touch = "USE",
-		touchOrder = 6,
 	},
 	--[[ Keyboard-only, and they do not need a gamepad or touch key: on those two
 	     schemes the consumable slots use themselves when re-selected, which is

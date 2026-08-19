@@ -188,4 +188,50 @@ GoreConfig.Budget = table.freeze({
 	CullDistance = 260, -- gore beyond this is never sent to a client
 })
 
+--[[
+	The ceilings above are what a desktop can push. A phone cannot.
+
+	Ninety loose gibs, forty limbs and a hundred and sixty blood decals is a lot
+	of draw calls and a lot of physics bodies, and on a handset it is the single
+	most likely thing to take the frame rate down during exactly the moment the
+	game is trying to be exciting. Gore that arrives at fifteen frames a second is
+	not more gore, it is less game.
+
+	Scaled per client rather than lowered for everyone: the desktop numbers are
+	the ones the effect was designed around and there is no reason to spend them.
+	Console sits in between — fixed hardware, real GPU, but a shared memory budget
+	and a player sitting three metres from the screen who will not miss the
+	hundred and sixtieth decal.
+
+	The event throttle and the cull distance are deliberately NOT scaled. Both are
+	server-side decisions about what to SEND, and one client's hardware cannot be
+	allowed to change what every other client receives.
+]]
+GoreConfig.BudgetScale = table.freeze({
+	Desktop = 1.0,
+	Console = 0.7,
+	Mobile = 0.4,
+})
+
+--[[
+	The client-side ceilings for a device class.
+
+	Gibs and decals only, deliberately. Limbs and ragdolls are counted on the
+	SERVER — they are physics bodies every client shares — so there is no
+	per-device version of them to return, and offering one here would be a number
+	that looked authoritative and changed nothing.
+
+	Floored rather than merely scaled, so even the smallest device still shows
+	gore instead of a clean kill. The entire point of the system is that killing
+	is satisfying; a budget that rounded toward zero would quietly delete the
+	feature on the platform with the most players.
+]]
+function GoreConfig.budgetFor(deviceClass: string): { gibs: number, decals: number }
+	local scale = GoreConfig.BudgetScale[deviceClass] or 1.0
+	return {
+		gibs = math.max(math.floor(GoreConfig.Budget.MaxActiveGibs * scale), 12),
+		decals = math.max(math.floor(GoreConfig.Budget.MaxActiveDecals * scale), 24),
+	}
+end
+
 return table.freeze(GoreConfig)

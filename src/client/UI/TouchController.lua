@@ -30,6 +30,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Registry = require(Shared.Util.Registry)
@@ -44,18 +45,57 @@ local LAYOUT = UITheme.Layout
 local TEXT = UITheme.TextSize
 
 --[[ Reference pixels, like everything else drawn in a scale layer. 64 is about
-     9mm on a phone at this scale, which is the smallest target a thumb hits
+     9mm on a phone at the scale floor, which is the smallest target a thumb hits
      reliably while also being shot at. ]]
 local BUTTON = 64
-local GAP = 8
+local BIG = 86 -- Fire only
 
---[[ The pad sits above the hotbar, not beside it. The hotbar is 54 tall plus the
-     screen margin, and the ammo panel sits above that — this clears both. ]]
-local BOTTOM_INSET = 150
+--[[
+	Where each button sits, as an offset from the pad's bottom-right corner.
 
--- Fire is the one button that has to be under the thumb without looking, so it
--- gets the bottom-right corner and a larger target than the rest.
-local FIRE_SCALE = 1.35
+	Explicit rather than computed from an index, because the arrangement is a
+	THUMB ARC and not a grid. The bottom row is the sweep a right thumb makes
+	without the hand moving — fire in the corner, then the two verbs you reach for
+	mid-fight — and the row above it is a deliberate stretch for the two you have
+	a moment to think about.
+
+	The whole cluster is 230 x 158, which on a small phone is 26% of the width and
+	32% of the height. The version this replaced filled two columns by index and
+	came out 310 tall: half the screen, on the side the player is trying to see
+	down.
+]]
+local PAD_LAYOUT: { [string]: { x: number, y: number, size: number } } = {
+	Fire = { x = 0, y = 0, size = BIG },
+	Reload = { x = 94, y = 0, size = BUTTON },
+	Aim = { x = 166, y = 0, size = BUTTON },
+	Melee = { x = 22, y = 94, size = BUTTON },
+	Shove = { x = 94, y = 94, size = BUTTON },
+	Interact = { x = 166, y = 94, size = BUTTON },
+}
+
+local PAD_WIDTH = 230
+local PAD_HEIGHT = 158
+
+--[[ The pad clears the ammo counter, which sits above the hotbar in the same
+     corner. Derived rather than typed: the ammo panel's own position is
+     `ScreenMargin + hotbar height + gap` and its height is on top of that, so a
+     hand-written inset here would silently start overlapping the first time
+     either of those changed. The old one did — by eight pixels, which put the
+     fire button on top of the magazine count. ]]
+local BOTTOM_INSET = LAYOUT.ScreenMargin
+	+ LAYOUT.HotbarSlotHeight
+	+ LAYOUT.ElementGap
+	+ LAYOUT.AmmoPanelHeight
+	+ LAYOUT.ElementGap
+
+--[[ Verbs whose button only appears when the verb would do something. Interact
+     is the only one: a permanent USE button is a permanent hole in the screen
+     for something that is relevant for maybe fifteen seconds a round, and the
+     button appearing IS the affordance — it says "there is something here"
+     better than the prompt does. ]]
+local CONTEXTUAL: { [string]: boolean } = {
+	Interact = true,
+}
 
 local TouchController = {}
 
@@ -65,7 +105,7 @@ local trove = Trove.new()
 local gui: ScreenGui
 local root: Frame
 local pad: Frame
-local buttons: { { frame: TextButton, stroke: UIStroke, action: string } } = {}
+local buttons: { { frame: TextButton, stroke: UIStroke, action: string, contextual: boolean } } = {}
 
 local state = {
 	visible = false,
@@ -117,13 +157,17 @@ local function newButton(action: string, label: string, size: number): any
 	bounds.MinTextSize = TEXT.Tiny
 	bounds.Parent = text
 
+	--[[ 10%, not more. At 18% the inner box on a 64px button is 41 wide, and
+	     "RELOAD" needs 43 even at the minimum text size — it clipped, because
+	     TextScaled will not go below a UITextSizeConstraint's floor and the label
+	     does not wrap. The longest label in the pad is what sets this number. ]]
 	local padding = Instance.new("UIPadding")
-	local inset = UDim.new(0, math.floor(size * 0.18))
+	local inset = UDim.new(0, math.floor(size * 0.10))
 	padding.PaddingTop, padding.PaddingBottom = inset, inset
 	padding.PaddingLeft, padding.PaddingRight = inset, inset
 	padding.Parent = text
 
-	local entry = { frame = frame, stroke = stroke, action = action }
+	local entry = { frame = frame, stroke = stroke, action = action, contextual = false }
 	paint(entry, false)
 
 	--[[ InputBegan/Ended on the button rather than Activated. Activated only
@@ -176,59 +220,75 @@ local function build()
 	pad.AnchorPoint = Vector2.new(1, 1)
 	pad.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 1, -BOTTOM_INSET)
 	pad.BackgroundTransparency = 1
-	pad.Size = UDim2.fromOffset(BUTTON * 2 + GAP, BUTTON * 3 + GAP * 2)
+	pad.Size = UDim2.fromOffset(PAD_WIDTH, PAD_HEIGHT)
 	pad.Parent = root
 
-	--[[ Ordered by touchOrder and laid out bottom-up, so the verbs that matter
-	     most in a fight are nearest the thumb. The keymap decides which verbs
-	     earn a button; this decides where they go. ]]
+	--[[ The keymap says which verbs earn a button; PAD_LAYOUT says where each one
+	     goes. A verb marked for touch with no entry in the layout is skipped
+	     rather than stacked at the origin — an unplaced button hiding under the
+	     fire button is worse than a missing one. ]]
 	local input = Registry.find("InputController")
-	local rows: { any } = {}
-	if input and typeof(input.getBindings) == "function" then
-		for _, binding in input:getBindings() do
-			if binding.touch and binding.touchOrder then
-				table.insert(rows, binding)
+	if not input or typeof(input.getBindings) ~= "function" then
+		return
+	end
+
+	for _, binding in input:getBindings() do
+		local place = binding.touch and PAD_LAYOUT[binding.action]
+		if place then
+			local entry = newButton(binding.action, binding.touch, place.size)
+			entry.frame.AnchorPoint = Vector2.new(1, 1)
+			entry.frame.Position = UDim2.new(1, -place.x, 1, -place.y)
+			entry.contextual = CONTEXTUAL[binding.action] == true
+			if entry.contextual then
+				entry.frame.Visible = false
 			end
 		end
 	end
-	table.sort(rows, function(a, b)
-		return a.touchOrder < b.touchOrder
-	end)
-
-	--[[ Two columns filling upward from the bottom-right. Fire is pulled out of
-	     the grid and given the corner and a bigger target: it is the one button
-	     a player must be able to find without looking at it. ]]
-	local column, row = 0, 0
-	for _, binding in rows do
-		local isFire = binding.touchOrder == 1
-		local size = if isFire then math.floor(BUTTON * FIRE_SCALE) else BUTTON
-		local entry = newButton(binding.action, binding.touch, size)
-
-		entry.frame.AnchorPoint = Vector2.new(1, 1)
-		if isFire then
-			entry.frame.Position = UDim2.new(1, 0, 1, 0)
-			column, row = 1, 0
-		else
-			entry.frame.Position = UDim2.new(
-				1,
-				-column * (BUTTON + GAP),
-				1,
-				-(math.floor(BUTTON * FIRE_SCALE) + GAP + row * (BUTTON + GAP))
-			)
-			column += 1
-			if column > 1 then
-				column = 0
-				row += 1
-			end
-		end
-	end
-
-	-- Tall enough for whatever the keymap actually asked for.
-	pad.Size =
-		UDim2.fromOffset(BUTTON * 2 + GAP, math.floor(BUTTON * FIRE_SCALE) + GAP + (row + 1) * (BUTTON + GAP))
 end
 
 -- ── visibility ──────────────────────────────────────────────────────────────
+
+--[[
+	Shows the contextual buttons only while their verb would do something.
+
+	Polled from a RenderStepped rather than pushed, because what it is asking —
+	"does PromptController have a target right now" — is itself recomputed every
+	frame from a raycast, and an event for it would be an event that fires every
+	frame. The work is one method call and a boolean compare unless the answer
+	changed.
+
+	The button appearing is the affordance. It says "there is something here"
+	more directly than the prompt text does, and a USE button that is on screen
+	permanently is a permanent hole in the view for something relevant maybe
+	fifteen seconds a round.
+]]
+local function refreshContextual()
+	if not gui or not gui.Enabled then
+		return
+	end
+	local prompt = Registry.find("PromptController")
+	local live = false
+	if prompt and typeof(prompt.getVerb) == "function" then
+		local ok, verb = pcall(prompt.getVerb, prompt)
+		live = ok and typeof(verb) == "string" and verb ~= ""
+	end
+
+	for _, entry in buttons do
+		if entry.contextual and entry.frame.Visible ~= live then
+			entry.frame.Visible = live
+			if not live then
+				--[[ Released on the way out. A finger still down on a button that
+				     vanishes never delivers its InputEnded, and the verb would
+				     stay held for the rest of the round. ]]
+				local input = Registry.find("InputController")
+				if input then
+					input:raise(entry.action, false)
+				end
+				paint(entry, false)
+			end
+		end
+	end
+end
 
 local function refresh()
 	if not gui then
@@ -284,6 +344,8 @@ function TouchController:start()
 	     stick because Roblox's handles multitouch and dead zones better than a
 	     reimplementation would, and jump because it is already in the corner this
 	     pad is careful to stay out of. ]]
+
+	trove:connect(RunService.RenderStepped, refreshContextual)
 
 	refresh()
 end

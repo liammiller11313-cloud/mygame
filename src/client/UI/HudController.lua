@@ -113,6 +113,19 @@ local RESERVE_WIDTH = 62
 	  HARD_MAX  rows that physically exist. They are pooled and recycled, so a
 	            wave of kills never means a wave of Instance.new.
 ]]
+--[[ How far the survivor stack lifts off the bottom-left corner on a touch
+     device. Roblox's movement thumbstick lives there — the dynamic one follows
+     the finger anywhere in the left half — and the four survivor bars were being
+     drawn underneath it. Nothing is broken by the overlap, since the panels are
+     read-only, but a thumb and a joystick sitting on top of the one piece of
+     information you check constantly is not a HUD. ]]
+local THUMBSTICK_INSET = 200
+
+--[[ Fewer kill feed rows on a phone. Seven rows of churn during a horde is a
+     third of a handset's height moving in the corner of your eye, and the feed
+     is the least load-bearing thing on the screen. ]]
+local TOUCH_FEED_LIMIT = 4
+
 local KILLFEED_MAX = 5
 local KILLFEED_HARD_MAX = KILLFEED_MAX + 2
 local KILLFEED_LIFETIME = 5.0
@@ -157,8 +170,10 @@ local SLOT_TITLE = {
 }
 
 -- Wider than they are tall: a weapon name and an ammo count have to fit.
-local HOTBAR_SLOT_WIDTH = 92
-local HOTBAR_SLOT_HEIGHT = 54
+-- In the theme, not here: TouchController lays the on-screen pad out above the
+-- hotbar and needs the same numbers. See UITheme.Layout.
+local HOTBAR_SLOT_WIDTH = LAYOUT.HotbarSlotWidth
+local HOTBAR_SLOT_HEIGHT = LAYOUT.HotbarSlotHeight
 
 local HudController = {}
 
@@ -220,6 +235,10 @@ local state = {
 	-- How much of the top of the screen WaveController has claimed. Pushed in
 	-- rather than read, so the HUD needs to know nothing about waves.
 	topInset = LAYOUT.ScreenMargin,
+	--[[ Set from InputController's scheme. The HUD is the same HUD on every
+	     device; this only moves things out from under the controls a touchscreen
+	     adds and drops the decoration a 390px-tall screen has no room for. ]]
+	touch = false,
 }
 
 -- ── construction helpers ────────────────────────────────────────────────────
@@ -889,6 +908,39 @@ local function refreshItems()
 	end
 end
 
+--[[
+	Moves the HUD out of the way of the controls a touchscreen adds.
+
+	Two changes, both about the fact that a phone in landscape is around 390
+	pixels tall and has a joystick drawn in the corner:
+
+	  - The survivor stack lifts clear of Roblox's movement thumbstick. It was
+	    being drawn underneath it, which breaks nothing (the panels are read-only)
+	    but puts a thumb on top of the one thing you check constantly.
+	  - The key glyph goes, since there is no key. The slot's NAME stays and takes
+	    the space the glyph leaves, because with no glyph and no item it would
+	    otherwise be the only thing telling a player what an empty slot is for.
+
+	Everything else is the same HUD. A phone is not a different game.
+]]
+local function applyTouchLayout()
+	if panelHolder then
+		local lift = if state.touch then THUMBSTICK_INSET else 0
+		panelHolder.Position = UDim2.new(0, LAYOUT.ScreenMargin, 1, -(LAYOUT.ScreenMargin + lift))
+	end
+
+	if killFeedHolder then
+		killFeedHolder.Size = UDim2.fromOffset(KILLFEED_WIDTH, feedLimit() * KILLFEED_ROW_HEIGHT)
+	end
+
+	for _, entry in itemSlots do
+		entry.key.Visible = not state.touch
+		-- The title takes back the width the key glyph was reserving.
+		local reserved = if state.touch then 12 else 26
+		entry.title.Size = UDim2.fromOffset(HOTBAR_SLOT_WIDTH - reserved, 12)
+	end
+end
+
 --[[ Re-run whenever the player picks up a different input, not just at boot.
      A console player who plugs in a keyboard, or a tablet player who pairs a
      controller, should see the buttons they are now holding. ]]
@@ -910,6 +962,8 @@ local function bindItemKeys()
 		end
 	end
 	local touch = scheme == "Touch"
+	state.touch = touch
+	applyTouchLayout()
 
 	for _, binding in bindings do
 		local entry = binding.slot and itemSlots[binding.slot]
@@ -989,13 +1043,28 @@ end
 --[[ A free row, or the oldest one if every row is spoken for. Losing the top
      line to the newest kill is the right way round: under a horde the bottom of
      the feed is the only part still true. ]]
+local function feedLimit(): number
+	return if state.touch then TOUCH_FEED_LIMIT else KILLFEED_HARD_MAX
+end
+
+--[[ Recycles the oldest row once the feed is at its limit, rather than only once
+     the pool runs dry. The pool is sized for the desktop limit and stays that
+     size, so a player who picks up a controller mid-round gets the full feed back
+     without anything being rebuilt. ]]
 local function acquireRow(): TextLabel
-	local free = table.remove(killFeedPool)
-	if free then
-		return free
+	if #killFeed < feedLimit() then
+		local free = table.remove(killFeedPool)
+		if free then
+			return free
+		end
 	end
 	local oldest = table.remove(killFeed, 1)
-	return (oldest :: any).label
+	if oldest then
+		return (oldest :: any).label
+	end
+	-- The limit is below the live count only just after a scheme change; take
+	-- from the pool rather than returning nil into a caller that cannot check.
+	return table.remove(killFeedPool) :: TextLabel
 end
 
 local function releaseRow(label: TextLabel)

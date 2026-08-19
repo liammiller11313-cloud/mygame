@@ -47,9 +47,11 @@
 	    can tell the difference, and the horde can.
 ]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -67,12 +69,43 @@ local BUDGET = GoreConfig.Budget
 local SCREEN = GoreConfig.ScreenBlood
 local LEVEL = Enums.GoreLevel
 
+--[[
+	What KIND of machine this is, for the gore budget below.
+
+	Not InputController's scheme, which answers a different question: that one
+	tracks what the player is holding, and a phone with a bluetooth controller
+	paired to it reports Gamepad while still being a phone. This asks about the
+	hardware, which does not change, and is read once at load because the ring
+	buffers are sized from it.
+
+	Detected here rather than borrowed from a service because this runs at module
+	scope — before any controller has started — and three lines of duplication
+	beats a load-order dependency that only breaks in the field.
+]]
+local function deviceClass(): string
+	if GuiService:IsTenFootInterface() then
+		return "Console"
+	end
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+		return "Mobile"
+	end
+	return "Desktop"
+end
+
+local DEVICE_BUDGET = GoreConfig.budgetFor(deviceClass())
+
 --[[ GameConfig.Corpses restates two of GoreConfig.Budget's ceilings. Rather
      than pick a winner and let the other drift into a lie, take the tighter of
      each pair — the same rule GoreService applies on the server, so the two
-     ledgers cannot disagree about what the budget is. ]]
-local MAX_GIBS = math.min(BUDGET.MaxActiveGibs, GameConfig.Corpses.MaxGibs)
-local MAX_DECALS = math.min(BUDGET.MaxActiveDecals, GameConfig.Corpses.MaxBloodDecals)
+     ledgers cannot disagree about what the budget is.
+
+     The device budget is a third voice in the same argument and wins the same
+     way: whichever ceiling is lowest is the ceiling. A phone gets 36 gibs and 64
+     decals where a desktop gets the full ninety and hundred and sixty, because
+     ninety loose physics bodies is what takes a handset's frame rate down during
+     exactly the moment the game is trying to be exciting. ]]
+local MAX_GIBS = math.min(BUDGET.MaxActiveGibs, GameConfig.Corpses.MaxGibs, DEVICE_BUDGET.gibs)
+local MAX_DECALS = math.min(BUDGET.MaxActiveDecals, GameConfig.Corpses.MaxBloodDecals, DEVICE_BUDGET.decals)
 
 local CULL_DISTANCE_SQUARED = BUDGET.CullDistance * BUDGET.CullDistance
 

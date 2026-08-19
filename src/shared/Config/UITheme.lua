@@ -128,6 +128,13 @@ UITheme.Layout = table.freeze({
 	AmmoPanelWidth = 190,
 	AmmoPanelHeight = 76,
 
+	--[[ The hotbar's own size lives here rather than privately in HudController
+	     because TouchController has to lay the on-screen pad out ABOVE it, and a
+	     second copy of the number is how the pad ended up eight pixels on top of
+	     the ammo counter. One definition, two readers. ]]
+	HotbarSlotWidth = 92,
+	HotbarSlotHeight = 54,
+
 	ItemSlotSize = 46,
 	ItemSlotGap = 5,
 })
@@ -236,7 +243,19 @@ UITheme.DisplayOrder = table.freeze({
 ]]
 UITheme.Scale = table.freeze({
 	ReferenceHeight = 900,
-	Min = 0.62,
+	--[[ The floor is set by LEGIBILITY, not by how much fits. A phone in
+	     landscape is around 390px tall, so every scale below about 0.75 renders
+	     TextSize.Tiny under nine real pixels — beneath what anyone can read on a
+	     handset at arm's length while being shot at. At 0.75 the smallest type in
+	     the interface lands at exactly 9px and TextSize.Small at 10.5px, which is
+	     the point of the whole exercise.
+
+	     It cannot go much higher: the main menu's mode entries are fixed-height
+	     and stack downward from 52% of the screen, and above roughly 0.8 the
+	     second one runs off the bottom of a small phone. (A THIRD mode would
+	     overflow at any floor, including the old one — worth knowing before one
+	     is added.) ]]
+	Min = 0.75,
 	Max = 1.35,
 })
 
