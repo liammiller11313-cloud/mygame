@@ -141,6 +141,44 @@ GameConfig.Interaction = table.freeze({
 	PickupRange = 10,
 })
 
+--[[
+	Recoil, split into the part you SEE and the part that moves your shots.
+
+	WeaponConfig's `recoilVertical` is one number and it used to do both jobs at
+	once: the camera pitched up by it, and because the shot direction was read
+	straight off the camera, your aim went with it. That is the harshest possible
+	arrangement — every bit of punch you add to make a gun feel good is punch that
+	throws the next round off target, so a satisfying gun and a controllable gun
+	pull against each other.
+
+	Two numbers instead. ViewScale decides how hard the camera kicks; AimFollow
+	decides how much of that kick your bullets inherit. The gun keeps its punch
+	and stops fighting you for it.
+
+	CrosshairController draws the reticle at the direction the shot will actually
+	take rather than at the middle of the screen, so the two never disagree — the
+	reticle visibly drifts under the recoil and settles back, which is also the
+	clearest read of "you are climbing" the game has.
+
+	Shake and explosion impulses are excluded from the aim entirely, at any
+	setting. A Tank landing next to you should rattle the frame; it should not
+	steer your bullets, and it silently did.
+]]
+GameConfig.Recoil = table.freeze({
+	--[[ The visible kick, as a fraction of WeaponConfig's recoilVertical /
+	     recoilHorizontal. Below 1 the whole roster calms down together, which
+	     beats editing fifteen pairs of numbers and losing the balance between
+	     them. ]]
+	ViewScale = 0.7,
+
+	--[[ How much of that kick moves where the bullets go. At 1 this is the old
+	     behaviour — the camera IS the aim. At 0 recoil is pure decoration and
+	     the gun is a laser, which is worse: climb you have to fight is most of
+	     what makes an automatic weapon a decision rather than a button. A third
+	     leaves the mechanic intact and takes the shove out of it. ]]
+	AimFollow = 0.35,
+})
+
 GameConfig.Corpses = table.freeze({
 	MaxRagdolls = 26, -- oldest is recycled past this; keeps the framerate honest
 	MaxGibs = 90,

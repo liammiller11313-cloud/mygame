@@ -412,13 +412,33 @@ end
 
 -- ── firing ──────────────────────────────────────────────────────────────────
 
+--[[
+	Where a shot starts and which way it goes.
+
+	CameraController's AIM CFrame, not the camera's own. The two differ by the
+	share of the recoil the aim does not inherit, plus all of the screen shake and
+	every explosion impulse — none of which should move a bullet. Reading
+	camera.CFrame here meant a Tank landing beside you threw the whole magazine,
+	and it was invisible in testing because at close range the two agree to within
+	a few pixels.
+
+	Falls back to the camera if the controller is missing, which is the old
+	behaviour and better than not firing at all.
+]]
 local function cameraRay(): (Vector3, Vector3)
+	local cameraController = Registry.find("CameraController")
+	if cameraController and typeof(cameraController.getAimCFrame) == "function" then
+		local ok, cframe = pcall(cameraController.getAimCFrame, cameraController)
+		if ok and typeof(cframe) == "CFrame" then
+			return cframe.Position, cframe.LookVector
+		end
+	end
+
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		return Vector3.zero, Vector3.zAxis
 	end
-	local cframe = camera.CFrame
-	return cframe.Position, cframe.LookVector
+	return camera.CFrame.Position, camera.CFrame.LookVector
 end
 
 local function rememberEcho(origin: Vector3, at: number)

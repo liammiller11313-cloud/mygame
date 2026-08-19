@@ -306,6 +306,41 @@ for p, text in sources.items():
         )
 
 
+# ── 9b. Services used without being fetched ─────────────────────────────────
+# The bug this exists for: `Workspace.CurrentCamera` in a file that never wrote
+# `local Workspace = game:GetService("Workspace")`. Roblox's global is `workspace`
+# in lowercase — capitalised `Workspace` is not a global at all, so the line
+# throws "attempt to index nil" the first time it runs and nothing catches it
+# earlier, because it parses perfectly and reads exactly like every other file.
+#
+# Check 9 misses these because it only looks at SCREAMING_CASE names, and
+# widening that to any capitalised identifier would need real scope analysis.
+# A fixed list of service names does not.
+SERVICE_NAMES = [
+    "Workspace", "Players", "Lighting", "ReplicatedStorage", "ServerStorage",
+    "ServerScriptService", "StarterGui", "StarterPlayer", "RunService",
+    "UserInputService", "ContextActionService", "TweenService", "Debris",
+    "CollectionService", "HttpService", "TeleportService", "MemoryStoreService",
+    "DataStoreService", "MarketplaceService", "SoundService", "PhysicsService",
+    "GuiService", "ChangeHistoryService", "TextService", "PathfindingService",
+    "MessagingService", "InsertService", "ContentProvider", "Chat", "Teams",
+]
+
+for p, text in sources.items():
+    fetched = set(re.findall(r'local\s+(\w+)\s*=\s*game:GetService\(', text))
+    # A local of the same name from any other source counts too.
+    declared = set(re.findall(r'local\s+(\w+)\s*[:=]', text))
+    for name in SERVICE_NAMES:
+        if name in fetched or name in declared:
+            continue
+        m = re.search(r'(?<![.:\w"])' + name + r'\s*[.:]', text)
+        if m:
+            problems.append(
+                f"{rel(p)}:{lineno(text, m.start())}  uses {name} but never did "
+                f'game:GetService("{name}") — capitalised service names are not globals'
+            )
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no

@@ -27,6 +27,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
@@ -50,6 +51,21 @@ local STATE = Enums.SurvivorState
 local SCOPE_FOV = 45
 
 -- Sub-pixel gap changes are not visible and are not worth a property write.
+--[[ How far down the aim ray the reticle's screen position is measured. Far
+     enough that the answer is the ANGLE between the camera and the aim rather
+     than a parallax artefact of the two having very slightly different origins;
+     any distance past a few hundred studs gives the same pixels. ]]
+local AIM_PROJECT_DISTANCE = 600
+
+--[[ The reticle may never travel further than this from the centre, in layer
+     pixels. Nothing legitimate comes close — the largest recoil in the roster is
+     a couple of degrees of aim — so this only ever catches a frame where the
+     projection returned nonsense. ]]
+local AIM_OFFSET_LIMIT = 260
+
+-- Sub-pixel movement is not worth a property write.
+local OFFSET_EPSILON = 0.25
+
 local GAP_EPSILON = 0.15
 
 local HIDDEN_STATES: { [string]: boolean } = {
@@ -70,6 +86,10 @@ local gui: ScreenGui
      projection of the real cone, so scaling it keeps the reticle the same
      apparent size on every display instead of a four-pixel speck at 4K. ]]
 local root: Frame
+--[[ Everything the reticle is made of hangs off this, and this is what MOVES.
+     The ticks stay laid out around their own centre and never learn that the
+     crosshair is not at the middle of the screen. ]]
+local reticle: Frame
 local ticks: { Frame } = {}
 local dot: Frame?
 
@@ -85,6 +105,11 @@ local state = {
 	cinematic = false,
 	visible = true,
 	shown = true,
+	-- Where the reticle currently sits relative to the middle of the screen, in
+	-- layer pixels. Held so the Position write is skipped on a frame that did not
+	-- move, which is most of them.
+	offsetX = 0,
+	offsetY = 0,
 }
 
 --[[ The four ticks, built as one vertical and one horizontal pair. Each is
@@ -101,6 +126,13 @@ local function build()
 
 	root = ScaleLayer.new(gui, "Scaled")
 
+	reticle = Instance.new("Frame")
+	reticle.Name = "Reticle"
+	reticle.BackgroundTransparency = 1
+	reticle.BorderSizePixel = 0
+	reticle.Size = UDim2.fromScale(1, 1)
+	reticle.Parent = root
+
 	for index = 1, 4 do
 		local tick = Instance.new("Frame")
 		tick.Name = "Tick" .. index
@@ -112,7 +144,7 @@ local function build()
 		tick.Size = if vertical
 			then UDim2.fromOffset(CROSSHAIR.Thickness, CROSSHAIR.Length)
 			else UDim2.fromOffset(CROSSHAIR.Length, CROSSHAIR.Thickness)
-		tick.Parent = root
+		tick.Parent = reticle
 		ticks[index] = tick
 	end
 
@@ -125,7 +157,7 @@ local function build()
 		centre.BackgroundColor3 = CROSSHAIR.Color
 		centre.BackgroundTransparency = CROSSHAIR.Transparency
 		centre.BorderSizePixel = 0
-		centre.Parent = root
+		centre.Parent = reticle
 		dot = centre
 	end
 end
@@ -200,6 +232,50 @@ local function shouldShow(): boolean
 	return true
 end
 
+--[[
+	Puts the reticle where the bullet is actually going.
+
+	The shot is fired along CameraController's AIM CFrame, which carries only a
+	share of the recoil and none of the shake — so during a burst the aim and the
+	middle of the screen are no longer the same place. A crosshair pinned to the
+	centre would quietly lie about where the next round lands, which is the one
+	thing a crosshair must never do.
+
+	Projecting a far point along the aim ray and measuring how far it falls from
+	the centre of the viewport turns that angular difference into pixels, exactly
+	as the renderer would. The reticle drifts down under recoil and settles back,
+	and that drift is also the clearest read of "you are climbing" the game has.
+]]
+local function aimOffset(): (number, number)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return 0, 0
+	end
+	local controller = Registry.find("CameraController")
+	if not controller or typeof(controller.getAimCFrame) ~= "function" then
+		return 0, 0
+	end
+	local ok, aim = pcall(controller.getAimCFrame, controller)
+	if not ok or typeof(aim) ~= "CFrame" then
+		return 0, 0
+	end
+
+	local point, onScreen = camera:WorldToViewportPoint(aim.Position + aim.LookVector * AIM_PROJECT_DISTANCE)
+	if not onScreen then
+		return 0, 0
+	end
+
+	-- Real viewport pixels out, layer pixels in: the reticle lives inside the
+	-- scale layer, where an offset is multiplied by the factor before it is drawn.
+	local factor = ScaleLayer.getFactor()
+	local dx = (point.X - camera.ViewportSize.X * 0.5) / factor
+	local dy = (point.Y - camera.ViewportSize.Y * 0.5) / factor
+
+	-- A pathological frame must not fling the reticle across the screen.
+	return math.clamp(dx, -AIM_OFFSET_LIMIT, AIM_OFFSET_LIMIT),
+		math.clamp(dy, -AIM_OFFSET_LIMIT, AIM_OFFSET_LIMIT)
+end
+
 local function update(dt: number)
 	local show = shouldShow()
 	if show ~= state.shown then
@@ -226,6 +302,12 @@ local function update(dt: number)
 	if wanted ~= state.color then
 		state.color = wanted
 		applyColor(wanted)
+	end
+
+	local dx, dy = aimOffset()
+	if math.abs(dx - state.offsetX) > OFFSET_EPSILON or math.abs(dy - state.offsetY) > OFFSET_EPSILON then
+		state.offsetX, state.offsetY = dx, dy
+		reticle.Position = UDim2.fromOffset(dx, dy)
 	end
 end
 

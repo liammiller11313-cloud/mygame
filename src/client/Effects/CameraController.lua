@@ -50,6 +50,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -79,6 +80,12 @@ local SPRINT_FOV_SPEED = 6
      recoilVertical: 1.15 degrees means the camera rises 1.15 degrees. ]]
 local IMPULSE_GAIN = math.exp(1)
 local RECOIL_DAMPING = 0.78 -- a little overshoot; a dead-flat return reads as a script
+
+--[[ The two halves of the recoil contract. See GameConfig.Recoil: the first
+     scales the kick the camera takes, the second decides how much of that kick
+     the bullets inherit. ]]
+local RECOIL_VIEW_SCALE = GameConfig.Recoil.ViewScale
+local RECOIL_AIM_FOLLOW = GameConfig.Recoil.AimFollow
 
 -- Trauma is normalised 0-1 and shakes by its square, so small hits barely
 -- register and a Tank landing on you fills the frame. shakeMagnitude decides
@@ -141,6 +148,10 @@ local state = {
 	lookYaw = 0,
 	lookPitch = 0,
 	baseCFrame = CFrame.identity,
+	--[[ Where the shot goes: base plus the aim's share of the recoil, and nothing
+	     else. Written every frame by the render step, read by WeaponController
+	     and by the crosshair. ]]
+	aimCFrame = CFrame.identity,
 	lastCFrame = CFrame.identity,
 
 	downed = 0, -- eased 0-1 blend into the incapacitated camera
@@ -183,7 +194,7 @@ end
 --[[ Degrees of kick. Vertical is up, horizontal is signed. Scaled so the number
      in WeaponConfig is the peak the camera actually reaches. ]]
 function CameraController:addRecoil(vertical: number, horizontal: number)
-	local gain = recoil.speed * IMPULSE_GAIN
+	local gain = recoil.speed * IMPULSE_GAIN * RECOIL_VIEW_SCALE
 	recoil:impulse(Vector2.new(vertical * gain, horizontal * gain))
 end
 
@@ -275,6 +286,21 @@ end
 
 function CameraController:getBaseCFrame(): CFrame
 	return state.baseCFrame
+end
+
+--[[
+	The CFrame a shot is fired along — NOT the camera's.
+
+	It carries GameConfig.Recoil.AimFollow of the recoil and none of the shake or
+	explosion impulse, so the view can kick harder than the aim moves and being
+	hit cannot steer your bullets.
+
+	Anything that fires, traces or draws a reticle must use this. Reading
+	camera.CFrame instead is the bug this exists to fix, and it is invisible in
+	testing because at close range the two agree to within a few pixels.
+]]
+function CameraController:getAimCFrame(): CFrame
+	return state.aimCFrame
 end
 
 --[[ 0 at the hip, 1 fully down the sights, smoothstepped. The viewmodel reads
@@ -380,6 +406,19 @@ local function update(deltaTime: number)
 	state.trauma = math.max(state.trauma - TRAUMA_DECAY * dt, 0)
 
 	local target = base * CFrame.Angles(math.rad(kick.X), math.rad(kick.Y), 0)
+
+	--[[
+		Where the shot actually goes, recorded before the shake and the impulse
+		are layered on.
+
+		Only AimFollow of the kick, so the camera can punch harder than the aim
+		moves — and none of the shake or the explosion impulse, because being hit
+		should rattle the frame without steering your bullets. It silently did:
+		WeaponController read the finished camera CFrame, so a Tank landing next
+		to you threw every round in the magazine and nothing said so.
+	]]
+	state.aimCFrame = base
+		* CFrame.Angles(math.rad(kick.X * RECOIL_AIM_FOLLOW), math.rad(kick.Y * RECOIL_AIM_FOLLOW), 0)
 
 	if state.trauma > 0.001 then
 		--[[ Perlin noise rather than random(): consecutive frames have to be
