@@ -138,6 +138,48 @@ local DOUBLE_STRIKE_CHANCE = 0.45
 local DOUBLE_STRIKE_GAP = 0.11
 local DOUBLE_STRIKE_SCALE = 0.7
 
+-- ── the gutter, and the breath ──────────────────────────────────────────────
+
+--[[
+	A rare, brief FAILURE of the light. Not lightning — the opposite of it. A
+	flash is a spike up and every horror game has one; this is a spike down, like
+	a streetlamp losing its ballast for a second, and it is far more unpleasant,
+	because the dark is where the thing you cannot see already is.
+
+	It is deliberately not a smooth dip. Real failing light stutters: it drops,
+	half-recovers, drops harder, then comes back reluctantly. The envelope below
+	is that shape, and it is the whole difference between "a light went out" and
+	"something is wrong with this place".
+
+	Only once the sun is mostly gone. A streetlamp guttering at golden hour is not
+	an event, it is a rendering artefact.
+]]
+local GUTTER_MIN_GAP = 55
+local GUTTER_MAX_GAP = 150
+local GUTTER_DURATION = 0.95
+local GUTTER_DEPTH = 0.62 -- fraction of the light taken at the deepest point
+local GUTTER_MIN_PROGRESS = 0.35
+
+--[[ Sampled linearly across the event. 0 is full light, 1 is fully guttered. The
+     asymmetry matters: the tail is longer than any of the drops, so the light
+     comes back slowly rather than snapping on. ]]
+local GUTTER_ENVELOPE = { 0.0, 0.85, 0.30, 1.0, 0.95, 0.55, 0.70, 0.25, 0.10, 0.0 }
+
+--[[
+	The fog is never quite still. Two sines at periods that do not divide into
+	each other, so the pattern never repeats across a seventeen-minute round,
+	moving the far plane by a few percent and the density by a hair.
+
+	Every individual frame of this is below the threshold anybody could point at.
+	That is exactly what it is for. A world that holds perfectly still reads as a
+	photograph; one that moves slightly, for a reason you cannot name, reads as a
+	place — and a place can have something in it.
+]]
+local BREATH_PERIOD_A = 37.0
+local BREATH_PERIOD_B = 53.0
+local BREATH_FOG_AMOUNT = 0.07 -- +/- fraction of the far plane
+local BREATH_DENSITY_AMOUNT = 0.022
+
 -- ── boss mood ───────────────────────────────────────────────────────────────
 
 --[[ Slow in, slower out. The point is that the room is already wrong by the time
@@ -247,70 +289,82 @@ local KEYFRAMES = {
 	},
 	{
 		anchor = 5,
-		-- Blue hour. Shapes without colour: the most useful horror light there
-		-- is, because a silhouette at 200 studs could be anything.
+		--[[ Blue hour, turning. Shapes without colour is the most useful horror
+		     light there is — a silhouette at 200 studs could be anything — and
+		     from here the sky stops being merely blue and starts being WRONG:
+		     the ambient picks up green against a fog that keeps the cold, which
+		     is the split that makes skin look ill. ]]
 		clock = 18.9,
-		brightness = 1.6,
+		brightness = 1.5,
 		exposure = 0.28,
-		ambient = Color3.fromRGB(40, 42, 52),
-		outdoor = Color3.fromRGB(76, 84, 104),
-		fogColor = Color3.fromRGB(34, 39, 52),
-		fogStart = 104,
-		fogEnd = 780,
-		density = 0.26,
-		haze = 1.55,
-		glare = 0.18,
-		atmColor = Color3.fromRGB(46, 56, 74),
-		tint = Color3.fromRGB(236, 242, 255),
-		contrast = 0.10,
-		saturation = -0.10,
-		envDiffuse = 0.50,
-		envSpecular = 0.52,
+		ambient = Color3.fromRGB(38, 44, 47),
+		outdoor = Color3.fromRGB(70, 84, 96),
+		fogColor = Color3.fromRGB(30, 38, 46),
+		fogStart = 88,
+		fogEnd = 660,
+		density = 0.29,
+		haze = 1.65,
+		glare = 0.15,
+		atmColor = Color3.fromRGB(42, 55, 66),
+		tint = Color3.fromRGB(232, 243, 248),
+		contrast = 0.14,
+		saturation = -0.16,
+		envDiffuse = 0.47,
+		envSpecular = 0.50,
 	},
 	{
 		anchor = 7,
 		-- Night. The finale opens here, already dark, so wave 7 does not have to
 		-- announce itself twice.
 		clock = 20.4,
-		brightness = 1.3,
+		brightness = 1.18,
 		exposure = 0.36,
-		ambient = Color3.fromRGB(33, 36, 46),
-		outdoor = Color3.fromRGB(62, 69, 88),
-		fogColor = Color3.fromRGB(20, 23, 32),
-		fogStart = 86,
-		fogEnd = 650,
-		density = 0.30,
-		haze = 1.8,
-		glare = 0.08,
-		atmColor = Color3.fromRGB(22, 28, 40),
-		tint = Color3.fromRGB(224, 234, 255),
-		contrast = 0.13,
-		saturation = -0.15,
-		envDiffuse = 0.44,
-		envSpecular = 0.46,
+		ambient = Color3.fromRGB(29, 36, 37),
+		outdoor = Color3.fromRGB(54, 68, 74),
+		fogColor = Color3.fromRGB(16, 21, 24),
+		fogStart = 68,
+		fogEnd = 560,
+		density = 0.34,
+		haze = 1.95,
+		glare = 0.06,
+		atmColor = Color3.fromRGB(18, 26, 30),
+		tint = Color3.fromRGB(219, 236, 238),
+		contrast = 0.19,
+		saturation = -0.24,
+		envDiffuse = 0.40,
+		envSpecular = 0.43,
 	},
 	{
 		anchor = "end",
-		-- Last Light. Darker and colder than the project file's baseline in every
-		-- term, with the fog at its floor. Whatever you can see here, the map's
-		-- own lamps are paying for.
+		--[[ Last Light. The fog is at its floor and the saturation is nearly gone:
+		     what is left is a grey-green cast that makes every surface look
+		     damp, and whatever you can still see, the map's own lamps are paying
+		     for.
+
+		     The contrast is the highest of any keyframe, which is what turns the
+		     remaining light hard — a scene this dark with soft contrast reads as
+		     underexposed, and one with hard contrast reads as a place lit by
+		     something failing. ]]
 		clock = 22.6,
-		brightness = 1.15,
+		brightness = 1.02,
 		exposure = 0.40,
-		ambient = Color3.fromRGB(29, 32, 42),
-		outdoor = Color3.fromRGB(54, 61, 79),
-		fogColor = Color3.fromRGB(16, 19, 27),
-		fogStart = 76,
-		fogEnd = 580,
-		density = 0.33,
-		haze = 1.95,
-		glare = 0.04,
-		atmColor = Color3.fromRGB(14, 18, 28),
-		tint = Color3.fromRGB(214, 228, 255),
-		contrast = 0.15,
-		saturation = -0.18,
-		envDiffuse = 0.40,
-		envSpecular = 0.44,
+		ambient = Color3.fromRGB(25, 32, 32),
+		outdoor = Color3.fromRGB(45, 58, 61),
+		fogColor = Color3.fromRGB(12, 16, 17),
+		fogStart = 58,
+		-- Just clear of MIN_FOG_END with room for the breath to swing under it.
+		-- Authoring a number below that floor would look like a decision and
+		-- behave like nothing, since resolve() would clamp it straight back.
+		fogEnd = 500,
+		density = 0.38,
+		haze = 2.1,
+		glare = 0.03,
+		atmColor = Color3.fromRGB(11, 17, 18),
+		tint = Color3.fromRGB(210, 231, 230),
+		contrast = 0.22,
+		saturation = -0.30,
+		envDiffuse = 0.35,
+		envSpecular = 0.40,
 	},
 }
 
@@ -406,6 +460,10 @@ local flashIntensity = 0
 local pendingStrikeAt = 0
 local pendingStrikeIntensity = 0
 local nextStrikeAt = 0
+
+local gutterActive = false
+local gutterStartedAt = 0
+local nextGutterAt = 0
 
 --[[ The resolved look, reused every tick. Rebuilding this table 10 times a
      second would be 10 tables a second of garbage for no reason. ]]
@@ -595,6 +653,7 @@ function AtmosphereService:_restore()
 	table.clear(applied)
 	resolved = false
 	flashActive = false
+	gutterActive = false
 	pendingStrikeAt = 0
 	bossBlend = 0
 	mode = MODE.Restored
@@ -689,23 +748,52 @@ end
      flash is added on top of `target` rather than stored anywhere, which is what
      lets a pulse end by writing the correctly interpolated value back instead of
      a value somebody hardcoded when they wrote the explosion code. ]]
-local function commit(flash: number)
+local function commit(flash: number, gutter: number, breath: number)
 	if not resolved then
 		return
 	end
 
+	--[[ The gutter is MULTIPLICATIVE where the flash is additive, and that is not
+	     a detail. Adding a negative would push a dark keyframe's brightness
+	     through zero and out the other side; taking a fraction of whatever the
+	     light happens to be right now means the same event costs the same
+	     PROPORTION of the scene at golden hour and at midnight. ]]
+	local dim = 1 - gutter * GUTTER_DEPTH
+
+	--[[ The far plane, breathing. Applied here rather than in resolve() so the
+	     keyframe interpolation stays a pure function of round progress — this is
+	     presentation on top of it, and anything reading `target` still reads the
+	     honest value.
+
+	     MIN_FOG_END is re-applied because resolve()'s clamp is upstream of this:
+	     without it the breath's downward swing could close the fog inside the
+	     band the Director spawns in, and infected would pop into existence in
+	     front of the players a few times a minute for no visible reason. ]]
+	local fogEnd = target.fogEnd * (1 + breath * BREATH_FOG_AMOUNT)
+	fogEnd = math.max(fogEnd, MIN_FOG_END, target.fogStart + 1)
+
 	writeNumber(Lighting, "ClockTime", target.clock, "clock")
-	writeNumber(Lighting, "Brightness", target.brightness + flash * FLASH_TO_LIGHT, "brightness")
+	writeNumber(Lighting, "Brightness", (target.brightness + flash * FLASH_TO_LIGHT) * dim, "brightness")
 	writeNumber(Lighting, "ExposureCompensation", target.exposure, "exposure")
 	writeNumber(Lighting, "FogStart", target.fogStart, "fogStart")
-	writeNumber(Lighting, "FogEnd", target.fogEnd, "fogEnd")
-	writeNumber(Lighting, "EnvironmentDiffuseScale", target.envDiffuse, "envDiffuse")
+	writeNumber(Lighting, "FogEnd", fogEnd, "fogEnd")
+	writeNumber(Lighting, "EnvironmentDiffuseScale", target.envDiffuse * dim, "envDiffuse")
 	writeNumber(Lighting, "EnvironmentSpecularScale", target.envSpecular, "envSpecular")
-	writeColor(Lighting, "Ambient", target.ambient, "ambient")
-	writeColor(Lighting, "OutdoorAmbient", target.outdoor, "outdoor")
+	writeColor(
+		Lighting,
+		"Ambient",
+		target.ambient:Lerp(Color3.new(0, 0, 0), gutter * GUTTER_DEPTH),
+		"ambient"
+	)
+	writeColor(
+		Lighting,
+		"OutdoorAmbient",
+		target.outdoor:Lerp(Color3.new(0, 0, 0), gutter * GUTTER_DEPTH),
+		"outdoor"
+	)
 	writeColor(Lighting, "FogColor", target.fogColor, "fogColor")
 
-	writeNumber(atmosphere, "Density", target.density, "density")
+	writeNumber(atmosphere, "Density", target.density + breath * BREATH_DENSITY_AMOUNT, "density")
 	writeNumber(atmosphere, "Haze", target.haze, "haze")
 	writeNumber(atmosphere, "Glare", target.glare, "glare")
 	writeColor(atmosphere, "Color", target.atmColor, "atmColor")
@@ -837,6 +925,40 @@ local function scheduleStrike(now: number)
 	nextStrikeAt = now + random:NextNumber(STRIKE_MIN_GAP, STRIKE_MAX_GAP)
 end
 
+local function scheduleGutter(now: number)
+	nextGutterAt = now + random:NextNumber(GUTTER_MIN_GAP, GUTTER_MAX_GAP)
+end
+
+--[[ How much light the gutter is currently taking, 0-1. Linear interpolation
+     between the envelope's points, and it clears itself on the frame it finishes
+     so that frame's commit writes the un-dimmed value back. ]]
+local function gutterAmount(now: number): number
+	if not gutterActive then
+		return 0
+	end
+	local u = (now - gutterStartedAt) / GUTTER_DURATION
+	if u >= 1 or u < 0 then
+		gutterActive = false
+		return 0
+	end
+
+	local last = #GUTTER_ENVELOPE
+	local scaled = u * (last - 1) + 1
+	local index = math.floor(scaled)
+	local nextIndex = math.min(index + 1, last)
+	local blend = scaled - index
+	return GUTTER_ENVELOPE[index] + (GUTTER_ENVELOPE[nextIndex] - GUTTER_ENVELOPE[index]) * blend
+end
+
+--[[ The slow, unnameable movement in the fog. Returns a signed -1..1; both terms
+     are sampled from the same clock every client shares, so nobody sees the fog
+     breathing out of step with anybody else. ]]
+local function breathAmount(now: number): number
+	local a = math.sin(now * (math.pi * 2) / BREATH_PERIOD_A)
+	local b = math.sin(now * (math.pi * 2) / BREATH_PERIOD_B)
+	return (a * 0.6 + b * 0.4)
+end
+
 --[[ True while something the players are supposed to be frightened of is alive.
      Read from the attribute InfectedService already maintains rather than from a
      signal, so this service holds no boss state of its own to get stale. ]]
@@ -913,8 +1035,19 @@ function AtmosphereService:_step(now: number)
 		end
 	end
 
+	--[[ Never while a strike is live. Two events on top of each other read as one
+	     confused flicker and each robs the other of the thing that makes it
+	     work — a flash needs dark around it and a gutter needs light to take. ]]
+	if now >= nextGutterAt then
+		scheduleGutter(now)
+		if progress >= GUTTER_MIN_PROGRESS and not flashActive and not gutterActive then
+			gutterActive = true
+			gutterStartedAt = now
+		end
+	end
+
 	resolve()
-	commit(flashAmount(now))
+	commit(flashAmount(now), gutterAmount(now), breathAmount(now))
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -941,13 +1074,16 @@ end
 function AtmosphereService:start()
 	bootAt = os.clock()
 	scheduleStrike(bootAt)
+	--[[ Scheduled at boot, or nextGutterAt sits at zero and the very first tick
+	     fires one — a light failing in the lobby before anybody has moved. ]]
+	scheduleGutter(bootAt)
 
 	-- The lobby sits at the opening keyframe rather than at the place's own
 	-- lighting, so the moment the round starts the sun is already where the first
 	-- second of it expects — the light falls, it never cuts.
 	self:_ensureInstances()
 	resolve()
-	commit(0)
+	commit(0, 0, 0)
 
 	--[[ THE loop. One connection for the whole system. The keyframe pass is
 	     throttled to TICK_INTERVAL because nothing in a sky changes usefully
@@ -963,10 +1099,17 @@ function AtmosphereService:start()
 			self:flash(STRIKE_DURATION * 0.8, pendingStrikeIntensity)
 		end
 
-		if flashActive then
-			local amount = flashAmount(now)
+		--[[ Both pulses run at frame rate, not at TICK_INTERVAL. A flash is 160ms
+		     and a gutter is under a second; sampled ten times a second, the
+		     gutter's stutter would land on nine frames and read as the renderer
+		     hitching rather than as a light failing. The cost is a handful of
+		     number writes on the frames where something is actually happening,
+		     and nothing at all the rest of the time. ]]
+		if flashActive or gutterActive then
+			local flash = flashAmount(now)
+			local gutter = gutterAmount(now)
 			if driving() then
-				commit(amount)
+				commit(flash, gutter, breathAmount(now))
 			end
 		end
 
