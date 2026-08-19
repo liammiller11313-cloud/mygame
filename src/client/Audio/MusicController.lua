@@ -169,6 +169,12 @@ local folder: Folder
 
 local enabled = true
 
+--[[ The music slider, 0-1. Separate from `enabled` because a player who
+     turns the music down to nothing has not asked the cue machine to stop
+     deciding — the moment they turn it back up it should already be on the
+     right track, not restarting the lobby loop mid-horde. ]]
+local musicScale = 1
+
 --[[ One cue's playback.
 
      `sounds` holds two instances for a cue that crossfades its own loop and one
@@ -294,7 +300,7 @@ local function applyVolume(name: string, voice: Voice)
 	if not cue then
 		return
 	end
-	local base = cue.volume * MIX.MasterVolume * duckFor(name) * voice.gain
+	local base = cue.volume * MIX.MasterVolume * musicScale * duckFor(name) * voice.gain
 
 	for index, sound in voice.sounds do
 		local share: number
@@ -697,6 +703,28 @@ end
 
 function MusicController:setEnabled(value: boolean)
 	enabled = value == true
+end
+
+--[[
+	The player's music volume, 0-1.
+
+	Applied on the spot rather than at the next mix tick: the slider is being
+	dragged while they listen, and a quarter-second of latency on a volume
+	control reads as the control not working.
+]]
+function MusicController:setVolume(scale: number)
+	local wanted = if typeof(scale) == "number" and scale == scale then math.clamp(scale, 0, 1) else 1
+	if wanted == musicScale then
+		return
+	end
+	musicScale = wanted
+	for name, voice in voices do
+		applyVolume(name, voice)
+	end
+end
+
+function MusicController:getVolume(): number
+	return musicScale
 end
 
 function MusicController:isEnabled(): boolean

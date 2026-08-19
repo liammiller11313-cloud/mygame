@@ -456,6 +456,45 @@ for p, text in sources.items():
                 )
 
 
+# ── 9f. A local function nobody calls ───────────────────────────────────────
+# The bug this exists for: `warnFriendlyFire` was written, committed, described
+# at length in the commit message — and never called. The edit that was meant to
+# call it was lost by a patch script that asserted after writing, so friendly
+# fire went on being applied at 0.25 while everything ABOUT the change was in the
+# tree. Nothing failed. The file parsed, the audit passed, and the feature was
+# simply absent.
+#
+# That shape — helper landed, call site lost — is the most expensive kind of
+# silent failure in this codebase, because the evidence that the work was done is
+# all present.
+#
+# A problem rather than a note: a module-level local function with no caller in
+# its own file is either dead code or a missing call, and both want removing.
+for p, text in sources.items():
+    lines = text.split("\n")
+    for index, line in enumerate(lines, start=1):
+        m = re.match(r"local function ([A-Za-z_]\w*)", line)
+        if not m:
+            continue
+        name = m.group(1)
+        # `name(` anywhere else in the file, or the name passed as a value
+        # (`trove:connect(sig, name)`, `table.sort(t, name)`, `return name`).
+        called = re.search(
+            r"(?<![.:\w])" + re.escape(name) + r"\s*[({\"']", text.replace(line, "", 1)
+        )
+        passed = re.search(
+            r"[(,]\s*" + re.escape(name) + r"\s*[,)]|=\s*" + re.escape(name) + r"\s*$",
+            text.replace(line, "", 1),
+            re.M,
+        )
+        if not called and not passed:
+            problems.append(
+                f"{rel(p)}:{index}  local function {name}() is never called or passed anywhere "
+                f"in this file — either it is dead code, or the call site that was meant to use "
+                f"it never landed"
+            )
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no

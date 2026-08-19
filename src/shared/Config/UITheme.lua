@@ -140,6 +140,13 @@ UITheme.Layout = table.freeze({
 
 	ItemSlotSize = 46,
 	ItemSlotGap = 5,
+
+	--[[ The settings button a touchscreen gets in the top-right corner. Here
+	     rather than privately in SettingsController for the same reason the
+	     hotbar's size is: the kill feed occupies that exact corner and has to
+	     step aside for it, and a second copy of the number is how the two ended
+	     up drawn on top of each other. One definition, two readers. ]]
+	SettingsButtonSize = 40,
 })
 
 -- ── Crosshair ───────────────────────────────────────────────────────────────
@@ -228,6 +235,10 @@ UITheme.DisplayOrder = table.freeze({
 	     everything, because a teleport has to end on black. ]]
 	Menu = 80,
 	Vote = 85,
+	--[[ Above both, because it is a modal the player opened deliberately and it
+	     opens from inside either of them. A settings panel with a vote card
+	     drawn through it is a settings panel nobody can read. ]]
+	Settings = 88,
 	Fade = 90,
 })
 

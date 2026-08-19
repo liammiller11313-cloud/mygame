@@ -71,6 +71,11 @@ local CONTROLLERS = {
 	-- After the HUD, because it lays itself out around where the hotbar already is.
 	"UI/TouchController",
 	"Audio/MusicController",
+	--[[ Before the menu, because the menu's SETTINGS entry opens this and its
+	     start() applies every stored preference — a sensitivity restored from the
+	     last server should be in force before the first frame of play, not after
+	     somebody opens the panel. ]]
+	"UI/SettingsController",
 	"UI/MainMenuController",
 }
 

@@ -48,6 +48,7 @@ local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
+local SettingsConfig = require(Shared.Config.SettingsConfig)
 local Signal = require(Shared.Util.Signal)
 local Types = require(Shared.Types)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
@@ -233,8 +234,16 @@ local headshotStreaks: { [Player]: number } = setmetatable({}, { __mode = "k" })
 ]]
 local lastFriendlyWarnAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
 
-local function warnFriendlyFire(attacker: Player?)
+local function warnFriendlyFire(attacker: Player?, damageType: string?)
 	if not attacker or not attacker.Parent then
+		return
+	end
+	--[[ Never for a melee swing. Swinging a machete in a doorway full of
+	     teammates is the correct panic response and always has been — it is
+	     zeroed rather than reduced for exactly that reason — so telling the
+	     player off for it would be teaching them the wrong lesson with the wrong
+	     words. ]]
+	if damageType == Enums.DamageType.Melee then
 		return
 	end
 	local now = os.clock()
@@ -244,6 +253,30 @@ local function warnFriendlyFire(attacker: Player?)
 	end
 	lastFriendlyWarnAt[attacker] = now
 	Remotes.Event.Notice:FireClient(attacker, { text = "DON'T SHOOT TEAM MATES", tone = "Warn" })
+end
+
+--[[
+	How much of the infected's damage one player has asked to receive.
+
+	1.0 for anybody who never touched the setting, which is everybody by default.
+	The value is read back through SettingsConfig rather than trusted as written,
+	because an attribute is a public surface: a future tool, a plugin or a
+	mistake elsewhere could put anything on it, and every path out of that table
+	is at most 1.
+]]
+local function personalDamageScale(player: Player?): number
+	if not player then
+		return 1
+	end
+	local choice = player:GetAttribute(Attributes.Player.Difficulty)
+	if typeof(choice) ~= "string" then
+		return 1
+	end
+	local profile = SettingsConfig.Difficulty[choice]
+	if not profile or not isFiniteNumber(profile.incomingDamage) then
+		return 1
+	end
+	return math.clamp(profile.incomingDamage, 0, 1)
 end
 
 local function pushKillFeed(attacker: Player, definition: any, ctx: DamageContext, isHeadshot: boolean)
@@ -354,6 +387,30 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 	if isSurvivor then
 		local difficulty = difficultyProfile()
 		if isFriendlyFire then
+			--[[
+				Friendly fire, off.
+
+				Blocked outright rather than scaled down. At any non-zero multiplier
+				the answer to "can a teammate kill me" is still yes given enough
+				bullets, and on a public server that is a griefing tool before it is
+				a tension. The arithmetic below is left intact behind the flag
+				because L4D's friendly fire IS the thing that makes a doorway
+				frightening — this is a deployment decision, not a deletion.
+
+				The shooter is told, because the alternative silence reads as a
+				broken gun: no damage, no hitmarker, no gore, no explanation.
+			]]
+			--[[ Your OWN blast and your own fire still hurt you. `isFriendlyFire`
+			     counts self-damage — a molotov's fire names its thrower as the
+			     attacker — and blocking that too would make throwables free to
+			     stand in, which deletes the one thing that makes throwing one a
+			     decision. Teammates are protected from a player; a player is not
+			     protected from themselves. ]]
+			if not GameConfig.Survivor.FriendlyFireEnabled and ctx.attacker ~= player then
+				warnFriendlyFire(ctx.attacker, ctx.damageType)
+				return Types.blockedResult(healthBefore)
+			end
+
 			-- Melee is 0.0 on purpose: swinging a machete in a doorway full of
 			-- teammates has to stay the correct panic response, not a team wipe.
 			if ctx.damageType == Enums.DamageType.Melee then
@@ -383,6 +440,22 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 				multiplier = 1
 			end
 			damage *= multiplier
+
+			--[[
+				Then the player's OWN difficulty, on top of the Director's.
+
+				Two different questions, which is why they multiply rather than one
+				replacing the other: the Director's number is how hard this round
+				is for everybody, and this one is how much of that a particular
+				player asked to be spared. It reads the attribute rather than a
+				table so there is one authority — the server wrote it, from a value
+				it coerced itself, and nothing on the client can move it.
+
+				Applied here and nowhere else, so it can only ever touch damage
+				coming IN. A survivor's outgoing damage, their teammates' health and
+				the Director's pacing are all untouched by it.
+			]]
+			damage *= personalDamageScale(player)
 		end
 	else
 		damage *= (infectedDefinition :: any).damageResistance

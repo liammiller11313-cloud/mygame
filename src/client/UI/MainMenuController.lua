@@ -4,9 +4,9 @@
 
 	This is the first thing anybody sees, so it is not a game UI. It is a worn
 	movie poster: a black field, a handful of white words, and exactly one orange
-	thing telling you where to look. Two mode entries, a countdown, a settings
-	line along the bottom, and nothing else. Every box that is not on this screen
-	was left off on purpose.
+	thing telling you where to look. Two mode entries, a countdown, one line into
+	the settings, and nothing else. Every box that is not on this screen was left
+	off on purpose.
 
 	── THE TITLE ───────────────────────────────────────────────────────────────
 	FADING in white, LIGHT in orange underneath it, both in UITheme.Font.Stencil
@@ -51,7 +51,9 @@
 	  * Master volume drives a SoundGroup this controller owns and adopts every
 	    client-side Sound under SoundService. World sounds are created by the
 	    server on parts in Workspace and are out of its reach until AudioService
-	    assigns them a group.
+	    assigns them a group. The SETTING itself belongs to SettingsController,
+	    which owns every preference in the game and draws the panel this screen's
+	    SETTINGS line opens; only the bus lives here.
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -59,7 +61,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
-local TeleportService = game:GetService("TeleportService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -71,7 +72,6 @@ local GameModeConfig = require(Shared.Config.GameModeConfig)
 local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
-local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
@@ -180,12 +180,6 @@ local MESSAGE_LIFETIME = 9
 -- anybody actually counts, and that is when the number should start shouting.
 local COUNTDOWN_URGENT = 10
 
--- Roblox's default mouse delta is 1.0. The ends are wide enough to be useful and
--- narrow enough that a slider drag cannot make the game unplayable by accident.
-local SENSITIVITY_MIN = 0.2
-local SENSITIVITY_MAX = 2.5
-local SLIDER_STEP = 0.05
-
 local NO_DATA = "—"
 local RESULT_ROW_HEIGHT = 30
 local MAX_ROWS = math.max(GameModeConfig.Classic.MaxPlayers, GameModeConfig.Versus.MaxPlayers)
@@ -197,10 +191,6 @@ local HELP_NEAR_COMPLETE = 0.5
 local HELP_WINDOW = 0.75
 
 local MainMenuController = {}
-
---[[ Fires (key, value) whenever a setting changes, so anything that grows a
-     preference later can subscribe instead of polling this table. ]]
-MainMenuController.settingChanged = Signal.new()
 
 local player = Players.LocalPlayer
 local trove = Trove.new()
@@ -222,36 +212,6 @@ local MODE_ENTRIES = {
 		id = MODES.Versus,
 		title = "VERSUS",
 		line = "Half of you are the infected.",
-	},
-}
-
-local SETTING_DEFS = {
-	{ key = "damageNumbers", label = "DAMAGE NUMBERS", kind = "toggle", default = true, width = 176 },
-	{
-		key = "masterVolume",
-		label = "VOLUME",
-		kind = "slider",
-		default = AudioConfig.Mix.MasterVolume,
-		min = 0,
-		max = 1,
-		width = 190,
-	},
-	{
-		key = "sensitivity",
-		label = "MOUSE SENSITIVITY",
-		kind = "slider",
-		default = 1,
-		min = SENSITIVITY_MIN,
-		max = SENSITIVITY_MAX,
-		width = 190,
-	},
-	{
-		key = "gore",
-		label = "GORE",
-		kind = "choice",
-		options = { "FULL", "LOW", "OFF" },
-		default = "FULL",
-		width = 150,
 	},
 }
 
@@ -294,8 +254,6 @@ local lobbyMode: TextLabel
 local lobbyMap: TextLabel
 local lobbyPlayers: TextLabel
 local lobbyMessage: TextLabel
-
-local settingCells: { any } = {}
 
 local resultOutcome: TextLabel
 local resultVerdict: TextLabel
@@ -378,12 +336,10 @@ local help = {
 	finishedAt = 0,
 }
 
-local settings: { [string]: any } = {}
 local restore = {
 	cameraMode = nil :: any,
 	mouseIcon = nil :: any,
 }
-local dragging: any = nil
 
 -- ── small helpers ───────────────────────────────────────────────────────────
 
@@ -502,113 +458,23 @@ local function playUi(definition: any)
 	existing:Play()
 end
 
--- ── settings ────────────────────────────────────────────────────────────────
+-- ── the master bus ──────────────────────────────────────────────────────────
 
 --[[
-	Persistence with no data service and no server round trip.
+	The mixer bus, and the one piece of the options that lives here.
 
-	TeleportService's teleport settings are client-side and survive a teleport,
-	which is exactly the lifetime that matters here: this game moves players
-	between servers to fill a round, and a volume slider that resets every time
-	the matchmaker did its job would read as the game forgetting.
-
-	It is not available in every context and it throws rather than returning nil,
-	so every touch is wrapped and the in-memory table is the real store.
+	SettingsController owns every preference in the game — see its header — but
+	the SoundGroup every client sound is adopted into is built and held by this
+	controller, because adoption happens the moment a sound appears and the menu
+	is what is on screen when the first ones do. So the volume setting is pushed
+	in here rather than the group being handed out.
 ]]
-local SETTING_PREFIX = "FL_Setting_"
-
-local function loadSetting(key: string, default: any): any
-	local ok, value = pcall(TeleportService.GetTeleportSetting, TeleportService, SETTING_PREFIX .. key)
-	if ok and typeof(value) == typeof(default) then
-		return value
-	end
-	return default
-end
-
-local function saveSetting(key: string, value: any)
-	pcall(TeleportService.SetTeleportSetting, TeleportService, SETTING_PREFIX .. key, value)
-end
-
---[[ Pushes one setting at whatever owns it. Called on change and once at start,
-     so a preference restored from a previous server is applied before the first
-     shot is fired rather than the first time the player opens the menu. ]]
-local function applySetting(key: string, value: any)
-	if key == "damageNumbers" then
-		callController("HitmarkerController", "setDamageNumbersEnabled", value == true)
-	elseif key == "gore" then
-		-- GoreController is on/off today. LOW is stored and published for it to
-		-- read when it grows a quality level; it must not silently mean OFF.
-		callController("GoreController", "setEnabled", value ~= "OFF")
-	elseif key == "masterVolume" then
-		masterGroup.Volume = math.clamp(value, 0, 1)
-		callController("MusicController", "setEnabled", value > 0)
-	elseif key == "sensitivity" then
-		UserInputService.MouseDeltaSensitivity = math.clamp(value, SENSITIVITY_MIN, SENSITIVITY_MAX)
-	end
-end
-
-local function settingText(definition: any, value: any): string
-	if definition.kind == "toggle" then
-		return if value then "ON" else "OFF"
-	elseif definition.kind == "choice" then
-		return tostring(value)
-	elseif definition.key == "masterVolume" then
-		return string.format("%d%%", math.floor(value * 100 + 0.5))
-	end
-	return string.format("%.2f", value)
-end
-
-local function refreshCell(cell: any)
-	local value = settings[cell.definition.key]
-	cell.value.Text = settingText(cell.definition, value)
-	if cell.fill then
-		local definition = cell.definition
-		local alpha = (value - definition.min) / (definition.max - definition.min)
-		cell.fill.Size = UDim2.new(math.clamp(alpha, 0, 1), 0, 1, 0)
-	end
-end
-
-local function setSetting(key: string, value: any, silent: boolean?)
-	if settings[key] == value then
+function MainMenuController:setMasterVolume(value: number)
+	if not masterGroup then
 		return
 	end
-	settings[key] = value
-	saveSetting(key, value)
-	applySetting(key, value)
-	for _, cell in settingCells do
-		if cell.definition.key == key then
-			refreshCell(cell)
-		end
-	end
-	if not silent then
-		playUi(AudioConfig.UI.MenuHover)
-	end
-	MainMenuController.settingChanged:fire(key, value)
-end
-
-local function cycleSetting(definition: any)
-	local current = settings[definition.key]
-	if definition.kind == "toggle" then
-		setSetting(definition.key, not current)
-		return
-	end
-
-	local options = definition.options
-	local index = table.find(options, current) or 0
-	setSetting(definition.key, options[(index % #options) + 1])
-end
-
-local function dragSetting(cell: any, x: number)
-	local definition = cell.definition
-	local track = cell.track
-	local width = track.AbsoluteSize.X
-	if width <= 0 then
-		return
-	end
-	local alpha = math.clamp((x - track.AbsolutePosition.X) / width, 0, 1)
-	local raw = definition.min + alpha * (definition.max - definition.min)
-	local stepped = math.floor(raw / SLIDER_STEP + 0.5) * SLIDER_STEP
-	setSetting(definition.key, math.clamp(stepped, definition.min, definition.max), true)
+	local wanted = if typeof(value) == "number" and value == value then math.clamp(value, 0, 1) else 1
+	masterGroup.Volume = wanted
 end
 
 -- ── suppression: what the menu does to the rest of the client ───────────────
@@ -639,12 +505,11 @@ end
      never be half-applied. The HUD is hidden through setVisible rather than
      setCinematic: OverlayController owns the cinematic flag for its end-of-round
      card, and two owners for one boolean is how a HUD ends up stuck off. ]]
-local function setSuppressed(value: boolean)
-	if state.suppressed == value then
-		return
-	end
-	state.suppressed = value
-
+--[[ What the menu takes away from the rest of the client, as one call. Split out
+     of setSuppressed so it can be re-asserted: the settings panel suppresses the
+     same things when it opens over a live round, and handing them back when it
+     closes would hand them back over a menu that is still up. ]]
+local function pushSuppression(value: boolean)
 	callController("HudController", "setVisible", not value)
 	callController("CrosshairController", "setVisible", not value)
 	callController("PromptController", "setEnabled", not value)
@@ -652,6 +517,18 @@ local function setSuppressed(value: boolean)
 	-- The touch pad goes with the HUD. Leaving fire buttons live under a menu is
 	-- how a phone player shoots the scoreboard.
 	callController("TouchController", "setVisible", not value)
+	-- Same reasoning as the pad: a settings button floating over the scoreboard
+	-- belongs to neither screen. The panel is reached from the menu's own entry.
+	callController("SettingsController", "setGearVisible", not value)
+end
+
+local function setSuppressed(value: boolean)
+	if state.suppressed == value then
+		return
+	end
+	state.suppressed = value
+
+	pushSuppression(value)
 
 	state.blurTarget = if value then BLUR_SIZE else 0
 
@@ -669,7 +546,6 @@ local function setSuppressed(value: boolean)
 		end
 		restore.cameraMode = nil
 		restore.mouseIcon = nil
-		dragging = nil
 	end
 end
 
@@ -1586,76 +1462,48 @@ local function buildLobby()
 	lobbyMessage.TextWrapped = true
 end
 
-local function buildSettingCell(row: Instance, definition: any): any
-	local holder = newButton(row, definition.key)
-	holder.Size = UDim2.new(0, definition.width, 1, 0)
+--[[
+	The way into the options, and nothing else.
 
-	local label = newLabel(holder, "Label", FONT.Body, TEXT.Tiny, COLOR.TextDim)
-	label.Size = UDim2.new(1, 0, 0, TEXT.Body)
-	label.Text = tracked(definition.label)
-
-	local value = newLabel(holder, "Value", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
-	value.Position = UDim2.fromOffset(0, TEXT.Body + 2)
-	value.Size = UDim2.new(1, 0, 0, TEXT.Large)
-
-	local cell = { definition = definition, button = holder, value = value, track = nil, fill = nil }
-
-	if definition.kind == "slider" then
-		local track = newFrame(holder, "Track", COLOR.Border, 0)
-		track.Position = UDim2.fromOffset(0, TEXT.Body + TEXT.Large + 6)
-		track.Size = UDim2.new(1, -LAYOUT.PanelPadding, 0, LAYOUT.BorderThickness * 2)
-		cell.track = track
-		cell.fill = newFrame(track, "Fill", COLOR.Accent, 0)
-		cell.fill.Size = UDim2.new(0, 0, 1, 0)
-
-		-- The whole cell is the hit area: a one-pixel rule is a rule, not a
-		-- target, and nobody should have to aim at it.
-		trove:connect(holder.InputBegan, function(input: InputObject)
-			if
-				input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
-				dragging = cell
-				dragSetting(cell, input.Position.X)
-			end
-		end)
-	else
-		trove:connect(holder.Activated, function()
-			cycleSetting(definition)
-		end)
-	end
-
-	trove:connect(holder.MouseEnter, function()
-		value.TextColor3 = COLOR.AccentBright
-	end)
-	trove:connect(holder.MouseLeave, function()
-		value.TextColor3 = COLOR.TextPrimary
-	end)
-
-	return cell
-end
-
+	This used to be four inline cells — volume, sensitivity, gore, damage
+	numbers — which meant the menu owned a settings store that the game itself
+	had no way to open. Everything moved to SettingsController, which draws the
+	same panel here and over a live round, so there is one store and one set of
+	rows rather than a menu version and an in-game version drifting apart.
+]]
 local function buildSettings()
-	local row = newFrame(menuLayer, "Settings", COLOR.Background, 1)
-	row.AnchorPoint = Vector2.new(0, 1)
-	row.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
-	row.Size = UDim2.new(0.85, 0, 0, TEXT.Body + TEXT.Large + LAYOUT.PanelPadding + 6)
+	local holder = newButton(menuLayer, "Settings")
+	holder.AnchorPoint = Vector2.new(0, 1)
+	holder.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
+	holder.Size = UDim2.fromOffset(260, TEXT.Large + TEXT.Body + 4)
 
-	local rule = newRule(row, "Rule", COLOR.Border)
+	local rule = newRule(holder, "Rule", COLOR.Border)
 	rule.Position = UDim2.fromOffset(0, -LAYOUT.PanelPadding)
 	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, LAYOUT.ScreenMargin * 2)
-	layout.Parent = row
+	local label = newLabel(holder, "Label", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
+	label.Size = UDim2.new(1, 0, 0, TEXT.Large + 2)
+	label.Text = "SETTINGS"
 
-	for index, definition in SETTING_DEFS do
-		local cell = buildSettingCell(row, definition)
-		cell.button.LayoutOrder = index
-		table.insert(settingCells, cell)
-	end
+	local line = newLabel(holder, "Line", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	line.Position = UDim2.fromOffset(0, TEXT.Large + 2)
+	line.Size = UDim2.new(1, 0, 0, TEXT.Body)
+	line.Text = tracked("GRAPHICS  AUDIO  CONTROLS  DIFFICULTY")
+
+	--[[ Reachable without a cursor. The mode entries take selection when the menu
+	     opens; this is the one thing below them a pad has to be able to walk to. ]]
+	GamepadFocus.style(holder)
+
+	trove:connect(holder.Activated, function()
+		playUi(AudioConfig.UI.MenuConfirm)
+		callController("SettingsController", "open")
+	end)
+	trove:connect(holder.MouseEnter, function()
+		label.TextColor3 = COLOR.AccentBright
+	end)
+	trove:connect(holder.MouseLeave, function()
+		label.TextColor3 = COLOR.TextPrimary
+	end)
 end
 
 local function buildTeleport()
@@ -1909,31 +1757,48 @@ end
 
 -- ── public API ──────────────────────────────────────────────────────────────
 
-function MainMenuController:getSetting(key: string): any
-	return settings[key]
+--[[
+	Puts the menu back the way it should be, without touching the saved camera.
+
+	For one case, and it has two halves. The settings panel opens over a live
+	round and suppresses the same things this menu does; while it is up the round
+	ends and this menu opens behind it; closing the panel then hands input and
+	the HUD back over a menu that is still on screen, and hands gamepad selection
+	back to nothing at all — which on a console is a screen where no button can
+	be pressed. So both are re-asserted here.
+
+	Only the pushes are repeated. The camera and cursor the menu saved on the way
+	in are left exactly as they are, because they are what it still has to hand
+	back later — which is why this is not simply `setSuppressed(true)` again.
+]]
+function MainMenuController:reassertSuppression()
+	if not state.suppressed then
+		return
+	end
+	pushSuppression(true)
+	-- Idempotent: setSuppressed inside sees no change and returns, and the
+	-- selection block at the end is the half this call is really after.
+	refreshVisibility()
 end
 
---[[ Programmatic set, for anything that grows an in-game options screen later.
-     Values are validated against the same definitions the menu uses, so nothing
-     can push a string into the sensitivity or an unknown gore level. ]]
+--[[ Kept as a courtesy for anything that used to ask the menu for a preference.
+     SettingsController is the store; this is a forward, not a second copy. ]]
+function MainMenuController:getSetting(key: string): any
+	local settings = Registry.find("SettingsController")
+	if not settings or typeof(settings.get) ~= "function" then
+		return nil
+	end
+	local ok, value = pcall(settings.get, settings, key)
+	return if ok then value else nil
+end
+
 function MainMenuController:setSetting(key: string, value: any): boolean
-	for _, definition in SETTING_DEFS do
-		if definition.key ~= key then
-			continue
-		end
-		if definition.kind == "toggle" and typeof(value) == "boolean" then
-			setSetting(key, value, true)
-			return true
-		elseif definition.kind == "choice" and table.find(definition.options, value) then
-			setSetting(key, value, true)
-			return true
-		elseif definition.kind == "slider" and typeof(value) == "number" then
-			setSetting(key, math.clamp(value, definition.min, definition.max), true)
-			return true
-		end
+	local settings = Registry.find("SettingsController")
+	if not settings or typeof(settings.set) ~= "function" then
 		return false
 	end
-	return false
+	local ok, changed = pcall(settings.set, settings, key, value)
+	return ok and changed == true
 end
 
 function MainMenuController:getLobbyState(): any
@@ -1951,13 +1816,6 @@ end
 function MainMenuController:init()
 	build()
 
-	for _, definition in SETTING_DEFS do
-		settings[definition.key] = loadSetting(definition.key, definition.default)
-	end
-	for _, cell in settingCells do
-		refreshCell(cell)
-	end
-
 	-- The round may already be running when this client arrives; read it quietly
 	-- so the first real transition is the first thing that moves the menu.
 	state.roundState = Attributes.get(Workspace, GA.RoundState, ROUND.Lobby)
@@ -1965,9 +1823,6 @@ function MainMenuController:init()
 end
 
 function MainMenuController:start()
-	for _, definition in SETTING_DEFS do
-		applySetting(definition.key, settings[definition.key])
-	end
 	for _, instance in SoundService:GetDescendants() do
 		adopt(instance)
 	end
@@ -2022,26 +1877,6 @@ function MainMenuController:start()
 		refreshVisibility()
 	end)
 
-	trove:connect(UserInputService.InputChanged, function(input: InputObject)
-		if
-			dragging
-			and (
-				input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch
-			)
-		then
-			dragSetting(dragging, input.Position.X)
-		end
-	end)
-	trove:connect(UserInputService.InputEnded, function(input: InputObject)
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-		then
-			dragging = nil
-		end
-	end)
-
 	watchViewport()
 	trove:connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), watchViewport)
 
@@ -2071,7 +1906,6 @@ end
 function MainMenuController:destroy()
 	setSuppressed(false)
 	table.clear(modeEntries)
-	table.clear(settingCells)
 	table.clear(resultRows)
 	table.clear(uiSounds)
 	trove:destroy()

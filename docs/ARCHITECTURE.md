@@ -537,6 +537,26 @@ Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes 
 | `UI/ScaleLayer.lua` | *(none — a helper, not a controller)* | resolution independence for every ScreenGui |
 | `UI/GamepadFocus.lua` | *(none — a helper)* | GuiService.SelectedObject, so a controller can reach a screen |
 | `UI/TouchController.lua` | `"TouchController"` | the on-screen pad, only under the touch scheme |
+| `UI/SettingsController.lua` | `"SettingsController"` | every player preference, and the panel that edits them |
+
+### Settings
+
+`Shared/Config/SettingsConfig.lua` declares WHAT the options are — key, kind,
+range, default, category. `UI/SettingsController.lua` owns the store, draws the
+panel and decides what applying one means. Adding an option is a change to the
+config only.
+
+One panel, opened from the main menu's `SETTINGS` line, from `O` or the
+gamepad's view button in a live round, and from a button in the top-right corner
+on a phone. Preferences persist through `TeleportService`'s teleport settings, so
+they survive the matchmaker moving a player between servers.
+
+**Personal difficulty** is the one setting with a server side. The client sends
+`SetDifficulty`; the server coerces it through the same `SettingsConfig` table
+and writes `Attributes.Player.Difficulty`, and `DamageService` multiplies damage
+arriving AT that player by `SettingsConfig.Difficulty[choice].incomingDamage`.
+Every multiplier in that table is at most 1, so the setting can cost a player
+difficulty and can never buy them an advantage.
 
 ### Where a shot comes from
 

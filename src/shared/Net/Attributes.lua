@@ -31,6 +31,12 @@ Attributes.Player = table.freeze({
 	FlowDistance = "FL_Flow", -- number, studs along the level spline
 	IsReady = "FL_Ready", -- boolean, lobby readiness
 	IsCrouching = "FL_IsCrouching", -- boolean; the server owns it, the client asks
+	--[[ The player's own comfort setting, as a name from SettingsConfig.Difficulty.
+	     Only ever softens what the infected do to THIS player — see the header
+	     of SettingsConfig. Public rather than private because the HUD wants to
+	     be able to say so, and because a setting the team can see is a setting
+	     nobody can quietly abuse. ]]
+	Difficulty = "FL_Difficulty", -- string, a key of SettingsConfig.Difficulty
 })
 
 -- Written on the Player instance, read by the ammo counter.

@@ -39,6 +39,7 @@ local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
+local SettingsConfig = require(Shared.Config.SettingsConfig)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 local Types = require(Shared.Types)
@@ -1661,6 +1662,24 @@ function SurvivorService:start()
 		end
 		record.crouching = crouching
 		Attributes.set(player, Attributes.Player.IsCrouching, crouching)
+	end)
+
+	--[[
+		Personal difficulty.
+
+		The client picks it in the options panel; the server is the only thing
+		that acts on it, because a client-side "the infected hit me less" is a
+		client telling the server how much damage it took. Coerced through
+		SettingsConfig, so an unknown name lands on NORMAL rather than on an
+		arbitrary multiplier — and every multiplier in that table is at most 1,
+		which is what keeps this a comfort setting rather than a cheat.
+	]]
+	serviceTrove:connect(Remotes.Event.SetDifficulty.OnServerEvent, function(player, wanted)
+		local choice = SettingsConfig.coerce("difficulty", wanted)
+		if typeof(choice) ~= "string" then
+			return
+		end
+		Attributes.set(player, Attributes.Player.Difficulty, choice)
 	end)
 
 	serviceTrove:connect(Remotes.Event.BeginInteract.OnServerEvent, function(player, target)

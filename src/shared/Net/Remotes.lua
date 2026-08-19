@@ -48,6 +48,10 @@ local EVENTS: { string } = {
 	     nothing about a crouched body is visible in its motion, so the client
 	     asks and the server decides. ]]
 	"SetCrouchState", -- (isCrouching: boolean)
+	--[[ The player's own comfort setting. Sent from the options panel, validated
+	     against SettingsConfig on arrival, and applied only to damage that
+	     reaches the sender. ]]
+	"SetDifficulty", -- (difficulty: string)
 	"PingLocation", -- {position: Vector3, kind: string}
 
 	-- ── Server → Client: combat feedback ────────────────────────────────────

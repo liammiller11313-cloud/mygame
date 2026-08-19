@@ -60,6 +60,10 @@ local line: TextLabel
 
 local queue: { { speaker: string, text: string, dwell: number } } = {}
 
+--[[ The subtitles setting. On by default: a player who never opens the options
+     panel should still be told what the Boomer just did. ]]
+local enabled = true
+
 local state = {
 	cinematic = false,
 	remaining = 0,
@@ -197,7 +201,7 @@ end
 
 --[[ Queues a caption. `speaker` may be empty for a line with no owner. ]]
 function SubtitleController:say(speaker: string, text: string, duration: number?)
-	if typeof(text) ~= "string" or text == "" then
+	if not enabled or typeof(text) ~= "string" or text == "" then
 		return
 	end
 	local dwell = if typeof(duration) == "number" and duration > 0 then duration else DEFAULT_DWELL
@@ -223,6 +227,24 @@ function SubtitleController:setCinematic(value: boolean)
 	if value then
 		self:clear()
 	end
+end
+
+--[[
+	Turns captions off for a player who does not want them.
+
+	Clears what is on screen as well as refusing what comes next: a caption
+	already up when the setting is switched off would otherwise sit there for its
+	full dwell, which reads as the switch not working.
+]]
+function SubtitleController:setEnabled(value: boolean)
+	enabled = value == true
+	if not enabled then
+		self:clear()
+	end
+end
+
+function SubtitleController:isEnabled(): boolean
+	return enabled
 end
 
 function SubtitleController:isBusy(): boolean

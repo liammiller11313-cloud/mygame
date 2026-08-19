@@ -111,9 +111,17 @@ local DEVICE_BUDGET = GoreConfig.budgetFor(deviceClass())
 local MAX_GIBS = math.min(BUDGET.MaxActiveGibs, GameConfig.Corpses.MaxGibs, DEVICE_BUDGET.gibs)
 local MAX_DECALS = math.min(BUDGET.MaxActiveDecals, GameConfig.Corpses.MaxBloodDecals, DEVICE_BUDGET.decals)
 
---[[ Multiplies every particle count in a burst. See GoreConfig.budgetFor: all
-     four layers survive on every device, at fewer particles each. ]]
-local PARTICLE_SCALE = DEVICE_BUDGET.particles
+--[[
+	Multiplies every particle count in a burst. See GoreConfig.budgetFor: all
+	four layers survive on every device, at fewer particles each.
+
+	Two inputs, and the SMALLER of them wins — which is what `setQuality`
+	enforces. The device budget is what the hardware can push; the player's
+	quality setting is what they want to look at. Somebody on a desktop who
+	prefers a clean screen gets their LOW; somebody on a phone gets the device
+	floor whatever they pick, because a setting cannot buy them a GPU.
+]]
+local particleScale = DEVICE_BUDGET.particles
 
 --[[ The blood a flying chunk leaves behind it. Rate is per second and the window
      is short: a gib is airborne for well under a second of its twelve-second
@@ -510,7 +518,7 @@ local function burst(position: Vector3, normal: Vector3, scale: number, styleNam
 	     the same four layers — dropping one would change what the effect READS
 	     as, not just what it costs — at a fraction of the particle count, which
 	     is the term that actually decides whether the frame holds. ]]
-	local budget = scale * PARTICLE_SCALE
+	local budget = scale * particleScale
 
 	slot.squib:Emit(math.max(1, math.floor(BLOOD.SquibParticles * budget + 0.5)))
 	slot.spray:Emit(math.max(1, math.floor(BLOOD.SprayParticles * budget + 0.5)))
@@ -701,7 +709,7 @@ local function gibSlot(): GibSlot
 		trail.Name = "Trail"
 		trail.Texture = SPRAY_TEXTURE
 		trail.Enabled = false
-		trail.Rate = GIB_TRAIL_RATE * PARTICLE_SCALE
+		trail.Rate = GIB_TRAIL_RATE * particleScale
 		trail.Color = ColorSequence.new(BLOOD.DarkColor)
 		trail.Size = NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 0.16),
@@ -963,6 +971,25 @@ end
 
 function GoreController:setEnabled(value: boolean)
 	enabled = value == true and GoreConfig.Enabled
+end
+
+--[[
+	Scales this client's particle budget by the player's quality setting.
+
+	`scale` is 0-1 from SettingsConfig.Quality. It never RAISES the budget: the
+	device ceiling is a hardware fact and the setting can only ask for less than
+	it, so the two are multiplied rather than the setting replacing the ceiling.
+
+	Only new bursts are affected. What is already on screen keeps the count it
+	was born with, which is invisible — a burst lives under a second.
+]]
+function GoreController:setQuality(scale: number)
+	local wanted = if typeof(scale) == "number" and scale == scale then math.clamp(scale, 0, 1) else 1
+	particleScale = DEVICE_BUDGET.particles * wanted
+end
+
+function GoreController:getQuality(): number
+	return particleScale
 end
 
 function GoreController:isEnabled(): boolean

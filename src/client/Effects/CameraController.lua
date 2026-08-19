@@ -168,6 +168,10 @@ local state = {
 
 local inputController: any = nil
 
+--[[ The screen-shake setting. On by default; see setShakeEnabled for why
+     recoil is not part of it. ]]
+local shakeEnabled = true
+
 local function wrapAngle(angle: number): number
 	if angle > math.pi then
 		return angle - math.pi * 2
@@ -208,7 +212,34 @@ end
      much quieter than one big one — which is what stops a horde of Commons from
      turning the screen into static. ]]
 function CameraController:addTrauma(amount: number)
+	if not shakeEnabled then
+		return
+	end
 	state.trauma = math.clamp(state.trauma + amount, 0, 1)
+end
+
+--[[
+	The screen-shake setting.
+
+	Turns off trauma and world impulses — the two things that move the camera
+	WITHOUT the player asking. Recoil is deliberately untouched: it is the gun
+	pushing the aim, it is something the player is doing and has to counter, and
+	a game where the recoil setting is optional is a game with two balances.
+
+	Motion sickness is the reason this exists, so it also drops whatever shake is
+	already running rather than letting it decay.
+]]
+function CameraController:setShakeEnabled(value: boolean)
+	shakeEnabled = value ~= false
+	if not shakeEnabled then
+		state.trauma = 0
+		impulsePosition:reset(Vector3.zero)
+		impulseRotation:reset(Vector3.zero)
+	end
+end
+
+function CameraController:isShakeEnabled(): boolean
+	return shakeEnabled
 end
 
 --[[
@@ -239,6 +270,9 @@ end
 	the spring's speed so a heavy hit can settle slowly and a shove snaps back.
 ]]
 function CameraController:impulse(position: Vector3?, rotation: Vector3?, decay: number?)
+	if not shakeEnabled then
+		return
+	end
 	local speed = math.max(decay or DEFAULT_IMPULSE_DECAY, 1)
 	if position then
 		impulsePosition.speed = speed

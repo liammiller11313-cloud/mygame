@@ -984,6 +984,13 @@ local function applyTouchLayout()
 
 	if killFeedHolder then
 		killFeedHolder.Size = UDim2.fromOffset(KILLFEED_WIDTH, feedLimit() * KILLFEED_ROW_HEIGHT)
+		--[[ And out from under the settings button, which only exists on a
+		     touchscreen and is drawn into this exact corner. The feed is
+		     right-aligned text in a 380-wide column with room to spare on its
+		     left, so stepping it aside costs nothing and sharing the corner
+		     costs both of them. ]]
+		local inset = if state.touch then LAYOUT.SettingsButtonSize + LAYOUT.ElementGap else 0
+		killFeedHolder.Position = UDim2.new(1, -(LAYOUT.ScreenMargin + inset), 0, LAYOUT.ScreenMargin)
 	end
 
 	--[[ No key glyph on a touchscreen: there is no key. The slot's single label
