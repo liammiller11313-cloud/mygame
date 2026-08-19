@@ -269,6 +269,31 @@ AudioConfig.UI = {
 	Hitmarker = sound(ID.HitmarkerTick, 0.3, 0.97, 1.05, 20, 2),
 	HeadshotMarker = sound(ID.HeadshotTick, 0.38, 0.99, 1.03, 20, 3),
 
+	--[[
+		The kill.
+
+		Until now a kill sounded exactly like a hit, which meant the game's most
+		important single piece of feedback — did that thing die — had to be read
+		off the crosshair instead of heard. In a horde, where the crosshair is
+		covered in bodies, that is the same as not being told.
+
+		These are the hit ticks pitched DOWN rather than new assets. That is the
+		honest constraint: this project has no kill-specific upload, and a
+		low-pitched version of a familiar tick is how the genre has always said
+		"heavier" — it reads as related to the hit sound, which is correct, and as
+		bigger, which is the point. A dedicated thump would be better and is worth
+		one upload; the pitch bands here are chosen so it can be dropped in
+		without touching anything else.
+
+		The three bands never overlap, so a kill can never be mistaken for a hit:
+		hits live at 0.97-1.05, a kill at 0.74-0.80, a boss kill at 0.58-0.62.
+	]]
+	KillMarker = sound(ID.HitmarkerTick, 0.46, 0.74, 0.8, 24, 4),
+	--[[ A Tank or a Witch. Lower and louder again, and audible from further away,
+	     because the whole team has been fighting it and the whole team should hear
+	     it stop. ]]
+	BossKillMarker = sound(ID.HeadshotTick, 0.62, 0.58, 0.62, 60, 6),
+
 	-- Menu. Hover is deliberately near-silent: if you notice it, it is too loud.
 	MenuHover = sound(ID.MenuHover, 0.18, 0.98, 1.04, 20, 1),
 	MenuConfirm = sound(ID.MenuConfirm, 0.5, 1.0, 1.0, 20, 4),

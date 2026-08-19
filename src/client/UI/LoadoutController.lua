@@ -35,6 +35,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
@@ -78,10 +79,79 @@ local PICK_ROW_HEIGHT_TOUCH = 50
 
 local PREVIEW_HEIGHT = 0.44
 
---[[ How long the round-start picker stays up. Long enough to read three names
-     and press one, short enough that it is gone before the first Common. ]]
-local PICKER_SECONDS = 12
-local PICKER_HEIGHT = 74
+--[[
+	The round-start picker: how long it stays up, and how big it is.
+
+	It used to be a 640×74 strip of three unlabelled cards with a two-digit clock
+	in the corner, clickable and nothing else. On a controller or a phone there
+	was no way to answer it at all, and on a keyboard the fastest way to change
+	loadout was to ignore it and open the full screen. A question nobody can
+	answer is worse than no question.
+
+	It is now a card with real presence, a timer you can see running out, number
+	keys, gamepad focus, and a way through to the full editor. It still does NOT
+	block input: the round is starting, players are moving around the safe room,
+	and a modal that traps them there would be the wrong trade for a convenience.
+]]
+local PICKER_SECONDS = 14
+local PICKER_WIDTH = 720
+local PICKER_HEIGHT = 168
+local PICKER_HEADER = 30
+local PICKER_FOOTER = 26
+--[[ The depleting bar across the top. A number counting down tells you the time
+     left; a bar tells you without being read, which is the whole difference
+     between a deadline you notice and one that expires on you. ]]
+local PICKER_BAR = 3
+--[[ Under this much of the window left, the bar and the clock turn to the danger
+     colour. A quarter is late enough to mean something and early enough to still
+     act on. ]]
+local PICKER_URGENT = 0.25
+--[[ How long the card stays up after the player answers, showing that it took
+     the press. ]]
+local PICKER_HOLD = 0.7
+
+--[[
+	How far off the bottom the card sits: clear of the entire bottom-right stack.
+
+	Derived rather than eyeballed, because eyeballing it is what put the old strip
+	straight through the ammo counter on a phone. A phone in landscape is about
+	500 reference pixels tall, not 900 — the picker at a fixed offset that looked
+	generous on a monitor had nowhere to go there.
+
+	Read bottom-up: screen margin, hotbar, gap, ammo panel, gap, the Dollars line,
+	gap. Every one of those is a real element from UITheme.Layout, so the card
+	moves if any of them is resized instead of quietly overlapping it.
+]]
+local PICKER_BOTTOM = LAYOUT.ScreenMargin
+	+ LAYOUT.HotbarSlotHeight
+	+ LAYOUT.ElementGap
+	+ LAYOUT.AmmoPanelHeight
+	+ LAYOUT.ElementGap
+	+ LAYOUT.WalletHeight
+	+ LAYOUT.ElementGap
+
+--[[
+	Answering the picker from a keyboard: arrows to move, Enter to take it.
+
+	NOT the number keys, which is the obvious design and the wrong one — 1, 2 and
+	3 are already bound to the weapon slots (see InputController's DEFAULT_BINDINGS)
+	and the picker is deliberately non-blocking, so a player pressing 2 in the safe
+	room means "draw my pistol". Binding the same keys here would have done both
+	things at once, every time, and the loadout half would have been invisible.
+
+	Arrows are unbound during play and read as "move along a row" without being
+	told. The cursor only appears once one is pressed: a mouse player never sees a
+	highlight they did not ask for, and the moment somebody reaches for the
+	keyboard the card row starts behaving like a keyboard control.
+]]
+local PICKER_STEP: { [Enum.KeyCode]: number } = {
+	[Enum.KeyCode.Left] = -1,
+	[Enum.KeyCode.Right] = 1,
+}
+local PICKER_CONFIRM: { [Enum.KeyCode]: boolean } = {
+	[Enum.KeyCode.Return] = true,
+	[Enum.KeyCode.KeypadEnter] = true,
+}
 
 local LoadoutController = {}
 
@@ -104,6 +174,10 @@ local activeLabel: TextLabel
 local pickerGui: ScreenGui
 local pickerButtons: { any } = {}
 local pickerClock: TextLabel
+local pickerRoot: Frame
+local pickerBarFill: Frame
+local pickerFoot: TextLabel
+local pickerHint: TextLabel
 
 local state = {
 	open = false,
@@ -115,6 +189,17 @@ local state = {
 	     are. The right-hand column is one of those two things and never both. ]]
 	choosing = "",
 	pickerUntil = 0,
+	--[[ The full window, kept so the bar knows what fraction is left. Separate
+	     from PICKER_SECONDS because opening the editor extends the deadline. ]]
+	pickerWindow = PICKER_SECONDS,
+	--[[ Set once the player answers. The card stays up for a beat afterwards
+	     saying so, and a second press in that beat must not re-arm the timer. ]]
+	pickerLocked = false,
+	--[[ Where the keyboard cursor is, or 0 for "the keyboard has not been used".
+	     Zero is not index 1: a mouse player must never see a highlight they did
+	     not ask for, and the card row only starts looking like a keyboard control
+	     once somebody presses an arrow. ]]
+	pickerCursor = 0,
 	firstCard = nil :: TextButton?,
 }
 
@@ -122,6 +207,14 @@ local state = {
 
 local function profile(): any
 	return Registry.find("ProfileController")
+end
+
+--[[ Which of the three is currently armed. Its own function because four places
+     ask, and every one of them has to cope with a profile that has not loaded —
+     defaulting to 1 rather than nil-indexing a card. ]]
+local function activeIndex(): number
+	local store = profile()
+	return if store then store:getActiveIndex() else 1
 end
 
 local function callController(name: string, method: string, ...: any)
@@ -153,6 +246,19 @@ local function isTouch(): boolean
 	end
 	local ok, touch = pcall(input.isTouchScheme, input)
 	return ok and touch == true
+end
+
+--[[ Which input the player is on right now, as InputController spells it. Empty
+     when that controller is not up yet, which callers read as "not a gamepad" —
+     the safe answer, since it costs a hint nobody needed rather than hiding one
+     somebody did. ]]
+local function scheme(): string
+	local input = Registry.find("InputController")
+	if not input or typeof(input.getScheme) ~= "function" then
+		return ""
+	end
+	local ok, value = pcall(input.getScheme, input)
+	return if ok and typeof(value) == "string" then value else ""
 end
 
 local function weaponName(weaponId: string?): string
@@ -359,16 +465,83 @@ end
 
 local function refreshPickerButtons()
 	local store = profile()
-	local active = if store then store:getActiveIndex() else 1
+	local active = activeIndex()
 	for index, entry in pickerButtons do
 		local loadout = if store then store:getLoadout(index) else LoadoutConfig.sanitise(nil, nil)
 		entry.name.Text = weaponName(loadout[Enums.Slot.Primary])
 		entry.sub.Text = weaponName(loadout[Enums.Slot.Secondary])
 		local selected = index == active
-		entry.stroke.Color = if selected then COLOR.Accent else COLOR.Border
-		entry.stroke.Thickness = if selected then LAYOUT.BorderThickness + 1 else LAYOUT.BorderThickness
+		--[[ Two different states on the same row, so they must not look alike.
+		     ACTIVE is the one you spawn with and it FILLS; the keyboard cursor is
+		     where the arrows have got to and it OUTLINES. A player arrowing across
+		     can see both at once, which is the whole point of having a cursor. ]]
+		local under = index == state.pickerCursor
+		entry.stroke.Color = if under
+			then COLOR.AccentBright
+			elseif selected then COLOR.Accent
+			else COLOR.Border
+		entry.stroke.Thickness = if under or selected
+			then LAYOUT.BorderThickness + 1
+			else LAYOUT.BorderThickness
 		entry.title.TextColor3 = if selected then COLOR.AccentBright else COLOR.TextSecondary
+		--[[ The selected card fills. A stroke alone is a one-pixel difference
+		     read at a glance in a safe room with a horde arriving — which is to
+		     say, not read. ]]
+		--[[ Three depths, not two. A card you could pick is barely there; the one
+		     you spawn with is lit; and the one you just locked in goes brighter
+		     still, which is what makes "LOCKED IN" — drawn in the background
+		     colour on top of it — legible rather than a dark word on a dim
+		     orange. ]]
+		entry.button.BackgroundColor3 = if selected then COLOR.Accent else COLOR.Panel
+		entry.button.BackgroundTransparency = if selected and state.pickerLocked
+			then 0.2
+			elseif selected then 0.55
+			else 0.94
+		entry.key.Visible = selected and not state.pickerLocked
+		entry.chosen.Visible = selected and state.pickerLocked
 	end
+
+	--[[ What happens if nobody presses anything. Stated rather than left to be
+	     discovered, because the whole point of a default is that it is fine —
+	     and a countdown with an unnamed consequence reads as a threat. ]]
+	if pickerFoot then
+		local name = LoadoutConfig.defaultName(active)
+		pickerFoot.Text = if state.pickerLocked
+			then string.upper(name) .. " LOCKED IN"
+			else "KEEPING " .. string.upper(name) .. " IF YOU DO NOT CHOOSE"
+		pickerFoot.TextColor3 = if state.pickerLocked then COLOR.Accent else COLOR.TextDim
+	end
+end
+
+--[[
+	Answers the picker.
+
+	Shared by the mouse, the number keys and the gamepad, which is the reason it
+	exists: three call sites that each did their own `setActive` plus their own
+	close is how one of them ends up not refreshing.
+]]
+local function choosePicker(index: number)
+	if state.pickerUntil <= 0 or state.pickerLocked then
+		return
+	end
+	local wanted = LoadoutConfig.clampIndex(index)
+	local store = profile()
+	if store then
+		store:setActive(wanted)
+	end
+	state.pickerLocked = true
+	playUi(AudioConfig.UI.MenuConfirm)
+	refreshPickerButtons()
+	--[[ Held for a beat rather than closed on the press. The card says LOCKED IN
+	     and then goes: a strip that vanishes the instant you click it leaves you
+	     unsure whether it registered, which is the one thing a confirmation is
+	     for.
+
+	     Done by shortening the deadline rather than with a task.delay, so the
+	     countdown loop stays the single thing that decides when the picker goes.
+	     Two owners of that is how a picker ends up closing during the beat and
+	     reopening for the rest of its window. ]]
+	state.pickerUntil = os.clock() + PICKER_HOLD
 end
 
 local function setPickerVisible(visible: boolean)
@@ -377,10 +550,26 @@ local function setPickerVisible(visible: boolean)
 	end
 	pickerGui.Enabled = visible
 	if visible then
+		state.pickerLocked = false
+		state.pickerCursor = 0
+		state.pickerWindow = PICKER_SECONDS
 		state.pickerUntil = os.clock() + PICKER_SECONDS
+		if pickerBarFill then
+			pickerBarFill.Size = UDim2.fromScale(1, 1)
+			pickerBarFill.BackgroundColor3 = COLOR.Accent
+		end
 		refreshPickerButtons()
+		--[[ A pad lands on the first card rather than nowhere. Without this the
+		     picker was answerable only with a mouse, which on a console is the
+		     same as not being answerable. ]]
+		local first = pickerButtons[1]
+		if first then
+			GamepadFocus.capture(first.button)
+		end
 	else
 		state.pickerUntil = 0
+		state.pickerLocked = false
+		GamepadFocus.release(nil)
 	end
 end
 
@@ -575,60 +764,172 @@ local function buildPicker()
 	trove:add(pickerGui)
 
 	local layer = ScaleLayer.new(pickerGui, "Scaled")
-	local root = Widgets.frame(layer, "Root", COLOR.Background, 1)
-	root.AnchorPoint = Vector2.new(0.5, 1)
-	root.Position = UDim2.new(0.5, 0, 1, -LAYOUT.ScreenMargin * 3)
-	root.Size = UDim2.fromOffset(640, PICKER_HEIGHT)
 
-	local title = Widgets.label(root, "Title", FONT.Heading, TEXT.Small, COLOR.TextSecondary)
-	title.Size = UDim2.new(0.7, 0, 0, TEXT.Body)
+	--[[ A real card, not a floating row of buttons. It has a background and an
+	     outline for one reason: this appears over a lit safe room with survivors
+	     moving through it, and the old transparent strip was regularly unreadable
+	     against a wall. It does NOT get a scrim — see PICKER_HEIGHT. ]]
+	local root = Widgets.frame(layer, "Root", COLOR.Panel, PANEL.Transparency)
+	root.AnchorPoint = Vector2.new(0.5, 1)
+	root.Position = UDim2.new(0.5, 0, 1, -PICKER_BOTTOM)
+	root.Size = UDim2.fromOffset(PICKER_WIDTH, PICKER_HEIGHT)
+	Widgets.stroke(root, COLOR.Border)
+	pickerRoot = root
+
+	--[[ The deadline, as a bar across the top edge. The digit beside the title
+	     stays as well: the bar is what gets noticed and the number is what gets
+	     read, and neither does the other one's job. ]]
+	local barTrack = Widgets.frame(root, "BarTrack", COLOR.Background, 0.4)
+	barTrack.Size = UDim2.new(1, 0, 0, PICKER_BAR)
+	pickerBarFill = Widgets.frame(barTrack, "Fill", COLOR.Accent, 0)
+	pickerBarFill.Size = UDim2.fromScale(1, 1)
+
+	local title = Widgets.label(root, "Title", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	title.Position = UDim2.fromOffset(LAYOUT.PanelPadding, PICKER_BAR)
+	title.Size = UDim2.new(0.6, 0, 0, PICKER_HEADER)
 	title.Text = "PICK A LOADOUT"
 
-	pickerClock = Widgets.label(root, "Clock", FONT.Numeric, TEXT.Small, COLOR.TextDim)
+	pickerClock = Widgets.label(root, "Clock", FONT.Numeric, TEXT.Large, COLOR.TextSecondary)
 	pickerClock.AnchorPoint = Vector2.new(1, 0)
-	pickerClock.Position = UDim2.new(1, 0, 0, 0)
-	pickerClock.Size = UDim2.fromOffset(40, TEXT.Body)
+	pickerClock.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, PICKER_BAR)
+	pickerClock.Size = UDim2.fromOffset(48, PICKER_HEADER)
 	pickerClock.TextXAlignment = Enum.TextXAlignment.Right
 
+	--[[ The way through to the full editor, for the player whose answer is "none
+	     of these three". Without it the picker was a dead end: the only way to
+	     change what was in a loadout was to let the timer run out, die, and go
+	     back to the menu. ]]
+	local edit = Widgets.button(root, "Edit")
+	edit.AnchorPoint = Vector2.new(1, 0)
+	edit.Position = UDim2.new(1, -(LAYOUT.PanelPadding + 56), 0, PICKER_BAR)
+	edit.Size = UDim2.fromOffset(90, PICKER_HEADER)
+	local editLabel = Widgets.label(edit, "Label", FONT.Body, TEXT.Small, COLOR.TextDim)
+	editLabel.Size = UDim2.fromScale(1, 1)
+	editLabel.TextXAlignment = Enum.TextXAlignment.Right
+	editLabel.Text = "EDIT"
+	Widgets.hover(trove, edit, editLabel)
+	trove:connect(edit.Activated, function()
+		playUi(AudioConfig.UI.MenuConfirm)
+		--[[ The picker goes rather than sitting behind the panel counting down.
+		     A deadline running while the player is three clicks deep in an editor
+		     is a deadline that expires on them mid-decision. ]]
+		setPickerVisible(false)
+		LoadoutController:open()
+	end)
+
+	local cardTop = PICKER_BAR + PICKER_HEADER
+	local cardHeight = PICKER_HEIGHT - cardTop - PICKER_FOOTER - LAYOUT.PanelPadding
 	local count = LoadoutConfig.MaxLoadouts
+	local usable = PICKER_WIDTH - LAYOUT.PanelPadding * 2 - CARD_GAP * (count - 1)
+	local cardWidth = usable / count
+
 	for index = 1, count do
 		local button = Widgets.button(root, "Pick" .. index)
 		button.Position =
-			UDim2.new((index - 1) / count, if index > 1 then CARD_GAP * 0.5 else 0, 0, TEXT.Body + 4)
-		button.Size = UDim2.new(1 / count, -CARD_GAP * 0.5, 1, -(TEXT.Body + 4))
+			UDim2.fromOffset(LAYOUT.PanelPadding + (index - 1) * (cardWidth + CARD_GAP), cardTop)
+		button.Size = UDim2.fromOffset(cardWidth, cardHeight)
 		button.BackgroundColor3 = COLOR.Panel
-		button.BackgroundTransparency = 0.1
+		button.BackgroundTransparency = 0.94
 		local stroke = Widgets.stroke(button, COLOR.Border)
+		Widgets.outlineHover(trove, button, stroke)
 
 		local label = Widgets.label(button, "Title", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
-		label.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 2)
-		label.Size = UDim2.new(1, -LAYOUT.PanelPadding, 0, TEXT.Body)
+		label.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 4)
+		label.Size = UDim2.new(1, -(LAYOUT.PanelPadding * 2 + 18), 0, TEXT.Body)
 		label.Text = LoadoutConfig.defaultName(index)
 
+		--[[ The ACTIVE badge, on whichever card the player spawns with. It is the
+		     one fact a glance has to return, so it is a word rather than a
+		     difference in border colour. ]]
+		local key = Widgets.label(button, "Badge", FONT.Body, TEXT.Tiny, COLOR.Accent)
+		key.AnchorPoint = Vector2.new(1, 0)
+		key.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 4)
+		key.Size = UDim2.fromOffset(46, TEXT.Body)
+		key.TextXAlignment = Enum.TextXAlignment.Right
+		key.Text = "ACTIVE"
+		key.Visible = false
+
+		--[[ Truncated, not clipped. Nothing here clips its children, so on a phone
+		     — where three cards share about 456 reference pixels — "Kriss Vector
+		     .45" would otherwise be drawn straight across the card beside it. ]]
 		local name = Widgets.label(button, "Name", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
-		name.Position = UDim2.fromOffset(LAYOUT.PanelPadding, TEXT.Body + 2)
-		name.Size = UDim2.new(1, -LAYOUT.PanelPadding, 0, TEXT.Large)
+		name.Position = UDim2.fromOffset(LAYOUT.PanelPadding, TEXT.Body + 6)
+		name.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Large)
+		name.TextTruncate = Enum.TextTruncate.AtEnd
 
-		local sub = Widgets.label(button, "Sub", FONT.Body, TEXT.Tiny, COLOR.TextDim)
-		sub.Position = UDim2.fromOffset(LAYOUT.PanelPadding, TEXT.Body + TEXT.Large + 2)
-		sub.Size = UDim2.new(1, -LAYOUT.PanelPadding, 0, TEXT.Body)
+		local sub = Widgets.label(button, "Sub", FONT.Body, TEXT.Small, COLOR.TextDim)
+		sub.Position = UDim2.fromOffset(LAYOUT.PanelPadding, TEXT.Body + TEXT.Large + 6)
+		sub.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Body)
+		sub.TextTruncate = Enum.TextTruncate.AtEnd
 
-		pickerButtons[index] = { button = button, stroke = stroke, title = label, name = name, sub = sub }
+		--[[ The confirmation, sitting on the card that was chosen rather than
+		     somewhere else on screen. Hidden until the press lands. ]]
+		local chosen = Widgets.label(button, "Chosen", FONT.Heading, TEXT.Tiny, COLOR.Background)
+		chosen.AnchorPoint = Vector2.new(0, 1)
+		chosen.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, -4)
+		chosen.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Body)
+		chosen.Text = "LOCKED IN"
+		chosen.Visible = false
+
+		pickerButtons[index] = {
+			button = button,
+			stroke = stroke,
+			title = label,
+			name = name,
+			sub = sub,
+			key = key,
+			chosen = chosen,
+		}
 
 		trove:connect(button.Activated, function()
-			local store = profile()
-			if store then
-				store:setActive(index)
-			end
-			playUi(AudioConfig.UI.MenuConfirm)
-			refreshPickerButtons()
-			--[[ Closed on choosing rather than left up for the rest of the
-			     window: the question has been answered, and a strip that stays
-			     is a strip in the way. ]]
-			task.delay(0.4, function()
-				setPickerVisible(false)
-			end)
+			choosePicker(index)
 		end)
+	end
+
+	pickerFoot = Widgets.label(root, "Foot", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	pickerFoot.AnchorPoint = Vector2.new(0, 1)
+	pickerFoot.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, 0)
+	pickerFoot.Size = UDim2.new(0.62, -LAYOUT.PanelPadding, 0, PICKER_FOOTER)
+
+	pickerHint = Widgets.label(root, "Hint", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	pickerHint.AnchorPoint = Vector2.new(1, 1)
+	pickerHint.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, 0)
+	pickerHint.Size = UDim2.new(0.38, -LAYOUT.PanelPadding, 0, PICKER_FOOTER)
+	pickerHint.TextXAlignment = Enum.TextXAlignment.Right
+end
+
+--[[ Fits the picker to the screen, and hides the number keys on a scheme that
+     has none. Same width problem as every other panel here: the layer's width in
+     reference pixels moves with the aspect ratio, and 720 hangs off both edges
+     of a phone held upright. ]]
+local function refreshPickerSize()
+	if not pickerRoot then
+		return
+	end
+	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+	local viewport = if camera and factor > 0 then camera.ViewportSize / factor else nil
+	local available = if viewport then viewport.X else PICKER_WIDTH
+	local width = math.min(PICKER_WIDTH, math.max(available - LAYOUT.ScreenMargin * 2, 300))
+	pickerRoot.Size = UDim2.fromOffset(width, PICKER_HEIGHT)
+
+	local count = LoadoutConfig.MaxLoadouts
+	local usable = width - LAYOUT.PanelPadding * 2 - CARD_GAP * (count - 1)
+	local cardWidth = usable / count
+	local cardTop = PICKER_BAR + PICKER_HEADER
+	local cardHeight = PICKER_HEIGHT - cardTop - PICKER_FOOTER - LAYOUT.PanelPadding
+	for index, entry in pickerButtons do
+		entry.button.Position =
+			UDim2.fromOffset(LAYOUT.PanelPadding + (index - 1) * (cardWidth + CARD_GAP), cardTop)
+		entry.button.Size = UDim2.fromOffset(cardWidth, cardHeight)
+	end
+
+	--[[ The key hint, only where those keys exist. A phone is told to tap and a
+	     pad is told nothing, because a pad player is already moving a highlight
+	     they can see. ]]
+	if pickerHint then
+		pickerHint.Text = if isTouch() then "TAP TO CHOOSE" else "◄ ►  CHOOSE      ENTER  CONFIRM"
+		pickerHint.Visible = scheme() ~= "Gamepad"
 	end
 end
 
@@ -758,24 +1059,110 @@ function LoadoutController:start()
 		end
 	end)
 
-	trove:connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), refreshPanelSize)
+	--[[ And for a client that finished booting DURING the start window, which is
+	     every client on a fresh server: the state change above already fired, into
+	     a listener that did not exist yet. The attribute is the same fact without
+	     the race. ]]
+	if Attributes.get(Workspace, Attributes.Game.RoundState, ROUND.Lobby) == ROUND.Starting then
+		setPickerVisible(true)
+	end
+
+	trove:connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), function()
+		refreshPanelSize()
+		refreshPickerSize()
+	end)
+	refreshPickerSize()
+
+	--[[ The number-key hints appear and disappear with the keyboard. A player who
+	     picks up a controller mid-round should not be looking at a "2" they
+	     cannot press. ]]
+	local input = Registry.find("InputController")
+	if input and input.schemeChanged then
+		trove:add(input.schemeChanged:connect(refreshPickerSize))
+	end
 
 	--[[ One loop for the picker's countdown, and only while it is up. A second
-	     RenderStepped for a number that changes once a second would be a frame
-	     cost for nothing. ]]
+	     RenderStepped for a bar that moves a few pixels a second would be a frame
+	     cost for nothing; a tenth of a second is well under what anybody reads as
+	     a step. ]]
 	trove:add(task.spawn(function()
 		while true do
-			task.wait(0.25)
-			if state.pickerUntil > 0 then
-				local remaining = state.pickerUntil - os.clock()
-				if remaining <= 0 then
-					setPickerVisible(false)
-				else
-					pickerClock.Text = string.format("%d", math.ceil(remaining))
-				end
+			task.wait(0.1)
+			if state.pickerUntil <= 0 then
+				continue
 			end
+			--[[
+				A deadline nobody can see must not expire.
+
+				The main menu, the full loadout panel, the shop and the pause menu
+				all draw over this, and a player who opened one of them has not
+				declined to answer — they are doing something else. The card hides
+				and the clock holds until it is back on screen.
+			]]
+			local obscured = state.open or menuIsOpen()
+			pickerRoot.Visible = not obscured
+			if obscured then
+				state.pickerUntil += 0.1
+				continue
+			end
+
+			local remaining = state.pickerUntil - os.clock()
+			if remaining <= 0 then
+				setPickerVisible(false)
+				continue
+			end
+			--[[ Once the player has answered, the deadline is only the beat the
+			     confirmation is held for. Running the bar and the clock down
+			     through it would show a two-second panic on a decision that has
+			     already been made. ]]
+			if state.pickerLocked then
+				continue
+			end
+
+			local fraction = math.clamp(remaining / state.pickerWindow, 0, 1)
+			pickerBarFill.Size = UDim2.fromScale(fraction, 1)
+			pickerClock.Text = string.format("%d", math.ceil(remaining))
+
+			local urgent = fraction <= PICKER_URGENT
+			pickerBarFill.BackgroundColor3 = if urgent then COLOR.Danger else COLOR.Accent
+			pickerClock.TextColor3 = if urgent then COLOR.Danger else COLOR.TextSecondary
 		end
 	end))
+
+	--[[
+		Answering the picker without a mouse.
+
+		Arrows move the cursor, Enter takes what it is on. On a pad none of this
+		runs: GamepadFocus already owns the selection and ButtonA already activates
+		it, which is why setPickerVisible captures the first card.
+
+		`processed` is respected throughout, so an arrow key going into the chat
+		box is not also a loadout change.
+	]]
+	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
+		if processed or state.pickerUntil <= 0 or state.open or state.pickerLocked then
+			return
+		end
+
+		local step = PICKER_STEP[input.KeyCode]
+		if step then
+			--[[ The first arrow press starts the cursor on whatever is ACTIVE
+			     rather than on card one, so the common case — nudge one across
+			     from what you already run — is a single key. ]]
+			local from = if state.pickerCursor > 0 then state.pickerCursor else activeIndex()
+			state.pickerCursor = LoadoutConfig.clampIndex(from + step)
+			playUi(AudioConfig.UI.MenuHover)
+			refreshPickerButtons()
+			return
+		end
+
+		if PICKER_CONFIRM[input.KeyCode] then
+			--[[ Enter with no cursor confirms what is already active. That is not
+			     a no-op: it dismisses the card, which is exactly what a player who
+			     is happy with their loadout wants from it. ]]
+			choosePicker(if state.pickerCursor > 0 then state.pickerCursor else activeIndex())
+		end
+	end)
 
 	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
 		if not state.open then

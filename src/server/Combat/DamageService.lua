@@ -290,6 +290,19 @@ local function pushKillFeed(attacker: Player, definition: any, ctx: DamageContex
 	if definition.isSpecial or definition.isBoss then
 		headshotStreaks[attacker] = 0
 		Remotes.Event.KillFeed:FireAllClients(payload)
+		--[[ A boss going down is the loudest moment a round has, and until now it
+		     was one more grey line in the kill feed. The whole team gets told,
+		     because the whole team was fighting it — a Tank is the only enemy in
+		     this game that four people work on together, and the payoff should be
+		     shared the same way. Specials are deliberately NOT announced: three
+		     Hunters in a wave would turn the notice line into a second kill
+		     feed. ]]
+		if definition.isBoss then
+			Remotes.Event.Notice:FireAllClients({
+				text = string.upper(definition.displayName) .. " DOWN",
+				tone = "Good",
+			})
+		end
 		return
 	end
 
@@ -542,12 +555,25 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 	if attacker and attacker.Parent then
 		-- The hitmarker is the player's only proof the server agreed with them.
 		-- It goes out immediately and carries the real, post-multiplier number.
+		--[[ `kind` rides along on a KILL only, and is what lets the client weight
+		     the feedback to the thing that died. A Common and a Tank produce the
+		     same hitmarker today, which is the single flattest thing about
+		     killing here: the moment that should land hardest in the whole game
+		     is indistinguishable from the three hundred that should not.
+
+		     Sent from the server rather than read off the model client-side
+		     because by the time this arrives the body is a corpse the client may
+		     already have released. Empty for a survivor and for a hit that did
+		     not kill — the client treats absent as Common. ]]
 		Remotes.Event.HitConfirmed:FireClient(attacker, {
 			region = region,
 			damage = result.dealt,
 			killed = result.killed,
 			isHeadshot = isHeadshot,
 			position = ctx.hitPosition,
+			kind = if result.killed and not isSurvivor
+				then target:GetAttribute(Attributes.Infected.Kind)
+				else nil,
 		})
 	end
 

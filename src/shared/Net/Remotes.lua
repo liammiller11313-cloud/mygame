@@ -56,7 +56,7 @@ local EVENTS: { string } = {
 
 	-- ── Server → Client: combat feedback ────────────────────────────────────
 	"WeaponFired", -- {shooter, weaponId, origin, direction, seed} — for OTHER players
-	"HitConfirmed", -- {region, damage, killed, isHeadshot, position} — hitmarker fuel
+	"HitConfirmed", -- {region, damage, killed, isHeadshot, position, kind?} — hitmarker fuel
 	"DamageTaken", -- {amount, sourcePosition, damageType} — vignette + direction arrow
 	"GoreEvent", -- {model, level, part, direction, force}
 	"ImpactEffect", -- {position, normal, material, damageType}

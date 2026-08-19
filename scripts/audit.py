@@ -621,6 +621,46 @@ for p, text in sources.items():
                 )
 
 
+# ── 9k. A Shared module used without being required ─────────────────────────
+# The bug this exists for: LoadoutController grew a call to
+# `Attributes.get(Workspace, ...)` in a file that had never required Attributes.
+# In Luau that is a read of a nil GLOBAL, so it does not fail to compile, does
+# not fail to load, and does not fail until the exact line runs — which was
+# inside a start-up branch that only fires for a client booting during the round
+# start window. Check 9i could not see it: it only inspects aliases that WERE
+# required.
+#
+# So: for every module under src/shared, if a file mentions it as `Name.` or
+# `Name(` and does not require it, that is a nil global.
+#
+# Deliberately conservative. A file that declares a local of the same name is
+# skipped entirely, as is the module's own source, as is any name that appears
+# on the left of an assignment — those are all legitimate ways for the identifier
+# to be something other than the module.
+SHARED_MODULE_NAMES = set()
+for candidate in SHARED_DIR.rglob("*.lua"):
+    SHARED_MODULE_NAMES.add(
+        candidate.parent.name if candidate.stem == "init" else candidate.stem
+    )
+
+for p, text in sources.items():
+    own = p.parent.name if p.stem == "init" else p.stem
+    required = set(re.findall(r"^local (\w+) = require\(", text, re.M))
+    declared = set(re.findall(r"^\s*local (\w+)", text, re.M))
+    declared |= set(re.findall(r"^\s*(\w+)\s*=[^=]", text, re.M))
+    for name in SHARED_MODULE_NAMES:
+        if name == own or name in required or name in declared:
+            continue
+        m = re.search(r"(?<![.:\w])" + re.escape(name) + r"\s*[.(]", text)
+        if not m:
+            continue
+        problems.append(
+            f"{rel(p)}:{lineno(text, m.start())}  uses {name} but never requires it — "
+            f"that is a nil global, and it throws the first time this line actually runs "
+            f"rather than at load"
+        )
+
+
 # ── 9j. An Animation destroyed after it was loaded ──────────────────────────
 # The bug this exists for: animations that loaded "sometimes".
 #

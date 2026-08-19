@@ -43,6 +43,7 @@ local ScaleLayer = require(script.Parent.ScaleLayer)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
+local KILL = UITheme.KillFeedback
 local MARK = UITheme.Hitmarker
 local TEXT = UITheme.TextSize
 
@@ -59,6 +60,11 @@ local NUMBER_POOL = 8
 local NUMBER_LIFETIME = 0.85
 local NUMBER_DRIFT = 34 -- pixels travelled upward over that lifetime
 local NUMBER_SPREAD = 26 -- pixels of scatter, so two numbers never sit exactly on each other
+
+--[[ The streak count fades over its last stretch rather than blinking off, for
+     the same reason every other transient here does: something that vanishes
+     was never there as far as peripheral vision is concerned. ]]
+local STREAK_FADE = 0.45
 
 local HitmarkerController = {}
 
@@ -77,10 +83,19 @@ local numberCursor = 1
 local sounds: { [any]: Sound } = {}
 local lastPlayed: { [any]: number } = {}
 
+local streakLabel: TextLabel
+
 local state = {
 	damageNumbers = true,
 	lastNumber = nil :: any,
 	lastNumberAt = 0,
+	--[[ The run of kills in progress. `count` keeps climbing while kills land
+	     inside KILL.StreakWindow of each other; `until_` is when the run expires
+	     and `hideAt` is when the label goes, which is later — the number is worth
+	     reading for a moment after the run it counted has ended. ]]
+	streak = 0,
+	streakUntil = 0,
+	streakHideAt = 0,
 }
 
 -- ── construction ────────────────────────────────────────────────────────────
@@ -136,7 +151,12 @@ local function buildMark(name: string, size: number, color: Color3, rotation: nu
 		holder = holder,
 		scale = scale,
 		bars = bars,
+		--[[ `baseDuration` is what this mark is worth unweighted; `duration` is
+		     what the strike in progress is using. A heavy kill raises the second
+		     and leaves the first alone, so the next Common is short again. ]]
+		baseDuration = MARK.Duration,
 		duration = MARK.Duration,
+		rest = 1,
 		elapsed = math.huge,
 	}
 end
@@ -181,9 +201,85 @@ local function build()
 	marks.Hit = buildMark("Hit", MARK.Size, MARK.NormalColor, 0)
 	marks.Headshot = buildMark("Headshot", MARK.HeadshotSize, MARK.HeadshotColor, 0)
 	marks.Kill = buildMark("Kill", MARK.KillSize, MARK.KillColor, MARK.RotationOnKill)
+	marks.Kill.baseDuration = MARK.KillDuration
 	marks.Kill.duration = MARK.KillDuration
 
+	--[[ The run counter. Centred under the crosshair, where a player already
+	     looks, and clear of the "+$" line the HUD draws just above it. It is a
+	     reward rather than a readout, so it never appears for the first two
+	     kills and never survives a lull — see KILL.StreakMin and StreakWindow. ]]
+	streakLabel = Instance.new("TextLabel")
+	streakLabel.Name = "Streak"
+	streakLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	streakLabel.Position = UDim2.fromScale(0.5, KILL.StreakY)
+	streakLabel.Size = UDim2.fromOffset(200, TEXT.Heading + 4)
+	streakLabel.BackgroundTransparency = 1
+	streakLabel.BorderSizePixel = 0
+	streakLabel.Font = FONT.Display
+	streakLabel.TextSize = TEXT.Heading
+	streakLabel.TextColor3 = MARK.KillColor
+	streakLabel.TextXAlignment = Enum.TextXAlignment.Center
+	streakLabel.TextStrokeColor3 = COLOR.Background
+	streakLabel.TextStrokeTransparency = 0.35
+	streakLabel.Text = ""
+	streakLabel.Visible = false
+	streakLabel.Parent = root
+
 	buildNumbers()
+end
+
+-- ── kills ───────────────────────────────────────────────────────────────────
+
+--[[ How much of the heavy treatment this kill earns, 0-1. An unknown class —
+     an environmental kill, a class added later and not yet weighted — reads as
+     a Common, which is the safe direction to be wrong in: it under-rewards
+     rather than shaking the screen for something trivial. ]]
+local function killWeight(kind: string?): number
+	if typeof(kind) ~= "string" then
+		return 0
+	end
+	return KILL.Weight[kind] or 0
+end
+
+--[[
+	Extends the run, and returns whether it is worth showing.
+
+	The window is measured from the LAST kill rather than the first, so a run is
+	a run for as long as the player keeps killing and ends the moment they stop.
+	Counting from the first would cap every streak at StreakWindow seconds no
+	matter how well it was going, which is exactly backwards.
+]]
+local function bumpStreak(now: number)
+	if now > state.streakUntil then
+		state.streak = 0
+	end
+	state.streak += 1
+	state.streakUntil = now + KILL.StreakWindow
+	if state.streak < KILL.StreakMin then
+		return
+	end
+
+	state.streakHideAt = state.streakUntil + KILL.StreakHold
+	streakLabel.Text = string.format("%d KILLS", state.streak)
+	streakLabel.TextTransparency = 0
+	streakLabel.TextStrokeTransparency = 0.35
+	streakLabel.Visible = true
+end
+
+local function stepStreak(now: number)
+	if not streakLabel.Visible then
+		return
+	end
+	local remaining = state.streakHideAt - now
+	if remaining <= 0 then
+		streakLabel.Visible = false
+		return
+	end
+	if remaining < STREAK_FADE then
+		local alpha = 1 - remaining / STREAK_FADE
+		streakLabel.TextTransparency = alpha
+		streakLabel.TextStrokeTransparency = 0.35 + alpha * 0.65
+	end
 end
 
 -- ── audio ───────────────────────────────────────────────────────────────────
@@ -221,10 +317,22 @@ end
 
 -- ── marks ───────────────────────────────────────────────────────────────────
 
-local function punch(mark: any)
+--[[
+	Strikes a mark, optionally weighted by what died.
+
+	`weight` grows the mark and holds it longer, so a Tank's X is visibly bigger
+	and lasts twice as long as a Common's. The resting scale is stored on the
+	mark rather than assumed to be 1, because the punch decays TOWARD it: without
+	that, a heavy kill would snap back to Common size a fifth of the way through
+	its own animation, which looks like a glitch rather than a reward.
+]]
+local function punch(mark: any, weight: number?)
+	local heft = math.clamp(weight or 0, 0, 1)
+	mark.rest = 1 + heft * (KILL.SizeGain - 1)
+	mark.duration = mark.baseDuration * (1 + heft * (KILL.DurationGain - 1))
 	mark.elapsed = 0
 	mark.holder.Visible = true
-	mark.scale.Scale = MARK.ScalePunch
+	mark.scale.Scale = MARK.ScalePunch * mark.rest
 	for _, bar in mark.bars do
 		bar.BackgroundTransparency = 0
 	end
@@ -289,6 +397,8 @@ local function pushNumber(damage: number, position: Vector3?)
 end
 
 local function update(dt: number)
+	stepStreak(os.clock())
+
 	for _, mark in marks do
 		if mark.elapsed < mark.duration then
 			mark.elapsed += dt
@@ -298,7 +408,8 @@ local function update(dt: number)
 			-- way: the mark is at full size and already fading by the time the
 			-- eye finds it, which is what makes it feel like a strike.
 			local punchAlpha = math.min(alpha / PUNCH_FRACTION, 1)
-			mark.scale.Scale = MARK.ScalePunch + (1 - MARK.ScalePunch) * punchAlpha
+			local rest = mark.rest or 1
+			mark.scale.Scale = rest * (MARK.ScalePunch + (1 - MARK.ScalePunch) * punchAlpha)
 			for _, bar in mark.bars do
 				bar.BackgroundTransparency = alpha
 			end
@@ -331,18 +442,36 @@ end
 --[[ Shows the mark that fits what happened. A kill outranks a headshot, because
      the kill is the fact the player needs; the headshot sound still carries the
      region. ]]
-function HitmarkerController:mark(killed: boolean, isHeadshot: boolean, damage: number?, position: Vector3?)
+function HitmarkerController:mark(
+	killed: boolean,
+	isHeadshot: boolean,
+	damage: number?,
+	position: Vector3?,
+	kind: string?
+)
 	if killed then
-		punch(marks.Kill)
-	elseif isHeadshot then
-		punch(marks.Headshot)
+		local weight = killWeight(kind)
+		punch(marks.Kill, weight)
+		bumpStreak(os.clock())
+		--[[ A kill sounds like a kill. It used to sound exactly like a hit, which
+		     meant the single most important fact in the game — did that thing die
+		     — had to be READ off the crosshair, and in a horde the crosshair is
+		     covered in bodies. The boss cue is a separate, lower band again: a
+		     Tank going down is the loudest thing that happens in a round. ]]
+		playUi(if weight >= 1 then AudioConfig.UI.BossKillMarker else AudioConfig.UI.KillMarker)
+		--[[ And the camera. A Common kill is deliberately zero trauma — they die
+		     three hundred times a round and anything that moves the screen for
+		     them is motion sickness by wave four. ]]
+		if weight > 0 then
+			local camera = Registry.find("CameraController")
+			if camera and typeof(camera.addTrauma) == "function" then
+				pcall(camera.addTrauma, camera, weight * KILL.MaxTrauma)
+			end
+		end
 	else
-		punch(marks.Hit)
+		punch(if isHeadshot then marks.Headshot else marks.Hit)
+		playUi(if isHeadshot then AudioConfig.UI.HeadshotMarker else AudioConfig.UI.Hitmarker)
 	end
-
-	-- AudioConfig.UI has no kill-specific cue, so a headshot kill still sounds
-	-- like a headshot; that is the region tell and it is the one worth keeping.
-	playUi(if isHeadshot then AudioConfig.UI.HeadshotMarker else AudioConfig.UI.Hitmarker)
 
 	if damage then
 		pushNumber(damage, position)
@@ -379,7 +508,8 @@ function HitmarkerController:start()
 			payload.killed == true,
 			payload.isHeadshot == true,
 			if typeof(payload.damage) == "number" then payload.damage else nil,
-			if typeof(payload.position) == "Vector3" then payload.position else nil
+			if typeof(payload.position) == "Vector3" then payload.position else nil,
+			if typeof(payload.kind) == "string" then payload.kind else nil
 		)
 	end)
 

@@ -147,6 +147,13 @@ UITheme.Layout = table.freeze({
 	     copy of the number is how the two ended up drawn on top of each other.
 	     One definition, two readers. ]]
 	PauseButtonSize = 40,
+
+	--[[ The Dollars line above the ammo counter. Here rather than privately in
+	     HudController because the round-start loadout picker has to sit ABOVE the
+	     whole bottom-right stack — hotbar, ammo panel, wallet — and a second copy
+	     of this number is how the picker ended up drawn across the ammo counter
+	     on a phone. One definition, two readers. ]]
+	WalletHeight = 20,
 })
 
 --[[
@@ -243,6 +250,55 @@ UITheme.Hitmarker = table.freeze({
 	KillColor = Color3.fromRGB(206, 46, 32),
 	RotationOnKill = 45, -- the kill mark is an X, not a cross
 	ScalePunch = 1.5,
+})
+
+--[[
+	How hard a kill lands, by what died.
+
+	Every kill in this game used to feel identical: the same red X, the same
+	tick, the same 35ms freeze, whether it was the three-hundredth Common of a
+	horde or the Tank the whole team had been fighting for a minute. That is the
+	flattest thing about killing here — the one moment that should land hardest
+	is indistinguishable from the ones that should not.
+
+	`Weight` is 0-1: how much of the heavy treatment a kill of that class earns.
+	A Common is deliberately 0, because it has to be. Commons die three hundred
+	times a round and anything that shakes the screen or holds the mark for them
+	stops being a reward within ninety seconds and becomes the reason somebody
+	quits. The escalation only means something if the floor stays flat.
+
+	Read by HitmarkerController (mark size, duration, which cue plays) and by
+	CameraController (how much trauma). One table so a Tank cannot end up
+	shaking the screen while its mark stays Common-sized.
+]]
+UITheme.KillFeedback = table.freeze({
+	Weight = table.freeze({
+		Common = 0,
+		Jockey = 0.4,
+		Hunter = 0.45,
+		Rusher = 0.5,
+		Witch = 1,
+		Tank = 1,
+	}),
+
+	--[[ Trauma at weight 1. Shake is trauma SQUARED, so 0.5 here is a quarter of
+	     a full-strength shake — a distinct thump on a special, and nowhere near
+	     the static that a Tank explosion produces. ]]
+	MaxTrauma = 0.5,
+
+	-- Multipliers applied to Hitmarker.KillSize and KillDuration at weight 1.
+	SizeGain = 1.55,
+	DurationGain = 2.0,
+
+	--[[ Kills closer together than this belong to the same run. 2.5s is long
+	     enough to survive a reload and short enough that a streak cannot quietly
+	     accumulate across a whole wave. ]]
+	StreakWindow = 2.5,
+	--[[ Below this the count is not worth saying. Two kills is Tuesday; the
+	     number should only appear when something is actually going well. ]]
+	StreakMin = 3,
+	StreakHold = 1.4, -- how long the count lingers after the run ends
+	StreakY = 0.62, -- screen fraction, clear below the "+$" line at HudController.EARN_Y
 })
 
 -- ── Damage feedback ─────────────────────────────────────────────────────────

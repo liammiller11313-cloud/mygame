@@ -216,6 +216,26 @@ local EARN_POOL = 6
      information read in a glance. ]]
 local EARN_MERGE_WINDOW = 0.35
 
+--[[
+	The balance, in the corner, all round.
+
+	The "+$4" above is the EVENT; this is the STATE. Both are needed and for
+	different reasons: the floating number says something just happened and is
+	gone in a second, and a player deciding whether to push for one more wave or
+	call the round wants the total, which no amount of watching popups gives you.
+
+	It sits above the ammo counter rather than anywhere else because that corner
+	is already where this interface keeps the numbers you spend, and because it
+	is the corner the eye visits between fights rather than during one. It is
+	deliberately quieter than the ammo count — dimmer, smaller, no panel of its
+	own — since money is never the thing that kills you.
+]]
+local WALLET_HEIGHT = LAYOUT.WalletHeight
+--[[ How long the balance stays lit after it moves. Long enough to notice out of
+     the corner of the eye, short enough that a horde does not leave it glowing
+     permanently. ]]
+local WALLET_FLASH = 0.8
+
 local HOTBAR_SLOT_WIDTH = LAYOUT.HotbarSlotWidth
 local HOTBAR_SLOT_HEIGHT = LAYOUT.HotbarSlotHeight
 
@@ -259,6 +279,7 @@ local objective: { frame: Frame, label: TextLabel, bar: Frame, fill: Frame }
 local notice: { label: TextLabel, until_: number }
 local earnLabels: { { label: TextLabel, until_: number, amount: number } } = {}
 local earnCursor = 0
+local wallet: { label: TextLabel, litUntil: number }? = nil
 local killFeedHolder: Frame
 
 local panels: { [Player]: any } = {}
@@ -1271,6 +1292,74 @@ local function stepEarned(now: number)
 	end
 end
 
+local function buildWallet()
+	--[[ Positioned off the ammo panel's own numbers so it stays put when the
+	     hotbar or the ammo panel is resized: one margin, one hotbar, one gap, one
+	     ammo panel, one gap. The alternative is a magic offset that is correct
+	     until somebody changes AmmoPanelHeight. ]]
+	local bottom = LAYOUT.ScreenMargin
+		+ HOTBAR_SLOT_HEIGHT
+		+ LAYOUT.ElementGap
+		+ LAYOUT.AmmoPanelHeight
+		+ LAYOUT.ElementGap
+
+	local label = Widgets.label(root, "Wallet", FONT.Numeric, TEXT.Body, COLOR.TextSecondary)
+	label.AnchorPoint = Vector2.new(1, 1)
+	label.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 1, -bottom)
+	label.Size = UDim2.fromOffset(LAYOUT.AmmoPanelWidth, WALLET_HEIGHT)
+	label.TextXAlignment = Enum.TextXAlignment.Right
+	--[[ A stroke rather than a panel. The balance has to stay readable over a
+	     lit sky or a wall of fire, and giving it its own background would put a
+	     third box in a corner that already has two. ]]
+	label.TextStrokeColor3 = COLOR.Background
+	label.TextStrokeTransparency = 0.5
+	--[[ Hidden until a profile arrives. A balance that reads $0 for the first
+	     two seconds of every round is a bug report waiting to be filed. ]]
+	label.Visible = false
+
+	wallet = { label = label, litUntil = 0 }
+end
+
+--[[ Redraws the balance and lights it when it moved. `lit` is separate from the
+     value because a balance can be refreshed for reasons that are not earnings —
+     the profile syncing after a purchase, say — and flashing for those would
+     teach the player that the flash means nothing. ]]
+local function refreshWallet(lit: boolean)
+	if not wallet then
+		return
+	end
+	local store = Registry.find("ProfileController")
+	if not store or typeof(store.isReady) ~= "function" then
+		return
+	end
+	local ok, ready = pcall(store.isReady, store)
+	if not ok or not ready then
+		return
+	end
+
+	wallet.label.Visible = true
+	wallet.label.Text = EconomyConfig.format(store:getDollars())
+	if lit then
+		wallet.litUntil = os.clock() + WALLET_FLASH
+		wallet.label.TextColor3 = COLOR.AccentBright
+	end
+end
+
+--[[ Fades the flash back to the resting colour. Driven from the frame loop
+     rather than a tween so it cannot outlive a HUD that was hidden mid-flash. ]]
+local function stepWallet(now: number)
+	if not wallet or wallet.litUntil <= 0 then
+		return
+	end
+	local remaining = wallet.litUntil - now
+	if remaining <= 0 then
+		wallet.litUntil = 0
+		wallet.label.TextColor3 = COLOR.TextSecondary
+		return
+	end
+	wallet.label.TextColor3 = COLOR.TextSecondary:Lerp(COLOR.AccentBright, remaining / WALLET_FLASH)
+end
+
 local function update(dt: number)
 	local now = os.clock()
 
@@ -1351,6 +1440,7 @@ local function update(dt: number)
 	end
 
 	stepEarned(now)
+	stepWallet(now)
 
 	if notice.until_ > 0 then
 		local remaining = notice.until_ - now
@@ -1708,6 +1798,7 @@ local function build()
 	end
 
 	buildAmmo()
+	buildWallet()
 	buildItems()
 	buildNotice()
 	buildEarnPool()
@@ -1869,8 +1960,19 @@ function HudController:start()
 	--[[ Money, from the balance moving rather than from a remote. See EARN_Y. ]]
 	local store = Registry.find("ProfileController")
 	if store and store.earned then
-		trove:add(store.earned:connect(showEarned))
+		trove:add(store.earned:connect(function(amount: number)
+			showEarned(amount)
+			refreshWallet(true)
+		end))
 	end
+	--[[ And the corner total off `changed`, which also fires for a purchase and
+	     for the first sync — the two moments `earned` deliberately does not. ]]
+	if store and store.changed then
+		trove:add(store.changed:connect(function()
+			refreshWallet(false)
+		end))
+	end
+	refreshWallet(false)
 
 	trove:connect(Remotes.Event.Notice.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" then
