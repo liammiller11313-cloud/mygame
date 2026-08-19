@@ -137,6 +137,33 @@ GoreConfig.Blood = table.freeze({
 	MistLifetime = 0.9,
 	MistSize = 1.8,
 
+	--[[
+		The heavy layer: gouts.
+
+		Spray is a fine mist of fast droplets and mist is the cloud it leaves —
+		together they read as "a red puff", which is fine for a graze and wrong
+		for a body coming apart. Gouts are the third answer: few, large, slow, and
+		fully gravity-bound, so they arc out of the wound and fall. They are what
+		makes a gib look like it had mass.
+
+		Deliberately a small count. Six heavy droplets that visibly travel read as
+		more violent than forty that do not, and they are the expensive ones — big
+		particles that live a full second are the layer that costs fill rate.
+	]]
+	GoutParticles = 6,
+	GoutSpeed = 20,
+	GoutSpread = 38,
+	GoutLifetime = 1.05,
+	GoutSize = 0.5,
+
+	--[[ The squib: a single bright pop on the frame of impact, gone in three.
+	     It is the cheapest readability win in the whole system — the eye finds
+	     the wound before it finds the blood, and without it a hit at distance
+	     reads as a miss. ]]
+	SquibParticles = 3,
+	SquibLifetime = 0.07,
+	SquibSize = 0.7,
+
 	-- Decals are sprayed onto whatever is behind the target, along the shot line.
 	DecalEnabled = true,
 	DecalMaxDistance = 20,
@@ -226,11 +253,28 @@ GoreConfig.BudgetScale = table.freeze({
 	is satisfying; a budget that rounded toward zero would quietly delete the
 	feature on the platform with the most players.
 ]]
-function GoreConfig.budgetFor(deviceClass: string): { gibs: number, decals: number }
+function GoreConfig.budgetFor(deviceClass: string): { gibs: number, decals: number, particles: number }
 	local scale = GoreConfig.BudgetScale[deviceClass] or 1.0
 	return {
 		gibs = math.max(math.floor(GoreConfig.Budget.MaxActiveGibs * scale), 12),
 		decals = math.max(math.floor(GoreConfig.Budget.MaxActiveDecals * scale), 24),
+
+		--[[
+			A multiplier on particle COUNTS, not a cap on layers.
+
+			Every device gets all four layers of a blood burst, because dropping
+			one changes what the effect reads as rather than only what it costs —
+			a hit with no squib reads as a miss at distance, and one with no gouts
+			reads as a graze. What scales is how many particles each layer emits,
+			which is the term that actually decides whether a handset holds its
+			frame during a horde.
+
+			Softer than the gib and decal scale. Those are persistent objects that
+			accumulate; particles are transient, and cutting them as hard would
+			leave a phone with a two-droplet spray that looks broken rather than
+			cheap. Square-rooting the device scale halves the cut.
+		]]
+		particles = math.max(math.sqrt(scale), 0.45),
 	}
 end
 

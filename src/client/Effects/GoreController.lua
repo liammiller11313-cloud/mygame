@@ -107,6 +107,17 @@ local DEVICE_BUDGET = GoreConfig.budgetFor(deviceClass())
 local MAX_GIBS = math.min(BUDGET.MaxActiveGibs, GameConfig.Corpses.MaxGibs, DEVICE_BUDGET.gibs)
 local MAX_DECALS = math.min(BUDGET.MaxActiveDecals, GameConfig.Corpses.MaxBloodDecals, DEVICE_BUDGET.decals)
 
+--[[ Multiplies every particle count in a burst. See GoreConfig.budgetFor: all
+     four layers survive on every device, at fewer particles each. ]]
+local PARTICLE_SCALE = DEVICE_BUDGET.particles
+
+--[[ The blood a flying chunk leaves behind it. Rate is per second and the window
+     is short: a gib is airborne for well under a second of its twelve-second
+     life, and an emitter left running past that is ninety of them bleeding into
+     the floor. ]]
+local GIB_TRAIL_RATE = 26
+local GIB_TRAIL_SECONDS = 0.85
+
 local CULL_DISTANCE_SQUARED = BUDGET.CullDistance * BUDGET.CullDistance
 
 -- Blood spray and mist bursts are short. Twenty nodes is more than the server's
@@ -151,6 +162,13 @@ local random = Random.new()
 
 -- ── particle styles ─────────────────────────────────────────────────────────
 
+--[[ How far each layer is stretched along its own velocity. The spray is thin
+     and fast, so it stretches hard; a gout is a heavy blob that deforms rather
+     than becoming a line, so it stretches about half as much. Both relax back
+     to round as they slow. ]]
+local SPRAY_STREAK = 2.6
+local GOUT_STREAK = 1.3
+
 local function shrink(start: number, peak: number): NumberSequence
 	return NumberSequence.new({
 		NumberSequenceKeypoint.new(0, start),
@@ -187,6 +205,24 @@ local STYLES = {
 		mistSpeed = NumberRange.new(1.5, 5),
 		mistLifetime = NumberRange.new(BLOOD.MistLifetime * 0.55, BLOOD.MistLifetime),
 		mistTransparency = fadeOut(0.42),
+
+		--[[ Gouts keep the fresh colour the whole way. Spray darkens because it
+		     is a fine mist oxidising in flight; a heavy droplet has not been in
+		     the air long enough for that to be true, and darkening it just makes
+		     it read as dirt. ]]
+		goutColor = ColorSequence.new(BLOOD.Color),
+		goutSize = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, BLOOD.GoutSize),
+			NumberSequenceKeypoint.new(0.8, BLOOD.GoutSize * 0.85),
+			NumberSequenceKeypoint.new(1, 0),
+		}),
+		goutSpeed = NumberRange.new(BLOOD.GoutSpeed * 0.35, BLOOD.GoutSpeed),
+		goutLifetime = NumberRange.new(BLOOD.GoutLifetime * 0.6, BLOOD.GoutLifetime),
+		-- Full gravity. This is the layer that is supposed to fall.
+		goutAcceleration = Vector3.new(0, -110, 0),
+
+		squibColor = ColorSequence.new(Color3.fromRGB(214, 74, 62)),
+		squibLight = 1,
 	},
 
 	Char = {
@@ -205,6 +241,24 @@ local STYLES = {
 		mistSpeed = NumberRange.new(1, 4),
 		mistLifetime = NumberRange.new(BLOOD.MistLifetime, BLOOD.MistLifetime * 1.8),
 		mistTransparency = fadeOut(0.55),
+
+		--[[ A burned body throws embers rather than gouts: same heavy arc, but
+		     they glow and they cool on the way down, which is the whole reason
+		     the gout layer is styled rather than shared. ]]
+		goutColor = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, EMBER_COLOR),
+			ColorSequenceKeypoint.new(1, SMOKE_COLOR),
+		}),
+		goutSize = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, BLOOD.GoutSize * 0.55),
+			NumberSequenceKeypoint.new(1, 0),
+		}),
+		goutSpeed = NumberRange.new(BLOOD.GoutSpeed * 0.25, BLOOD.GoutSpeed * 0.7),
+		goutLifetime = NumberRange.new(BLOOD.GoutLifetime, BLOOD.GoutLifetime * 1.7),
+		goutAcceleration = Vector3.new(0, -42, 0),
+
+		squibColor = ColorSequence.new(EMBER_COLOR),
+		squibLight = 1,
 	},
 }
 
@@ -218,8 +272,15 @@ local trove = Trove.new()
 local folder: Folder
 local enabled = GoreConfig.Enabled
 
-type SpraySlot = { part: BasePart, spray: ParticleEmitter, mist: ParticleEmitter, style: string? }
-type GibSlot = { part: BasePart, expiresAt: number }
+type SpraySlot = {
+	part: BasePart,
+	squib: ParticleEmitter,
+	spray: ParticleEmitter,
+	gout: ParticleEmitter,
+	mist: ParticleEmitter,
+	style: string?,
+}
+type GibSlot = { part: BasePart, expiresAt: number, trail: ParticleEmitter, trailUntil: number }
 type DecalSlot = {
 	part: BasePart,
 	expiresAt: number,
@@ -304,7 +365,18 @@ end
 
 -- ── spray and mist ──────────────────────────────────────────────────────────
 
-local function newEmitter(host: BasePart, name: string, texture: string): ParticleEmitter
+--[[
+	`streak` turns a particle from a facing-camera dot into something aligned with
+	its own velocity and stretched along it.
+
+	That single property is most of the difference between blood that looks like
+	red confetti and blood that looks like liquid. A droplet moving at thirty
+	studs a second IS a streak — it covers most of a frame's distance while the
+	shutter is open — and drawing it as a circle is drawing it at rest. Rotation
+	is dropped for those, because a particle already oriented by its velocity has
+	nothing left to spin about that would not look like a wobble.
+]]
+local function newEmitter(host: BasePart, name: string, texture: string, streak: number?): ParticleEmitter
 	local emitter = Instance.new("ParticleEmitter")
 	emitter.Name = name
 	emitter.Texture = texture
@@ -312,8 +384,20 @@ local function newEmitter(host: BasePart, name: string, texture: string): Partic
 	emitter.EmissionDirection = Enum.NormalId.Front
 	emitter.Enabled = false
 	emitter.Rate = 0
-	emitter.Rotation = NumberRange.new(0, 360)
-	emitter.RotSpeed = NumberRange.new(-140, 140)
+
+	if streak then
+		emitter.Orientation = Enum.ParticleOrientation.VelocityParallel
+		emitter.Squash = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, streak),
+			-- Relaxes back toward round as it slows, so a droplet that has spent
+			-- its speed stops pretending it is still travelling.
+			NumberSequenceKeypoint.new(1, 0),
+		})
+	else
+		emitter.Rotation = NumberRange.new(0, 360)
+		emitter.RotSpeed = NumberRange.new(-140, 140)
+	end
+
 	emitter.Parent = host
 	return emitter
 end
@@ -326,7 +410,13 @@ local function spraySlot(): SpraySlot
 		part.Size = Vector3.new(0.1, 0.1, 0.1)
 		slot = {
 			part = part,
-			spray = newEmitter(part, "Spray", SPRAY_TEXTURE),
+			--[[ Four layers, front to back in the order the eye reads them: the
+			     squib pops, the spray streaks out, the gouts arc and fall, the
+			     mist hangs where it happened. Each one alone reads as an effect;
+			     together they read as an event. ]]
+			squib = newEmitter(part, "Squib", SPRAY_TEXTURE),
+			spray = newEmitter(part, "Spray", SPRAY_TEXTURE, SPRAY_STREAK),
+			gout = newEmitter(part, "Gout", SPRAY_TEXTURE, GOUT_STREAK),
 			mist = newEmitter(part, "Mist", MIST_TEXTURE),
 			style = nil,
 		}
@@ -355,6 +445,41 @@ local function applyStyle(slot: SpraySlot, styleName: string)
 	spray.Acceleration = style.sprayAcceleration
 	spray.Transparency = NumberSequence.new(0)
 
+	local gout = slot.gout
+	gout.Color = style.goutColor
+	gout.Size = style.goutSize
+	gout.Speed = style.goutSpeed
+	gout.Lifetime = style.goutLifetime
+	gout.LightEmission = style.sprayLight
+	gout.SpreadAngle = Vector2.new(BLOOD.GoutSpread, BLOOD.GoutSpread)
+	--[[ Almost no drag, unlike the spray. A heavy droplet keeps its speed and
+	     lets gravity do the work; dragging it would make it hang, and a gout that
+	     hangs is just a slow mist. ]]
+	gout.Drag = 0.3
+	gout.Acceleration = style.goutAcceleration
+	gout.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.85, 0),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+
+	--[[ The squib does not travel. It is a flash at the wound, so it barely
+	     moves, barely lives, and is bright enough to find at any distance. ]]
+	local squib = slot.squib
+	squib.Color = style.squibColor
+	squib.LightEmission = style.squibLight
+	squib.LightInfluence = 0
+	squib.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, BLOOD.SquibSize),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	squib.Speed = NumberRange.new(0.5, 3)
+	squib.Lifetime = NumberRange.new(BLOOD.SquibLifetime * 0.6, BLOOD.SquibLifetime)
+	squib.SpreadAngle = Vector2.new(60, 60)
+	squib.Drag = 8
+	squib.Acceleration = Vector3.zero
+	squib.Transparency = NumberSequence.new(0)
+
 	local mist = slot.mist
 	mist.Color = style.mistColor
 	mist.Size = style.mistSize
@@ -376,8 +501,17 @@ local function burst(position: Vector3, normal: Vector3, scale: number, styleNam
 	local slot = spraySlot()
 	applyStyle(slot, styleName)
 	slot.part.CFrame = faceAlong(position, normal)
-	slot.spray:Emit(math.max(1, math.floor(BLOOD.SprayParticles * scale + 0.5)))
-	slot.mist:Emit(math.max(1, math.floor(BLOOD.MistParticles * scale + 0.5)))
+
+	--[[ Every count is scaled by the device as well as by the hit. A phone gets
+	     the same four layers — dropping one would change what the effect READS
+	     as, not just what it costs — at a fraction of the particle count, which
+	     is the term that actually decides whether the frame holds. ]]
+	local budget = scale * PARTICLE_SCALE
+
+	slot.squib:Emit(math.max(1, math.floor(BLOOD.SquibParticles * budget + 0.5)))
+	slot.spray:Emit(math.max(1, math.floor(BLOOD.SprayParticles * budget + 0.5)))
+	slot.gout:Emit(math.max(1, math.floor(BLOOD.GoutParticles * budget + 0.5)))
+	slot.mist:Emit(math.max(1, math.floor(BLOOD.MistParticles * budget + 0.5)))
 end
 
 -- ── decals and pools ────────────────────────────────────────────────────────
@@ -548,7 +682,40 @@ local function gibSlot(): GibSlot
 		if group then
 			part.CollisionGroup = group
 		end
-		slot = { part = part, expiresAt = 0 }
+
+		--[[
+			A chunk that flies and leaves nothing behind reads as a prop being
+			thrown. The trail is what makes it read as part of a body.
+
+			Continuous rather than a burst, because the point is the LINE it draws
+			through the air — and switched off after a short window rather than
+			run for the gib's whole twelve-second lifetime, since a chunk that has
+			come to rest on the floor should not still be bleeding upward. That
+			window is the only reason this is affordable at ninety gibs.
+		]]
+		local trail = Instance.new("ParticleEmitter")
+		trail.Name = "Trail"
+		trail.Texture = SPRAY_TEXTURE
+		trail.Enabled = false
+		trail.Rate = GIB_TRAIL_RATE * PARTICLE_SCALE
+		trail.Color = ColorSequence.new(BLOOD.DarkColor)
+		trail.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.16),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		trail.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.15),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		trail.Lifetime = NumberRange.new(0.2, 0.45)
+		trail.Speed = NumberRange.new(0, 1.5)
+		trail.SpreadAngle = Vector2.new(180, 180)
+		trail.Acceleration = Vector3.new(0, -70, 0)
+		trail.Drag = 1
+		trail.LightEmission = 0
+		trail.Parent = part
+
+		slot = { part = part, expiresAt = 0, trail = trail, trailUntil = 0 }
 		gibs[gibCursor] = slot
 	end
 	return slot
@@ -604,12 +771,19 @@ local function spawnGibs(position: Vector3, direction: Vector3, seed: number, co
 			rng:NextNumber(-GIBS.SpinMax, GIBS.SpinMax),
 			rng:NextNumber(-GIBS.SpinMax, GIBS.SpinMax)
 		)
-		slot.expiresAt = os.clock() + GIBS.Lifetime
+		local now = os.clock()
+		slot.expiresAt = now + GIBS.Lifetime
+		--[[ Only while it is actually travelling. Long enough to draw the arc,
+		     short enough that a chunk which has landed is not still bleeding. ]]
+		slot.trailUntil = now + GIB_TRAIL_SECONDS
+		slot.trail.Enabled = true
 	end
 end
 
 local function retireGib(slot: GibSlot)
 	slot.expiresAt = 0
+	slot.trailUntil = 0
+	slot.trail.Enabled = false
 	local part = slot.part
 	part.Anchored = true
 	part.Transparency = 1
@@ -619,6 +793,13 @@ end
 
 local function updateGibs(now: number)
 	for _, slot in gibs do
+		--[[ The trail stops long before the chunk does. A gib lives twelve
+		     seconds and is airborne for well under one of them; leaving the
+		     emitter running is ninety emitters bleeding into the floor. ]]
+		if slot.trailUntil > 0 and now >= slot.trailUntil then
+			slot.trailUntil = 0
+			slot.trail.Enabled = false
+		end
 		if slot.expiresAt > 0 and now >= slot.expiresAt then
 			retireGib(slot)
 		end
