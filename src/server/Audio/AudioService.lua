@@ -2,14 +2,14 @@
 --[[
 	AudioService — the server's voice mixer.
 
-	Two facts shape everything in this file.
+	Three facts shape everything in this file.
 
-	1. The sound bank is EMPTY. Every id in AudioConfig is "" on purpose (read
-	   that file's header). So the normal state of this service for a while is
-	   "asked to play a sound that does not exist yet". That has to be silent,
-	   free, and reported exactly ONCE per distinct sound — a warn per gunshot
-	   would bury every other message in the output window inside ten seconds,
-	   and a playtest with a broken warn stream is a playtest nobody finishes.
+	1. The bank is PARTIALLY filled. Most ids are real now, a few entries are
+	   still "". So this service is routinely asked to play a sound that does not
+	   exist yet, and that has to be silent, free, and reported exactly ONCE per
+	   distinct sound — a warn per gunshot would bury every other message in the
+	   output window inside ten seconds, and a playtest with a broken warn stream
+	   is a playtest nobody finishes.
 
 	2. A horde death-pile asks for two hundred sounds in a single frame. Roblox
 	   will cheerfully start all of them, and the result carries no information:
@@ -17,6 +17,23 @@
 	   feedback. AudioConfig.Mix is the answer — a hard voice cap, a per-category
 	   cap so gunfire cannot starve the special-infected tells that keep players
 	   alive, and a retrigger interval so one sound cannot machine-gun itself.
+
+	3. VARIATION IS THE POINT of AudioConfig's `ids` lists, and it only exists if
+	   the play path uses it. Every sample is chosen through AudioConfig.pickId,
+	   never off `definition.id` — reading the field takes the first entry every
+	   time, which turns Impact.Flesh's three samples into one sound that fires
+	   on every connecting shot, which is exactly what the feature was added to
+	   prevent.
+
+	── LEAVING ONE LISTENER OUT ────────────────────────────────────────────────
+	`playAt` and `playOn` take an optional `exclude` player. The shooter's own
+	client already played a 2D copy of their gunshot the instant they clicked, so
+	a world emitter they can also hear arrives ~100ms later as an echo of their
+	own gun. PlayerGui is the only container the server can put an instance into
+	and have it replicate to exactly one client, so excluding a listener means
+	one emitter per REMAINING listener instead of one in Workspace. That is worth
+	doing for the handful of sounds that have an owner and wrong for everything
+	else, which is why it is opt-in per call.
 
 	Positional sounds live on a temporary anchored emitter part. That part is
 	CanQuery = false and CanTouch = false, which is not cosmetic: an emitter that
@@ -37,10 +54,15 @@ local Trove = require(Shared.Util.Trove)
 
 type SoundDefinition = AudioConfig.SoundDefinition
 
---[[ One playing sound plus the bookkeeping needed to bill and reclaim it. ]]
+--[[ One playing sound plus the bookkeeping needed to bill and reclaim it.
+
+     `holders` is a list because an excluded listener forces one emitter per
+     remaining player. They are one VOICE regardless: it is one event in the
+     world, it costs one slot in the budget, and `sound` is whichever copy the
+     sweep reads timing off. ]]
 type Voice = {
 	sound: Sound,
-	holder: BasePart?, -- the temporary emitter, when we made one
+	holders: { BasePart }?, -- the temporary emitters, when we made any
 	category: string,
 	priority: number,
 	startedAt: number,
@@ -73,6 +95,11 @@ local DEBRIS_LIFETIME = UNKNOWN_LIFETIME + 4
 local SWEEP_INTERVAL = 0.06
 
 local EMITTER_SIZE = Vector3.new(0.2, 0.2, 0.2)
+
+-- Slack past a definition's own rollOffMax when deciding who gets a per-player
+-- emitter. The listener is the camera, not the root part this is measured from,
+-- and a survivor who runs toward the sound during its tail should still hear it.
+local AUDIBLE_SLACK = 40
 
 -- Retrigger timing is scoped, so a UI sound played for four players in the same
 -- frame is four legitimate plays rather than one play and three suppressions.
@@ -132,25 +159,28 @@ end
 	`parent` defaults to Workspace. Pass something else only to scope the
 	emitter's lifetime to an object that may be destroyed early — a corpse being
 	recycled should take its own body-fall sound with it.
+
+	`exclude` leaves one player out of the audience. Pass the shooter for
+	anything they already heard locally; see the header. When it is set, `parent`
+	is ignored — the emitters have to live in each listener's own PlayerGui or
+	they would not be per-player at all.
 ]]
-function AudioService:playAt(definition: SoundDefinition, position: Vector3, parent: Instance?): Sound?
+function AudioService:playAt(
+	definition: SoundDefinition,
+	position: Vector3,
+	parent: Instance?,
+	exclude: Player?
+): Sound?
+	if exclude ~= nil and typeof(exclude) == "Instance" and exclude:IsA("Player") then
+		return self:_playExcluding(definition, position, exclude)
+	end
+
 	local category = self:_admit(definition, WORLD_SCOPE)
 	if not category then
 		return nil
 	end
 
-	local holder = Instance.new("Part")
-	holder.Name = "FL_SoundEmitter"
-	holder.Size = EMITTER_SIZE
-	holder.CFrame = CFrame.new(position)
-	holder.Anchored = true
-	holder.CanCollide = false
-	holder.CanQuery = false
-	holder.CanTouch = false
-	holder.CastShadow = false
-	holder.Transparency = 1
-	holder.Locked = true
-
+	local holder = self:_buildEmitter(position)
 	local sound = self:_buildSound(definition)
 	sound.Parent = holder
 	holder.Parent = parent or Workspace
@@ -160,16 +190,25 @@ function AudioService:playAt(definition: SoundDefinition, position: Vector3, par
 		Debris:AddItem(holder, DEBRIS_LIFETIME)
 	end
 
-	self:_track(sound, holder, category, definition)
+	self:_track(sound, { holder }, category, definition)
 	return sound
 end
 
 --[[ Plays a sound from an existing part, so it tracks that part as it moves.
      Use this for anything attached to a body: footsteps, vocalisations, a
-     Smoker's tongue. ]]
-function AudioService:playOn(definition: SoundDefinition, part: BasePart): Sound?
+     Tank's footfalls.
+
+     `exclude` costs the tracking: a per-player emitter cannot be welded to a
+     part in Workspace, so an excluded-listener sound is fixed at the part's
+     position when it started. Every caller that wants one is a one-shot impact
+     of a tenth of a second, which does not move far enough to notice. ]]
+function AudioService:playOn(definition: SoundDefinition, part: BasePart, exclude: Player?): Sound?
 	if typeof(part) ~= "Instance" or not part:IsA("BasePart") then
 		return nil
+	end
+
+	if exclude ~= nil and typeof(exclude) == "Instance" and exclude:IsA("Player") then
+		return self:_playExcluding(definition, part.Position, exclude)
 	end
 
 	local category = self:_admit(definition, WORLD_SCOPE)
@@ -187,6 +226,113 @@ function AudioService:playOn(definition: SoundDefinition, part: BasePart): Sound
 
 	self:_track(sound, nil, category, definition)
 	return sound
+end
+
+--[[
+	One emitter per listener, in that listener's own PlayerGui, so the excluded
+	player genuinely never receives the instance.
+
+	The sample and the pitch are chosen ONCE and shared: this is one event in the
+	world, and two survivors standing together hearing two different waveforms of
+	the same gunshot would read as two guns.
+
+	Returns nil — and costs nothing at all — when nobody is left to hear it,
+	which is the whole of solo play. `_admit` is deliberately called after that
+	check so an unheard sound never spends a voice.
+]]
+function AudioService:_playExcluding(definition: SoundDefinition, position: Vector3, exclude: Player): Sound?
+	if definition == nil then
+		self:_warnOnce(
+			NIL_DEFINITION,
+			"[AudioService] asked to play a nil definition — check the AudioConfig key at the call site"
+		)
+		return nil
+	end
+	-- Checked here as well as in _admit, because the audience is gathered first
+	-- and an unconfigured id must not cost that walk.
+	if not AudioConfig.isConfigured(definition) then
+		self:_warnOnce(definition, nil)
+		return nil
+	end
+
+	local reach = (definition.rollOffMax or 200) + AUDIBLE_SLACK
+	local reachSquared = reach * reach
+
+	local listeners: { Player } = {}
+	for _, player in Players:GetPlayers() do
+		if player == exclude then
+			continue
+		end
+		local playerGui = player:FindFirstChildOfClass("PlayerGui")
+		if not playerGui then
+			continue
+		end
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") and (root.Position - position).Magnitude ^ 2 > reachSquared then
+			-- Out of the definition's own rolloff. At 22 rounds a second an
+			-- emitter for someone who cannot hear it is pure instance churn.
+			continue
+		end
+		table.insert(listeners, player)
+	end
+
+	if #listeners == 0 then
+		return nil
+	end
+
+	local category = self:_admit(definition, WORLD_SCOPE)
+	if not category then
+		return nil
+	end
+
+	local id = AudioConfig.pickId(definition)
+	local pitch = random:NextNumber(definition.pitchMin or 1, definition.pitchMax or 1)
+
+	local holders = table.create(#listeners)
+	local primary: Sound? = nil
+
+	for _, player in listeners do
+		local playerGui = player:FindFirstChildOfClass("PlayerGui")
+		if not playerGui then
+			continue
+		end
+		local holder = self:_buildEmitter(position)
+		local sound = self:_buildSound(definition, id, pitch)
+		sound.Parent = holder
+		holder.Parent = playerGui
+		sound:Play()
+		table.insert(holders, holder)
+		if not sound.Looped then
+			Debris:AddItem(holder, DEBRIS_LIFETIME)
+		end
+		primary = primary or sound
+	end
+
+	if not primary then
+		-- Everyone left between the two loops. Give the voice slot straight back.
+		self._categoryCounts[category] = math.max((self._categoryCounts[category] or 1) - 1, 0)
+		return nil
+	end
+
+	self:_track(primary, holders, category, definition)
+	return primary
+end
+
+--[[ The anchored, unqueryable, untouchable part a positional sound rides on. ]]
+function AudioService:_buildEmitter(position: Vector3): BasePart
+	local holder = Instance.new("Part")
+	holder.Name = "FL_SoundEmitter"
+	holder.Size = EMITTER_SIZE
+	holder.CFrame = CFrame.new(position)
+	holder.Anchored = true
+	holder.CanCollide = false
+	holder.CanQuery = false
+	holder.CanTouch = false
+	holder.CastShadow = false
+	holder.Transparency = 1
+	holder.Locked = true
+	return holder
 end
 
 --[[
@@ -234,9 +380,15 @@ end
 		Audio:play("UI", "Pickup", player)
 
 	`where` may be a Vector3 (emitter), a BasePart (attached), or a Player (2D,
-	that client only).
+	that client only). `exclude` is forwarded to the positional paths.
 ]]
-function AudioService:play(category: string, key: string, where: any, parent: Instance?): Sound?
+function AudioService:play(
+	category: string,
+	key: string,
+	where: any,
+	parent: Instance?,
+	exclude: Player?
+): Sound?
 	local definition = self:getDefinition(category, key)
 	if not definition then
 		-- Keyed on the joined pair so a mistyped call site reports once, by name.
@@ -247,10 +399,10 @@ function AudioService:play(category: string, key: string, where: any, parent: In
 
 	local kind = typeof(where)
 	if kind == "Vector3" then
-		return self:playAt(definition, where, parent)
+		return self:playAt(definition, where, parent, exclude)
 	elseif kind == "Instance" then
 		if where:IsA("BasePart") then
-			return self:playOn(definition, where)
+			return self:playOn(definition, where, exclude)
 		elseif where:IsA("Player") then
 			return self:playForPlayer(where, definition)
 		end
@@ -384,13 +536,18 @@ function AudioService:_evictWeakest(category: string?, priority: number): boolea
 	return true
 end
 
-function AudioService:_buildSound(definition: SoundDefinition): Sound
+--[[ `id` and `pitch` are passed in only by the per-listener path, which has to
+     give every copy of one event the same waveform. Everywhere else they are
+     rolled here, per play. ]]
+function AudioService:_buildSound(definition: SoundDefinition, id: string?, pitch: number?): Sound
 	local sound = Instance.new("Sound")
-	sound.SoundId = definition.id
+	-- pickId, never definition.id: reading the field takes the first sample of a
+	-- varied entry every single time, and Impact.Flesh fires on every hit.
+	sound.SoundId = id or AudioConfig.pickId(definition)
 	sound.Volume = (definition.volume or 1) * MIX.MasterVolume
 	-- A fixed pitch is what turns a 900rpm SMG into a buzzsaw; the per-shot
 	-- spread in the config is the single cheapest thing that stops it.
-	sound.PlaybackSpeed = random:NextNumber(definition.pitchMin or 1, definition.pitchMax or 1)
+	sound.PlaybackSpeed = pitch or random:NextNumber(definition.pitchMin or 1, definition.pitchMax or 1)
 	sound.Looped = definition.looped == true
 	-- InverseTapered holds a sound at full volume close in and then falls off
 	-- fast, which is what makes a distant horde audible as a direction without
@@ -402,13 +559,18 @@ function AudioService:_buildSound(definition: SoundDefinition): Sound
 	return sound
 end
 
-function AudioService:_track(sound: Sound, holder: BasePart?, category: string, definition: SoundDefinition)
+function AudioService:_track(
+	sound: Sound,
+	holders: { BasePart }?,
+	category: string,
+	definition: SoundDefinition
+)
 	local now = os.clock()
 	table.insert(
 		self._voices,
 		{
 			sound = sound,
-			holder = holder,
+			holders = holders,
 			category = category,
 			priority = definition.priority or 1,
 			startedAt = now,
@@ -466,10 +628,12 @@ function AudioService:_sweep()
 end
 
 function AudioService:_destroyVoice(voice: Voice)
-	-- Destroying the emitter takes the Sound with it; one Destroy, not two.
-	local holder = voice.holder
-	if holder then
-		holder:Destroy()
+	-- Destroying an emitter takes its Sound with it; one Destroy, not two.
+	local holders = voice.holders
+	if holders then
+		for _, holder in holders do
+			holder:Destroy()
+		end
 	else
 		voice.sound:Destroy()
 	end

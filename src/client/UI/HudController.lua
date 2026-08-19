@@ -8,6 +8,10 @@
 	when it has something to say and then leaves. There is no minimap, no XP bar
 	and no border art, and that absence is the design, not an omission.
 
+	The top of the screen is shared: WaveController owns the round clock and the
+	wave pips up there and pushes its height down here through setTopInset, so
+	the objective line sits under the block instead of through it.
+
 	── THE TWO-LAYER HEALTH BAR ────────────────────────────────────────────────
 	The single most recognisable element of the L4D HUD. Permanent health fills
 	the bar; temporary (pill / adrenaline / revive) health is a lighter segment
@@ -21,8 +25,8 @@
 	Everything is attributes and their changed signals. Nothing here polls a
 	value, and nothing here asks a service for state it could read off a Player.
 	Attributes replicate on write, so a HUD driven by them costs zero bandwidth
-	while nothing is happening, which during the quiet 80% of a campaign is most
-	of the time.
+	while nothing is happening, which during a breather and most of a wave is
+	most of the time.
 
 	── PERFORMANCE ─────────────────────────────────────────────────────────────
 	One RenderStepped connection for the entire HUD. Bars chase their targets in
@@ -42,6 +46,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -72,10 +77,35 @@ local BAR_EPSILON = 0.0015
      point at which the player should be thinking about cover, not arithmetic. ]]
 local LOW_AMMO_FRACTION = 0.25
 
+--[[ Room for "/ 426", the widest reserve in the roster, at TextSize.Large. The
+     magazine count takes whatever is left of the panel. ]]
+local RESERVE_WIDTH = 62
+
+--[[
+	The feed carried survivor deaths only — a handful in a whole round. It now
+	carries infected kills too, and those arrive in bursts of a dozen, so every
+	number here exists to keep it bounded and readable under load:
+
+	  MAX       lines worth reading at once. Past this the oldest is pushed into
+	            its fade rather than deleted under the eye, so the list visibly
+	            drains instead of flickering.
+	  HARD_MAX  rows that physically exist. They are pooled and recycled, so a
+	            wave of kills never means a wave of Instance.new.
+]]
 local KILLFEED_MAX = 5
+local KILLFEED_HARD_MAX = KILLFEED_MAX + 2
 local KILLFEED_LIFETIME = 5.0
 local KILLFEED_FADE = 0.6
 local KILLFEED_ROW_HEIGHT = 18
+local KILLFEED_WIDTH = 380
+
+--[[ Kill feed victims arrive as display names, not enum keys, so this maps one
+     back to the definition that can say whether the thing that just died was a
+     Common or a Tank. Built once: the roster is six entries. ]]
+local INFECTED_BY_NAME: { [string]: any } = {}
+for _, definition in InfectedConfig.all() do
+	INFECTED_BY_NAME[definition.displayName] = definition
+end
 
 -- The identity stripe down the left edge of a survivor panel.
 local STRIPE_WIDTH = 3
@@ -107,6 +137,7 @@ local killFeedHolder: Frame
 local panels: { [Player]: any } = {}
 local slotIndices: { [Player]: number } = {}
 local killFeed: { { label: TextLabel, age: number } } = {}
+local killFeedPool: { TextLabel } = {}
 -- UIListLayout ties on equal LayoutOrder, so entries carry a running number and
 -- the newest kill is always the bottom line.
 local killFeedOrder = 0
@@ -116,6 +147,9 @@ local state = {
 	cinematic = false,
 	reloading = false,
 	objectiveText = "",
+	-- How much of the top of the screen WaveController has claimed. Pushed in
+	-- rather than read, so the HUD needs to know nothing about waves.
+	topInset = LAYOUT.ScreenMargin,
 }
 
 -- ── construction helpers ────────────────────────────────────────────────────
@@ -219,7 +253,7 @@ end
 
 --[[
 	Colour slots are handed out on join and held until the player leaves, so a
-	survivor keeps the same colour for the whole campaign. OutlineController and
+	survivor keeps the same colour for the whole round. OutlineController and
 	SubtitleController read the assignment back out of here rather than deriving
 	their own, because a teammate whose outline and HUD panel disagree about
 	which one they are is worse than no colour at all.
@@ -343,7 +377,7 @@ end
 
 --[[ The local player's panel sits at the bottom of the stack and every teammate
      stacks above them in slot order, so "mine is the bottom one" is true for
-     the whole campaign and nobody has to hunt for their own health. ]]
+     the whole round and nobody has to hunt for their own health. ]]
 local function relayout()
 	local order: { any } = {}
 	for _, record in panels do
@@ -615,13 +649,47 @@ end
 
 -- ── kill feed ───────────────────────────────────────────────────────────────
 
+--[[
+	The colour a name is drawn in.
+
+	A survivor gets their identity colour — the same one on their panel stripe
+	and their outline through a wall. An infected is coloured by what it was:
+	Commons stay dim because they arrive in floods and none of them is news, a
+	special reads as plain text, and a Tank or a Witch gets the accent, because
+	that line is the one the player wants to find in a feed of twenty.
+]]
 local function nameColor(name: string): Color3
 	for target, record in panels do
 		if target.Name == name or target.DisplayName == name then
 			return record.identity
 		end
 	end
+	local infected = INFECTED_BY_NAME[name]
+	if infected then
+		return if infected.isBoss
+			then COLOR.AccentBright
+			elseif infected.isSpecial then COLOR.TextPrimary
+			else COLOR.TextDim
+	end
 	return COLOR.TextSecondary
+end
+
+--[[ A free row, or the oldest one if every row is spoken for. Losing the top
+     line to the newest kill is the right way round: under a horde the bottom of
+     the feed is the only part still true. ]]
+local function acquireRow(): TextLabel
+	local free = table.remove(killFeedPool)
+	if free then
+		return free
+	end
+	local oldest = table.remove(killFeed, 1)
+	return (oldest :: any).label
+end
+
+local function releaseRow(label: TextLabel)
+	label.Visible = false
+	label.Text = ""
+	table.insert(killFeedPool, label)
 end
 
 local function pushKill(payload: any)
@@ -641,11 +709,10 @@ local function pushKill(payload: any)
 	local middle = if payload.headshot then COLOR.AccentBright else COLOR.TextDim
 
 	killFeedOrder += 1
-	local label = newLabel(killFeedHolder, "Kill", FONT.Body, TEXT.Small, COLOR.TextPrimary)
-	label.RichText = true
+	local label = acquireRow()
 	label.LayoutOrder = killFeedOrder
-	label.Size = UDim2.new(1, 0, 0, KILLFEED_ROW_HEIGHT)
-	label.TextXAlignment = Enum.TextXAlignment.Right
+	label.TextTransparency = 0
+	label.Visible = true
 	label.Text = string.format(
 		'<font color="%s">%s</font><font color="%s">  ×  %s%s</font><font color="%s">%s</font>',
 		hex(nameColor(killer)),
@@ -653,15 +720,18 @@ local function pushKill(payload: any)
 		hex(middle),
 		weaponText,
 		if payload.headshot then "HS  " else "",
-		hex(COLOR.TextSecondary),
+		hex(nameColor(victim)),
 		string.upper(victim)
 	)
 
 	table.insert(killFeed, { label = label, age = 0 })
-	while #killFeed > KILLFEED_MAX do
-		local oldest = table.remove(killFeed, 1)
-		if oldest then
-			oldest.label:Destroy()
+
+	-- Everything past the readable count is pushed into its fade rather than
+	-- yanked: under a burst the feed drains, it does not blink.
+	for index = 1, #killFeed - KILLFEED_MAX do
+		local entry = killFeed[index]
+		if entry.age < KILLFEED_LIFETIME then
+			entry.age = KILLFEED_LIFETIME
 		end
 	end
 end
@@ -718,7 +788,7 @@ local function update(dt: number)
 		entry.age += dt
 		local over = entry.age - KILLFEED_LIFETIME
 		if over >= KILLFEED_FADE then
-			entry.label:Destroy()
+			releaseRow(entry.label)
 			table.remove(killFeed, index)
 		elseif over > 0 then
 			entry.label.TextTransparency = over / KILLFEED_FADE
@@ -736,11 +806,20 @@ local function buildAmmo()
 	corner(panel)
 	stroke(panel)
 
+	--[[ Sixteen real guns means names like "Kriss Vector .45" where the old
+	     roster had "SMG". Truncation would hide the half of ".357 Magnum" that
+	     identifies it, so the name scales itself down to TextSize.Tiny instead
+	     and every weapon in the roster fits at a glance. ]]
 	local name = newLabel(panel, "Weapon", FONT.Heading, TEXT.Small, COLOR.TextSecondary)
 	name.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 5)
 	name.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, 16)
 	name.TextXAlignment = Enum.TextXAlignment.Right
-	name.TextTruncate = Enum.TextTruncate.AtEnd
+	name.TextScaled = true
+	name.TextWrapped = false
+	local nameBounds = Instance.new("UITextSizeConstraint")
+	nameBounds.MaxTextSize = TEXT.Small
+	nameBounds.MinTextSize = TEXT.Tiny
+	nameBounds.Parent = name
 
 	local reloading = newLabel(panel, "Reloading", FONT.Body, TEXT.Small, COLOR.Accent)
 	reloading.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 22)
@@ -749,16 +828,35 @@ local function buildAmmo()
 	reloading.Text = "RELOADING"
 	reloading.Visible = false
 
+	--[[ The reserve is pinned to the panel's padding edge and the magazine ends
+	     where the reserve begins, so the pair right-aligns as one number no
+	     matter how wide it gets. A PPSh-41 carries "71 / 426"; nothing in the
+	     roster is wider than that, and the size constraints mean nothing could
+	     be. ]]
+	local reserve = newLabel(panel, "Reserve", FONT.Numeric, TEXT.Large, COLOR.TextSecondary)
+	reserve.AnchorPoint = Vector2.new(1, 1)
+	reserve.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, -10)
+	reserve.Size = UDim2.fromOffset(RESERVE_WIDTH, TEXT.Large + 4)
+	reserve.TextXAlignment = Enum.TextXAlignment.Right
+	reserve.TextScaled = true
+	reserve.TextWrapped = false
+	local reserveBounds = Instance.new("UITextSizeConstraint")
+	reserveBounds.MaxTextSize = TEXT.Large
+	reserveBounds.MinTextSize = TEXT.Small
+	reserveBounds.Parent = reserve
+
 	local magazine = newLabel(panel, "Magazine", FONT.Numeric, TEXT.Display, COLOR.TextPrimary)
 	magazine.AnchorPoint = Vector2.new(1, 1)
-	magazine.Position = UDim2.new(0, LAYOUT.AmmoPanelWidth - 74, 1, -4)
-	magazine.Size = UDim2.fromOffset(110, TEXT.Display)
+	magazine.Position = UDim2.new(1, -(LAYOUT.PanelPadding + RESERVE_WIDTH), 1, -4)
+	magazine.Size =
+		UDim2.fromOffset(LAYOUT.AmmoPanelWidth - RESERVE_WIDTH - LAYOUT.PanelPadding * 2, TEXT.Display)
 	magazine.TextXAlignment = Enum.TextXAlignment.Right
-
-	local reserve = newLabel(panel, "Reserve", FONT.Numeric, TEXT.Large, COLOR.TextSecondary)
-	reserve.AnchorPoint = Vector2.new(0, 1)
-	reserve.Position = UDim2.new(0, LAYOUT.AmmoPanelWidth - 70, 1, -10)
-	reserve.Size = UDim2.fromOffset(64, TEXT.Large + 4)
+	magazine.TextScaled = true
+	magazine.TextWrapped = false
+	local magazineBounds = Instance.new("UITextSizeConstraint")
+	magazineBounds.MaxTextSize = TEXT.Display
+	magazineBounds.MinTextSize = TEXT.Heading
+	magazineBounds.Parent = magazine
 
 	ammo = { panel = panel, name = name, mag = magazine, reserve = reserve, reloading = reloading }
 end
@@ -806,7 +904,7 @@ end
 local function buildObjective()
 	local frame = newFrame(gui, "Objective", COLOR.Panel, 1)
 	frame.AnchorPoint = Vector2.new(0.5, 0)
-	frame.Position = UDim2.new(0.5, 0, 0, LAYOUT.ScreenMargin)
+	frame.Position = UDim2.new(0.5, 0, 0, state.topInset)
 	frame.Size = UDim2.fromOffset(560, 28)
 	frame.Visible = false
 
@@ -846,10 +944,14 @@ local function build()
 		MAX_SURVIVORS * (LAYOUT.SurvivorPanelHeight + LAYOUT.SurvivorPanelGap)
 	)
 
+	--[[ Fixed height and clipped, so no volume of kills can grow the feed down
+	     the side of the screen and into the play space. The rows it can hold are
+	     the rows that exist. ]]
 	killFeedHolder = newFrame(gui, "KillFeed", COLOR.Panel, 1)
 	killFeedHolder.AnchorPoint = Vector2.new(1, 0)
 	killFeedHolder.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 0, LAYOUT.ScreenMargin)
-	killFeedHolder.Size = UDim2.fromOffset(300, KILLFEED_MAX * KILLFEED_ROW_HEIGHT)
+	killFeedHolder.Size = UDim2.fromOffset(KILLFEED_WIDTH, KILLFEED_HARD_MAX * KILLFEED_ROW_HEIGHT)
+	killFeedHolder.ClipsDescendants = true
 
 	local feedLayout = Instance.new("UIListLayout")
 	feedLayout.FillDirection = Enum.FillDirection.Vertical
@@ -857,6 +959,15 @@ local function build()
 	feedLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 	feedLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	feedLayout.Parent = killFeedHolder
+
+	for _ = 1, KILLFEED_HARD_MAX do
+		local row = newLabel(killFeedHolder, "Kill", FONT.Body, TEXT.Small, COLOR.TextPrimary)
+		row.RichText = true
+		row.Size = UDim2.new(1, 0, 0, KILLFEED_ROW_HEIGHT)
+		row.TextXAlignment = Enum.TextXAlignment.Right
+		row.Visible = false
+		table.insert(killFeedPool, row)
+	end
 
 	buildAmmo()
 	buildItems()
@@ -888,9 +999,9 @@ function HudController:isVisible(): boolean
 end
 
 --[[ The end-of-round cards take the whole frame and a HUD showing through one
-     reads as a bug. OverlayController owns this flag and pushes it; a chapter
-     card deliberately does NOT set it, because the game is still being played
-     underneath that one. ]]
+     reads as a bug. OverlayController owns this flag and pushes it; a wave
+     announcement deliberately does NOT set it, because the game is still being
+     played underneath that one. ]]
 function HudController:setCinematic(value: boolean)
 	state.cinematic = value
 	if gui then
@@ -900,6 +1011,19 @@ end
 
 function HudController:setObjective(text: string, progress: number?)
 	setObjective(text, progress)
+end
+
+--[[ Reserves the top of the screen for somebody else. WaveController's round
+     clock lives at the same margin the objective line used to own, and the
+     objective drops below whatever height it claims. ]]
+function HudController:setTopInset(pixels: number)
+	if typeof(pixels) ~= "number" then
+		return
+	end
+	state.topInset = math.max(pixels, LAYOUT.ScreenMargin) + LAYOUT.ElementGap
+	if objective then
+		objective.frame.Position = UDim2.new(0.5, 0, 0, state.topInset)
+	end
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────
@@ -944,7 +1068,7 @@ function HudController:start()
 		setObjective(tostring(payload.text or ""), payload.progress)
 	end)
 
-	-- The objective is also an attribute, so a player who joins mid-chapter sees
+	-- The objective is also an attribute, so a player dropping into wave 5 sees
 	-- it without waiting for the next time it changes.
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.ObjectiveText), function()
 		setObjective(Attributes.get(Workspace, GA.ObjectiveText, ""), nil)

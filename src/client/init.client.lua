@@ -42,6 +42,11 @@ local BAR = string.rep("=", 72)
 	It is ordered for humans and because the init/start passes run in it: input
 	and camera first because everything else reacts to them, presentation after
 	the systems that drive it.
+
+	MainMenuController is last on purpose. Its start() opens the menu, and opening
+	the menu switches off the HUD, the crosshair, the interact prompts and the
+	input controller — so every controller it reaches for has to have built its
+	ScreenGui already, or the menu opens over a HUD that is still visible.
 ]]
 local CONTROLLERS = {
 	"Input/InputController",
@@ -52,12 +57,14 @@ local CONTROLLERS = {
 	"Effects/GoreController",
 	"Effects/OutlineController",
 	"UI/HudController",
+	"UI/WaveController",
 	"UI/CrosshairController",
 	"UI/HitmarkerController",
 	"UI/PromptController",
 	"UI/SubtitleController",
 	"UI/OverlayController",
 	"Audio/MusicController",
+	"UI/MainMenuController",
 }
 
 -- How long to wait for a controller module to replicate before giving up on it.
@@ -75,6 +82,22 @@ type Loaded = {
 }
 
 local loaded: { Loaded } = {}
+
+-- Path -> the phase that broke it, in the order they broke. The counts in the
+-- banner say something is missing; only the names say which screen is gone, and
+-- a player looking at a HUD with no ammo counter cannot scroll back through
+-- fourteen tracebacks to work it out.
+local failures: { [string]: string } = {}
+local failureOrder: { string } = {}
+
+local function noteFailure(path: string, phase: string)
+	if not failures[path] then
+		table.insert(failureOrder, path)
+	end
+	-- Keep the first: a controller that failed to require cannot then fail init,
+	-- so a later phase overwriting it would only ever report the symptom.
+	failures[path] = failures[path] or phase
+end
 
 local function report(phase: string, subject: string, err: any)
 	warn(
@@ -114,16 +137,19 @@ local function loadController(path: string)
 	local moduleScript = resolve(path)
 	if not moduleScript then
 		report("require", path, "no ModuleScript at that path (not written yet?)")
+		noteFailure(path, "missing")
 		return
 	end
 
 	local ok, result = xpcall(require, traceback, moduleScript :: any)
 	if not ok then
 		report("require", path, result)
+		noteFailure(path, "require")
 		return
 	end
 	if typeof(result) ~= "table" then
 		report("require", path, "module did not return a table")
+		noteFailure(path, "require")
 		return
 	end
 	table.insert(loaded, { path = path, module = result })
@@ -140,6 +166,7 @@ local function runPhase(phase: string): (number, number)
 			else
 				failed += 1
 				report(phase, entry.path, err)
+				noteFailure(entry.path, phase)
 			end
 		end
 	end
@@ -200,8 +227,8 @@ local started = os.clock()
 	before any controller connects to a remote in start().
 
 	It is isolated because a failure here is not one controller's problem: every
-	controller requires Remotes, so letting it throw fourteen more times would
-	cost fourteen more twenty-second waits and bury the one message that matters.
+	controller requires Remotes, so letting it throw once per controller would
+	cost a twenty-second wait each time and bury the one message that matters.
 ]]
 local remotesOk, remotesResult = xpcall(require, traceback, Shared.Net.Remotes :: any)
 if not remotesOk then
@@ -220,12 +247,11 @@ local startRan, startFailed = runPhase("start")
 
 local bootMs = (os.clock() - started) * 1000
 
+print(BAR)
 print(
 	string.format(
-		"%s\n[Fading Light] client up in %.0fms — %d/%d controllers loaded (%.0fms), "
-			.. "init %d ok / %d failed, start %d ok / %d failed\n"
-			.. "registered: %s\n%s",
-		BAR,
+		"[Fading Light] client up in %.0fms — %d/%d controllers loaded (%.0fms), "
+			.. "init %d ok / %d failed, start %d ok / %d failed\nregistered: %s",
 		bootMs,
 		#loaded,
 		#CONTROLLERS,
@@ -234,10 +260,16 @@ print(
 		initFailed,
 		startRan,
 		startFailed,
-		table.concat(Registry.getRegisteredNames(), ", "),
-		BAR
+		table.concat(Registry.getRegisteredNames(), ", ")
 	)
 )
+if #failureOrder > 0 then
+	print(string.format("%d CONTROLLER(S) BROKEN — tracebacks are above:", #failureOrder))
+	for _, path in failureOrder do
+		print(string.format("  %-34s failed at %s", path, failures[path]))
+	end
+end
+print(BAR)
 
 --[[ Seeded after start() so a controller's remote listeners are already up: the
      snapshot is a starting point, not a substitute for the events that follow. ]]

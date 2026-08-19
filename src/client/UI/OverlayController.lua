@@ -9,10 +9,12 @@
 	                       pulse under it, capped at MaxIntensity
 	  2. DOWNED / DEAD     desaturation, a heavy vignette, and the one line that
 	                       matters ("WAITING FOR HELP"), plus the black-and-white
-	                       warning that the next down is the last one
+	                       warning that the next down is the last one — which now
+	                       drains the world while the player is still standing in
+	                       it, because that is when it is worth knowing
 	  3. ROUND CARDS       team wipe and victory, from RoundStateChanged
-	  4. CHAPTER CARDS     the one place the game is allowed to look like a movie
-	                       poster, in UITheme.Font.Stencil
+	  4. THE HANDOFF       RoundEnded lands the result card, then gets out of the
+	                       way for MainMenuController
 	  5. SCREEN EFFECTS    Boomer bile, blood on the lens, the adrenaline shift
 	  6. DAMAGE ARROWS     which direction that came from, in screen space
 
@@ -44,6 +46,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
+local GameModeConfig = require(Shared.Config.GameModeConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -83,10 +86,34 @@ local GRADE_CHASE = 3.5
 local HIT_FLASH = 0.28
 local HIT_FLASH_TIME = 0.35
 
-local CHAPTER_HOLD = 2.6
+local CARD_HOLD = 2.6
 local CARD_SLIDE = 26 -- pixels the card title drifts as it fades in
 
 local BILE_BLOBS = 9
+
+--[[
+	Standing in black and white.
+
+	The whole L4D health model builds toward this moment — two incaps down, the
+	next one is fatal, and the player is still on their feet — and until now the
+	screen said nothing about it unless you were already on the floor. It does
+	now: the colour drains out of the world while you are still walking around in
+	it. Short of the -1 that being downed uses, so the two never read as the same
+	state. On your feet the world is draining; on the floor it is already gone.
+]]
+local STANDING_BW_SATURATION = -0.85
+local STANDING_BW_BRIGHTNESS = -0.04
+
+--[[
+	How long the result card gets before the screen is handed over.
+
+	MainMenuController's scoreboard is already waiting behind this — it takes
+	RoundEnded itself and returns everyone to the lobby on
+	Matchmaking.PostRoundDuration — so this is a beat, not a screen: long enough
+	for the card to land, short enough to leave the scoreboard nearly all of that
+	window.
+]]
+local HANDOFF_DELAY = CARD_HOLD
 
 local OverlayController = {}
 
@@ -120,6 +147,9 @@ local cardBack: Frame
 local cardTitle: TextLabel
 local cardSubtitle: TextLabel
 
+local fadeGui: ScreenGui
+local fadeLayer: Frame
+
 local state = {
 	survivorState = STATE.Spectating,
 	blackAndWhite = false,
@@ -138,7 +168,6 @@ local state = {
 	tint = Color3.new(1, 1, 1),
 	brightness = 0,
 
-	chapter = -1,
 	card = nil :: any,
 	cardPhase = "idle",
 	cardClock = 0,
@@ -146,7 +175,15 @@ local state = {
 	cinematic = false,
 
 	roundState = ROUND.Lobby,
+
+	fade = 0,
+	fadeTarget = 0,
+	fadeSpeed = 1 / MOTION.Cinematic,
 }
+
+--[[ Bumped on every round-state edge. A handoff scheduled for the round that
+     just ended must not fire into the one that already started. ]]
+local handoffGeneration = 0
 
 -- ── construction ────────────────────────────────────────────────────────────
 
@@ -307,7 +344,8 @@ local function buildCard()
 	cardBack = newFrame(cardPanel, "Scrim", COLOR.Background, 1)
 	cardBack.Size = UDim2.fromScale(1, 1)
 
-	cardTitle = newLabel(cardPanel, "Title", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
+	-- showCard sets the font per card; this is only the resting state.
+	cardTitle = newLabel(cardPanel, "Title", FONT.Display, TEXT.Title, COLOR.TextPrimary)
 	cardTitle.AnchorPoint = Vector2.new(0.5, 1)
 	cardTitle.Position = UDim2.fromScale(0.5, 0.5)
 	cardTitle.Size = UDim2.new(0, 1100, 0, TEXT.Title + 12)
@@ -338,6 +376,22 @@ local function build()
 	overlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	overlayGui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(overlayGui)
+
+	--[[ The fade owns its own layer above everything, including whatever the main
+	     menu draws: it is the seam between the round and the menu, and a seam
+	     something else can appear through is not a seam. ]]
+	fadeGui = Instance.new("ScreenGui")
+	fadeGui.Name = "FL_Fade"
+	fadeGui.ResetOnSpawn = false
+	fadeGui.IgnoreGuiInset = true
+	fadeGui.DisplayOrder = UITheme.DisplayOrder.Fade
+	fadeGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	fadeGui.Parent = player:WaitForChild("PlayerGui")
+	trove:add(fadeGui)
+
+	fadeLayer = newFrame(fadeGui, "Black", COLOR.Background, 1)
+	fadeLayer.Size = UDim2.fromScale(1, 1)
+	fadeLayer.Visible = false
 
 	-- Behind the edges: the flat darkening that being downed or dead adds.
 	scrim = newFrame(vignetteGui, "Scrim", COLOR.Background, 1)
@@ -457,6 +511,12 @@ local function updateGrade(dt: number, now: number)
 		-- Downed drains the colour out of the world; black and white takes the
 		-- last of it, so the two states are never confusable.
 		saturation = if state.blackAndWhite then -1 else -0.75
+	elseif state.blackAndWhite then
+		-- Standing, and one down from dead. The health model spends the whole
+		-- round building to this and the screen has to say so while the player is
+		-- still upright, not only once they are on the floor.
+		saturation = STANDING_BW_SATURATION
+		brightness = STANDING_BW_BRIGHTNESS
 	end
 
 	local bile = if now < state.bileUntil
@@ -599,7 +659,15 @@ local function broadcastCinematic(value: boolean)
 		return
 	end
 	state.cinematic = value
-	for _, name in { "HudController", "CrosshairController", "PromptController", "SubtitleController" } do
+	for _, name in
+		{
+			"HudController",
+			"CrosshairController",
+			"PromptController",
+			"SubtitleController",
+			"WaveController",
+		}
+	do
 		local controller = Registry.find(name)
 		if controller and typeof(controller.setCinematic) == "function" then
 			pcall(controller.setCinematic, controller, value)
@@ -610,10 +678,11 @@ end
 --[[
 	Shows a full-frame card.
 
-	`persist` cards (the end of a run) stay until something replaces them;
+	`persist` cards (the end of a round) stay until something replaces them;
 	everything else holds for `hold` seconds and leaves. `takeover` cards hide
-	the HUD, because a card the HUD shows through reads as a bug — a chapter
-	title does NOT, since the game is still being played underneath it.
+	the HUD, because a card the HUD shows through reads as a bug — a wave
+	announcement does NOT, since the game is still being played underneath it,
+	and WaveController draws those on its own layer for exactly that reason.
 ]]
 local function showCard(config: any)
 	state.card = config
@@ -658,7 +727,7 @@ local function updateCard(dt: number)
 		end
 	elseif state.cardPhase == "hold" then
 		state.cardAlpha = 1
-		if not card.persist and state.cardClock >= (card.hold or CHAPTER_HOLD) then
+		if not card.persist and state.cardClock >= (card.hold or CARD_HOLD) then
 			state.cardPhase = "out"
 			state.cardClock = 0
 		end
@@ -714,32 +783,133 @@ local function onScreenEffect(payload: any)
 end
 
 --[[
-	LevelService rides the chapter on RoundStateChanged rather than inventing a
-	second remote, and it sends the safe room's INDEX — a number — plus the room
-	model. So: an explicit `chapterTitle` string wins, then an FL_Title attribute
-	on the room (the one hook a map builder has for naming a leg), then plain
-	"CHAPTER n". Returns nil when the payload carries no chapter at all.
+	How the round ended, in one line under the title.
+
+	"WAVE 5 OF 7 — 11:42" is the number a team argues about afterwards and the
+	one they come back to beat, so it is worth more than a word like "DEFEAT".
 ]]
-local function chapterFrom(payload: any): (string?, string?, number?)
-	local explicit = payload.chapterTitle
-	if typeof(explicit) == "string" and explicit ~= "" then
-		return explicit, payload.chapterSubtitle, tonumber(payload.chapter)
+local function resultSubtitle(payload: any): string
+	if typeof(payload) ~= "table" then
+		return ""
+	end
+	local waves = GameModeConfig.getWaveCount()
+	local elapsed = math.max(tonumber(payload.elapsed) or 0, 0)
+	local clock = string.format("%d:%02d", elapsed // 60, math.floor(elapsed % 60))
+
+	if payload.outcome == ROUND.Victory then
+		return string.format("ALL %d WAVES — %s", waves, clock)
+	end
+	local reached = math.clamp(tonumber(payload.waveReached) or 0, 0, waves)
+	return string.format("WAVE %d OF %d — %s", reached, waves, clock)
+end
+
+--[[
+	The result card.
+
+	RoundStateChanged and RoundEnded describe the same moment — the state arrives
+	first, the detail a frame behind it — so the card is drawn once and the second
+	message fills the subtitle in rather than restarting the fade under the
+	player's eye.
+]]
+local function showResult(outcome: string, subtitle: string)
+	if state.card and state.card.outcome == outcome then
+		cardSubtitle.Text = string.upper(subtitle)
+		cardSubtitle.Visible = subtitle ~= ""
+		return
 	end
 
-	local chapter = payload.chapter
-	if typeof(chapter) == "string" and chapter ~= "" then
-		return chapter, payload.chapterSubtitle, nil
+	local victory = outcome == ROUND.Victory
+	showCard({
+		outcome = outcome,
+		-- Seventeen minutes and seven waves. There is no door to reach and
+		-- nowhere to have got to: holding out IS the win condition.
+		title = if victory then "YOU HELD OUT" else "THE SURVIVORS DIDN'T MAKE IT",
+		subtitle = subtitle,
+		color = if victory then COLOR.Success else COLOR.Danger,
+		titleSize = TEXT.Display,
+		persist = true,
+		takeover = true,
+		scrim = if victory then 0.8 else 0.85,
+		fadeIn = MOTION.Cinematic,
+	})
+end
+
+--[[ Drives the black. Everything else on screen chases its target in the frame
+     loop; this is the one full-frame value that has an explicit destination and
+     a duration, because a handoff has to finish before the menu appears. ]]
+local function fadeTo(value: number, duration: number)
+	state.fadeTarget = math.clamp(value, 0, 1)
+	state.fadeSpeed = 1 / math.max(duration, 0.01)
+	if state.fadeTarget > 0 then
+		fadeLayer.Visible = true
 	end
-	if typeof(chapter) ~= "number" or chapter <= 0 then
-		return nil, nil, nil
+end
+
+--[[
+	Hands the screen to the main menu.
+
+	MainMenuController belongs to another module that may simply not be there — a
+	developer running half a client must still get a readable end to their round —
+	so nothing here assumes it. If nothing takes over, the card stays up and the
+	server's own post-round timer returns everyone to the lobby.
+
+	It also listens to RoundEnded itself and draws above this layer, so by the time
+	the card's beat is over it is normally already showing its scoreboard. Handing
+	over then means getting out of the way: no fade, because there is nothing left
+	to hide, and above all no second result screen replacing the one the player has
+	already started reading. The fade is for the other case — a menu that has not
+	reacted — where the black is the seam between the round and the menu.
+]]
+local MENU_ENTRY_POINTS = { "showResults", "open" }
+
+local function menuIsShowing(menu: any): boolean
+	if typeof(menu.isOpen) ~= "function" then
+		return false
+	end
+	local ok, result = pcall(menu.isOpen, menu)
+	return ok and result == true
+end
+
+local function handOffToMenu(payload: any)
+	local menu = Registry.find("MainMenuController")
+	if not menu then
+		return
 	end
 
-	local room = payload.safeRoom
-	local named = if typeof(room) == "Instance" then room:GetAttribute("FL_Title") else nil
-	if typeof(named) == "string" and named ~= "" then
-		return named, string.format("CHAPTER %d", chapter), chapter
+	if menuIsShowing(menu) then
+		hideCard()
+		return
 	end
-	return string.format("CHAPTER %d", chapter), payload.chapterSubtitle, chapter
+
+	local entry: string? = nil
+	for _, name in MENU_ENTRY_POINTS do
+		if typeof(menu[name]) == "function" then
+			entry = name
+			break
+		end
+	end
+	if not entry then
+		return
+	end
+
+	local mine = handoffGeneration
+	fadeTo(1, MOTION.Cinematic)
+	task.delay(MOTION.Cinematic, function()
+		if mine ~= handoffGeneration then
+			return
+		end
+		-- The card goes with the round it belonged to, and the takeover with it:
+		-- from here the menu owns the screen and covers what it wants covered.
+		hideCard()
+
+		local ok, err = pcall(menu[entry], menu, payload)
+		if not ok then
+			warn(
+				string.format("[OverlayController] MainMenuController:%s failed — %s", entry, tostring(err))
+			)
+		end
+		fadeTo(0, MOTION.Cinematic)
+	end)
 end
 
 --[[ Both the remote and the Workspace attribute report the same transition, so
@@ -750,35 +920,62 @@ local function onRoundState(newState: string, payload: any)
 		return
 	end
 	state.roundState = newState
+	handoffGeneration += 1
 
-	if newState == ROUND.TeamWipe then
-		showCard({
-			title = "THE SURVIVORS DIDN'T MAKE IT",
-			subtitle = (typeof(payload) == "table" and payload.subtitle) or "",
-			color = COLOR.Danger,
-			titleSize = TEXT.Display,
-			persist = true,
-			takeover = true,
-			scrim = 0.85,
-			fadeIn = MOTION.Cinematic,
-		})
-	elseif newState == ROUND.Victory then
-		showCard({
-			title = "SAFE ROOM REACHED",
-			subtitle = (typeof(payload) == "table" and payload.subtitle) or "EVERYONE INSIDE",
-			color = COLOR.Success,
-			titleSize = TEXT.Display,
-			persist = true,
-			takeover = true,
-			scrim = 0.8,
-			fadeIn = MOTION.Cinematic,
-		})
-	elseif state.card and state.card.persist then
-		hideCard()
+	if newState == ROUND.TeamWipe or newState == ROUND.Victory then
+		showResult(newState, (typeof(payload) == "table" and tostring(payload.subtitle or "")) or "")
+		return
 	end
+
+	-- Anything else means another round is on its way in: clear whatever the last
+	-- one left on screen, including a takeover that was handed to the menu.
+	if state.card and state.card.persist then
+		hideCard()
+	elseif state.cinematic then
+		broadcastCinematic(false)
+	end
+	fadeTo(0, MOTION.Cinematic)
+end
+
+--[[ The end of the round, with the detail the state change did not carry. This
+     is also the one place the client hands the screen over, because RoundEnded
+     is the only message that means "this round is finished", as opposed to
+     "somebody joined a lobby". ]]
+local function onRoundEnded(payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local outcome = tostring(payload.outcome or "")
+	if outcome ~= ROUND.Victory and outcome ~= ROUND.TeamWipe then
+		return
+	end
+
+	onRoundState(outcome, payload)
+	showResult(outcome, resultSubtitle(payload))
+
+	local mine = handoffGeneration
+	task.delay(HANDOFF_DELAY, function()
+		if mine == handoffGeneration then
+			handOffToMenu(payload)
+		end
+	end)
 end
 
 -- ── frame loop ──────────────────────────────────────────────────────────────
+
+local function updateFade(dt: number)
+	if state.fade == state.fadeTarget then
+		return
+	end
+	local step = dt * state.fadeSpeed
+	state.fade = if state.fadeTarget > state.fade
+		then math.min(state.fade + step, state.fadeTarget)
+		else math.max(state.fade - step, state.fadeTarget)
+	fadeLayer.BackgroundTransparency = 1 - state.fade
+	if state.fade <= 0 then
+		fadeLayer.Visible = false
+	end
+end
 
 local function update(dt: number)
 	local now = os.clock()
@@ -787,35 +984,10 @@ local function update(dt: number)
 	updateDroplets(dt)
 	updateIndicators(dt)
 	updateCard(dt)
+	updateFade(dt)
 end
 
 -- ── public API ──────────────────────────────────────────────────────────────
-
---[[
-	The movie-poster moment. Stencil type, no HUD takeover: the chapter title
-	appears OVER a game that is still being played, exactly as it does in L4D.
-
-	No remote in the manifest carries a chapter change, so this is also the entry
-	point LevelService's presentation should reach for — via RoundStateChanged's
-	payload (`chapter`/`chapterTitle`) or a DirectorEvent of kind "Chapter",
-	both of which are wired below.
-]]
-function OverlayController:showChapterCard(title: string, subtitle: string?)
-	if typeof(title) ~= "string" or title == "" then
-		return
-	end
-	showCard({
-		title = title,
-		subtitle = subtitle or "",
-		font = FONT.Stencil,
-		titleSize = TEXT.Title,
-		color = COLOR.TextPrimary,
-		hold = CHAPTER_HOLD,
-		scrim = 0.35,
-		fadeIn = MOTION.Cinematic,
-		fadeOut = MOTION.Cinematic,
-	})
-end
 
 function OverlayController:showCard(title: string, subtitle: string?, color: Color3?)
 	showCard({
@@ -823,7 +995,7 @@ function OverlayController:showCard(title: string, subtitle: string?, color: Col
 		subtitle = subtitle or "",
 		color = color or COLOR.TextPrimary,
 		titleSize = TEXT.Display,
-		hold = CHAPTER_HOLD,
+		hold = CARD_HOLD,
 		scrim = 0.5,
 	})
 end
@@ -872,37 +1044,19 @@ function OverlayController:start()
 	trove:connect(Remotes.Event.ScreenEffect.OnClientEvent, onScreenEffect)
 
 	trove:connect(Remotes.Event.RoundStateChanged.OnClientEvent, function(payload: any)
-		if typeof(payload) ~= "table" then
+		if typeof(payload) ~= "table" or typeof(payload.state) ~= "string" then
 			return
 		end
 		local body = if typeof(payload.payload) == "table" then payload.payload else payload
-		local title, subtitle, index = chapterFrom(body)
-		-- The round is published twice on the way in (Starting, then InProgress)
-		-- and again on every leg, all carrying the chapter. The card belongs to
-		-- the LEG, so it fires when that number actually moves.
-		local terminal = payload.state == ROUND.Victory or payload.state == ROUND.TeamWipe
-		if title and not terminal and (index == nil or index ~= state.chapter) then
-			state.chapter = index or state.chapter
-			OverlayController:showChapterCard(title, subtitle)
-		end
-		if typeof(payload.state) == "string" then
-			onRoundState(payload.state, body)
-		end
+		onRoundState(payload.state, body)
 	end)
+
+	trove:connect(Remotes.Event.RoundEnded.OnClientEvent, onRoundEnded)
 
 	--[[ The round state is also an attribute, which is the only thing a player
 	     joining into a finished round will ever see. ]]
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
 		onRoundState(Attributes.get(Workspace, GA.RoundState, ROUND.Lobby), nil)
-	end)
-
-	trove:connect(Remotes.Event.DirectorEvent.OnClientEvent, function(payload: any)
-		if typeof(payload) == "table" and payload.kind == "Chapter" then
-			local body = payload.payload
-			if typeof(body) == "table" then
-				OverlayController:showChapterCard(tostring(body.title or ""), body.subtitle)
-			end
-		end
 	end)
 
 	trove:connect(RunService.RenderStepped, update)

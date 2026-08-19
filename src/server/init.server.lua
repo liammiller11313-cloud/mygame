@@ -14,11 +14,18 @@
 	thirty-second fix into a restart loop. A loud, named failure that leaves the
 	rest of the game standing is worth far more than a clean stack trace nobody
 	can act on because they cannot get in-game to reproduce it.
+
+	The banner at the end exists for the same reason. A developer pressing Play
+	needs one screen that answers: did everything load, what broke, how long did
+	it take, is the game using my models or grey boxes, and does a joining player
+	land in the menu or in a round. Every one of those has been a bug that took
+	twenty minutes to notice.
 ]]
 
 local PhysicsService = game:GetService("PhysicsService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -26,12 +33,16 @@ local Attributes = require(Shared.Net.Attributes)
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
+local GameModeConfig = require(Shared.Config.GameModeConfig)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
 -- Requiring Remotes is what creates ReplicatedStorage.FadingLightNet. It has to
 -- happen before any client gets far enough to WaitForChild it, so it is first.
 local Remotes = require(Shared.Net.Remotes)
 
 local BAR = string.rep("=", 72)
+local RULE = "  " .. string.rep("-", 68)
 
 -- Read by RigUtil.makeDebris and by every service that reparents a body, so the
 -- names here are a contract, not a preference.
@@ -70,10 +81,23 @@ local COLLISION_RULES: { { any } } = {
 
 	The Registry means this order cannot break anything — nothing resolves
 	another service until it is called. It is ordered for humans, and because the
-	init/start passes run in this same order, which gives assets and the level a
-	chance to exist before the Director starts asking about them.
+	init/start passes run in this same order.
+
+	The round lifecycle goes first. Matchmaking decides whether this server is a
+	lobby or a round and where a joining player lands; RoundService owns the wave
+	clock that the Director, the atmosphere and the whole HUD read off. Putting
+	them at the top says which way the dependencies point, even though the
+	Registry means nothing enforces it.
+
+	Atmosphere goes last because it is downstream of everything: it interpolates
+	the light level from how far through the round RoundService says we are, so
+	it has nothing to say until there is a round to be far through.
 ]]
 local MODULES = {
+	"Round/RoundService",
+	"Round/VersusService",
+	"Round/MatchmakingService",
+
 	"Audio/AudioService",
 	"Assets/PlaceholderFactory",
 	"Level/LevelService",
@@ -83,10 +107,16 @@ local MODULES = {
 	"Combat/DamageService",
 	"Combat/BallisticsService",
 	"Combat/MeleeService",
+	"Combat/ProjectileService",
 	"Infected/InfectedService",
 	"Director/ItemPlacer",
 	"Director/DirectorService",
+	"Level/AtmosphereService",
 }
+
+-- Matchmaking is the one module the bootstrap itself changes behaviour around,
+-- so its path is named rather than spelled out at the two call sites.
+local MATCHMAKING_PATH = "Round/MatchmakingService"
 
 -- Modules slower than this get called out by name in the banner. Boot cost that
 -- nobody can see is boot cost nobody fixes.
@@ -97,6 +127,18 @@ local SLOW_MODULE_MS = 8
 -- nothing but a table read.
 local STATE_CACHE_TIME = 0.25
 
+-- The folder PlaceholderFactory looks in, surveyed here before it runs so the
+-- banner reports what the USER supplied rather than what the factory then
+-- published alongside it.
+local ASSETS_FOLDER = "Assets"
+
+--[[ FL_WavePhase between rounds. RoundService and WaveController each declare
+     this string set privately ("Prep" | "Active" | "Breather" | "Over", per
+     Attributes.Game.WavePhase); there is no shared enum to borrow, and adding
+     one is not this file's call. "Over" is what the client tests for to decide
+     the wave block is not worth drawing. ]]
+local IDLE_WAVE_PHASE = "Over"
+
 type LoadedModule = {
 	path: string,
 	names: { string },
@@ -104,6 +146,12 @@ type LoadedModule = {
 }
 
 local loaded: { LoadedModule } = {}
+
+-- Path -> the phase that broke it. A service whose module threw, or whose init
+-- or start threw, is not safe to hand players to no matter what it managed to
+-- register on the way down, and the banner has to name it.
+local failures: { [string]: string } = {}
+local failureOrder: { string } = {}
 
 local function report(phase: string, subject: string, err: any)
 	warn(
@@ -116,6 +164,16 @@ local function report(phase: string, subject: string, err: any)
 			BAR
 		)
 	)
+end
+
+local function noteFailure(path: string, phase: string)
+	if not failures[path] then
+		table.insert(failureOrder, path)
+	end
+	-- The first failure is the interesting one: a module that failed to load
+	-- cannot then fail init, so a later phase overwriting it would only ever
+	-- report the symptom.
+	failures[path] = failures[path] or phase
 end
 
 --[[ xpcall with a traceback, because a bare pcall message points at the line
@@ -165,6 +223,12 @@ end
 	Seeds the global attributes so a client that joins before any service has
 	written one reads a sane value instead of nil. Only ever fills a blank: the
 	service that owns a field still owns it.
+
+	The round fields matter more here than the older ones. WaveController divides
+	by a phase duration and renders a countdown off FL_WaveEndsAt on its very
+	first frame; nil there is an arithmetic error in a RenderStepped loop, which
+	is a black HUD rather than a warning. Zeroed stamps with the phase set to
+	"Over" read as "there is no round yet", which is exactly true at this point.
 ]]
 local function seedGameAttributes()
 	local defaults: { [string]: any } = {
@@ -175,6 +239,13 @@ local function seedGameAttributes()
 		[Attributes.Game.InfectedAlive] = 0,
 		[Attributes.Game.TankActive] = false,
 		[Attributes.Game.ObjectiveText] = "",
+
+		[Attributes.Game.Mode] = GameModeConfig.DefaultMode,
+		[Attributes.Game.WaveIndex] = 0,
+		[Attributes.Game.WavePhase] = IDLE_WAVE_PHASE,
+		[Attributes.Game.WaveEndsAt] = 0,
+		[Attributes.Game.RoundEndsAt] = 0,
+		[Attributes.Game.Difficulty] = DirectorConfig.DefaultDifficulty,
 	}
 	for name, value in defaults do
 		if Workspace:GetAttribute(name) == nil then
@@ -182,6 +253,96 @@ local function seedGameAttributes()
 		end
 	end
 end
+
+-- ── asset survey ────────────────────────────────────────────────────────────
+-- Run BEFORE any module loads. PlaceholderFactory publishes some of its own
+-- grey-box output into ReplicatedStorage.Assets, so counting after it has run
+-- would report the factory's work back to the user as their own models.
+
+--[[ How many models the user supplied under a category for the first of `names`
+     that exists: a Model is one, a Folder of variants is however many Models it
+     holds. Both storage roots and the name priority order mirror what
+     PlaceholderFactory itself looks for, so the banner and the factory can never
+     disagree about whether a gun is real. ]]
+local function suppliedModels(category: string, names: { string }): number
+	for _, name in names do
+		for _, root in { ReplicatedStorage, ServerStorage } do
+			local assets = root:FindFirstChild(ASSETS_FOLDER)
+			local folder = assets and assets:FindFirstChild(category)
+			local entry = folder and folder:FindFirstChild(name)
+			if entry then
+				if entry:IsA("Model") then
+					return 1
+				end
+				if entry:IsA("Folder") then
+					local count = 0
+					for _, child in entry:GetChildren() do
+						if child:IsA("Model") then
+							count += 1
+						end
+					end
+					if count > 0 then
+						return count
+					end
+				end
+			end
+		end
+	end
+	return 0
+end
+
+--[[ One banner line answering "is this my game or a grey box?". Somebody who
+     has just dropped a folder of models into the place has no other way to find
+     out whether the names matched, and a silhouette test at runtime is a slow,
+     confusing way to learn that a folder is called "Weapon". ]]
+local function surveyAssets(): string
+	local weapons, viewmodels, weaponTotal = 0, 0, 0
+	for weaponId, definition in WeaponConfig.all() do
+		weaponTotal += 1
+		-- modelName first: the asset folder is named for the real gun, and the
+		-- enum id is only a fallback for anyone who named theirs in code style.
+		local names = { definition.modelName, weaponId }
+		if suppliedModels("Weapons", names) > 0 then
+			weapons += 1
+		end
+		if suppliedModels("Viewmodels", names) > 0 then
+			viewmodels += 1
+		end
+	end
+
+	local kinds, kindTotal, variants = 0, 0, 0
+	for kind in InfectedConfig.all() do
+		kindTotal += 1
+		local found = suppliedModels("Infected", { kind })
+		if found > 0 then
+			kinds += 1
+			variants += found
+		end
+	end
+
+	if weapons + viewmodels + kinds == 0 then
+		return "GREY-BOX — nothing under Assets/; every rig, gun and viewmodel is procedural"
+	end
+
+	local label = if weapons == weaponTotal
+			and viewmodels == weaponTotal
+			and kinds == kindTotal
+		then "YOUR MODELS"
+		else "PARTIAL — the rest is grey-boxed"
+	return string.format(
+		"%s · infected %d/%d kinds (%d rigs) · weapons %d/%d · viewmodels %d/%d",
+		label,
+		kinds,
+		kindTotal,
+		variants,
+		weapons,
+		weaponTotal,
+		viewmodels,
+		weaponTotal
+	)
+end
+
+-- ── module loading ──────────────────────────────────────────────────────────
 
 local function resolveModule(path: string): ModuleScript?
 	local instance: Instance? = script
@@ -212,6 +373,7 @@ local function loadModule(path: string): number
 	local moduleScript = resolveModule(path)
 	if not moduleScript then
 		report("module load", path, "no ModuleScript at ServerScriptService.Server." .. path)
+		noteFailure(path, "missing")
 		return 0
 	end
 
@@ -222,6 +384,7 @@ local function loadModule(path: string): number
 
 	if not ok then
 		report("module load", path, result)
+		noteFailure(path, "load")
 		return elapsed
 	end
 
@@ -264,9 +427,21 @@ local function runPhase(phase: string): (number, number)
 		else
 			failed += 1
 			report(phase .. "()", entry.path, err)
+			noteFailure(entry.path, phase)
 		end
 	end
 	return ran, failed
+end
+
+--[[ MatchmakingService, but only when it is actually fit to receive a player.
+     Registered-but-broken is the dangerous case: a service whose start() threw
+     never connected its RequestMode listener, so a player handed to it would sit
+     in a menu whose only button does nothing. That is worse than no menu. ]]
+local function matchmakingService(): any?
+	if failures[MATCHMAKING_PATH] then
+		return nil
+	end
+	return Registry.find("MatchmakingService")
 end
 
 -- ── initial state handshake ─────────────────────────────────────────────────
@@ -278,24 +453,58 @@ local cachedState: { [string]: any }? = nil
 local cachedAt = 0
 local reportedStateFailure = false
 
---[[ Difficulty has no attribute in the contract, so it is read from the Director
-     when that service offers a getter and falls back to the config default. ]]
+--[[
+	The difficulty in force, mirrored into its attribute on the way past.
+
+	DirectorService owns the value and is the only thing that can change it, but
+	it publishes no attribute for it — and Attributes.Game.Difficulty exists in
+	the contract with no writer. This is the one place that already asks, so it
+	is the cheapest honest place to keep the attribute current: a client reading
+	FL_Difficulty then sees what the damage code is using rather than the boot
+	default. Never a loop; the payload cache already bounds how often it runs.
+]]
 local function currentDifficulty(): string
+	local published = Attributes.get(Workspace, Attributes.Game.Difficulty, DirectorConfig.DefaultDifficulty)
+
 	local director = Registry.find("DirectorService")
 	if director and typeof(director.getDifficulty) == "function" then
 		local ok, name = protect(director.getDifficulty, director)
 		if ok and typeof(name) == "string" and name ~= "" then
+			if name ~= published then
+				Workspace:SetAttribute(Attributes.Game.Difficulty, name)
+			end
 			return name
 		end
 	end
-	return DirectorConfig.DefaultDifficulty
+	return published
+end
+
+--[[ The lobby has no attribute: MatchmakingService owns it in memory and pushes
+     LobbyStateChanged when it moves. Somebody who joins between two broadcasts
+     would otherwise get a main menu insisting the server is an empty lobby while
+     a round is running, so the snapshot carries it. Optional and protected — the
+     menu already handles this table being absent. ]]
+local function lobbySnapshot(): { [string]: any }?
+	local matchmaking = matchmakingService()
+	if not matchmaking or typeof(matchmaking.getLobbyState) ~= "function" then
+		return nil
+	end
+	local ok, state = protect(matchmaking.getLobbyState, matchmaking)
+	if ok and typeof(state) == "table" then
+		return state
+	end
+	return nil
 end
 
 --[[
 	Everything a joining client needs to draw a HUD before the first event
-	arrives. Built entirely from attributes rather than by calling into services:
+	arrives. Built from attributes rather than by calling into services:
 	attribute reads cannot yield and cannot throw, which is exactly the property
 	a RemoteFunction callback needs.
+
+	The two *EndsAt fields are absolute server-time stamps, and `serverTime` is
+	sampled in the same breath, so a client can correct for its own clock offset
+	once and then render every countdown locally with no further traffic.
 ]]
 local function buildInitialState(): { [string]: any }
 	local roster = {}
@@ -318,10 +527,16 @@ local function buildInitialState(): { [string]: any }
 		pacingState = Attributes.get(Workspace, Attributes.Game.PacingState, Enums.PacingState.Relax),
 		teamIntensity = Attributes.get(Workspace, Attributes.Game.TeamIntensity, 0),
 		objective = Attributes.get(Workspace, Attributes.Game.ObjectiveText, ""),
+		mode = Attributes.get(Workspace, Attributes.Game.Mode, GameModeConfig.DefaultMode),
+		waveIndex = Attributes.get(Workspace, Attributes.Game.WaveIndex, 0),
+		wavePhase = Attributes.get(Workspace, Attributes.Game.WavePhase, IDLE_WAVE_PHASE),
+		waveEndsAt = Attributes.get(Workspace, Attributes.Game.WaveEndsAt, 0),
+		roundEndsAt = Attributes.get(Workspace, Attributes.Game.RoundEndsAt, 0),
 		difficulty = currentDifficulty(),
 		maxSurvivors = GameConfig.MaxSurvivors,
 		serverTime = Workspace:GetServerTimeNow(),
 		survivors = roster,
+		lobby = lobbySnapshot(),
 	}
 end
 
@@ -351,10 +566,17 @@ Remotes.Function.RequestInitialState.OnServerInvoke = function(_player: Player)
 			pacingState = Enums.PacingState.Relax,
 			teamIntensity = 0,
 			objective = "",
+			mode = GameModeConfig.DefaultMode,
+			waveIndex = 0,
+			wavePhase = IDLE_WAVE_PHASE,
+			waveEndsAt = 0,
+			roundEndsAt = 0,
 			difficulty = DirectorConfig.DefaultDifficulty,
 			maxSurvivors = GameConfig.MaxSurvivors,
 			serverTime = Workspace:GetServerTimeNow(),
 			survivors = {},
+			-- No `lobby`: if the snapshot build threw, the matchmaking getter is
+			-- the likeliest culprit. The menu already draws itself without one.
 		}
 		cachedState = fallback
 		cachedAt = now
@@ -375,6 +597,8 @@ local bootStarted = os.clock()
 Players.CharacterAutoLoads = false
 
 seedGameAttributes()
+
+local assetSummary = surveyAssets()
 
 local collisionStarted = os.clock()
 setupCollisionGroups()
@@ -398,39 +622,109 @@ local startStarted = os.clock()
 local startRan, startFailed = runPhase("start")
 local startMs = (os.clock() - startStarted) * 1000
 
-print(BAR)
-print("  Fading Light — server")
-print(string.format("  collision groups                       %7.1f ms", collisionMs))
-print(string.format("  modules    %2d/%2d loaded                 %7.1f ms", #loaded, #MODULES, loadMs))
-print(string.format("  init       %2d ran, %d failed             %7.1f ms", initRan, initFailed, initMs))
-print(string.format("  start      %2d ran, %d failed             %7.1f ms", startRan, startFailed, startMs))
-print(string.format("  total                                  %7.1f ms", (os.clock() - bootStarted) * 1000))
-if #slowModules > 0 then
-	print("  slow       " .. table.concat(slowModules, ", "))
+-- Decided once, here, so the banner and the join handler can never disagree
+-- about where a player is going to end up.
+local matchmakingReady = matchmakingService() ~= nil
+
+-- The line that explains why nobody spawned. Without matchmaking this bootstrap
+-- is the thing putting players into the world, and that is a fallback rather
+-- than the design, so it says so in capitals.
+local joiningSummary = if matchmakingReady
+	then "players land in the MAIN MENU, MatchmakingService spawns them"
+	else "NO MATCHMAKING — spawning every player straight into the map (degraded)"
+
+--[[ One column layout for the whole banner. Fixed widths so the timings line up
+     under each other: a boot cost that has doubled has to be visible by shape,
+     without reading the numbers. ]]
+local function line(label: string, detail: string, milliseconds: number?)
+	if milliseconds then
+		print(string.format("  %-11s %-42s %7.1f ms", label, detail, milliseconds))
+	else
+		print(string.format("  %-11s %s", label, detail))
+	end
 end
-print("  registry   " .. table.concat(Registry.getRegisteredNames(), ", "))
+
+print(BAR)
+print(string.format("  FADING LIGHT — server up in %.0f ms", (os.clock() - bootStarted) * 1000))
+print(RULE)
+line("collision", string.format("%d groups, %d rules", #COLLISION_GROUPS, #COLLISION_RULES), collisionMs)
+line("modules", string.format("%d of %d loaded", #loaded, #MODULES), loadMs)
+line("init", string.format("%d ran, %d failed", initRan, initFailed), initMs)
+line("start", string.format("%d ran, %d failed", startRan, startFailed), startMs)
+line("assets", assetSummary)
+line("joining", joiningSummary)
+if #slowModules > 0 then
+	line("slow", table.concat(slowModules, ", "))
+end
+line("registry", table.concat(Registry.getRegisteredNames(), ", "))
+
+if #failureOrder > 0 then
+	print(RULE)
+	print(string.format("  %d MODULE(S) BROKEN — tracebacks are above:", #failureOrder))
+	for _, path in failureOrder do
+		print(string.format("    %-34s failed at %s", path, failures[path]))
+	end
+end
 print(BAR)
 
--- ── survivor spawning ───────────────────────────────────────────────────────
+-- ── where a joining player goes ─────────────────────────────────────────────
 
 local handledPlayers: { [Player]: boolean } = {}
+local warnedNoMatchmaking = false
 
+--[[
+	With a main menu in front of the game, spawning a player the moment they
+	connect is wrong: it drops them into whatever wave this server happens to be
+	on, with no say in it and no idea what they joined. MatchmakingService owns
+	that decision — it holds them in the menu, and spawns them itself when they
+	pick a mode, when the lobby countdown fires, or when they take a
+	join-in-progress slot.
+
+	The direct spawn survives as the fallback for exactly one case: matchmaking
+	is not there, or came up broken. A developer whose Round/ folder is mid-
+	rewrite still gets a character and a gun instead of an empty grey screen,
+	which is the difference between one broken system and a broken game.
+]]
 local function onPlayerAdded(player: Player)
 	if handledPlayers[player] then
 		return
 	end
 	handledPlayers[player] = true
 
+	local matchmaking = matchmakingService()
+	if matchmaking then
+		--[[ Optional hook, in the same spirit as onPlayerRemoving below.
+		     MatchmakingService watches PlayerAdded itself, so this only calls a
+		     method if that service chose to declare one and the bootstrap never
+		     forces API onto a neighbour. Either branch ends the same way: no
+		     spawn from here, because the menu is the player's first screen. ]]
+		if typeof(matchmaking.onPlayerAdded) == "function" then
+			local ok, err = protect(matchmaking.onPlayerAdded, matchmaking, player)
+			if not ok then
+				report("MatchmakingService:onPlayerAdded", player.Name, err)
+			end
+		end
+		return
+	end
+
 	local survivors = Registry.find("SurvivorService")
 	if not survivors then
 		warn(
 			string.format(
-				"[Fading Light] SurvivorService is not registered, so %s has no character. "
-					.. "Fix the load failure above.",
+				"[Fading Light] neither MatchmakingService nor SurvivorService is usable, so %s has "
+					.. "no menu and no character. Fix the load failures above.",
 				player.Name
 			)
 		)
 		return
+	end
+
+	if not warnedNoMatchmaking then
+		warnedNoMatchmaking = true
+		warn(
+			"[Fading Light] MatchmakingService is unavailable — every player is being spawned straight "
+				.. "into the map with no menu and no mode choice. This is the degraded path."
+		)
 	end
 
 	local ok, err = protect(survivors.spawnSurvivor, survivors, player)
@@ -442,14 +736,17 @@ end
 local function onPlayerRemoving(player: Player)
 	handledPlayers[player] = nil
 
-	-- Optional hook. SurvivorService owns survivor lifetime and is expected to
-	-- watch PlayerRemoving itself; this only calls a method if that service
-	-- chose to declare one, so the bootstrap never forces API onto a neighbour.
-	local survivors = Registry.find("SurvivorService")
-	if survivors and typeof(survivors.onPlayerRemoving) == "function" then
-		local ok, err = protect(survivors.onPlayerRemoving, survivors, player)
-		if not ok then
-			report("onPlayerRemoving", player.Name, err)
+	-- Optional hooks. Both services own their own player lifetime and are
+	-- expected to watch PlayerRemoving themselves; this only calls a method if
+	-- one of them chose to declare it, so the bootstrap never forces API onto a
+	-- neighbour.
+	for _, name in { "SurvivorService", "MatchmakingService" } do
+		local service = Registry.find(name)
+		if service and typeof(service.onPlayerRemoving) == "function" then
+			local ok, err = protect(service.onPlayerRemoving, service, player)
+			if not ok then
+				report(name .. ":onPlayerRemoving", player.Name, err)
+			end
 		end
 	end
 end
