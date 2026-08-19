@@ -75,6 +75,11 @@ local HIP_FOV = 70
 local SPRINT_FOV_BONUS = 4
 local SPRINT_FOV_SPEED = 6
 
+--[[ How far the view drops when crouched, and how fast it gets there. Fast
+     enough to feel like ducking, slow enough not to read as a teleport. ]]
+local CROUCH_DROP = GameConfig.Survivor.CrouchCameraDrop
+local CROUCH_SPEED = 9
+
 --[[ Peak displacement of a spring kicked with velocity v0 is v0/(w*e), so
      pre-multiplying an impulse by w*e makes the config number the actual peak.
      recoilVertical: 1.15 degrees means the camera rises 1.15 degrees. ]]
@@ -138,6 +143,7 @@ local state = {
 	aimAlpha = 0, -- raw 0-1 ramp
 	aimEased = 0, -- smoothstepped; this is what the FOV and the viewmodel use
 	sprintAlpha = 0,
+	crouchAlpha = 0,
 
 	trauma = 0,
 	roughness = DEFAULT_ROUGHNESS,
@@ -333,6 +339,33 @@ local function stepAim(dt: number)
 	state.aimEased = alpha * alpha * (3 - 2 * alpha)
 end
 
+--[[
+	Drops the view to where a crouched head would be.
+
+	Eased rather than snapped, and driven off the SERVER's attribute rather than
+	off the key — the server decides whether a crouch was granted (it refuses one
+	from a survivor who is down), and a camera that ducked on a refused request
+	would be the view disagreeing with the body.
+
+	CameraOffset rather than moving the camera CFrame: the offset is applied by
+	the humanoid, so it follows the character through everything else this
+	controller does to the frame.
+]]
+local function stepCrouch(dt: number)
+	local wanted = Attributes.get(player, Attributes.Player.IsCrouching, false) and 1 or 0
+	if math.abs(state.crouchAlpha - wanted) < 0.001 then
+		state.crouchAlpha = wanted
+	else
+		state.crouchAlpha += (wanted - state.crouchAlpha) * math.min(dt * CROUCH_SPEED, 1)
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.CameraOffset = Vector3.new(0, -CROUCH_DROP * state.crouchAlpha, 0)
+	end
+end
+
 local function stepSprint(dt: number)
 	if not inputController then
 		inputController = Registry.find("InputController")
@@ -398,6 +431,7 @@ local function update(deltaTime: number)
 
 	stepAim(dt)
 	stepSprint(dt)
+	stepCrouch(dt)
 
 	local kick = recoil:update(dt)
 	local impulseOffset = impulsePosition:update(dt)

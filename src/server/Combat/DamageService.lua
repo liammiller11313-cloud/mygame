@@ -220,6 +220,32 @@ local HEADSHOT_STREAK_STEP = 5
 -- no PlayerRemoving connection and this service needs no lifecycle at all.
 local headshotStreaks: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
 
+--[[
+	Tells a shooter, once, that they are hitting a teammate.
+
+	Throttled per player rather than per shot: an automatic weapon into a
+	teammate's back would otherwise be fifteen identical notices a second, which
+	is not a warning, it is a fault. One message, then silence for long enough
+	that a second incident later still says something.
+
+	The table is weak-keyed so a player who leaves takes their entry with them
+	rather than pinning the Player instance for the life of the server.
+]]
+local lastFriendlyWarnAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
+
+local function warnFriendlyFire(attacker: Player?)
+	if not attacker or not attacker.Parent then
+		return
+	end
+	local now = os.clock()
+	local last = lastFriendlyWarnAt[attacker]
+	if last and now - last < GameConfig.Survivor.FriendlyFireWarnCooldown then
+		return
+	end
+	lastFriendlyWarnAt[attacker] = now
+	Remotes.Event.Notice:FireClient(attacker, { text = "DON'T SHOOT TEAM MATES", tone = "Warn" })
+end
+
 local function pushKillFeed(attacker: Player, definition: any, ctx: DamageContext, isHeadshot: boolean)
 	local payload = {
 		killer = attacker.Name,

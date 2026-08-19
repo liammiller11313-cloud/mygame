@@ -177,6 +177,13 @@ local SLOT_TITLE = {
      panel. ]]
 local HOTBAR_MARKER_HEIGHT = 3
 
+--[[ Where a notice sits, as a fraction of screen height. Just above the middle:
+     high enough not to sit on the crosshair, low enough to be inside the cone a
+     player is actually looking at. ]]
+local NOTICE_Y = 0.42
+local NOTICE_SECONDS = 2.2
+local NOTICE_FADE = 0.5
+
 local HOTBAR_SLOT_WIDTH = LAYOUT.HotbarSlotWidth
 local HOTBAR_SLOT_HEIGHT = LAYOUT.HotbarSlotHeight
 
@@ -217,6 +224,7 @@ local itemSlots: {
 } =
 	{}
 local objective: { frame: Frame, label: TextLabel, bar: Frame, fill: Frame }
+local notice: { label: TextLabel, until_: number }
 local killFeedHolder: Frame
 
 local panels: { [Player]: any } = {}
@@ -1266,6 +1274,20 @@ local function update(dt: number)
 		ammo.mag.TextTransparency = (0.5 + 0.5 * math.sin(now * 5)) * 0.55
 	end
 
+	if notice.until_ > 0 then
+		local remaining = notice.until_ - now
+		if remaining <= 0 then
+			notice.until_ = 0
+			notice.label.Visible = false
+		else
+			--[[ Held solid, then faded over the tail. A warning that starts fading
+			     immediately reads as an accident rather than as the game speaking. ]]
+			local fade = if remaining < NOTICE_FADE then 1 - remaining / NOTICE_FADE else 0
+			notice.label.TextTransparency = fade
+			notice.label.TextStrokeTransparency = 0.4 + fade * 0.6
+		end
+	end
+
 	for index = #killFeed, 1, -1 do
 		local entry = killFeed[index]
 		entry.age += dt
@@ -1506,6 +1528,37 @@ local function buildItems()
 	end
 end
 
+--[[
+	A short, centred warning about something the player just did.
+
+	Deliberately not the objective line, which is about what the ROUND is doing
+	and lives at the top of the screen where nobody looks mid-fight. This sits
+	just above the crosshair — the one place a player is guaranteed to be looking
+	— holds for a couple of seconds, and fades.
+
+	One at a time, replaced rather than queued. A second warning arriving means
+	the first is no longer the most important thing to say.
+]]
+local function buildNotice()
+	local label = newLabel(root, "Notice", FONT.Display, TEXT.Heading, COLOR.Danger)
+	label.AnchorPoint = Vector2.new(0.5, 1)
+	label.Position = UDim2.fromScale(0.5, NOTICE_Y)
+	label.Size = UDim2.new(1, -LAYOUT.ScreenMargin * 2, 0, TEXT.Heading + 6)
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextScaled = true
+	label.TextWrapped = false
+	label.TextStrokeColor3 = COLOR.Background
+	label.TextStrokeTransparency = 0.4
+	label.Visible = false
+
+	local bounds = Instance.new("UITextSizeConstraint")
+	bounds.MaxTextSize = TEXT.Heading
+	bounds.MinTextSize = TEXT.Body
+	bounds.Parent = label
+
+	notice = { label = label, until_ = 0 }
+end
+
 local function buildObjective()
 	local frame = newFrame(root, "Objective", COLOR.Panel, 1)
 	frame.AnchorPoint = Vector2.new(0.5, 0)
@@ -1578,6 +1631,7 @@ local function build()
 
 	buildAmmo()
 	buildItems()
+	buildNotice()
 	buildObjective()
 end
 
@@ -1732,6 +1786,22 @@ function HudController:start()
 	setObjective(Attributes.get(Workspace, GA.ObjectiveText, ""), nil)
 
 	trove:connect(Remotes.Event.KillFeed.OnClientEvent, pushKill)
+
+	trove:connect(Remotes.Event.Notice.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local text = tostring(payload.text or "")
+		if text == "" then
+			return
+		end
+		notice.label.Text = string.upper(text)
+		notice.label.TextColor3 = if tostring(payload.tone) == "Good" then COLOR.Accent else COLOR.Danger
+		notice.label.TextTransparency = 0
+		notice.label.TextStrokeTransparency = 0.4
+		notice.label.Visible = true
+		notice.until_ = os.clock() + NOTICE_SECONDS
+	end)
 
 	--[[
 		The predicted half of the ammo counter.

@@ -30,6 +30,7 @@ Attributes.Player = table.freeze({
 	PinnedBy = "FL_PinnedBy", -- string, Enums.Infected or "" when free
 	FlowDistance = "FL_Flow", -- number, studs along the level spline
 	IsReady = "FL_Ready", -- boolean, lobby readiness
+	IsCrouching = "FL_IsCrouching", -- boolean; the server owns it, the client asks
 })
 
 -- Written on the Player instance, read by the ammo counter.

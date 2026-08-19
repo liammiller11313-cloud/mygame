@@ -43,6 +43,11 @@ local EVENTS: { string } = {
 	"BeginInteract", -- (targetRef: Instance)           revive, pickup, door, rescue
 	"CancelInteract", -- ()
 	"SetAimState", -- (isAiming: boolean)
+	--[[ Crouch has to be told rather than inferred. Sprinting is read off actual
+	     velocity — a survivor outrunning their walk speed is sprinting — but
+	     nothing about a crouched body is visible in its motion, so the client
+	     asks and the server decides. ]]
+	"SetCrouchState", -- (isCrouching: boolean)
 	"PingLocation", -- {position: Vector3, kind: string}
 
 	-- ── Server → Client: combat feedback ────────────────────────────────────
@@ -65,6 +70,10 @@ local EVENTS: { string } = {
 	"ObjectiveChanged", -- {text: string, progress: number?}
 	"KillFeed", -- {killer: string, victim: string, weaponId: string, headshot: boolean}
 	"StatsUpdated", -- {player, stats} — end-of-round tally
+	--[[ A short warning shown to ONE player, centred, in their face. For things
+	     the game has to say about what they just did rather than about what is
+	     happening — the friendly-fire notice is the first. ]]
+	"Notice", -- {text: string, tone: string?}  tone: "Warn" (default) | "Good"
 
 	-- ── Round structure & matchmaking ───────────────────────────────────────
 	"WaveChanged", -- {index, name, announcement, isBreather, endsAt}

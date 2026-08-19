@@ -139,8 +139,24 @@ local BINDINGS: { Binding } = {
 	{ action = Action.Sprint, keys = { Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3 } },
 	-- Passed through: Roblox's own control script owns the jump itself, and
 	-- sinking Space would break jumping to fix nothing. We only want to know.
-	{ action = Action.Jump, keys = { Enum.KeyCode.Space, Enum.KeyCode.ButtonA }, pass = true },
-	{ action = Action.Crouch, keys = { Enum.KeyCode.LeftControl, Enum.KeyCode.C, Enum.KeyCode.ButtonB } },
+	--[[ Passed through: Roblox's own control script owns the jump itself, and
+	     sinking Space would break jumping to fix nothing. We only want to know.
+
+	     It still earns a touch button. Roblox draws its own jump button on a
+	     phone, but in the bottom-RIGHT corner — underneath the fire button this
+	     pad puts there — so the two fight for the same thumb. Ours sits in the
+	     pad where it belongs, and TouchController hides Roblox's. ]]
+	{
+		action = Action.Jump,
+		keys = { Enum.KeyCode.Space, Enum.KeyCode.ButtonA },
+		pass = true,
+		touch = "JUMP",
+	},
+	{
+		action = Action.Crouch,
+		keys = { Enum.KeyCode.LeftControl, Enum.KeyCode.C, Enum.KeyCode.ButtonB },
+		touch = "CROUCH",
+	},
 	{
 		action = Action.Interact,
 		keys = { Enum.KeyCode.E, Enum.KeyCode.ButtonY },
@@ -257,6 +273,15 @@ local function setDown(action: string, isDown: boolean)
 		return
 	end
 	down[action] = isDown
+
+	--[[ Crouch is a HELD state, not an event, so it rides the down/up edge
+	     rather than forward(). The server owns whether it is granted; this only
+	     reports that the button is down, and reports the release too — including
+	     the release setEnabled() synthesises when a menu opens, which is what
+	     stops a player being stuck crouched behind the scoreboard. ]]
+	if action == Action.Crouch then
+		Remotes.Event.SetCrouchState:FireServer(isDown)
+	end
 
 	local perAction = if isDown then beganSignals[action] else endedSignals[action]
 	if perAction then
@@ -432,6 +457,25 @@ local function forward(action: string)
 		lastSelect.slot = binding.slot
 		lastSelect.at = os.clock()
 		Remotes.Event.SwitchSlot:FireServer(binding.slot)
+		return
+	end
+
+	--[[
+		Jump and crouch, forwarded here because a touch button cannot reach the
+		control script the way a key can.
+
+		On a keyboard, Space is handled by Roblox's own controls and this binding
+		only observes it — which is why the row is marked `pass`. A finger on an
+		on-screen button has no such path, so the jump has to be performed. Doing
+		it for every scheme is harmless: pressing Space raises this too, and
+		setting Jump on a humanoid that is already jumping is a no-op.
+	]]
+	if action == Action.Jump then
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Jump = true
+		end
 		return
 	end
 

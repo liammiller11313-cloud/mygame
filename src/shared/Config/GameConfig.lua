@@ -100,6 +100,14 @@ GameConfig.Survivor = table.freeze({
 	LimpWalkSpeed = 11,
 	NormalWalkSpeed = 16,
 	SprintSpeed = 22,
+
+	--[[ Crouching. A real slowdown rather than a token one — the trade is that
+	     you are a smaller silhouette and your shots settle, and neither is worth
+	     anything if you can still cross a street at walking pace. Roblox has no
+	     native crouch, so this is the whole of it: speed, and a camera that drops
+	     to where the head now is. ]]
+	CrouchSpeed = 8,
+	CrouchCameraDrop = 1.6, -- studs the view lowers by
 	SprintStaminaDrain = 26, -- per second
 	SprintStaminaRegen = 18, -- per second
 	MaxStamina = 100,
@@ -122,6 +130,27 @@ GameConfig.Survivor = table.freeze({
 	IncapHealth = 300,
 	IncapBleedPerSecond = 2.0,
 	IncapWeapon = Enums.Weapon.M1911A1,
+
+	--[[
+		Whether a survivor can hurt another survivor at all.
+
+		Off. Left 4 Dead's friendly fire is a real tension and the damage pipeline
+		still knows how to apply it — DirectorConfig carries a per-difficulty
+		multiplier and the melee case is separately zeroed — but a public Roblox
+		server is not four friends on voice chat, and a teammate who can end your
+		round by holding a trigger is a griefing tool before it is a mechanic.
+
+		Blocked rather than merely reduced: at any non-zero multiplier the answer
+		to "can you kill me" is yes given enough bullets, and the whole point is
+		that it is no. The shooter is told, once, rather than being left to wonder
+		why nothing happened.
+	]]
+	FriendlyFireEnabled = false,
+
+	--[[ Seconds between friendly-fire warnings for one shooter. Long enough that
+	     emptying a magazine into a teammate produces one message rather than
+	     thirty, short enough that a second incident later still says something. ]]
+	FriendlyFireWarnCooldown = 4,
 	ReviveTime = 5.0,
 	ReviveHealth = 30, -- temp health you stand up with
 	MaxIncapsBeforeDeath = 2, -- the third down kills you

@@ -167,6 +167,7 @@ function SurvivorService:_ensureRecord(player: Player)
 		adrenalineUntil = 0,
 		stamina = S.MaxStamina,
 		sprintLocked = false,
+		crouching = false,
 		ledgeRemaining = 0,
 
 		pinnedBy = nil,
@@ -412,6 +413,14 @@ function SurvivorService:_computeWalkSpeed(record): number
 	-- intended way back over the threshold, not an exception carved out here.
 	if not hurt and not record.sprintLocked and record.stamina > 0 then
 		speed = math.max(speed, S.SprintSpeed)
+	end
+
+	--[[ Crouch wins over sprint. You cannot sprint while crouched — that is the
+	     trade the whole thing is built on — so this clamps rather than scales,
+	     and it happens before adrenaline so a stimmed survivor still crouches
+	     slowly. ]]
+	if record.crouching then
+		speed = math.min(speed, S.CrouchSpeed)
 	end
 
 	if self:_hasAdrenaline(record) then
@@ -1638,6 +1647,22 @@ function SurvivorService:init()
 end
 
 function SurvivorService:start()
+	--[[ The client asks; the server decides and publishes. Nothing here trusts
+	     the request beyond "this player pressed crouch" — the speed clamp and the
+	     attribute are both computed on this side. ]]
+	serviceTrove:connect(Remotes.Event.SetCrouchState.OnServerEvent, function(player, wanted)
+		local record = records[player]
+		if not record then
+			return
+		end
+		local crouching = wanted == true and self:_isUpright(record)
+		if record.crouching == crouching then
+			return
+		end
+		record.crouching = crouching
+		Attributes.set(player, Attributes.Player.IsCrouching, crouching)
+	end)
+
 	serviceTrove:connect(Remotes.Event.BeginInteract.OnServerEvent, function(player, target)
 		-- Other systems (doors, level triggers) listen on this remote too; an
 		-- unrecognised target is silently not ours.

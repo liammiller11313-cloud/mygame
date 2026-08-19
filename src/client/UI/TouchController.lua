@@ -76,9 +76,16 @@ local PAD_LAYOUT: { [string]: { x: number, y: number, size: number } } = {
 	Melee = { x = 22, y = 94, size = BUTTON },
 	Shove = { x = 94, y = 94, size = BUTTON },
 	Interact = { x = 166, y = 94, size = BUTTON },
+
+	--[[ A third column, further from the corner than the rest. Jump and crouch
+	     are movement rather than combat: wanted often enough to earn a button,
+	     rarely enough that they should not sit where a thumb rests. Putting them
+	     at the far edge of the arc is also what keeps them off the trigger. ]]
+	Jump = { x = 238, y = 0, size = BUTTON },
+	Crouch = { x = 238, y = 94, size = BUTTON },
 }
 
-local PAD_WIDTH = 230
+local PAD_WIDTH = 302
 local PAD_HEIGHT = 158
 
 --[[ The pad clears the ammo counter, which sits above the hotbar in the same
