@@ -457,6 +457,12 @@ procedural. A rig that shipped its own walk keeps it — it knows its own
 proportions better than a generic package does — and `AnimationConfig` only fills
 the roles left over.
 
+`AnimationConfig` is keyed **by rig**, not by kind: R6 and R15 each have a
+complete set, so every body in the roster gets real clips and the procedural
+poser is now the fallback for a rig that is neither. A per-kind override exists
+for the day one kind should move differently, and is still checked against the
+rig before it is used.
+
 The engine resolves a joint as `C0 * Transform * C1:Inverse()`, which is what
 lets the brain's windup pose and a walk cycle coexist without either knowing
 about the other.

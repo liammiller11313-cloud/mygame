@@ -168,19 +168,17 @@ function InfectedAnimator.new(model: Model, kind: string)
 	     moves nothing — and because InfectedPoseController stands down for any
 	     body with tracks playing, the result is a rig animated by neither. That
 	     is a T-pose that looks exactly like the bug this all exists to fix. ]]
-	local set = AnimationConfig.forInfected(kind)
 	local rig = AnimationConfig.rigOf(model)
+	local set = AnimationConfig.forInfected(kind, rig)
 
-	if set.rig ~= rig then
+	if not set then
 		warnOnce(
-			string.format("rigmismatch:%s", kind),
+			string.format("norig:%s", kind),
 			string.format(
-				"%s is an %s rig and the configured animations are %s — they address joint names it "
-					.. "does not have, so they are skipped. The client's procedural poser will drive it "
-					.. "instead. Add an %s entry to AnimationConfig.Infected to give it real clips.",
+				"%s is an %s rig and AnimationConfig has no set that addresses those joint names. "
+					.. "The client's procedural poser will drive it instead. Add an entry under "
+					.. "AnimationConfig.ByRig to give it real clips.",
 				kind,
-				rig,
-				set.rig,
 				rig
 			)
 		)
@@ -302,6 +300,13 @@ function InfectedAnimator.playOnce(self, role: string, holdFor: number?)
 	end
 	track:Play(0.08)
 	self.oneShotUntil = os.clock() + (holdFor or track.Length)
+end
+
+--[[ True when a role has a real clip behind it. InfectedBrain asks about
+     "attack" before posing the arms by hand: its C0 telegraph and a real swing
+     both rotate the same shoulders, and doing both rotates them twice. ]]
+function InfectedAnimator.has(self, role: string): boolean
+	return self.tracks[role] ~= nil
 end
 
 function InfectedAnimator.stopAll(self)

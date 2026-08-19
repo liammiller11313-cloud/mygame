@@ -798,11 +798,25 @@ function InfectedBrain:_cancelSwing()
 	self:_setAutoRotate(true)
 end
 
---[[ Rears the arms back by rotating the shoulder joints. Two property writes at
-     the start of a windup and two at the end — no per-frame animation cost, and
-     Motor6D.C0 replicates, so every client sees the tell. ]]
+--[[
+	Rears the arms back by rotating the shoulder joints.
+
+	Two property writes at the start of a windup and two at the end — no
+	per-frame animation cost, and Motor6D.C0 replicates, so every client sees the
+	tell.
+
+	Skipped entirely when the rig has a real attack clip. Both rotate the same
+	shoulders — the clip through Transform, this through C0 — and the engine
+	composes them, so doing both rears the arms back twice and the swing starts
+	from somewhere behind the body. The clip is the better telegraph where one
+	exists; this is what stands in when none does.
+]]
 function InfectedBrain:_setSwingPose(on: boolean)
 	if self.posed == on then
+		return
+	end
+	local animator = self.animator
+	if animator and typeof(animator.has) == "function" and animator:has("attack") then
 		return
 	end
 
