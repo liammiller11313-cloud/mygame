@@ -1419,6 +1419,29 @@ local function buildGun(definition): Model?
 		muzzle.Parent = host
 	end
 
+	--[[
+		Where the hand goes.
+
+		Every shape in GUNS is authored around a grip at the origin with the
+		barrel down -Z, which is the same convention a Roblox Tool uses — so the
+		grip point IS the model origin, and this is the only place in the codebase
+		that knows that for certain. Stamping it here means CarryVisualService can
+		hold any weapon by lining one attachment up with a hand, without a table
+		of per-class offsets that would have to be re-tuned every time a shape
+		changed.
+
+		`ensureGrip` fills this in for a SUPPLIED model, which has no such
+		guarantee. Doing it here as well is not redundant: there the position has
+		to be guessed from the geometry, and here it is known.
+	]]
+	local gripHost = model:FindFirstChild("Handle")
+	if gripHost and gripHost:IsA("BasePart") then
+		local grip = Instance.new("Attachment")
+		grip.Name = "Grip"
+		grip.CFrame = gripHost.CFrame:Inverse()
+		grip.Parent = gripHost
+	end
+
 	return model
 end
 
@@ -1480,6 +1503,49 @@ local BARREL_NAMES = table.freeze({
 	named barrel part when there is one and against the whole model when there is
 	not.
 ]]
+--[[
+	Where a survivor's hand goes on this weapon.
+
+	CarryVisualService lines this attachment up with the right hand, so a model
+	without one cannot be held. Three sources, in descending order of how much
+	they actually know:
+
+	  1. An attachment the model already carries. `Grip` is ours; the other three
+	     are what a Roblox Tool and the free models built around one ship with,
+	     and copying the artist's point beats inventing one every time.
+	  2. Nothing — because buildGun already stamped it at the model origin, which
+	     for a shape we authored is exactly right.
+	  3. A guess, for a supplied model that brought neither: the BOTTOM-REAR of
+	     the handle's own box. That is where a hand is on a gun, and it is a far
+	     better guess than the handle's centre — which on a model whose "Handle"
+	     is the whole receiver puts the grip in the middle of the weapon.
+]]
+local function ensureGrip(model: Model, handle: BasePart): Attachment
+	local existing = findAttachmentNamed(model, "Grip")
+	if existing then
+		return existing
+	end
+
+	for _, alias in { "GripAttachment", "RightGripAttachment", "HandGrip" } do
+		local found = findAttachmentNamed(model, alias)
+		if found and found.Parent and found.Parent:IsA("BasePart") then
+			local copy = Instance.new("Attachment")
+			copy.Name = "Grip"
+			copy.CFrame = found.CFrame
+			copy.Parent = found.Parent
+			return copy
+		end
+	end
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "Grip"
+	--[[ Half the handle's height down and a third of its length back. Local to
+	     the handle, so it survives the model being scaled or re-posed. ]]
+	attachment.CFrame = CFrame.new(0, -handle.Size.Y * 0.5, handle.Size.Z * 0.3)
+	attachment.Parent = handle
+	return attachment
+end
+
 local function ensureMuzzle(model: Model, handle: BasePart): Attachment
 	local existing = findAttachmentNamed(model, "Muzzle")
 	if existing then
@@ -1553,6 +1619,10 @@ local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): 
 	end
 
 	ensureMuzzle(model, handle)
+	--[[ On the viewmodel too. It costs one attachment and it means the two models
+	     agree about where the weapon is held, which is what a future third-person
+	     camera would need to line them up. ]]
+	ensureGrip(model, handle)
 	model.Name = weaponId
 	return model
 end

@@ -539,6 +539,32 @@ Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes 
 | `UI/TouchController.lua` | `"TouchController"` | the on-screen pad, only under the touch scheme |
 | `UI/SettingsController.lua` | `"SettingsController"` | every player preference, and the panel that edits them |
 
+### What a survivor is carrying, on the survivor
+
+`Survivors/CarryVisualService.lua` mirrors two slots onto the character model,
+server-side, so every client sees the same thing at the same moment:
+
+| Mount | Shows | Anchor |
+|---|---|---|
+| `Back` | the Health slot, unless it is the selected slot | `UpperTorso` / `Torso` |
+| `Hands` | the selected weapon, or a selected medkit | `RightHand` / `Right Arm` |
+
+A weapon is held by lining its `Grip` attachment up with the hand rather than by
+a table of per-weapon offsets. `PlaceholderFactory` stamps that attachment on
+every world model and every viewmodel — at the model origin for a shape it
+authored, guessed from the handle's own box for one it was given — so nothing
+downstream has to know what a particular gun looks like.
+
+This is not only decoration. `ImpactController` resolves another player's muzzle
+flash by searching their character for an attachment named `Muzzle`, falling back
+to a guessed point in front of their face. Every world weapon model carries one,
+so a gun in somebody's hands moves their muzzle flash to its barrel with no
+change on the client at all.
+
+`ViewmodelController` hides the LOCAL player's own copy, keyed to whether the
+camera is third-person rather than to whether the viewmodel is up — a downed
+survivor's viewmodel goes away while their camera stays at their head.
+
 ### Settings
 
 `Shared/Config/SettingsConfig.lua` declares WHAT the options are — key, kind,

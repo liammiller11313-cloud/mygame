@@ -1575,6 +1575,60 @@ local function refreshHidden()
 	setHidden(HIDDEN_STATES[Attributes.get(player, PA.State, STATE.Spectating)] == true)
 end
 
+--[[
+	The world gun on the LOCAL player's own character.
+
+	CarryVisualService welds one to every survivor's hand so that teammates can
+	see what each other are holding. That includes this player, whose own copy
+	sits a couple of studs in front of a first-person camera — a second rifle,
+	floating through the viewmodel.
+
+	Roblox's own TransparencyController already fades the local character to
+	nothing at first-person range and our model is a descendant of it, so this is
+	belt and braces. It is worth the lines anyway: it is not documented behaviour
+	that a welded Model under the character is cached by that controller, and the
+	failure mode if it is not is the single most obvious visual bug this feature
+	could have.
+
+	Note this is NOT the same question as whether the viewmodel is hidden. A
+	downed survivor's viewmodel goes away and their camera stays at their head,
+	so keying off that would put their own pistol in their face for exactly as
+	long as they were on the floor.
+
+	LocalTransparencyModifier rather than Transparency, because Transparency
+	replicates and would hide the gun for everybody else too.
+]]
+local CARRIED_PREFIX = "FL_Carried"
+
+--[[
+	Whether this player can currently see their own body.
+
+	Exactly one situation puts them there: dead or spectating, where
+	CameraController drops to Classic AND unpins the zoom so they can pull back
+	and watch the team. Read off the camera rather than off a second copy of that
+	state list — a menu opening also drops CameraMode to Classic, and the zoom is
+	the half of the pair that only moves when the body does.
+]]
+local function cameraIsThirdPerson(): boolean
+	return player.CameraMode == Enum.CameraMode.Classic and player.CameraMaxZoomDistance > 1
+end
+
+local function hideOwnWorldWeapon(hidden: boolean)
+	local character = player.Character
+	if not character then
+		return
+	end
+	for _, child in character:GetChildren() do
+		if child:IsA("Model") and string.sub(child.Name, 1, #CARRIED_PREFIX) == CARRIED_PREFIX then
+			for _, part in child:GetDescendants() do
+				if part:IsA("BasePart") then
+					part.LocalTransparencyModifier = if hidden then 1 else 0
+				end
+			end
+		end
+	end
+end
+
 local function update(deltaTime: number)
 	local camera = Workspace.CurrentCamera
 	if not camera then
@@ -1594,6 +1648,11 @@ local function update(deltaTime: number)
 	end
 	stepShells(now)
 	stepMagazine(now)
+
+	--[[ Every frame, because Roblox's TransparencyController writes the same
+	     property on the same parts and whoever writes last wins. Two or three
+	     parts on one model; the cost is noise next to the pose below. ]]
+	hideOwnWorldWeapon(not cameraIsThirdPerson())
 
 	if not model or current.hidden then
 		return

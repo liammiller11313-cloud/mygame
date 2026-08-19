@@ -2,24 +2,38 @@
 --[[
 	CarryVisualService — what a survivor is carrying, on the survivor.
 
-	In Left 4 Dead the single most useful thing you know about a teammate is
-	whether they still have a medkit, and you learn it by LOOKING at them. There
-	is no menu, no roster panel, no callout — the kit is on their back, and a
-	glance down a corridor tells you whether the person in front of you can save
-	you. That read is worth more than any HUD element could be, because it comes
-	for free while you are already looking where you were going to look.
+	In Left 4 Dead the single most useful thing you know about a teammate is what
+	they are holding, and you learn it by LOOKING at them. There is no menu, no
+	roster panel, no callout — the kit is on their back and the shotgun is in
+	their hands, and a glance down a corridor tells you whether the person in
+	front of you can save you and what they can do about the horde behind you.
+	That read is worth more than any HUD element could be, because it comes for
+	free while you are already looking where you were going to look.
 
-	So this service does one thing: it mirrors the Health slot onto the character.
-	Take a kit, it appears between your shoulder blades. Spend it, drop it, or go
-	down and lose it, and it is gone — for everybody, at the same moment, because
-	the model lives on the server's copy of the character and replicates like any
-	other part of it.
+	So this service mirrors two slots onto the character:
+
+	  BACK    the Health slot. Take a kit, it appears between your shoulder
+	          blades. Spend it, drop it, or go down and lose it, and it is gone.
+	  HANDS   whichever weapon is selected. Swap to your pistol and the rifle is
+	          replaced by it, which is the only honest way to show a swap without
+	          inventing a sling.
+
+	Both live on the SERVER'S copy of the character, so they replicate like any
+	other part of it: everybody sees the same thing at the same moment, including
+	a dead player watching from the spectate camera.
+
+	── WHY THE HANDS MOUNT IS WORTH THE PARTS ───────────────────────────────────
+	It is not only decoration. ImpactController resolves another player's muzzle
+	flash by searching their character for an attachment named "Muzzle" and falls
+	back to guessing a point in front of their face when it finds none. Every
+	world weapon model carries one, so the moment a gun is in somebody's hands
+	their muzzle flash moves to its barrel with no change on the client at all.
 
 	── WHY THE MODEL IS WELDED, NOT PARENTED ────────────────────────────────────
 	A prop parented into a character and left alone falls off it: the parts are
 	simulated, the character moves, and physics resolves the disagreement by
 	putting the kit on the floor twenty studs back. Every part is welded to one
-	root, that root is welded to the torso, and everything is made massless so a
+	root, that root is welded to the limb, and everything is made massless so a
 	kit cannot change how a survivor moves. Massless matters more than it sounds:
 	a supplied prop built at map scale can weigh more than the person wearing it.
 
@@ -27,29 +41,89 @@
 	The medkits are props built to be read from three studs away on the floor, not
 	to be worn. Scaling by a fixed factor works for a kit that happens to be about
 	the right size and turns a large one into a wardrobe, so anything over
-	MapConfig.Medkits.CarryMaxSize is scaled to fit that instead.
+	MapConfig.Medkits.CarryMaxSize is scaled to fit that instead. Weapons need
+	none of this: PlaceholderFactory has already sized and welded them.
+
+	── THE GRIP ─────────────────────────────────────────────────────────────────
+	A weapon model is held by lining its "Grip" attachment up with the hand rather
+	than by a table of per-weapon offsets. PlaceholderFactory stamps that
+	attachment — at the model origin for a shape it authored, guessed from the
+	handle's own box for one it was given — so this file never has to know what a
+	particular gun looks like. See `ensureGrip` there.
+
+	── KNOWN GAP ────────────────────────────────────────────────────────────────
+	The arm is not posed. Survivors run Roblox's default animations, which swing
+	the arms, and a welded gun swings with them; a real hold pose is a tool
+	animation overlay and is the natural next step. The gun is welded a little
+	forward of the hand so that at rest it reads as low-ready rather than as
+	pointing at the floor, which is most of the difference.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local RigUtil = require(Shared.Util.RigUtil)
 local Trove = require(Shared.Util.Trove)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local KIT = MapConfig.Medkits
+local LA = Attributes.Loadout
 
 local CarryVisualService = {}
 
 local serviceTrove = Trove.new()
 
--- The prop currently on each survivor's back, and what it is showing.
-local worn: { [Player]: { model: Model, itemId: string } } = {}
+--[[ The two places something can hang. Named rather than indexed because both
+     the model's name and the bookkeeping key are built from this, and a mount
+     appearing twice on one rig is the failure this prevents. ]]
+local MOUNT = table.freeze({
+	Back = "Back",
+	Hands = "Hands",
+})
 
 local CARRY_NAME = "FL_Carried"
+
+--[[
+	Where a weapon sits relative to the hand.
+
+	Forward of it and turned very slightly outward, so a rifle at rest reads as
+	low-ready rather than as buried in the leg it would otherwise intersect.
+	Rotation is deliberately near-identity: the limb already faces the way the
+	survivor does, and every world model is authored barrel-down-Z, so a gripped
+	weapon points where its owner is looking without any correction at all.
+
+	These are art numbers, not balance numbers, which is why they are here rather
+	than in a Config — the same split ViewmodelController's pose table makes.
+]]
+local HAND_OFFSET = CFrame.new(0, 0, -0.25) * CFrame.Angles(0, math.rad(-4), 0)
+
+--[[ Fallback grip height when a limb carries no RightGripAttachment, as a
+     fraction of its own length. R6 arms and R15 hands both put the hand at the
+     far end of the part, so "most of the way down it" is right for both. ]]
+local HAND_DROP = 0.5
+
+--[[ The slots whose contents are shown in the hands, and how. Anything not in
+     here is carried invisibly, which is the correct answer for pills — a bottle
+     in a fist is not a read anybody needs at twenty studs. ]]
+local HAND_SLOTS: { [string]: string } = {
+	[Enums.Slot.Primary] = "Weapon",
+	[Enums.Slot.Secondary] = "Weapon",
+	--[[ A selected kit comes OFF the back and INTO the hands. That swap is the
+	     single clearest tell in Left 4 Dead that somebody is about to heal, and
+	     it costs nothing here: it is the same model, mounted somewhere else. ]]
+	[Enums.Slot.Health] = "Medkit",
+}
+
+--[[ What is on each survivor right now, per mount. The `key` is what is being
+     shown rather than the model itself, so a refresh that would rebuild the same
+     thing can be skipped — and `refresh` is called for every slot change. ]]
+type Worn = { model: Model, key: string }
+local worn: { [Player]: { [string]: Worn } } = {}
 
 --[[ Anything that would make the prop behave like a scripted object rather than
      like a decal you can see from across a room. Mirrors PlaceholderFactory's
@@ -65,6 +139,30 @@ local function carryAnchor(character: Model): BasePart?
 	return character:FindFirstChild("UpperTorso") :: BasePart?
 		or character:FindFirstChild("Torso") :: BasePart?
 		or RigUtil.getRoot(character)
+end
+
+--[[ The limb a weapon is held in. R15 ends the arm in RightHand and R6 has the
+     whole thing as "Right Arm"; a rig with neither cannot hold anything, and
+     returning nil is how that stays a missing gun rather than a gun welded to
+     somebody's head. ]]
+local function handAnchor(character: Model): BasePart?
+	return character:FindFirstChild("RightHand") :: BasePart?
+		or character:FindFirstChild("Right Arm") :: BasePart?
+end
+
+--[[
+	Where the hand actually is, in world space.
+
+	Roblox rigs carry a RightGripAttachment on the limb for exactly this and it
+	is the authored answer, so it wins. Without one the hand is assumed to be at
+	the far end of the part, which is true of both rig types.
+]]
+local function handGrip(limb: BasePart): CFrame
+	local attachment = limb:FindFirstChild("RightGripAttachment")
+	if attachment and attachment:IsA("Attachment") then
+		return limb.CFrame * attachment.CFrame * HAND_OFFSET
+	end
+	return limb.CFrame * CFrame.new(0, -limb.Size.Y * HAND_DROP, 0) * HAND_OFFSET
 end
 
 local function strip(model: Model)
@@ -131,52 +229,45 @@ local function consolidate(model: Model): BasePart?
 	return root
 end
 
-local function removeWorn(player: Player)
+local function mountName(mount: string): string
+	return CARRY_NAME .. mount
+end
+
+local function removeMount(player: Player, mount: string)
 	local entry = worn[player]
-	if entry then
-		if entry.model then
-			entry.model:Destroy()
+	local current = entry and entry[mount]
+	if current then
+		if current.model then
+			current.model:Destroy()
 		end
-		worn[player] = nil
+		entry[mount] = nil
 	end
 
 	--[[ Also sweep the character itself. A respawn hands us a NEW character
 	     model, so the table can be empty while an old prop is still parented to
-	     a rig somewhere — and a duplicate kit on one back reads as a bug even
-	     though it is only a leak. ]]
+	     a rig somewhere — and two kits on one back reads as a bug even though it
+	     is only a leak. ]]
 	local character = player.Character
 	if character then
 		for _, child in character:GetChildren() do
-			if child.Name == CARRY_NAME then
+			if child.Name == mountName(mount) then
 				child:Destroy()
 			end
 		end
 	end
 end
 
---[[ Builds the prop and attaches it. Returns false when there is nothing
-     sensible to show, which is not an error: a Health slot holding a
-     defibrillator has no supplied model, and no prop beats a wrong one. ]]
-local function attach(player: Player, itemId: string): boolean
-	local character = player.Character
-	if not character or not character.Parent then
-		return false
+local function removeAll(player: Player)
+	for _, mount in MOUNT do
+		removeMount(player, mount)
 	end
-	local anchor = carryAnchor(character)
-	if not anchor then
-		return false
-	end
+	worn[player] = nil
+end
 
-	local medkits = Registry.find("MedkitService")
-	local template = medkits and medkits:getCarryTemplate()
-	if not template then
-		return false
-	end
-
-	local model = template:Clone()
-	model.Name = CARRY_NAME
+--[[ Makes a prop safe to wear: no collisions, no ray hits, no weight, and no
+     scripts. Called on everything that goes onto a survivor whatever built it. ]]
+local function tame(model: Model)
 	strip(model)
-
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Anchored = false
@@ -186,6 +277,24 @@ local function attach(player: Player, itemId: string): boolean
 			part.Massless = true
 		end
 	end
+end
+
+--[[
+	The medkit prop, from whichever spot in the map still has its template.
+
+	Nil is a normal answer and not an error: a map with no kits placed, or a
+	Health slot holding a defibrillator, has no model to show, and no prop beats
+	a wrong one.
+]]
+local function buildKitModel(): Model?
+	local medkits = Registry.find("MedkitService")
+	local template = medkits and medkits:getCarryTemplate()
+	if not template then
+		return nil
+	end
+
+	local model = template:Clone()
+	tame(model)
 
 	local size = longestSide(model)
 	local factor = KIT.CarryScale
@@ -193,50 +302,193 @@ local function attach(player: Player, itemId: string): boolean
 		factor = KIT.CarryMaxSize / math.max(size, 0.01)
 	end
 	scaleModel(model, factor)
+	return model
+end
 
+--[[ The world weapon model. PlaceholderFactory answers with the user's model or
+     a grey-box and never with nothing for a real weapon id, so a nil here means
+     the id was not a weapon — which is what happens the frame a slot is cleared. ]]
+local function buildWeaponModel(itemId: string): Model?
+	if not WeaponConfig.get(itemId) then
+		return nil
+	end
+	local factory = Registry.find("PlaceholderFactory")
+	if not factory then
+		return nil
+	end
+	local model = factory:buildWeaponModel(itemId)
+	if not model then
+		return nil
+	end
+	tame(model)
+	return model
+end
+
+--[[
+	Puts `model` on the character and welds it there.
+
+	The pose is applied BEFORE parenting, so the prop never exists for a frame at
+	the world origin with a physics step in between — which is visible as a flash
+	of gun at the middle of the map every time somebody swaps weapons.
+]]
+local function place(character: Model, anchor: BasePart, model: Model, pose: CFrame, mount: string): boolean
 	local root = consolidate(model)
 	if not root then
 		model:Destroy()
 		return false
 	end
 
-	-- Placed before parenting, so the prop never exists for a frame at the origin
-	-- with a physics step in between.
-	model:PivotTo(anchor.CFrame * KIT.CarryOffset)
-	model.Parent = character
+	model.Name = mountName(mount)
+	model:PivotTo(pose)
 
+	--[[ Welded BEFORE parenting, so the prop is never a loose unanchored body in
+	     the workspace for even one physics step. Posing it first and parenting it
+	     last means the frame it appears is the frame it is already in place and
+	     already attached. ]]
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0 = anchor
 	weld.Part1 = root
 	weld.Parent = root
 
-	worn[player] = { model = model, itemId = itemId }
+	model.Parent = character
 	return true
 end
 
---[[ Brings the prop in line with the slot. Cheap to call repeatedly: showing the
-     same item twice does nothing, which matters because `changed` fires for
-     every slot and this only cares about one. ]]
-function CarryVisualService:refresh(player: Player)
+--[[
+	Where a weapon has to be moved to for its grip to land in the hand.
+
+	Expressed as the rigid transform from the grip's current world CFrame to the
+	one we want, applied to the model's pivot — rather than as "put the primary
+	part here". The grip attachment does not have to live on the primary part: a
+	supplied model that shipped its own RightGripAttachment has it wherever the
+	artist put it, and pivoting to the primary part would then hold the gun by
+	the wrong end of itself.
+]]
+local function gripPose(model: Model, target: CFrame): CFrame?
+	local grip: Attachment? = nil
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("Attachment") and descendant.Name == "Grip" then
+			grip = descendant
+			break
+		end
+	end
+	local host = grip and grip.Parent
+	if not grip or not host or not host:IsA("BasePart") then
+		return nil
+	end
+	local delta = target * (host.CFrame * grip.CFrame):Inverse()
+	return delta * model:GetPivot()
+end
+
+--[[ Builds and mounts one thing. `kind` is what HAND_SLOTS names, or "Medkit"
+     for the back. Returns false when there is nothing sensible to show, which is
+     not an error — see buildKitModel. ]]
+local function attach(player: Player, mount: string, kind: string, itemId: string): Model?
+	local character = player.Character
+	if not character or not character.Parent then
+		return nil
+	end
+
+	if mount == MOUNT.Hands then
+		local limb = handAnchor(character)
+		if not limb then
+			return nil
+		end
+		local model = if kind == "Weapon" then buildWeaponModel(itemId) else buildKitModel()
+		if not model then
+			return nil
+		end
+		local pose = gripPose(model, handGrip(limb))
+		if not pose then
+			--[[ A model with no grip cannot be held in any defensible place, and
+			     welding it to the hand at its own origin puts a rifle through a
+			     survivor's chest. PlaceholderFactory stamps one on everything it
+			     hands out, so this is a model that came from somewhere else. ]]
+			model:Destroy()
+			return nil
+		end
+		return if place(character, limb, model, pose, mount) then model else nil
+	end
+
+	local anchor = carryAnchor(character)
+	if not anchor then
+		return nil
+	end
+	local model = buildKitModel()
+	if not model then
+		return nil
+	end
+	local pose = anchor.CFrame * KIT.CarryOffset
+	return if place(character, anchor, model, pose, mount) then model else nil
+end
+
+--[[ One mount, brought in line with what it should be showing. Split out of
+     refresh so the two mounts cannot drift apart in the handling of a rebuild. ]]
+local function applyMount(player: Player, entry: { [string]: Worn }, mount: string, key: string)
+	local current = entry[mount]
+	if current and current.key == key then
+		return
+	end
+	removeMount(player, mount)
+	if key == "" then
+		return
+	end
+	local kind, itemId = string.match(key, "^(%w+):(.+)$")
+	if not kind then
+		return
+	end
+	local model = attach(player, mount, kind, itemId)
+	if model then
+		entry[mount] = { model = model, key = key }
+	end
+end
+
+--[[
+	What each mount should be showing, as a key.
+
+	One string per mount, built from the kind and the item, because that is
+	exactly what has to change for a rebuild to be worth doing — and `refresh` is
+	called on every slot change of every kind. An empty string means bare.
+]]
+local function wantedKeys(player: Player): (string, string)
 	local inventory = Registry.find("InventoryService")
 	if not inventory then
-		return
+		return "", ""
 	end
-
 	local loadout = inventory:getLoadout(player)
-	local entry = loadout and loadout[Enums.Slot.Health]
-	local itemId = entry and entry.itemId or ""
-
-	local current = worn[player]
-	if current and current.itemId == itemId then
-		return
+	if not loadout then
+		return "", ""
 	end
 
-	removeWorn(player)
-	if itemId == "" then
-		return
+	local health = loadout[Enums.Slot.Health]
+	local healthId = health and health.itemId or ""
+
+	local active = player:GetAttribute(LA.ActiveSlot)
+	local activeSlot = if typeof(active) == "string" then active else Enums.Slot.Secondary
+	local kind = HAND_SLOTS[activeSlot]
+	local entry = loadout[activeSlot]
+	local handsId = entry and entry.itemId or ""
+
+	local hands = if kind and handsId ~= "" then kind .. ":" .. handsId else ""
+	--[[ The kit is on the back UNLESS it is in the hands. Two mounts showing the
+	     same object at once is the one arrangement that reads as broken. ]]
+	local back = if healthId ~= "" and kind ~= "Medkit" then "Medkit:" .. healthId else ""
+	return back, hands
+end
+
+--[[ Brings both mounts in line with the loadout. Cheap to call repeatedly:
+     showing the same thing twice does nothing, which matters because `changed`
+     fires for every slot and most of them move neither mount. ]]
+function CarryVisualService:refresh(player: Player)
+	local backKey, handsKey = wantedKeys(player)
+	local entry = worn[player]
+	if not entry then
+		entry = {}
+		worn[player] = entry
 	end
-	attach(player, itemId)
+
+	applyMount(player, entry, MOUNT.Back, backKey)
+	applyMount(player, entry, MOUNT.Hands, handsKey)
 end
 
 function CarryVisualService:init() end
@@ -244,35 +496,44 @@ function CarryVisualService:init() end
 function CarryVisualService:start()
 	local inventory = Registry.find("InventoryService")
 	if inventory and inventory.changed then
-		serviceTrove:add(inventory.changed:connect(function(player: Player, slot: string)
-			if slot == Enums.Slot.Health then
-				self:refresh(player)
-			end
+		--[[ Every slot, not just Health: the hands mount follows whichever slot is
+		     selected, and a swap fires `changed` for the slot that gained focus.
+		     refresh does the filtering, by key. ]]
+		serviceTrove:add(inventory.changed:connect(function(player: Player)
+			self:refresh(player)
 		end))
 	else
-		warn("[CarryVisualService] no InventoryService; nothing will appear on anybody's back")
+		warn("[CarryVisualService] no InventoryService; nothing will appear on anybody")
 	end
 
-	--[[ A respawn replaces the character, and the new one arrives bare even though
-	     the slot never changed. CharacterAdded rather than a SurvivorService
-	     signal on purpose: the thing that invalidates the prop is the character
-	     model being swapped, which is exactly what this event means and nothing
-	     else does.
+	--[[
+		A respawn replaces the character, and the new one arrives bare even though
+		the slots never changed. CharacterAdded rather than a SurvivorService
+		signal on purpose: the thing that invalidates a prop is the character model
+		being swapped, which is exactly what this event means and nothing else does.
 
-	     The table entry is cleared first because the prop it names belongs to a
-	     rig that is on its way to being destroyed — leaving it would make refresh
-	     believe the right kit is already on the right back. ]]
+		The table entry is cleared first because the props it names belong to a rig
+		that is on its way to being destroyed — leaving it would make refresh
+		believe the right things are already on the right survivor.
+	]]
 	local function watch(player: Player)
 		serviceTrove:connect(player.CharacterAdded, function()
 			worn[player] = nil
 			--[[ The loadout is restored a moment after the character exists, so
-			     reading it on this frame gets the slot as it was mid-respawn.
+			     reading it on this frame gets the slots as they were mid-respawn.
 			     One deferred pass, not a poll. ]]
 			task.defer(function()
 				if player.Parent then
 					self:refresh(player)
 				end
 			end)
+		end)
+
+		--[[ The selected slot is an attribute rather than a signal — it moves far
+		     too often for a remote — so the hands mount follows it directly. This
+		     is the event that fires when somebody presses 1 or 2. ]]
+		serviceTrove:connect(player:GetAttributeChangedSignal(LA.ActiveSlot), function()
+			self:refresh(player)
 		end)
 	end
 
@@ -287,14 +548,14 @@ function CarryVisualService:start()
 	local survivors = Registry.find("SurvivorService")
 	if survivors and survivors.died then
 		serviceTrove:add(survivors.died:connect(function(player: Player)
-			removeWorn(player)
+			removeAll(player)
 		end))
 	end
 end
 
 function CarryVisualService:destroy()
 	for player in worn do
-		removeWorn(player)
+		removeAll(player)
 	end
 	serviceTrove:destroy()
 end
