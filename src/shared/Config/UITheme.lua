@@ -132,8 +132,11 @@ UITheme.Layout = table.freeze({
 	     because TouchController has to lay the on-screen pad out ABOVE it, and a
 	     second copy of the number is how the pad ended up eight pixels on top of
 	     the ammo counter. One definition, two readers. ]]
-	HotbarSlotWidth = 92,
-	HotbarSlotHeight = 54,
+	--[[ Squarer than they were. Left 4 Dead's item slots are close to square
+	     tiles, and the wide rectangles this replaced read as list rows — which is
+	     also 100 studs of screen width saved on a phone. ]]
+	HotbarSlotWidth = 78,
+	HotbarSlotHeight = 58,
 
 	ItemSlotSize = 46,
 	ItemSlotGap = 5,

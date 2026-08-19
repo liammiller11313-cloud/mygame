@@ -172,6 +172,11 @@ local SLOT_TITLE = {
 -- Wider than they are tall: a weapon name and an ammo count have to fit.
 -- In the theme, not here: TouchController lays the on-screen pad out above the
 -- hotbar and needs the same numbers. See UITheme.Layout.
+--[[ The lit bar under the selected tile. Three pixels: thick enough to read at
+     the edge of vision, thin enough that it is an underline rather than a second
+     panel. ]]
+local HOTBAR_MARKER_HEIGHT = 3
+
 local HOTBAR_SLOT_WIDTH = LAYOUT.HotbarSlotWidth
 local HOTBAR_SLOT_HEIGHT = LAYOUT.HotbarSlotHeight
 
@@ -203,7 +208,6 @@ local itemSlots: {
 	[string]: {
 		frame: Frame,
 		key: TextLabel,
-		title: TextLabel,
 		label: TextLabel,
 		count: TextLabel,
 		marker: Frame,
@@ -814,8 +818,18 @@ end
 	comes from WeaponController's prediction — so this runs on change rather than
 	on a timer, and the only thing that animates is the pickup flash.
 ]]
+--[[ States in which the only thing you can hold is the incap pistol.
+     InventoryService enforces it — setActiveSlot refuses outright — but a rule
+     the server enforces and the interface does not show is a rule the player
+     experiences as their keys having stopped working. ]]
+local DOWNED_STATES: { [string]: boolean } = {
+	[STATE.Incapacitated] = true,
+	[STATE.LedgeHanging] = true,
+}
+
 local function refreshItems()
 	local active = Attributes.get(player, LA.ActiveSlot, SLOT.Primary)
+	local downed = DOWNED_STATES[Attributes.get(player, PA.State, STATE.Spectating)] == true
 
 	for _, slot in HOTBAR_SLOTS do
 		local entry = itemSlots[slot]
@@ -872,24 +886,41 @@ local function refreshItems()
 		local filled = itemId ~= ""
 		local selected = slot == active
 
+		--[[ What is in the slot, or — when there is nothing — what the slot is
+		     for. One label doing both is what lets an empty tile still teach a new
+		     player that the slot exists, which the old dash on its own did not. ]]
 		if filled then
 			local definition = WEAPON_SLOTS[slot] and WeaponConfig.get(itemId)
 			entry.label.Text = if definition then string.upper(definition.displayName) else itemLabel(itemId)
 		else
-			entry.label.Text = "—"
+			entry.label.Text = SLOT_TITLE[slot] or "—"
 		end
 		entry.count.Text = countText
 
-		entry.label.TextColor3 = if filled then COLOR.TextPrimary else COLOR.TextDim
-		entry.title.TextColor3 = if selected and filled then COLOR.Accent else COLOR.TextDim
-		entry.key.TextColor3 = if filled then COLOR.TextSecondary else COLOR.TextDim
+		--[[ On the floor you hold the pistol and nothing else. The slots you
+		     cannot reach are dimmed to the level an EMPTY slot draws at, so the
+		     bar reads as "these are not available" rather than as five options
+		     that ignore you — which is what it looked like before, because the
+		     server refuses the switch silently. ]]
+		local reachable = not downed or slot == SLOT.Secondary
+
+		entry.label.TextColor3 = if not reachable
+			then COLOR.TextDim
+			elseif filled then COLOR.TextPrimary
+			else COLOR.TextDim
+		entry.key.TextColor3 = if reachable and filled then COLOR.TextSecondary else COLOR.TextDim
 		entry.count.TextColor3 = if selected then COLOR.AccentBright else COLOR.TextSecondary
 		entry.marker.Visible = selected and filled
 
-		entry.frame.BackgroundTransparency = if selected and filled then 0.05 elseif filled then 0.3 else 0.62
+		entry.frame.BackgroundTransparency = if not reachable
+			then 0.72
+			elseif selected and filled then 0.05
+			elseif filled then 0.3
+			else 0.62
 
-		local base = if selected and filled
-			then COLOR.Accent
+		local base = if not reachable
+			then COLOR.Border
+			elseif selected and filled then COLOR.Accent
 			elseif filled then COLOR.BorderBright
 			else COLOR.Border
 
@@ -947,11 +978,11 @@ local function applyTouchLayout()
 		killFeedHolder.Size = UDim2.fromOffset(KILLFEED_WIDTH, feedLimit() * KILLFEED_ROW_HEIGHT)
 	end
 
+	--[[ No key glyph on a touchscreen: there is no key. The slot's single label
+	     already says what it holds or what it is for, so nothing is lost — which
+	     was not true when the glyph and the slot name were separate things. ]]
 	for _, entry in itemSlots do
 		entry.key.Visible = not state.touch
-		-- The title takes back the width the key glyph was reserving.
-		local reserved = if state.touch then 12 else 26
-		entry.title.Size = UDim2.fromOffset(HOTBAR_SLOT_WIDTH - reserved, 12)
 	end
 end
 
@@ -1347,7 +1378,10 @@ local function buildItems()
 		local frame = newFrame(holder, slot, COLOR.Panel, 0.55)
 		frame.LayoutOrder = order
 		frame.Size = UDim2.fromOffset(HOTBAR_SLOT_WIDTH, HOTBAR_SLOT_HEIGHT)
-		corner(frame)
+		--[[ No rounded corner, deliberately. Every other panel in this interface
+		     takes UITheme's 2px radius; the hotbar does not, because Left 4 Dead's
+		     item tiles are cut square and the corner is most of what separates a
+		     row of game tiles from a row of app buttons. ]]
 		local line = stroke(frame)
 
 		--[[
@@ -1393,32 +1427,38 @@ local function buildItems()
 			end
 		end)
 
-		--[[ A hairline down the left edge, lit only on the selected slot. It is
-		     the cheapest possible "this one" marker and it survives being read
-		     out of the corner of the eye, which is the only way this bar is ever
-		     actually read during a fight. ]]
+		--[[ The selected slot is lit along its whole bottom edge rather than
+		     marked with a hairline down its side. That underline is the L4D
+		     read — the tile the light is under is the one in your hands — and a
+		     full-width bar survives being caught in peripheral vision, which is
+		     the only way this row is ever actually looked at during a fight. ]]
 		local marker = newFrame(frame, "Marker", COLOR.Accent)
-		marker.Size = UDim2.new(0, 2, 1, 0)
+		marker.AnchorPoint = Vector2.new(0, 1)
+		marker.Position = UDim2.new(0, 0, 1, 0)
+		marker.Size = UDim2.new(1, 0, 0, HOTBAR_MARKER_HEIGHT)
 		marker.Visible = false
 
 		-- Stencil digits: the one place in the HUD that gets to look stamped on.
 		local key = newLabel(frame, "Key", FONT.Stencil, TEXT.Small, COLOR.TextDim)
-		key.Position = UDim2.fromOffset(7, 3)
-		key.Size = UDim2.fromOffset(14, 14)
+		key.Position = UDim2.fromOffset(6, 4)
+		key.Size = UDim2.fromOffset(16, 14)
 
-		--[[ The slot's own name, shown even when it is empty. Naming an empty
-		     slot is what tells a new player the slot exists at all. ]]
-		local title = newLabel(frame, "Title", FONT.Body, TEXT.Tiny, COLOR.TextDim)
-		title.AnchorPoint = Vector2.new(1, 0)
-		title.Position = UDim2.new(1, -6, 0, 4)
-		title.Size = UDim2.fromOffset(HOTBAR_SLOT_WIDTH - 26, 12)
-		title.TextXAlignment = Enum.TextXAlignment.Right
-		title.Text = SLOT_TITLE[slot] or ""
+		--[[
+			One line of text per slot, not two.
 
+			It used to carry the slot's NAME and the item's name at once, which is
+			twice the words for one fact and nothing L4D would ever show — its
+			tiles are a silhouette and a number. With no icons to draw, the honest
+			equivalent is a single label that says whatever the slot currently
+			needs to communicate: what is in it, or, when it is empty, what it is
+			for. That also fixed the touch case, where hiding the key glyph used to
+			leave an empty slot with no indication of what it was.
+		]]
 		local label = newLabel(frame, "Label", FONT.Heading, TEXT.Small, COLOR.TextDim)
-		label.Position = UDim2.fromOffset(7, 18)
-		label.Size = UDim2.new(1, -14, 0, 16)
-		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.AnchorPoint = Vector2.new(0.5, 0)
+		label.Position = UDim2.new(0.5, 0, 0, 20)
+		label.Size = UDim2.new(1, -10, 0, 17)
+		label.TextXAlignment = Enum.TextXAlignment.Center
 		label.TextScaled = true
 		label.TextWrapped = false
 		local bounds = Instance.new("UITextSizeConstraint")
@@ -1426,19 +1466,18 @@ local function buildItems()
 		bounds.MinTextSize = TEXT.Tiny
 		bounds.Parent = label
 
-		--[[ Only weapon slots ever fill this in. It still exists on the others
-		     rather than being conditional, so every slot keeps the same height
-		     and refreshItems never has to check whether a field is there. ]]
+		--[[ Bottom-right, above the marker. Only weapon slots ever fill it in, but
+		     it exists on every slot rather than being conditional, so every tile
+		     keeps the same shape and refreshItems never has to check. ]]
 		local count = newLabel(frame, "Count", FONT.Numeric, TEXT.Small, COLOR.TextSecondary)
-		count.AnchorPoint = Vector2.new(0, 1)
-		count.Position = UDim2.new(0, 7, 1, -4)
-		count.Size = UDim2.new(1, -14, 0, 14)
-		count.TextXAlignment = Enum.TextXAlignment.Left
+		count.AnchorPoint = Vector2.new(1, 1)
+		count.Position = UDim2.new(1, -6, 1, -(HOTBAR_MARKER_HEIGHT + 3))
+		count.Size = UDim2.new(1, -12, 0, 14)
+		count.TextXAlignment = Enum.TextXAlignment.Right
 
 		itemSlots[slot] = {
 			frame = frame,
 			key = key,
-			title = title,
 			label = label,
 			count = count,
 			marker = marker,
@@ -1612,6 +1651,11 @@ function HudController:init()
 			LA.ThrowableId,
 			LA.HealthItemId,
 			LA.PillItemId,
+			--[[ Not a loadout attribute, but it changes what the hotbar may draw:
+			     going down locks every slot except the pistol, and without this
+			     the bar keeps showing five live options until some unrelated
+			     attribute happens to move. ]]
+			PA.State,
 		}
 	do
 		trove:connect(player:GetAttributeChangedSignal(attribute), function()

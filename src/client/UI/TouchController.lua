@@ -50,6 +50,11 @@ local TEXT = UITheme.TextSize
 local BUTTON = 64
 local BIG = 86 -- Fire only
 
+--[[ The ring is the whole of a circular button's edge, so it carries more of the
+     read than a square one's border does and is drawn a little heavier. ]]
+local RING_IDLE = 2
+local RING_HELD = 3
+
 --[[
 	Where each button sits, as an offset from the pad's bottom-right corner.
 
@@ -105,7 +110,16 @@ local trove = Trove.new()
 local gui: ScreenGui
 local root: Frame
 local pad: Frame
-local buttons: { { frame: TextButton, stroke: UIStroke, action: string, contextual: boolean } } = {}
+type PadButton = {
+	frame: TextButton,
+	stroke: UIStroke,
+	label: TextLabel,
+	action: string,
+	-- Shown only while its verb would do something. See refreshContextual.
+	contextual: boolean,
+}
+
+local buttons: { PadButton } = {}
 
 local state = {
 	visible = false,
@@ -115,10 +129,14 @@ local state = {
 
 -- ── construction ────────────────────────────────────────────────────────────
 
+--[[ A pressed button fills and brightens rather than moving. A control that
+     shifts under the thumb holding it is a control the thumb then has to chase,
+     and on a touchscreen there is no cursor to re-find it with. ]]
 local function paint(entry, held: boolean)
 	entry.frame.BackgroundTransparency = if held then 0.1 else 0.45
 	entry.stroke.Color = if held then COLOR.AccentBright else COLOR.BorderBright
-	entry.stroke.Thickness = if held then LAYOUT.BorderThickness + 1 else LAYOUT.BorderThickness
+	entry.stroke.Thickness = if held then RING_HELD else RING_IDLE
+	entry.label.TextColor3 = if held then COLOR.AccentBright else COLOR.TextPrimary
 end
 
 local function newButton(action: string, label: string, size: number): any
@@ -131,13 +149,18 @@ local function newButton(action: string, label: string, size: number): any
 	frame.Size = UDim2.fromOffset(size, size)
 	frame.Parent = pad
 
+	--[[ Round, not square. The rest of this interface is deliberately hard-edged
+	     — Left 4 Dead's HUD has no rounded corners anywhere — but a touch control
+	     is the one place that rule loses to the hand: a thumb's contact patch is
+	     a circle, so a circular target is the shape whose whole area is reachable
+	     without looking. Half the button's size is a full circle at any size. ]]
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, LAYOUT.CornerRadius)
+	corner.CornerRadius = UDim.new(0.5, 0)
 	corner.Parent = frame
 
 	local stroke = Instance.new("UIStroke")
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Thickness = LAYOUT.BorderThickness
+	stroke.Thickness = RING_IDLE
 	stroke.Color = COLOR.BorderBright
 	stroke.Parent = frame
 
@@ -167,7 +190,7 @@ local function newButton(action: string, label: string, size: number): any
 	padding.PaddingLeft, padding.PaddingRight = inset, inset
 	padding.Parent = text
 
-	local entry = { frame = frame, stroke = stroke, action = action, contextual = false }
+	local entry = { frame = frame, stroke = stroke, label = text, action = action, contextual = false }
 	paint(entry, false)
 
 	--[[ InputBegan/Ended on the button rather than Activated. Activated only
