@@ -1223,6 +1223,20 @@ function HudController:init()
 	trove:connect(Players.PlayerAdded, addPlayer)
 	trove:connect(Players.PlayerRemoving, removePlayer)
 
+	--[[
+		ONE list, driving BOTH refreshers.
+
+		These used to be two lists, and they disagreed: the ammo counter listened
+		to the ammo attributes and the hotbar listened to the item ones. But the
+		hotbar shows a per-slot round count too, so it read PrimaryAmmo without
+		ever being told when it changed — the big number in the corner ticked down
+		as you fired while the number on the slot itself sat frozen at whatever it
+		said when you last picked something up.
+
+		Splitting them saved nothing: every one of these attributes is written by
+		the same publish on the same frame, so a change is one signal either way.
+		Both panels read from the same loadout, so both should wake for all of it.
+	]]
 	for _, attribute in
 		{
 			LA.ActiveSlot,
@@ -1232,12 +1246,15 @@ function HudController:init()
 			LA.SecondaryId,
 			LA.SecondaryAmmo,
 			LA.IsReloading,
+			LA.ThrowableId,
+			LA.HealthItemId,
+			LA.PillItemId,
 		}
 	do
-		trove:connect(player:GetAttributeChangedSignal(attribute), refreshAmmo)
-	end
-	for _, attribute in { LA.ThrowableId, LA.HealthItemId, LA.PillItemId, LA.ActiveSlot } do
-		trove:connect(player:GetAttributeChangedSignal(attribute), refreshItems)
+		trove:connect(player:GetAttributeChangedSignal(attribute), function()
+			refreshAmmo()
+			refreshItems()
+		end)
 	end
 
 	refreshAmmo()
