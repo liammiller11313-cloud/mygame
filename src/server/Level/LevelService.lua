@@ -88,7 +88,12 @@ local POPULATE_LOOKAHEAD = DirectorConfig.Spawning.MaxFlowAhead
 --[[ A character's root part sits about this far above the floor on both R6 and
      R15 rigs. Spawning at the floor point itself drops half a survivor through
      it and lets Roblox resolve the overlap, which it does by launching them. ]]
-local SPAWN_ROOT_HEIGHT = 3.5
+--[[ How far above the ground a survivor's root is placed. A HumanoidRootPart
+     already sits about three studs up, so this is clearance ON TOP of that: a
+     ground ray that lands on a thin ledge or a sloped mesh can be off by a stud
+     or so, and spawning even slightly inside geometry is what the solver
+     resolves by flinging the body out of it. ]]
+local SPAWN_ROOT_HEIGHT = 6
 
 --[[ How far apart survivors stand in a fallback spawn ring. Wide enough that
      four characters do not resolve their collisions by shoving each other off a
@@ -525,7 +530,21 @@ end
      Falls through to the point itself when nothing is below — a spawn hanging in
      the air is recoverable, a spawn inside the floor is not. ]]
 local function standOn(point: Vector3): Vector3
-	local ground = RaycastUtil.groundAt(point, GROUND_SEARCH, {})
+	--[[ Characters and debris are excluded from the cast. A ray that lands on a
+	     teammate's head would place the next survivor standing on them, and the
+	     two of them are then resolved apart at speed. ]]
+	local ignore = {}
+	for _, other in Players:GetPlayers() do
+		if other.Character then
+			table.insert(ignore, other.Character)
+		end
+	end
+	local gore = Workspace:FindFirstChild("FL_Gore")
+	if gore then
+		table.insert(ignore, gore)
+	end
+
+	local ground = RaycastUtil.groundAt(point, GROUND_SEARCH, ignore)
 	if ground then
 		return Vector3.new(ground.X, ground.Y + SPAWN_ROOT_HEIGHT, ground.Z)
 	end

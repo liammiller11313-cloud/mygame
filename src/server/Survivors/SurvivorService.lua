@@ -497,6 +497,48 @@ function SurvivorService:_onCharacterAdded(player: Player, character: Model)
 	record.humanoid = humanoid
 	record.root = character:WaitForChild("HumanoidRootPart", 5) :: BasePart?
 
+	--[[
+		Placed HERE, the moment the root exists, and not further down.
+
+		LoadCharacter drops the character at whatever SpawnLocation Roblox finds
+		first — which on a map-swapping game is routinely nowhere near the map
+		that is actually loaded. Physics starts immediately, so by the time the
+		old code reached its PivotTo at the bottom of this function the character
+		had been falling for two WaitForChild yields, and teleporting a body that
+		already carries velocity into map geometry is exactly how a player ends up
+		flung across the world.
+
+		So: move it as early as possible, then zero the momentum it arrived with.
+		Clearing the velocity is the half that actually stops the fling — without
+		it the solver resolves the overlap by converting that accumulated fall
+		speed into a very fast exit.
+	]]
+	local spawnAt = record.spawnCFrame
+	if not spawnAt then
+		-- No CFrame was staged for this spawn. Ask the level rather than leaving
+		-- the character wherever Roblox put it, which is the case that strands a
+		-- player in the void when a map has just been swapped underneath them.
+		local level = Registry.find("LevelService")
+		if level and typeof(level.getSurvivorSpawnCFrame) == "function" then
+			local ok, cframe = pcall(function()
+				return level:getSurvivorSpawnCFrame(#Players:GetPlayers())
+			end)
+			if ok and typeof(cframe) == "CFrame" then
+				spawnAt = cframe
+			end
+		end
+	end
+
+	if spawnAt then
+		character:PivotTo(spawnAt)
+		record.spawnCFrame = nil
+		local root = record.root
+		if root then
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+
 	humanoid.MaxHealth = S.MaxHealth
 	humanoid.BreakJointsOnDeath = false -- GoreService owns what a body does
 	record.baseJumpPower = humanoid.JumpPower
@@ -529,11 +571,6 @@ function SurvivorService:_onCharacterAdded(player: Player, character: Model)
 			)
 		end
 	end)
-
-	if record.spawnCFrame then
-		character:PivotTo(record.spawnCFrame)
-		record.spawnCFrame = nil
-	end
 
 	self:_applyHumanoid(record)
 	self:_refreshUprightState(record)
