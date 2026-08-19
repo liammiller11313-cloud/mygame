@@ -20,6 +20,11 @@
 	warns once, rather than erroring per zombie per frame.
 ]]
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AnimationConfig = require(Shared.Config.AnimationConfig)
+
 local InfectedAnimator = {}
 InfectedAnimator.__index = InfectedAnimator
 
@@ -40,6 +45,21 @@ local ROLE_FALLBACK = {
 	run = { "run", "runanim", "sprint", "walk", "zombie" },
 	attack = { "attack", "swipe", "slash", "toolslash", "punch" },
 	death = { "death", "die", "dead" },
+	--[[ Airborne and climbing. Reached from the humanoid's own state rather than
+	     from its speed, because a body falling off a catwalk has plenty of speed
+	     and none of it is walking. A rig without these keeps whatever ground
+	     state it was in, which is the old behaviour. ]]
+	jump = { "jump", "jumpanim" },
+	fall = { "fall", "freefall", "falling" },
+	climb = { "climb", "climbanim" },
+}
+
+--[[ Humanoid states that are not "on the ground moving", and the role each one
+     wants. Checked before speed, since speed cannot tell them apart. ]]
+local STATE_ROLE: { [Enum.HumanoidStateType]: string } = {
+	[Enum.HumanoidStateType.Freefall] = "fall",
+	[Enum.HumanoidStateType.Jumping] = "jump",
+	[Enum.HumanoidStateType.Climbing] = "climb",
 }
 
 -- Speed at which a body is considered to be moving at all, and the speed above
@@ -56,7 +76,18 @@ local BASE_WALK_SPEED = 16
 local MIN_RATE = 0.5
 local MAX_RATE = 2.4
 
+--[[ The roles whose playback rate follows the body's speed. See setState. ]]
+local RATE_MATCHED: { [string]: boolean } = {
+	walk = true,
+	run = true,
+}
+
 local FADE = 0.18
+
+--[[ One generator for the whole module. Each body draws its idle variant from
+     it at spawn, so the choice differs per zombie without every zombie paying
+     for its own Random. ]]
+local random = Random.new()
 
 local warned: { [string]: boolean } = {}
 local function warnOnce(key: string, message: string)
@@ -80,14 +111,10 @@ function InfectedAnimator.new(model: Model, kind: string)
 		return nil
 	end
 
+	--[[ No longer fatal. A rig with no harvested folder can still be animated
+	     from AnimationConfig, and if that produces nothing either the client's
+	     procedural poser picks it up. Absence here is a fallback, not a failure. ]]
 	local store = model:FindFirstChild(ANIMATION_FOLDER)
-	if not store then
-		warnOnce(
-			"nostore:" .. kind,
-			string.format("%s rigs carry no %s folder — they will not animate", kind, ANIMATION_FOLDER)
-		)
-		return nil
-	end
 
 	local self = setmetatable({
 		model = model,
@@ -98,28 +125,101 @@ function InfectedAnimator.new(model: Model, kind: string)
 		oneShotUntil = 0,
 	}, InfectedAnimator)
 
-	for role, candidates in ROLE_FALLBACK do
-		for _, name in candidates do
-			local bucket = store:FindFirstChild(name)
-			local animation = bucket and bucket:FindFirstChildOfClass("Animation")
-			if animation then
-				local ok, track = pcall(function()
-					return animator:LoadAnimation(animation)
-				end)
-				if ok and track then
-					track.Priority = if role == "attack" or role == "death"
-						then Enum.AnimationPriority.Action
-						else Enum.AnimationPriority.Movement
-					track.Looped = role ~= "attack" and role ~= "death"
-					self.tracks[role] = track
+	--[[ Loads one Animation instance and keeps the track. Shared by both sources
+	     so priority and looping are decided once: an attack or a death is an
+	     Action played over the top of whatever is moving, everything else is
+	     Movement and loops. ]]
+	local function adopt(role: string, animation: Animation): boolean
+		local ok, track = pcall(function()
+			return animator:LoadAnimation(animation)
+		end)
+		if not ok or not track then
+			return false
+		end
+		track.Priority = if role == "attack" or role == "death"
+			then Enum.AnimationPriority.Action
+			else Enum.AnimationPriority.Movement
+		track.Looped = role ~= "attack" and role ~= "death"
+		self.tracks[role] = track
+		return true
+	end
+
+	-- ── 1. what the rig brought with it ─────────────────────────────────────
+	if store then
+		for role, candidates in ROLE_FALLBACK do
+			for _, name in candidates do
+				local bucket = store:FindFirstChild(name)
+				local animation = bucket and bucket:FindFirstChildOfClass("Animation")
+				if animation and adopt(role, animation) then
 					break
 				end
 			end
 		end
 	end
 
+	--[[ ── 2. what this game supplies ────────────────────────────────────────
+
+	     Only for roles the rig did not already fill, so a model that shipped its
+	     own walk keeps it — it knows its own proportions better than a generic
+	     package does.
+
+	     The rig check is the important part. A Roblox animation addresses NAMED
+	     joints, so an R6 clip on an R15 rig loads, reports itself as playing, and
+	     moves nothing — and because InfectedPoseController stands down for any
+	     body with tracks playing, the result is a rig animated by neither. That
+	     is a T-pose that looks exactly like the bug this all exists to fix. ]]
+	local set = AnimationConfig.forInfected(kind)
+	local rig = AnimationConfig.rigOf(model)
+
+	if set.rig ~= rig then
+		warnOnce(
+			string.format("rigmismatch:%s", kind),
+			string.format(
+				"%s is an %s rig and the configured animations are %s — they address joint names it "
+					.. "does not have, so they are skipped. The client's procedural poser will drive it "
+					.. "instead. Add an %s entry to AnimationConfig.Infected to give it real clips.",
+				kind,
+				rig,
+				set.rig,
+				rig
+			)
+		)
+	else
+		for role, ids in set :: any do
+			if role == "rig" or self.tracks[role] or typeof(ids) ~= "table" then
+				continue
+			end
+			--[[ One id per body, chosen at spawn and kept. Two Commons in the
+			     same doorway get different idles, which costs nothing and is most
+			     of what stops a crowd reading as one animation. ]]
+			local id = ids[random:NextInteger(1, #ids)]
+			local animation = Instance.new("Animation")
+			animation.AnimationId = "rbxassetid://" .. tostring(id)
+			if not adopt(role, animation) then
+				warnOnce(
+					"badid:" .. tostring(id),
+					string.format(
+						"animation %d failed to load for %s/%s. Roblox only plays animations owned by "
+							.. "this place's creator or by Roblox itself.",
+						id,
+						kind,
+						role
+					)
+				)
+			end
+			animation:Destroy()
+		end
+	end
+
 	if next(self.tracks) == nil then
-		warnOnce("empty:" .. kind, string.format("%s rigs harvested no usable animations", kind))
+		warnOnce(
+			"empty:" .. kind,
+			string.format(
+				"%s has no usable animations from its rig or from AnimationConfig — the client's "
+					.. "procedural poser will drive it",
+				kind
+			)
+		)
 		return nil
 	end
 
@@ -147,10 +247,16 @@ function InfectedAnimator.setState(self, role: string, speed: number)
 		self.current = role
 	end
 
-	if role == "idle" then
-		track:AdjustSpeed(1)
-	else
+	--[[ Only a GAIT is rate-matched. Walking and running are clips whose feet
+	     have to keep up with the ground, and scaling them to the body's real
+	     speed is what stops the moonwalk. Nothing else is: an idle, a fall or a
+	     climb has no stride to match, and they arrive here with a speed of zero —
+	     which the clamp would turn into half-rate playback, so a zombie would
+	     drop off a catwalk in slow motion. ]]
+	if RATE_MATCHED[role] then
 		track:AdjustSpeed(math.clamp(speed / BASE_WALK_SPEED, MIN_RATE, MAX_RATE))
+	else
+		track:AdjustSpeed(1)
 	end
 end
 
@@ -164,6 +270,17 @@ function InfectedAnimator.update(self, runSpeed: number)
 	local humanoid = self.humanoid
 	if humanoid.Health <= 0 then
 		return
+	end
+
+	--[[ Airborne first. A zombie dropping off a catwalk is moving fast in a
+	     direction, and asking its speed would put it into a run cycle mid-air. ]]
+	local ok, humanoidState = pcall(humanoid.GetState, humanoid)
+	if ok then
+		local role = STATE_ROLE[humanoidState]
+		if role and self.tracks[role] then
+			self:setState(role, 0)
+			return
+		end
 	end
 
 	local speed = humanoid.MoveDirection.Magnitude * humanoid.WalkSpeed

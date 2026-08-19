@@ -448,9 +448,14 @@ Two systems, and which one runs depends on what the rig shipped with.
 
 | | Owner | Drives | When |
 |---|---|---|---|
-| `Server/Infected/InfectedAnimator` | server | `AnimationTrack`s | the rig has harvested animation ids |
-| `Client/Effects/InfectedPoseController` | client | `Motor6D.Transform` | it does not |
+| `Server/Infected/InfectedAnimator` | server | `AnimationTrack`s | the rig harvested ids, **or** `AnimationConfig` supplies them |
+| `Client/Effects/InfectedPoseController` | client | `Motor6D.Transform` | neither did |
 | `Server/Infected/InfectedBrain:_setSwingPose` | server | `Motor6D.C0` | attack windup, always |
+
+Animation sources are tried rig-first, then `Shared/Config/AnimationConfig`, then
+procedural. A rig that shipped its own walk keeps it — it knows its own
+proportions better than a generic package does — and `AnimationConfig` only fills
+the roles left over.
 
 The engine resolves a joint as `C0 * Transform * C1:Inverse()`, which is what
 lets the brain's windup pose and a walk cycle coexist without either knowing
@@ -463,6 +468,14 @@ Two rules:
   writes — but forty-six bodies × eight joints × sixty frames is a quarter of a
   million replicated writes a second. Discrete poses on the server, continuous
   motion on the client.
+- **Every animation set declares the rig it addresses.** A Roblox animation is a
+  keyframe sequence addressed to named joints: an R6 clip on an R15 rig loads,
+  reports itself as playing, and moves nothing. That is worse than doing nothing,
+  because `InfectedPoseController` stands down for any body with tracks playing —
+  so the body ends up animated by neither, which looks exactly like the T-pose
+  bug the whole system exists to fix. `AnimationConfig.rigOf` reads the model's
+  actual joints rather than `Humanoid.RigType`, which hand-built rigs routinely
+  get wrong.
 - **Never assume a joint's hinge axis.** `Transform` is applied inside `C0`'s
   frame, and R6 shoulders carry a ±90° yaw in theirs while R15 shoulders carry
   none — so `CFrame.Angles(theta, 0, 0)` swings an R15 arm forward and an R6 arm
