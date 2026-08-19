@@ -294,10 +294,19 @@ end
 	The medkit prop, from whichever spot in the map still has its template.
 
 	Nil is a normal answer and not an error: a map with no kits placed, or a
-	Health slot holding a defibrillator, has no model to show, and no prop beats
-	a wrong one.
+	Health slot holding anything that is not a kit, has no model to show — and no
+	prop beats a wrong one.
 ]]
-local function buildKitModel(): Model?
+local function buildKitModel(itemId: string): Model?
+	--[[ The Health slot holds a defibrillator as well as a medkit, and the only
+	     prop this file can reach is the map's kit. Showing one for the other was
+	     the actual behaviour until now, despite a comment claiming otherwise —
+	     a defib on somebody's back that reads as a medkit is worse than a bare
+	     back, because a teammate counts on that read to decide whether to push. ]]
+	if itemId ~= Enums.HealthItem.Medkit then
+		return nil
+	end
+
 	local medkits = Registry.find("MedkitService")
 	local template = medkits and medkits:getCarryTemplate()
 	if not template then
@@ -419,16 +428,26 @@ local function place(character: Model, anchor: BasePart, model: Model, pose: CFr
 end
 
 --[[
-	Where a weapon has to be moved to for its grip to land in the hand.
+	Where something has to be moved to for the hand to be holding it.
 
-	Expressed as the rigid transform from the grip's current world CFrame to the
-	one we want, applied to the model's pivot — rather than as "put the primary
-	part here". The grip attachment does not have to live on the primary part: a
+	Expressed as the rigid transform from the hold point's CURRENT world CFrame
+	to the one we want, applied to the model's pivot — rather than as "put the
+	primary part here". The grip does not have to live on the primary part: a
 	supplied model that shipped its own RightGripAttachment has it wherever the
-	artist put it, and pivoting to the primary part would then hold the gun by
+	artist put it, and pivoting to the primary part would then hold that gun by
 	the wrong end of itself.
+
+	Two hold points, and the fallback is not a safety net — it is the only one a
+	medkit has:
+
+	  1. A "Grip" attachment. PlaceholderFactory stamps one on every weapon it
+	     hands out, so this is the path every gun takes.
+	  2. The centre of the model's own bounding box. A medkit comes off the map
+	     as a prop, not out of the weapon pipeline, and has no attachments at all
+	     — refusing to mount it (which is what this did at first) meant a
+	     survivor who selected their kit was left holding nothing.
 ]]
-local function gripPose(model: Model, target: CFrame): CFrame?
+local function holdPose(model: Model, target: CFrame): CFrame
 	local grip: Attachment? = nil
 	for _, descendant in model:GetDescendants() do
 		if descendant:IsA("Attachment") and descendant.Name == "Grip" then
@@ -436,12 +455,19 @@ local function gripPose(model: Model, target: CFrame): CFrame?
 			break
 		end
 	end
+
 	local host = grip and grip.Parent
-	if not grip or not host or not host:IsA("BasePart") then
-		return nil
+	local hold: CFrame
+	if grip and host and host:IsA("BasePart") then
+		hold = host.CFrame * grip.CFrame
+	else
+		--[[ The box CENTRE, not the pivot: a prop's pivot is wherever the artist
+		     left it and is routinely outside the object, while the middle of the
+		     thing is always somewhere a hand could plausibly be. ]]
+		hold = model:GetBoundingBox()
 	end
-	local delta = target * (host.CFrame * grip.CFrame):Inverse()
-	return delta * model:GetPivot()
+
+	return (target * hold:Inverse()) * model:GetPivot()
 end
 
 --[[ Builds and mounts one thing. `kind` is what HAND_SLOTS names, or "Medkit"
@@ -458,7 +484,7 @@ local function attach(player: Player, mount: string, kind: string, itemId: strin
 		if not limb then
 			return nil
 		end
-		local model = if kind == "Weapon" then buildWeaponModel(itemId) else buildKitModel()
+		local model = if kind == "Weapon" then buildWeaponModel(itemId) else buildKitModel(itemId)
 		if not model then
 			return nil
 		end
@@ -470,15 +496,7 @@ local function attach(player: Player, mount: string, kind: string, itemId: strin
 		if kind == "Weapon" then
 			addBeam(model)
 		end
-		local pose = gripPose(model, handGrip(limb))
-		if not pose then
-			--[[ A model with no grip cannot be held in any defensible place, and
-			     welding it to the hand at its own origin puts a rifle through a
-			     survivor's chest. PlaceholderFactory stamps one on everything it
-			     hands out, so this is a model that came from somewhere else. ]]
-			model:Destroy()
-			return nil
-		end
+		local pose = holdPose(model, handGrip(limb))
 		return if place(character, limb, model, pose, mount) then model else nil
 	end
 
@@ -486,7 +504,7 @@ local function attach(player: Player, mount: string, kind: string, itemId: strin
 	if not anchor then
 		return nil
 	end
-	local model = buildKitModel()
+	local model = buildKitModel(itemId)
 	if not model then
 		return nil
 	end
