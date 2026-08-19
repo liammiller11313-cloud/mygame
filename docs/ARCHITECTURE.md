@@ -442,6 +442,33 @@ MatchmakingService:advertise()
   wrap every call in `pcall` and fall back to "run it on this server". A developer
   pressing Play must always get a round, never a matchmaking error.
 
+### Infected animation
+
+Two systems, and which one runs depends on what the rig shipped with.
+
+| | Owner | Drives | When |
+|---|---|---|---|
+| `Server/Infected/InfectedAnimator` | server | `AnimationTrack`s | the rig has harvested animation ids |
+| `Client/Effects/InfectedPoseController` | client | `Motor6D.Transform` | it does not |
+| `Server/Infected/InfectedBrain:_setSwingPose` | server | `Motor6D.C0` | attack windup, always |
+
+The engine resolves a joint as `C0 * Transform * C1:Inverse()`, which is what
+lets the brain's windup pose and a walk cycle coexist without either knowing
+about the other.
+
+Two rules:
+
+- **A continuous gait must never be driven from the server.** `Motor6D.C0`
+  replicates, which is why the brain can pose an attack windup for two property
+  writes — but forty-six bodies × eight joints × sixty frames is a quarter of a
+  million replicated writes a second. Discrete poses on the server, continuous
+  motion on the client.
+- **Never assume a joint's hinge axis.** `Transform` is applied inside `C0`'s
+  frame, and R6 shoulders carry a ±90° yaw in theirs while R15 shoulders carry
+  none — so `CFrame.Angles(theta, 0, 0)` swings an R15 arm forward and an R6 arm
+  out sideways. Derive it: `C0.Rotation:Inverse() * Vector3.xAxis` is the
+  parent's right axis in joint space, and it is the correct hinge on any rig.
+
 ### `Level/MedkitService.lua` → `"MedkitService"`
 
 Owns the `Medkits` folder in the live map: dresses each model as a pickup, and

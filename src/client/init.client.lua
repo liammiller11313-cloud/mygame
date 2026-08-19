@@ -56,6 +56,9 @@ local CONTROLLERS = {
 	"Effects/ImpactController",
 	"Effects/GoreController",
 	"Effects/OutlineController",
+	-- The horde's walk cycle. Client-side because a continuous gait replicated
+	-- from the server would be a quarter of a million property writes a second.
+	"Effects/InfectedPoseController",
 	"UI/HudController",
 	"UI/WaveController",
 	"UI/CrosshairController",
