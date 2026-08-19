@@ -4,31 +4,39 @@
 
 	── THE POINT OF THIS MODULE ─────────────────────────────────────────────────
 	Not one coordinate in this file. Every single thing the level does is
-	discovered from CollectionService tags and Instance attributes, so the user's
-	own hand-built map drops in and works with ZERO code changes. Build a level
-	that carries these tags and this service will run it:
+	discovered from CollectionService tags and Instance attributes, so a
+	hand-built map — the user's own "Zombieville", or anything else dragged into
+	Workspace — drops in and works with ZERO code changes. Build a level that
+	carries these tags and this service will run it:
 
-	    FL_FlowNode      a point on the level spline; ordered by its FL_Order
-	                     attribute (any numbers, they only have to sort)
-	    FL_SpawnNode     a legal infected spawn point
-	    FL_ItemSpawn     a pickup pad; optional FL_Slot attribute forces its type
-	    FL_SafeRoom      a Model containing a part named "Door"; FL_Index
-	                     attribute orders the chapters, highest index is the end
-	    FL_PanicTrigger  a volume; walking into it starts a crescendo, once
-	    FL_BossZone      read by the Director, not by this service
+	    FL_FlowNode       a point on the level spline; ordered by its FL_Order
+	                      attribute (any numbers, they only have to sort)
+	    FL_SurvivorSpawn  where survivors start the round; its rotation is the
+	                      direction they face. More than one is a fine idea —
+	                      they are handed out round-robin
+	    FL_SpawnNode      a legal infected spawn point
+	    FL_ItemSpawn      a pickup pad; optional FL_Slot attribute forces its type
+	    FL_PanicTrigger   a volume; walking into it starts a crescendo, once
+	    FL_BossZone       an arena a Tank or a Witch may be placed in
 
-	The one optional extra: a Door may carry an FL_OpenOffset Vector3 attribute,
-	which is the LOCAL-space vector the door slides along to open. Without it a
-	door slides straight up by its own height, which is the sane default for a
-	shutter and wrong for nothing much.
+	There are no safe rooms and no chapters. A round is seven waves on a fixed
+	clock and RoundService owns that clock; this module owns geometry, and the two
+	never write the same attribute.
 
 	── FLOW DISTANCE ────────────────────────────────────────────────────────────
 	The flow nodes form a polyline, and `getFlowDistance` projects a point onto it
 	and returns the arc length to that projection. That number is the backbone of
-	the whole Director: what counts as "ahead of the team", where a Tank is due,
-	whether a spawn point is in front of the survivors or behind them, and how far
-	through the chapter the HUD says you are. It is a scalar for a 3D world, and
-	it is the reason a Left 4 Dead map feels directed rather than random.
+	the Director: what counts as "ahead of the team", whether a spawn point is in
+	front of the survivors or behind them, and which boss zone is the next one.
+	It is a scalar for a 3D world, and it is the reason a directed map feels
+	directed rather than random.
+
+	── WHEN THE MAP IS NOT TAGGED YET ───────────────────────────────────────────
+	Every discovery in here degrades to something playable and says so LOUDLY,
+	once, naming the tag that is missing and what it does. A map with no flow
+	nodes still spawns survivors and still runs a round; it just cannot tell the
+	Director which way is forward. Silence would be the actual failure: it is why
+	an untagged map used to drop everybody at the world origin.
 
 	Tags are watched, not sampled: a map that streams in, or an author adding a
 	node in Studio during a playtest, invalidates the cache and it rebuilds on the
@@ -39,7 +47,6 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -48,56 +55,29 @@ local Attributes = require(Shared.Net.Attributes)
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
-local GameModeConfig = require(Shared.Config.GameModeConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
-local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
-local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local TAG_FLOW = "FL_FlowNode"
 local TAG_SPAWN = "FL_SpawnNode"
 local TAG_ITEM = "FL_ItemSpawn"
-local TAG_SAFEROOM = "FL_SafeRoom"
 local TAG_PANIC = "FL_PanicTrigger"
+local TAG_BOSS = "FL_BossZone"
+local TAG_SURVIVOR_SPAWN = "FL_SurvivorSpawn"
 
 local ATTR_ORDER = "FL_Order"
-local ATTR_INDEX = "FL_Index"
-local ATTR_OPEN_OFFSET = "FL_OpenOffset"
 
---[[ 5Hz. Safe-room entry and panic triggers are spatial questions about four
-     characters; asking them every frame would cost sixty times as much for an
-     answer that cannot change meaningfully inside 200ms. ]]
+--[[ 5Hz. The only spatial question left in this module is whether one of four
+     characters has walked into a panic volume, and that cannot change
+     meaningfully inside 200ms. ]]
 local TICK_INTERVAL = 0.2
-
---[[ How far inside a safe room's own bounding box a survivor has to be before
-     they count as inside it. The box includes the walls, so without an inset a
-     player leaning on the outside of the room would complete the chapter. ]]
-local SAFEROOM_MARGIN = 4
 
 --[[ getSurvivorFlow is asked for by the Director, by SpawnPlacement and by this
      module's own tick, several times per second each, and the answer cannot
      change much in a tenth of a second at survivor walking speed. ]]
 local FLOW_CACHE_TIME = 0.1
-
---[[ How long a safe-room door takes to travel. Deliberately not read from
-     UITheme.Motion: that table is the interface's timing language, and a blast
-     door is not a HUD element. ]]
-local DOOR_TWEEN = TweenInfo.new(1.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
---[[
-	Round timings, borrowed from GameModeConfig rather than invented.
-
-	That file describes a wave-based mode and states outright that there are no
-	safe rooms — see this module's report; it and ARCHITECTURE.md disagree about
-	what a round is. These two numbers are the part that is mode-independent
-	either way: how long the team gets before the pressure starts, and how long a
-	result screen holds before the server resets. Reusing them means one place
-	still owns the pacing of a round's edges.
-]]
-local START_DELAY = GameModeConfig.Classic.PrepDuration
-local RESTART_DELAY = GameModeConfig.Matchmaking.PostRoundDuration
 
 --[[ Items are stocked this far ahead of the team. Borrowed from the Director's
      own spawn window on purpose: it is already the distance at which the game
@@ -105,22 +85,24 @@ local RESTART_DELAY = GameModeConfig.Matchmaking.PostRoundDuration
      front of the level is. ]]
 local POPULATE_LOOKAHEAD = DirectorConfig.Spawning.MaxFlowAhead
 
--- Objective lines. Strings, not tuning — no config owns copy.
-local TEXT = table.freeze({
-	FirstLeg = "Fight your way to the checkpoint",
-	NextLeg = "Move up to the next safe room",
-	FinalLeg = "Get to the safe room",
-	Panic = "Survive the horde",
-	Victory = "You made it.",
-	Wipe = "The team is down.",
-	Lobby = "Waiting for survivors",
-})
+--[[ A character's root part sits about this far above the floor on both R6 and
+     R15 rigs. Spawning at the floor point itself drops half a survivor through
+     it and lets Roblox resolve the overlap, which it does by launching them. ]]
+local SPAWN_ROOT_HEIGHT = 3.5
+
+--[[ How far apart survivors stand in a fallback spawn ring. Wide enough that
+     four characters do not resolve their collisions by shoving each other off a
+     ledge, tight enough that the team starts as a team. ]]
+local SPAWN_RING_RADIUS = 6
+
+--[[ How far up and down a spawn point looks for a floor. Generous because the
+     anchor may be a flow node hanging in the air over a stairwell. ]]
+local GROUND_SEARCH = 120
+
+-- Objective copy for the panic window. Strings, not tuning — no config owns copy.
+local TEXT_PANIC = "Survive the horde"
 
 local LevelService = {}
-
---[[ Fired as (chapterIndex, safeRoomModel, isFinal) each time the team completes
-     a leg by sealing themselves into a safe room. ]]
-LevelService.chapterChanged = Signal.new()
 
 local serviceTrove = Trove.new()
 
@@ -138,9 +120,11 @@ local cachedSurvivorFlowAt = -math.huge
 local spawnNodes: { BasePart } = {}
 local spawnDirty = true
 
-local safeRooms: { any } = {} -- ordered by FL_Index
-local roomByModel: { [Model]: any } = {}
-local safeDirty = true
+local bossZones: { BasePart } = {}
+local bossDirty = true
+
+local survivorSpawns: { BasePart } = {}
+local survivorSpawnDirty = true
 
 local panicTriggers: { [BasePart]: boolean } = {} -- part -> already fired
 local panicDirty = true
@@ -148,11 +132,7 @@ local panicDirty = true
 local sections: { any } = {}
 local sectionsDirty = true
 
--- ── round ───────────────────────────────────────────────────────────────────
-local roundState = Enums.RoundState.Lobby
-local roundGeneration = 0
-local currentChapter = 0
-local sawLivingSurvivor = false
+-- ── objective ───────────────────────────────────────────────────────────────
 local objectiveText = ""
 local accumulator = 0
 
@@ -179,6 +159,20 @@ local function taggedParts(tag: string): { BasePart }
 	return parts
 end
 
+--[[ A stable order for anything a level author might reasonably expect to be
+     ordered: FL_Order if it has one, then name. Without it the round-robin of
+     survivor spawns changes every time the map reloads. ]]
+local function sortTagged(parts: { BasePart })
+	table.sort(parts, function(a, b)
+		local left = tonumber(a:GetAttribute(ATTR_ORDER)) or math.huge
+		local right = tonumber(b:GetAttribute(ATTR_ORDER)) or math.huge
+		if left == right then
+			return a.Name < b.Name
+		end
+		return left < right
+	end)
+end
+
 --[[
 	Rebuilds the polyline from FL_FlowNode parts, ordered by FL_Order.
 
@@ -194,14 +188,7 @@ local function rebuildFlow()
 	flowTotal = 0
 
 	local nodes = taggedParts(TAG_FLOW)
-	table.sort(nodes, function(a, b)
-		local left = tonumber(a:GetAttribute(ATTR_ORDER)) or math.huge
-		local right = tonumber(b:GetAttribute(ATTR_ORDER)) or math.huge
-		if left == right then
-			return a.Name < b.Name
-		end
-		return left < right
-	end)
+	sortTagged(nodes)
 
 	for _, node in nodes do
 		table.insert(flowPoints, node.Position)
@@ -214,11 +201,19 @@ local function rebuildFlow()
 		flowTotal += length
 	end
 
-	if #flowPoints == 0 then
+	if #flowPoints < 2 then
 		warnOnce(
 			"noflow",
-			"no FL_FlowNode parts in Workspace — flow distance is 0 everywhere, so the "
-				.. "Director cannot tell what is ahead of the team"
+			string.format(
+				"the map has %d %s part(s). Tag a chain of parts with %s and give each an %s "
+					.. "attribute (1, 2, 3 …) to define the level spline. Until then flow distance is 0 "
+					.. "everywhere: the Director cannot tell what is ahead of the team, so spawns fall "
+					.. "back to distance-from-survivor only and boss zones are picked at random.",
+				#flowPoints,
+				TAG_FLOW,
+				TAG_FLOW,
+				ATTR_ORDER
+			)
 		)
 	end
 end
@@ -226,71 +221,29 @@ end
 local function rebuildSpawnNodes()
 	spawnDirty = false
 	spawnNodes = taggedParts(TAG_SPAWN)
+	if #spawnNodes == 0 then
+		warnOnce(
+			"nospawnnodes",
+			string.format(
+				"no %s parts in the map. Infected placement falls back to sampling the space around "
+					.. "the survivors, which works but ignores your doorways and alleys — tag a few "
+					.. "parts out of sight of the play space to control where the horde comes from.",
+				TAG_SPAWN
+			)
+		)
+	end
 end
 
---[[ The rooms, ordered by FL_Index, each with its door captured in the closed
-     pose it was authored in and the bounding box it had before that door ever
-     moved. Both are snapshots on purpose: an open door must not enlarge the
-     volume that decides who is inside. ]]
-local function rebuildSafeRooms()
-	safeDirty = false
-	-- Carried over rather than rebuilt: a tag edit anywhere in the map must not
-	-- silently un-complete a chapter the team has already earned, and the door's
-	-- closed pose must be the one it was AUTHORED in, not wherever it is now.
-	local previous = roomByModel
-	safeRooms = {}
-	roomByModel = {}
+local function rebuildBossZones()
+	bossDirty = false
+	bossZones = taggedParts(TAG_BOSS)
+	sortTagged(bossZones)
+end
 
-	for _, instance in CollectionService:GetTagged(TAG_SAFEROOM) do
-		if not instance:IsA("Model") or not instance:IsDescendantOf(Workspace) then
-			continue
-		end
-		local carried = previous[instance]
-		local door = instance:FindFirstChild("Door", true)
-		local box, size = instance:GetBoundingBox()
-		local record = {
-			model = instance,
-			index = tonumber(instance:GetAttribute(ATTR_INDEX)) or (#safeRooms + 1),
-			order = 0,
-			door = if door and door:IsA("BasePart") then door else nil,
-			closedCFrame = nil,
-			openCFrame = nil,
-			doorOpen = if carried then carried.doorOpen else false,
-			box = if carried then carried.box else box,
-			size = if carried then carried.size else size,
-			completed = if carried then carried.completed else false,
-		}
-		if record.door then
-			record.closedCFrame = if carried and carried.closedCFrame
-				then carried.closedCFrame
-				else record.door.CFrame
-			local offset = record.door:GetAttribute(ATTR_OPEN_OFFSET)
-			if typeof(offset) ~= "Vector3" then
-				offset = Vector3.new(0, record.door.Size.Y + 0.2, 0)
-			end
-			record.openCFrame = record.closedCFrame * CFrame.new(offset)
-		else
-			warnOnce(
-				"nodoor:" .. instance.Name,
-				string.format("safe room %q has no part named Door; it can never be sealed", instance.Name)
-			)
-		end
-		table.insert(safeRooms, record)
-		roomByModel[instance] = record
-	end
-
-	table.sort(safeRooms, function(a, b)
-		return a.index < b.index
-	end)
-	for order, record in safeRooms do
-		-- Position in the chain, which is what "the last one" means. FL_Index only
-		-- has to sort: a hand-built map is free to number its rooms 10, 20, 30.
-		record.order = order
-	end
-
-	if #safeRooms == 0 then
-		warnOnce("norooms", "no FL_SafeRoom models in Workspace — the round can never be won")
-	end
+local function rebuildSurvivorSpawns()
+	survivorSpawnDirty = false
+	survivorSpawns = taggedParts(TAG_SURVIVOR_SPAWN)
+	sortTagged(survivorSpawns)
 end
 
 local function rebuildPanicTriggers()
@@ -314,10 +267,10 @@ end
 	in — each pad's own ancestor that is a direct child of the map root — and
 	records the flow distance of each group.
 
-	ItemPlacer's populateSection wants "the section the team is committing to",
-	and this derives that from the tags already in the map rather than demanding
-	yet another tag. A map that is one flat folder of pads degrades to a single
-	section, which stocks once and is still perfectly playable.
+	ItemPlacer's populateSection wants "the part of the map the team is fighting
+	in", and this derives that from the tags already in the map rather than
+	demanding yet another tag. A map that is one flat folder of pads degrades to a
+	single section, which stocks as a whole and is still perfectly playable.
 ]]
 local function sectionContainerFor(pad: Instance): Instance?
 	if not pad:IsDescendantOf(Workspace) then
@@ -360,12 +313,24 @@ local function rebuildSections()
 		table.insert(sections, {
 			container = container,
 			flow = entry.total / math.max(entry.count, 1),
-			stocked = false,
 		})
 	end
 	table.sort(sections, function(a, b)
 		return a.flow < b.flow
 	end)
+
+	if #sections == 0 then
+		warnOnce(
+			"noitems",
+			string.format(
+				"no %s parts in the map, so no pills, medkits, throwables or ammo will ever appear. "
+					.. "Tag a few flat surfaces (shelves, crates, counters) with %s; an optional FL_Slot "
+					.. "attribute forces what a pad holds.",
+				TAG_ITEM,
+				TAG_ITEM
+			)
+		)
+	end
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -451,6 +416,10 @@ function LevelService:getFlowLength(): number
 	return flowTotal
 end
 
+-- ════════════════════════════════════════════════════════════════════════════
+--  Tagged geometry the Director asks for
+-- ════════════════════════════════════════════════════════════════════════════
+
 function LevelService:getSpawnNodes(): { BasePart }
 	if spawnDirty then
 		rebuildSpawnNodes()
@@ -460,19 +429,232 @@ function LevelService:getSpawnNodes(): { BasePart }
 	return table.clone(spawnNodes)
 end
 
-function LevelService:getSafeRooms(): { Model }
-	if safeDirty then
-		rebuildSafeRooms()
+--[[ Arenas a Tank or a Witch may be placed in, in flow order. A map with none
+     still gets bosses; they just arrive wherever the ordinary spawn rules allow
+     rather than in the room that was built for them. ]]
+function LevelService:getBossZones(): { BasePart }
+	if bossDirty then
+		rebuildBossZones()
 	end
-	local models = {}
-	for _, record in safeRooms do
-		table.insert(models, record.model)
-	end
-	return models
+	return table.clone(bossZones)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
---  Objective and round state
+--  Items
+-- ════════════════════════════════════════════════════════════════════════════
+
+--[[ The pickup sections of the map, ordered by flow. ]]
+function LevelService:getItemSections(): { Instance }
+	if sectionsDirty then
+		rebuildSections()
+	end
+	local containers = {}
+	for _, section in sections do
+		if section.container.Parent then
+			table.insert(containers, section.container)
+		end
+	end
+	return containers
+end
+
+--[[
+	Stocks the part of the map the team is fighting in, through ItemPlacer.
+
+	Called by RoundService when a breather's itemDropChance roll comes up, and
+	once during prep so there is something on the shelves to start with. The
+	timing matters: ItemPlacer weights its roll by how the team is doing RIGHT
+	NOW, so a map stocked at load would hand a healthy team the medkit a hurt team
+	needed twelve minutes later.
+
+	Re-stocking the same section is safe and is the point — ItemPlacer skips pads
+	that are still holding something, so a breather tops up exactly what the team
+	picked up during the wave.
+
+	Returns the number of sections offered to ItemPlacer.
+]]
+function LevelService:restockItems(): number
+	if sectionsDirty then
+		rebuildSections()
+	end
+	local placer = Registry.find("ItemPlacer")
+	if not placer or #sections == 0 then
+		return 0
+	end
+
+	local teamFlow = self:getSurvivorFlow()
+	local stocked = 0
+	local nearest, nearestGap = nil, math.huge
+
+	for _, section in sections do
+		if not section.container.Parent then
+			continue
+		end
+		local gap = math.abs(section.flow - teamFlow)
+		if gap < nearestGap then
+			nearestGap = gap
+			nearest = section.container
+		end
+		-- Behind the team is still worth stocking: in a hold-out round the team
+		-- doubles back constantly, and a map with no flow nodes reports every
+		-- section at 0 anyway.
+		if section.flow - teamFlow <= POPULATE_LOOKAHEAD then
+			placer:populateSection(section.container)
+			stocked += 1
+		end
+	end
+
+	-- Every section is further ahead than the lookahead window: stock the closest
+	-- one rather than nothing, because an empty map is not a difficulty setting.
+	if stocked == 0 and nearest then
+		placer:populateSection(nearest)
+		stocked = 1
+	end
+
+	return stocked
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  Survivor spawn placement
+--
+--  This used to require a safe room, which is exactly why an untagged map put
+--  everybody at the world origin on empty terrain. It now falls back three
+--  times before it gives up, and says which tag would have fixed it.
+-- ════════════════════════════════════════════════════════════════════════════
+
+--[[ Drops a point onto whatever floor is under it and lifts it to root height.
+     Falls through to the point itself when nothing is below — a spawn hanging in
+     the air is recoverable, a spawn inside the floor is not. ]]
+local function standOn(point: Vector3): Vector3
+	local ground = RaycastUtil.groundAt(point, GROUND_SEARCH, {})
+	if ground then
+		return Vector3.new(ground.X, ground.Y + SPAWN_ROOT_HEIGHT, ground.Z)
+	end
+	return point + Vector3.new(0, SPAWN_ROOT_HEIGHT, 0)
+end
+
+--[[ A slot's position on a ring around a centre, so four survivors do not spawn
+     inside one another and spend the first second of the round being pushed
+     apart by the physics solver. ]]
+local function ringPoint(centre: Vector3, slot: number): Vector3
+	local count = math.max(GameConfig.MaxSurvivors, 1)
+	local bearing = ((slot - 1) % count) * (math.pi * 2 / count)
+	return centre
+		+ Vector3.new(math.cos(bearing) * SPAWN_RING_RADIUS, 0, math.sin(bearing) * SPAWN_RING_RADIUS)
+end
+
+local function flatLook(direction: Vector3): Vector3
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	if flat.Magnitude < 1e-3 then
+		return Vector3.new(0, 0, -1)
+	end
+	return flat.Unit
+end
+
+--[[ The centre of the flow spline, and the direction it runs. The last-but-one
+     fallback: a map with a spline has told us where the play space is even if
+     nobody tagged a spawn. ]]
+local function flowAnchor(): (Vector3?, Vector3?)
+	if flowDirty then
+		rebuildFlow()
+	end
+	if #flowPoints == 0 then
+		return nil, nil
+	end
+	local sum = Vector3.zero
+	for _, point in flowPoints do
+		sum += point
+	end
+	local centre = sum / #flowPoints
+	local direction = if #flowPoints > 1 then flowPoints[#flowPoints] - flowPoints[1] else nil
+	return centre, direction
+end
+
+--[[
+	Where survivor `slot` starts the round.
+
+	In order of preference: a part tagged FL_SurvivorSpawn (handed out round-robin
+	so one part works and four parts work better, and its rotation is the way the
+	survivor faces), a SpawnLocation anywhere in Workspace, the middle of the flow
+	spline, and finally the ground under the world origin — which is a bad answer
+	and says so in the log rather than pretending.
+]]
+function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
+	if survivorSpawnDirty then
+		rebuildSurvivorSpawns()
+	end
+	local index = math.max(math.floor(tonumber(slot) or 1), 1)
+
+	if #survivorSpawns > 0 then
+		local pad = survivorSpawns[((index - 1) % #survivorSpawns) + 1]
+		local top = pad.Position + Vector3.new(0, pad.Size.Y * 0.5 + SPAWN_ROOT_HEIGHT, 0)
+		return CFrame.lookAt(top, top + flatLook(pad.CFrame.LookVector))
+	end
+
+	local spawnLocation = Workspace:FindFirstChildWhichIsA("SpawnLocation", true)
+	if spawnLocation then
+		warnOnce(
+			"nosurvivorspawn",
+			string.format(
+				"no %s parts in the map, so survivors are starting at the SpawnLocation %q. Tag a part "
+					.. "with %s where you want the team to begin the round — its rotation is the "
+					.. "direction they face.",
+				TAG_SURVIVOR_SPAWN,
+				spawnLocation:GetFullName(),
+				TAG_SURVIVOR_SPAWN
+			)
+		)
+		local point = standOn(ringPoint(spawnLocation.Position, index))
+		return CFrame.lookAt(point, point + flatLook(spawnLocation.CFrame.LookVector))
+	end
+
+	local centre, direction = flowAnchor()
+	if centre then
+		warnOnce(
+			"nosurvivorspawn",
+			string.format(
+				"no %s part and no SpawnLocation in the map, so survivors are starting in the middle "
+					.. "of the %s spline. Tag a part with %s where you want the team to begin.",
+				TAG_SURVIVOR_SPAWN,
+				TAG_FLOW,
+				TAG_SURVIVOR_SPAWN
+			)
+		)
+		local point = standOn(ringPoint(centre, index))
+		return CFrame.lookAt(point, point + flatLook(direction or Vector3.new(0, 0, -1)))
+	end
+
+	warnOnce(
+		"nosurvivorspawn",
+		string.format(
+			"the map carries no %s part, no SpawnLocation and no %s parts, so there is nothing that "
+				.. "says where the team should stand. Survivors are being dropped onto whatever is "
+				.. "under the world origin. Tag ONE part in your map with %s to fix this.",
+			TAG_SURVIVOR_SPAWN,
+			TAG_FLOW,
+			TAG_SURVIVOR_SPAWN
+		)
+	)
+	local point = standOn(ringPoint(Vector3.zero, index))
+	return CFrame.lookAt(point, point + Vector3.new(0, 0, -1))
+end
+
+--[[ Hands every player their spawn point. Called by RoundService before it
+     spawns the team, and on join so the bootstrap's own spawnSurvivor has a
+     CFrame to use. ]]
+function LevelService:placeSurvivors()
+	local survivors = Registry.find("SurvivorService")
+	if not survivors then
+		return
+	end
+	local slot = 0
+	for _, player in Players:GetPlayers() do
+		slot += 1
+		survivors:setSpawnCFrame(player, self:getSurvivorSpawnCFrame(slot))
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  Objective
 -- ════════════════════════════════════════════════════════════════════════════
 
 local function playUi(definition)
@@ -487,7 +669,8 @@ end
 
 --[[ Writes the objective attribute and announces it once. Attribute AND remote
      on purpose: the attribute is the state a late joiner reads, the remote is
-     the event a HUD animates. ]]
+     the event a HUD animates. RoundService supplies the words — the round knows
+     what the team is meant to be doing; the level knows where it is. ]]
 function LevelService:setObjective(text: string)
 	if typeof(text) ~= "string" or text == objectiveText then
 		return
@@ -501,293 +684,24 @@ function LevelService:setObjective(text: string)
 	playUi(AudioConfig.UI.ObjectiveChange)
 end
 
---[[
-	Publishes the round state.
-
-	Also fired, with the state unchanged, on a chapter boundary: the payload is
-	what the client's overlay reads to throw up a chapter card, and inventing a
-	second remote for "the same round, one leg further on" would put two events on
-	the wire that always travel together.
-]]
-function LevelService:_publishRound(state: string, payload: { [string]: any }?)
-	roundState = state
-	Workspace:SetAttribute(Attributes.Game.RoundState, state)
-	Remotes.Event.RoundStateChanged:FireAllClients({ state = state, payload = payload })
-end
-
-function LevelService:getRoundState(): string
-	return roundState
-end
-
--- ════════════════════════════════════════════════════════════════════════════
---  Safe rooms
--- ════════════════════════════════════════════════════════════════════════════
-
-local function pointInside(box: CFrame, size: Vector3, position: Vector3, margin: number): boolean
-	local localPoint = box:PointToObjectSpace(position)
-	return math.abs(localPoint.X) <= math.max(size.X * 0.5 - margin, 0)
-		and math.abs(localPoint.Y) <= math.max(size.Y * 0.5, 0)
-		and math.abs(localPoint.Z) <= math.max(size.Z * 0.5 - margin, 0)
-end
-
-function LevelService:_setDoor(record, open: boolean)
-	if not record.door or not record.openCFrame or record.doorOpen == open then
-		return
-	end
-	record.doorOpen = open
-	TweenService:Create(record.door, DOOR_TWEEN, {
-		CFrame = if open then record.openCFrame else record.closedCFrame,
-	}):Play()
-end
-
---[[
-	A standing spot inside a room: spread around the middle, dropped onto whatever
-	floor is actually under that spot, facing the door.
-
-	The cast starts at the middle of the room and goes DOWN rather than starting
-	above and falling in — a safe room has a ceiling, and a search that begins
-	outside the box lands every survivor on the roof.
-]]
-local function standingCFrame(record, slot: number): CFrame
-	local centre = record.box.Position
-	local bearing = (slot - 1) * (math.pi * 2 / math.max(GameConfig.MaxSurvivors, 1))
-	local spread = math.min(record.size.X, record.size.Z) * 0.22
-	local point = centre + Vector3.new(math.cos(bearing) * spread, 0, math.sin(bearing) * spread)
-
-	local floor = workspace:Raycast(point, Vector3.new(0, -record.size.Y, 0), RaycastUtil.excluding({}))
-	local y = if floor then floor.Position.Y else record.box.Position.Y - record.size.Y * 0.5
-	local stand = Vector3.new(point.X, y + 3.5, point.Z)
-
-	local door = record.door
-	if door then
-		local facing = Vector3.new(door.Position.X, stand.Y, door.Position.Z)
-		if (facing - stand).Magnitude > 1 then
-			return CFrame.lookAt(stand, facing)
-		end
-	end
-	return CFrame.new(stand)
-end
-
---[[
-	Resupply. A safe room is the game's only guaranteed breather, so it undoes
-	everything a chapter did to the team that a chapter is allowed to undo:
-	everyone who is down gets up, everyone who died comes back, wounds close and
-	magazines and reserves refill.
-
-	It deliberately does NOT clear black and white. That state is cleared by a
-	medkit and only by a medkit, which is why the shelves in here are tagged with
-	FL_Slot = Health — the way out is an item the team has to choose to spend.
-]]
-function LevelService:_resupply(record)
-	local survivors = Registry.find("SurvivorService")
-	local inventory = Registry.find("InventoryService")
-	if not survivors then
-		return
-	end
-
-	local slot = 0
-	for _, player in Players:GetPlayers() do
-		slot += 1
-		local cframe = standingCFrame(record, slot)
-		survivors:setSpawnCFrame(player, cframe)
-
-		local state = survivors:getState(player)
-		if state == Enums.SurvivorState.Dead or state == Enums.SurvivorState.Spectating then
-			-- A chapter boundary is where Left 4 Dead gives a dead survivor back.
-			survivors:spawnSurvivor(player)
-		elseif survivors:isIncapacitated(player) then
-			survivors:revive(player)
-		end
-
-		survivors:heal(player, GameConfig.Survivor.MaxHealth, false)
-
-		if inventory then
-			for _, weaponSlot in { Enums.Slot.Primary, Enums.Slot.Secondary } do
-				local itemId = inventory:getItem(player, weaponSlot)
-				local definition = itemId and WeaponConfig.get(itemId)
-				if definition then
-					-- Re-giving the same weapon is the ammo pile: full magazine,
-					-- full reserve, nothing else about the loadout disturbed.
-					inventory:giveWeapon(player, itemId, definition.magSize, definition.reserveMax)
-				end
-			end
-		end
-	end
-
-	local placer = Registry.find("ItemPlacer")
-	if placer then
-		placer:populateSection(record.model)
-	end
-end
-
---[[
-	The team has sealed itself into `room`.
-
-	Idempotent per room: a survivor who steps out and back in has not completed
-	the chapter twice, and the Victory path in particular must fire exactly once.
-]]
-function LevelService:onSafeRoomReached(room: Model)
-	if safeDirty then
-		rebuildSafeRooms()
-	end
-	local record = roomByModel[room]
-	if not record or record.completed then
-		return
-	end
-	record.completed = true
-	currentChapter = record.index
-
-	self:_setDoor(record, false)
-	playUi(AudioConfig.UI.SafeRoomReached)
-	-- Off the tick: resupply respawns the dead, and LoadCharacter yields. The
-	-- shared loop must not be held open waiting for four characters to stream in.
-	task.spawn(function()
-		self:_resupply(record)
-	end)
-
-	local isFinal = record.order >= #safeRooms
-	self.chapterChanged:fire(record.index, room, isFinal)
-
-	if isFinal then
-		self:_finishRound(Enums.RoundState.Victory, TEXT.Victory)
-		return
-	end
-
-	self:_publishRound(roundState, { chapter = record.index, safeRoom = room, final = false })
-
-	-- The door the team just came through closes; the one out of the far side of
-	-- the room is whatever the next leg opens for them.
-	local remaining = #safeRooms - record.order
-	self:setObjective(if remaining <= 1 then TEXT.FinalLeg else TEXT.NextLeg)
-end
-
--- ════════════════════════════════════════════════════════════════════════════
---  Round lifecycle
--- ════════════════════════════════════════════════════════════════════════════
-
-function LevelService:_openStartRoom()
-	if safeDirty then
-		rebuildSafeRooms()
-	end
-	for _, record in safeRooms do
-		self:_setDoor(record, record.order == 1)
-	end
-end
-
-function LevelService:_beginRound()
-	if roundState == Enums.RoundState.Starting or roundState == Enums.RoundState.InProgress then
-		return
-	end
-	if #Players:GetPlayers() == 0 then
-		return
-	end
-
-	if safeDirty then
-		rebuildSafeRooms()
-	end
-	--[[
-		A map with no safe rooms is not a campaign map, so this module has no
-		business deciding when its round starts or ends. It keeps answering flow,
-		spawn-node and objective questions and leaves FL_RoundState entirely
-		alone, so a wave-based mode service can own the round without two systems
-		writing the same attribute. See the report: GameModeConfig describes
-		exactly that mode and ARCHITECTURE.md describes this one.
-	]]
-	if #safeRooms == 0 then
-		warnOnce(
-			"noroundowner",
-			"no FL_SafeRoom models in the map, so the round is left to whoever else owns it"
-		)
-		return
-	end
-
-	roundGeneration += 1
-	local generation = roundGeneration
-
-	sectionsDirty = true
-	for _, record in safeRooms do
-		record.completed = false
-		self:_setDoor(record, false)
-	end
-	for part in panicTriggers do
-		panicTriggers[part] = false
-	end
-
-	currentChapter = if safeRooms[1] then safeRooms[1].index else 0
-	sawLivingSurvivor = false
-
-	self:_publishRound(Enums.RoundState.Starting, { chapter = currentChapter })
-	self:setObjective(TEXT.Lobby)
-
-	task.delay(START_DELAY, function()
-		if generation ~= roundGeneration then
-			return
-		end
-		self:_openStartRoom()
-		self:_publishRound(Enums.RoundState.InProgress, { chapter = currentChapter })
-		self:setObjective(if #safeRooms > 2 then TEXT.FirstLeg else TEXT.FinalLeg)
-	end)
-end
-
---[[ Ends the round and schedules a reset. There is no round service in the
-     contract, and a server that sits on a wipe screen forever is a server nobody
-     can playtest twice, so the level owns the loop. ]]
-function LevelService:_finishRound(state: string, text: string)
-	if roundState == state then
-		return
-	end
-	self:_publishRound(state, { chapter = currentChapter })
-	self:setObjective(text)
-
-	roundGeneration += 1
-	local generation = roundGeneration
-
-	task.delay(RESTART_DELAY, function()
-		if generation ~= roundGeneration then
-			return
-		end
-		local infected = Registry.find("InfectedService")
-		if infected then
-			infected:despawnAll()
-		end
-
-		local survivors = Registry.find("SurvivorService")
-		local first = safeRooms[1]
-		if survivors and first then
-			local slot = 0
-			for _, player in Players:GetPlayers() do
-				slot += 1
-				survivors:setSpawnCFrame(player, standingCFrame(first, slot))
-				survivors:spawnSurvivor(player)
-			end
-		end
-
-		roundState = Enums.RoundState.Lobby
-		self:_beginRound()
-	end)
-end
-
---[[ Sets a joining player's first spawn to the start safe room. Connected in
-     start(), which runs before the bootstrap's own PlayerAdded handler, so the
-     CFrame is in place by the time SurvivorService calls LoadCharacter. ]]
-function LevelService:_placePlayer(player: Player)
-	if safeDirty then
-		rebuildSafeRooms()
-	end
-	local first = safeRooms[1]
-	local survivors = Registry.find("SurvivorService")
-	if first and survivors then
-		survivors:setSpawnCFrame(player, standingCFrame(first, #Players:GetPlayers()))
-	end
+function LevelService:getObjective(): string
+	return objectiveText
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
 --  The shared tick
 -- ════════════════════════════════════════════════════════════════════════════
 
+local function pointInside(box: CFrame, size: Vector3, position: Vector3): boolean
+	local localPoint = box:PointToObjectSpace(position)
+	return math.abs(localPoint.X) <= size.X * 0.5
+		and math.abs(localPoint.Y) <= size.Y * 0.5
+		and math.abs(localPoint.Z) <= size.Z * 0.5
+end
+
 --[[ Every survivor still in the fight, and where they are. Built once per tick
-     and reused by the safe-room test and the panic test, because both want the
-     same four positions and a character lookup is not free. ]]
+     into a reused table, because the tick runs five times a second forever and a
+     fresh table each time is garbage the horde has to pay for later. ]]
 local tickPositions: { Vector3 } = {}
 
 local function gatherSurvivorPositions(): number
@@ -813,13 +727,21 @@ function LevelService:_checkPanic()
 		return
 	end
 
+	-- A trigger arms once and only once, so it must not be burned by somebody
+	-- wandering over it during the lobby or the prep window. The round state is
+	-- read from the attribute rather than from RoundService, because geometry
+	-- should not need to know which service is running the round.
+	if Attributes.get(Workspace, Attributes.Game.RoundState, "") ~= Enums.RoundState.InProgress then
+		return
+	end
+
 	for part, fired in panicTriggers do
 		if fired or not part.Parent then
 			continue
 		end
 		local hit = false
 		for _, position in tickPositions do
-			if pointInside(part.CFrame, part.Size, position, 0) then
+			if pointInside(part.CFrame, part.Size, position) then
 				hit = true
 				break
 			end
@@ -834,7 +756,7 @@ function LevelService:_checkPanic()
 
 		-- find(), not get(): a level with a panic trigger and no Director should
 		-- still be walkable, and this runs inside the shared loop where a throw
-		-- would take the safe-room check down with it.
+		-- would take the rest of the tick down with it.
 		local director = Registry.find("DirectorService")
 		if director then
 			director:triggerPanicEvent(part.Position)
@@ -843,87 +765,20 @@ function LevelService:_checkPanic()
 		end
 
 		local restore = objectiveText
-		self:setObjective(TEXT.Panic)
+		self:setObjective(TEXT_PANIC)
 		task.delay(DirectorConfig.PanicEvent.Duration, function()
-			if objectiveText == TEXT.Panic then
+			-- Only if nothing else has claimed the line since — RoundService
+			-- rewrites it on every wave edge and the round outranks a trigger.
+			if objectiveText == TEXT_PANIC then
 				self:setObjective(restore)
 			end
 		end)
 	end
 end
 
-function LevelService:_checkSafeRooms()
-	if safeDirty then
-		rebuildSafeRooms()
-	end
-	if #tickPositions == 0 then
-		return
-	end
-
-	for _, record in safeRooms do
-		if record.completed or record.index <= currentChapter then
-			continue
-		end
-		local everyone = true
-		for _, position in tickPositions do
-			if not pointInside(record.box, record.size, position, SAFEROOM_MARGIN) then
-				everyone = false
-				break
-			end
-		end
-		if everyone then
-			self:onSafeRoomReached(record.model)
-			return
-		end
-	end
-end
-
---[[ Stocks the section the team is walking into. Deliberately late: ItemPlacer
-     weights its roll by how the team is doing RIGHT NOW, so a section stocked at
-     map load would hand a healthy team the medkit a hurt team needed. ]]
-function LevelService:_checkSections(teamFlow: number)
-	if sectionsDirty then
-		rebuildSections()
-	end
-	local placer = Registry.find("ItemPlacer")
-	if not placer then
-		return
-	end
-	for _, section in sections do
-		if not section.stocked and teamFlow + POPULATE_LOOKAHEAD >= section.flow then
-			section.stocked = true
-			if section.container.Parent then
-				placer:populateSection(section.container)
-			end
-		end
-	end
-end
-
 function LevelService:_step()
-	if roundState ~= Enums.RoundState.InProgress then
-		return
-	end
-
-	local survivors = Registry.find("SurvivorService")
-	if not survivors then
-		return
-	end
-
-	-- Read from survivor STATE, never from whether a character exists: a
-	-- character is briefly nil across every respawn, and a wipe declared in that
-	-- gap would end the round while the team was still alive.
-	if #survivors:getAliveSurvivors() > 0 then
-		sawLivingSurvivor = true
-	elseif sawLivingSurvivor and #Players:GetPlayers() > 0 and GameModeConfig.Classic.EndOnTeamWipe then
-		-- Nobody left standing, and nobody left to open a rescue closet.
-		self:_finishRound(Enums.RoundState.TeamWipe, TEXT.Wipe)
-		return
-	end
-
 	gatherSurvivorPositions()
-	self:_checkSafeRooms()
 	self:_checkPanic()
-	self:_checkSections(self:getSurvivorFlow())
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -946,11 +801,14 @@ function LevelService:init()
 			[TAG_ITEM] = function()
 				sectionsDirty = true
 			end,
-			[TAG_SAFEROOM] = function()
-				safeDirty = true
-			end,
 			[TAG_PANIC] = function()
 				panicDirty = true
+			end,
+			[TAG_BOSS] = function()
+				bossDirty = true
+			end,
+			[TAG_SURVIVOR_SPAWN] = function()
+				survivorSpawnDirty = true
 			end,
 		}
 	do
@@ -962,26 +820,38 @@ end
 function LevelService:start()
 	rebuildFlow()
 	rebuildSpawnNodes()
-	rebuildSafeRooms()
+	rebuildBossZones()
+	rebuildSurvivorSpawns()
 	rebuildPanicTriggers()
+	rebuildSections()
 
+	-- One line, at boot, saying exactly what the map gave us. A map that is
+	-- missing something should be obvious before the first zombie, not after
+	-- twenty minutes of wondering why the Director is quiet.
 	print(
 		string.format(
-			"[LevelService] %d flow nodes over %.0f studs, %d spawn nodes, %d safe rooms",
+			"[LevelService] %d flow nodes over %.0f studs, %d spawn nodes, %d boss zones, "
+				.. "%d survivor spawns, %d item sections, %d panic triggers",
 			#flowPoints,
 			flowTotal,
 			#spawnNodes,
-			#safeRooms
+			#bossZones,
+			#survivorSpawns,
+			#sections,
+			#taggedParts(TAG_PANIC)
 		)
 	)
 
+	-- Before the bootstrap's own PlayerAdded handler, which is connected after
+	-- every start() has run — so the CFrame is in place by the time
+	-- SurvivorService calls LoadCharacter for a joining player.
 	serviceTrove:connect(Players.PlayerAdded, function(player)
-		self:_placePlayer(player)
-		self:_beginRound()
+		local survivors = Registry.find("SurvivorService")
+		if survivors then
+			survivors:setSpawnCFrame(player, self:getSurvivorSpawnCFrame(#Players:GetPlayers()))
+		end
 	end)
-	for _, player in Players:GetPlayers() do
-		self:_placePlayer(player)
-	end
+	self:placeSurvivors()
 
 	-- THE loop. One connection for the whole level, throttled to TICK_INTERVAL:
 	-- everything in it is a spatial test against four characters and none of it
@@ -994,8 +864,6 @@ function LevelService:start()
 		accumulator = 0
 		self:_step()
 	end)
-
-	self:_beginRound()
 end
 
 function LevelService:destroy()

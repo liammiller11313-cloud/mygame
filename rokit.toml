@@ -1,6 +1,6 @@
 # Rokit toolchain manifest — run `rokit install` to get the exact tool versions.
 # (Rokit is the successor to Aftman/Foreman: https://github.com/rojo-rbx/rokit)
 [tools]
-rojo = "rojo-rbx/rojo@7.5.1"
+rojo = "rojo-rbx/rojo@7.6.1"
 stylua = "JohnnyMorganz/StyLua@2.0.2"
 selene = "Kampfkarren/selene@0.28.0"

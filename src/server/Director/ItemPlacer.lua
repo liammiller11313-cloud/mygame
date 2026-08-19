@@ -20,6 +20,12 @@
 	Placement itself is dumb on purpose: FL_ItemSpawn parts are placed by hand by
 	whoever built the map, and an item that appears somewhere a level designer
 	did not put a pad is an item nobody finds.
+
+	In wave mode there are no sections to walk into, so the BREATHER is when the
+	map restocks — see restockForBreather. That timing is if anything better than
+	the campaign one: the roll reads the team's health immediately after the wave
+	that just hurt them, so what appears on the pads answers the fight they
+	actually had rather than the one they are about to have.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -80,6 +86,84 @@ end
 	populateSection call from there must not find a half-built service.
 ]]
 local occupied: { [BasePart]: Model } = {}
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  Weapon classes
+--
+--  Picking uniformly from every id in a slot is what put four rifles in a row
+--  on a map. The Primary slot holds five rifles, five SMGs, two marksman rifles
+--  and exactly one shotgun, so a uniform roll is a rifle 38% of the time and
+--  the shotgun — a whole class carried by one gun — shows up on one pad in
+--  thirteen.
+--
+--  So the roll draws a CLASS first, from a deck dealt without replacement. Over
+--  any four Primary placements the map offers a shotgun, an SMG, a rifle and a
+--  marksman rifle in some order, and the team gets a choice of weapon types
+--  instead of a choice of rifles. The classes themselves are discovered from
+--  WeaponConfig, so a new class is placeable the moment it is defined.
+-- ════════════════════════════════════════════════════════════════════════════
+
+local classesBySlot: { [string]: { string } } = {}
+local idsBySlotClass: { [string]: { [string]: { string } } } = {}
+
+do
+	local seen: { [string]: { [string]: boolean } } = {}
+	for _, definition in WeaponConfig.all() do
+		local slot = definition.slot
+		local slotSeen = seen[slot]
+		if not slotSeen then
+			slotSeen = {}
+			seen[slot] = slotSeen
+			classesBySlot[slot] = {}
+			idsBySlotClass[slot] = {}
+		end
+		if slotSeen[definition.class] then
+			continue
+		end
+		slotSeen[definition.class] = true
+		table.insert(classesBySlot[slot], definition.class)
+
+		-- idsForClass allocates and sorts. WeaponConfig is frozen, so this runs
+		-- once per class at load rather than on every placement roll. The slot
+		-- filter matters for a class that could legally span two slots.
+		local ids = {}
+		for _, id in WeaponConfig.idsForClass(definition.class) do
+			local candidate = WeaponConfig.get(id)
+			if candidate and candidate.slot == slot then
+				table.insert(ids, id)
+			end
+		end
+		idsBySlotClass[slot][definition.class] = ids
+	end
+
+	-- Sorted so the deck is dealt from a stable list; the shuffle owns the order.
+	for _, classes in classesBySlot do
+		table.sort(classes)
+	end
+end
+
+--[[ One deck per slot, reshuffled when it runs out. Module state for the same
+     reason `occupied` is: a map may be stocked before this module's lifecycle
+     would have run. ]]
+local decks: { [string]: { string } } = {}
+
+local function drawClass(slot: string): string?
+	local classes = classesBySlot[slot]
+	if not classes or #classes == 0 then
+		return nil
+	end
+
+	local deck = decks[slot]
+	if not deck or #deck == 0 then
+		deck = table.clone(classes)
+		for index = #deck, 2, -1 do
+			local swap = random:NextInteger(1, index)
+			deck[index], deck[swap] = deck[swap], deck[index]
+		end
+		decks[slot] = deck
+	end
+	return table.remove(deck)
+end
 
 -- ════════════════════════════════════════════════════════════════════════════
 --  The roll
@@ -143,6 +227,15 @@ function ItemPlacer:_rollItem(slot: string): string?
 	elseif slot == Enums.Slot.Throwable then
 		return pick({ Enums.Throwable.PipeBomb, Enums.Throwable.Molotov, Enums.Throwable.BileJar })
 	end
+
+	-- Class first, then a gun inside it. See the Weapon classes section above.
+	local class = drawClass(slot)
+	local ids = class and idsBySlotClass[slot][class]
+	if ids then
+		return pick(ids)
+	end
+	-- A slot WeaponConfig has nothing for. Falling through to the flat list keeps
+	-- a hand-authored FL_Slot from silently placing nothing.
 	return pick(WeaponConfig.idsForSlot(slot))
 end
 
@@ -227,6 +320,54 @@ function ItemPlacer:_availablePads(sectionFolder: Instance): { BasePart }
 end
 
 --[[
+	Fills some of `pads`, returning how many pickups actually landed.
+
+	How MANY is health-weighted too, not just what: the config's range is the
+	whole span, and a hurt team's roll starts at the top of it. A healthy team
+	rolls the full Min..Max, a team at the hurt threshold rolls Max..Max. Same
+	idea as the item roll — the amount is as quiet a lever as the kind, and it
+	costs no tuning number the config does not already carry.
+]]
+function ItemPlacer:_stock(pads: { BasePart }): number
+	-- Fisher-Yates: without it the first pads in tag order are stocked every
+	-- time, and a replay of the same map puts every item back in the same room.
+	for index = #pads, 2, -1 do
+		local swap = random:NextInteger(1, index)
+		pads[index], pads[swap] = pads[swap], pads[index]
+	end
+
+	local hurt = self:_hurtFraction()
+	local span = PLACEMENT.MaxItemsPerSection - PLACEMENT.MinItemsPerSection
+	local least = math.floor(PLACEMENT.MinItemsPerSection + span * hurt + 0.5)
+	local wanted = random:NextInteger(least, PLACEMENT.MaxItemsPerSection)
+	local count = math.min(wanted, #pads)
+	local placed = 0
+
+	for index = 1, count do
+		local pad = pads[index]
+		-- A pad may declare what it holds. A level designer who put a medkit
+		-- shelf on a rooftop means it, and the Director does not argue.
+		local declared = pad:GetAttribute(SLOT_ATTRIBUTE)
+		local slot = if typeof(declared) == "string" and Enums.Slot[declared]
+			then declared
+			else self:_rollSlot(hurt)
+
+		local itemId = self:_rollItem(slot)
+		if itemId then
+			-- The pad's top surface, so an item on a table is on the table.
+			local top = pad.Position + Vector3.new(0, pad.Size.Y * 0.5, 0)
+			local model = self:spawnPickup(slot, itemId, top)
+			if model then
+				occupied[pad] = model
+				placed += 1
+			end
+		end
+	end
+
+	return placed
+end
+
+--[[
 	Stocks one section of the level.
 
 	Called by whoever owns level flow when the team commits to a new section, so
@@ -243,37 +384,32 @@ function ItemPlacer:populateSection(sectionFolder: Instance)
 	if #pads == 0 then
 		return
 	end
+	self:_stock(pads)
+end
 
-	-- Fisher-Yates: without it the first pads in tag order are stocked every
-	-- time, and a replay of the same map puts every item back in the same room.
-	for index = #pads, 2, -1 do
-		local swap = random:NextInteger(1, index)
-		pads[index], pads[swap] = pads[swap], pads[index]
+--[[
+	Restocks the map between two waves. RoundService's entry point.
+
+	A wave-mode map has no sections to commit to — the team holds one arena for
+	seventeen minutes — so every free FL_ItemSpawn pad in the Workspace is a
+	candidate and the breather is the only moment new items appear. Pads still
+	holding an untaken item are skipped, so a team that hoarded gets less than a
+	team that spent everything, which is the correct answer to both.
+
+	WHETHER to call this is RoundService's decision: `itemDropChance` lives on
+	the wave definition and belongs to whoever owns the schedule. What appears
+	once it does is this module's, and it is still weighted by how badly the team
+	is hurting.
+
+	Returns how many pickups landed, so a caller can tell "the map is already
+	full" apart from "nothing spawned".
+]]
+function ItemPlacer:restockForBreather(): number
+	local pads = self:_availablePads(Workspace)
+	if #pads == 0 then
+		return 0
 	end
-
-	local wanted = random:NextInteger(PLACEMENT.MinItemsPerSection, PLACEMENT.MaxItemsPerSection)
-	local count = math.min(wanted, #pads)
-	local hurt = self:_hurtFraction()
-
-	for index = 1, count do
-		local pad = pads[index]
-		-- A pad may declare what it holds. A level designer who put a medkit
-		-- shelf in the safe room means it, and the Director does not argue.
-		local declared = pad:GetAttribute(SLOT_ATTRIBUTE)
-		local slot = if typeof(declared) == "string" and Enums.Slot[declared]
-			then declared
-			else self:_rollSlot(hurt)
-
-		local itemId = self:_rollItem(slot)
-		if itemId then
-			-- The pad's top surface, so an item on a table is on the table.
-			local top = pad.Position + Vector3.new(0, pad.Size.Y * 0.5, 0)
-			local model = self:spawnPickup(slot, itemId, top)
-			if model then
-				occupied[pad] = model
-			end
-		end
-	end
+	return self:_stock(pads)
 end
 
 Registry.register("ItemPlacer", ItemPlacer)

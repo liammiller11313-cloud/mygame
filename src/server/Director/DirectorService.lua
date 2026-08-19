@@ -31,6 +31,57 @@
 	system at TICK_RATE (this is a strategic system, not a physics one), spawn
 	requests drain through a single queue at a fixed rate per tick, and the
 	intensity pass allocates nothing per survivor.
+
+	── WAVES ────────────────────────────────────────────────────────────────────
+
+	Fading Light is not a campaign. A round is seven waves on a fixed schedule,
+	and RoundService owns that schedule. So the Director no longer invents WHEN
+	pressure happens — it is handed a budget on every phase change and decides
+	WHAT and HOW MUCH inside it:
+
+	    DirectorService:setWaveBudget(budget)   populationScale, spawnRateScale,
+	                                            maxSpecialsAlive, specialInterval,
+	                                            waveIndex, isBreather
+	    DirectorService:releaseBoss(kind)       a Tank or a Witch, placed now
+	    DirectorService:setActive(active)       prep, post-round, lobby
+
+	The wave sets the CEILING. Everything above still runs underneath it: the
+	intensity read is unchanged, the pacing machine still moves between Relax and
+	SustainPeak inside a wave, and the spawn rules still refuse to put a body in
+	somebody's field of view. What the budget changes is the size of the room the
+	Director gets to move around in.
+
+	── THE BAND ─────────────────────────────────────────────────────────────────
+
+	The Director's whole decision each tick is one scalar, `pressure`, and it is
+	multiplied into BOTH the common-infected target and the spawn rate — so a
+	single choice ("how hard am I leaning on these people") shows up as fewer
+	bodies AND longer gaps between them, which together is what a player actually
+	reads as the game easing off. One number, two effects, no way for them to
+	disagree.
+
+	    1.25   healthy team, quiet last few seconds   a quarter above the wave
+	    1.00   the wave definition's own baseline
+	    0.45   team at the hurt threshold, or intensity at PeakThreshold
+
+	Why 0.45 at the bottom: roughly halving the horde is the smallest change that
+	reads as relief from inside a fight. A gentler floor (0.7, 0.8) is invisible
+	while you are shooting, which makes the entire mechanism pointless. Wave 6's
+	SustainPeak ask of 46 x 1.35 — already past the roster's ceiling of 60 — falls
+	to 28. The room visibly empties, the team gets to move, and it is still a wave.
+
+	Why only 1.25 at the top: the wave schedule IS the difficulty curve. A
+	Director that rewards a coasting team with 60% more bodies turns wave 3 into
+	wave 5 and flattens the shape the whole round is built around. A quarter more
+	is pressure a good team feels without the round losing its identity.
+
+	Between those ends it is linear in `stress`, which is the WORSE of two reads,
+	each normalised at the config's own line for it — the same reasoning that
+	makes team intensity a peak rather than an average:
+
+	    intensity   0 at rest, 1 at DirectorConfig PeakThreshold (0.80)
+	    health      0 at full team health, 1 once SurvivorService's team fraction
+	                has fallen to GameConfig HurtThreshold / MaxHealth (0.40)
 ]]
 
 local Players = game:GetService("Players")
@@ -62,10 +113,44 @@ local PANIC = DirectorConfig.PanicEvent
 
 local STATE = Enums.PacingState
 
---[[ Bosses excluded — they are scheduled by flow distance, never by the special
-     budget. The config is frozen, so this list never changes and is built once
-     rather than rebuilt (and re-sorted) on every Director tick. ]]
+--[[ Bosses excluded — they are released by RoundService at wave start, never by
+     the special budget. The config is frozen, so this list never changes and is
+     built once rather than rebuilt (and re-sorted) on every Director tick. ]]
 local SPECIAL_IDS = InfectedConfig.getSpecialIds()
+
+--[[ The most specials that can physically be alive, summed from each kind's own
+     maxAlive. A wave asking for more than the roster allows is asking for a
+     number the game cannot produce, so the budget is clamped to it on the way in
+     rather than silently starving the special timer every tick. ]]
+local SPECIAL_ALIVE_CEILING = 0
+for _, id in SPECIAL_IDS do
+	local definition = InfectedConfig.get(id)
+	if definition then
+		SPECIAL_ALIVE_CEILING += definition.maxAlive
+	end
+end
+
+--[[ The Director may never ask for more Commons than the roster allows alive.
+     Wave 7's 1.6x on SustainPeak's 46 asks for 74 against InfectedConfig's
+     ceiling of 60, and the difference is pure waste: the queue keeps running
+     full placement searches for rigs InfectedService then refuses to build. ]]
+local COMMON_CEILING = InfectedConfig.get(Enums.Infected.Common).maxAlive
+
+--[[ The config's special jitter expressed as a FRACTION of its own base
+     interval, so a wave that asks for one special every 18s gets the same ±38%
+     variation the 26s baseline was tuned with, rather than a flat ±10s that
+     would swamp a short interval and barely register on a long one. ]]
+local SPECIAL_JITTER_FRACTION = SPECIALS.IntervalJitter / math.max(SPECIALS.BaseInterval, 1e-3)
+
+-- The pressure band. See THE BAND in the header for why these two numbers.
+local BAND_PUSH = 1.25
+local BAND_BACKOFF = 0.45
+
+--[[ Team health, normalised so that 1 is "the average survivor is as hurt as the
+     game's own definition of hurt". Derived rather than invented: below
+     HurtThreshold a survivor limps and every infected in the map can hear them. ]]
+local HURT_FRACTION = GameConfig.Survivor.HurtThreshold / GameConfig.Survivor.MaxHealth
+local HEALTH_STRESS_SPAN = math.max(1 - HURT_FRACTION, 1e-3)
 
 --[[ 8Hz. Pacing decisions happen on the scale of seconds, so anything faster is
      spent CPU with no visible product; anything slower and a batch of seven at
@@ -145,6 +230,32 @@ local SOURCE_PANIC = "panic"
 local SOURCE_SPECIAL = "special"
 local SOURCE_BOSS = "boss"
 
+--[[
+	What RoundService hands over on every phase change. Every field is a CEILING
+	or a BASELINE the Director works inside, never an order to spawn something.
+]]
+export type WaveBudget = {
+	populationScale: number, -- multiplier on the pacing state's common target
+	spawnRateScale: number, -- multiplier on how fast they arrive
+	maxSpecialsAlive: number, -- hard cap on live specials, 0 for none
+	specialInterval: number, -- seconds between specials during this wave
+	waveIndex: number, -- 1-7, or 0 during prep
+	isBreather: boolean, -- the calm between two waves
+}
+
+--[[ What the Director uses before RoundService says otherwise, and what it falls
+     back to field by field when a budget arrives incomplete. These reproduce the
+     pre-wave behaviour exactly, so a test place with no RoundService — pressing
+     Play on the placeholder map — still gets a working Director. ]]
+local DEFAULT_BUDGET: WaveBudget = table.freeze({
+	populationScale = 1,
+	spawnRateScale = 1,
+	maxSpecialsAlive = SPECIALS.MaxAliveTotal,
+	specialInterval = SPECIALS.BaseInterval,
+	waveIndex = 0,
+	isBreather = false,
+})
+
 local DirectorService = {}
 
 --[[ (newState: string, oldState: string) ]]
@@ -204,7 +315,17 @@ function DirectorService:init()
 	self._stateEnteredAt = os.clock()
 	self._stateIntensity = 0
 	self._teamIntensity = 0
-	self._publishedIntensity = -1
+
+	-- Wave state. `_waveMode` latches on the first setWaveBudget and never
+	-- clears: it is how the Director knows a RoundService exists at all, and
+	-- several campaign-era rules below are wrong the moment one does.
+	self._budget = DEFAULT_BUDGET
+	self._waveMode = false
+	self._active = true
+
+	self._pressure = 1
+	self._healthStress = 0
+	self._intensityStress = 0
 
 	self._intensity = {} :: { [Player]: number }
 	self._survivors = {} :: { Player }
@@ -307,6 +428,7 @@ end
 function DirectorService:_tick(dt: number, now: number)
 	self:_refreshSurvivors()
 	self:_updateIntensity(dt)
+	self:_updatePressure()
 	self:_updatePacing(now)
 
 	if self:_isPlaying() then
@@ -321,11 +443,12 @@ function DirectorService:_tick(dt: number, now: number)
 	self:_reportStarvation(now)
 end
 
---[[ The Director runs whenever there is somebody left to press. There is no
-     round service in the contract, so a wipe or a victory is the only thing
-     that silences it. ]]
+--[[ The Director runs whenever there is somebody left to press and RoundService
+     has not switched it off for prep or a scoreboard. The RoundState check stays
+     as a backstop: a wipe must silence the horde even if nothing calls
+     setActive, because a Director spawning over a dead team is unwatchable. ]]
 function DirectorService:_isPlaying(): boolean
-	if #self._survivors == 0 then
+	if not self._active or #self._survivors == 0 then
 		return false
 	end
 	local round = Attributes.get(Workspace, Attributes.Game.RoundState, Enums.RoundState.InProgress)
@@ -341,6 +464,135 @@ function DirectorService:_refreshSurvivors()
 	end
 	self._survivors = service:getAliveSurvivors()
 	self._characters = service:getSurvivorCharacters()
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  Wave budget
+--
+--  RoundService owns the schedule; this is where it hands over. Everything
+--  arriving here is treated as untrusted input even though it comes from
+--  another server module: the two systems are built in parallel, and a Director
+--  that throws on a missing field takes the whole round down with it.
+-- ════════════════════════════════════════════════════════════════════════════
+
+--[[ A finite number at or above `floor`, or the fallback. NaN is checked
+     explicitly: it is the one value that survives every comparison below and
+     would then poison every multiplication for the rest of the round. ]]
+local function positive(value: any, fallback: number, floor: number): number
+	if typeof(value) ~= "number" or value ~= value or value == math.huge then
+		return fallback
+	end
+	return math.max(value, floor)
+end
+
+--[[
+	Installs the budget for the phase RoundService just entered.
+
+	Called on EVERY phase change — prep, each wave start, each breather. The
+	Director keeps whatever it already had for any field that arrives malformed,
+	so a partially-built RoundService degrades to the previous phase's pacing
+	rather than to no pacing at all.
+
+	Neither scale needs an upper clamp: the common target is clamped to the
+	roster's own ceiling and the spawn interval is floored at the tick rate, so
+	an absurd number produces a saturated Director rather than a broken one.
+]]
+function DirectorService:setWaveBudget(budget: WaveBudget?)
+	-- The Director inits late in the boot order. A neighbour that announces a
+	-- phase from its own init() must not take that init down with a nil index.
+	if not self._budget then
+		warn("[DirectorService] setWaveBudget before init(); call it from start() or later")
+		return
+	end
+	if typeof(budget) ~= "table" then
+		warn("[DirectorService] setWaveBudget expects a table; keeping the current budget")
+		return
+	end
+
+	local previous = self._budget
+	local isBreather = budget.isBreather == true
+	local waveIndex = math.floor(positive(budget.waveIndex, previous.waveIndex, 0))
+
+	self._budget = {
+		populationScale = positive(budget.populationScale, previous.populationScale, 0),
+		spawnRateScale = positive(budget.spawnRateScale, previous.spawnRateScale, 1e-3),
+		maxSpecialsAlive = math.min(
+			math.floor(positive(budget.maxSpecialsAlive, previous.maxSpecialsAlive, 0)),
+			SPECIAL_ALIVE_CEILING
+		),
+		specialInterval = positive(budget.specialInterval, previous.specialInterval, 0),
+		waveIndex = waveIndex,
+		isBreather = isBreather,
+	}
+	self._waveMode = true
+
+	--[[
+		The phase boundary owns the pacing state; the intensity machine owns
+		everything between two boundaries.
+
+		Entering a breather drops straight to Relax so the horde and the music go
+		quiet on the same frame — the calm is the entire reason the next wave
+		lands, and a Relax state announced thirty seconds into it is a calm
+		nobody got. Entering a wave starts at BuildUp so a wave never opens
+		against Relax's 22-second minimum dwell, which on wave 1 would be a
+		quarter of the wave spent at a target of four bodies.
+	]]
+	if isBreather then
+		self:_setState(STATE.Relax)
+		-- A special enqueued a moment before the horn is still a special landing
+		-- during the calm. Population is dropped by _setState; this is the rest.
+		self:_dropQueued(SOURCE_SPECIAL)
+	elseif previous.isBreather or waveIndex ~= previous.waveIndex then
+		self:_setState(STATE.BuildUp)
+	end
+
+	-- _setState only does this when the state actually moved, and a budget change
+	-- inside the same state still invalidates every request sized for the old one.
+	self:_dropQueued(SOURCE_POPULATION)
+	self._nextPopulationAt = os.clock()
+end
+
+--[[ A copy, never the live table: a caller that mutated this would be changing
+     the Director's ceiling from outside with nothing to say it had happened. ]]
+function DirectorService:getWaveBudget(): WaveBudget
+	return table.clone(self._budget)
+end
+
+--[[
+	Switches spawning on and off wholesale. Prep, the post-round scoreboard and
+	the lobby are all "the Director is not playing"; a breather is NOT — that is
+	a budget, because the Director still trickles a handful of stragglers through
+	it and still reads the team.
+
+	Intensity, pacing and the published attributes keep running while inactive:
+	the HUD and the music are still on screen during a scoreboard, and a frozen
+	TeamIntensity is worse than a decaying one.
+]]
+function DirectorService:setActive(active: boolean)
+	if self._panic == nil then
+		warn("[DirectorService] setActive before init(); call it from start() or later")
+		return
+	end
+	local wanted = active == true
+	if self._active == wanted then
+		return
+	end
+	self._active = wanted
+
+	if not wanted then
+		-- Everything queued belongs to a phase that no longer exists.
+		self:_clearQueue()
+		self._panic.active = false
+		self:_setState(STATE.Relax)
+	elseif self._state == STATE.Relax then
+		-- Coming back live out of a Relax the machine cannot leave for another 22
+		-- seconds would spend the top of a wave at a target of four.
+		self:_setState(STATE.BuildUp)
+	end
+end
+
+function DirectorService:isActive(): boolean
+	return self._active
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -446,6 +698,43 @@ function DirectorService:_updateIntensity(dt: number)
 	self._teamIntensity = peak
 end
 
+--[[ SurvivorService's 0-1 read on the team, or 1 when it cannot answer. Failing
+     OPTIMISTIC is deliberate: a Director that reads a missing service as "this
+     team is dying" would quietly halve every horde in the game. ]]
+function DirectorService:_teamHealthFraction(): number
+	local survivors = Registry.find("SurvivorService")
+	if not survivors or typeof(survivors.getTeamHealthFraction) ~= "function" then
+		return 1
+	end
+	local ok, fraction = pcall(survivors.getTeamHealthFraction, survivors)
+	if not ok or typeof(fraction) ~= "number" or fraction ~= fraction then
+		return 1
+	end
+	return math.clamp(fraction, 0, 1)
+end
+
+--[[
+	The band. See THE BAND in the header for the numbers and the reasoning.
+
+	Two independent reads of "this team is in trouble", each normalised to 1 at
+	the config's own line for it, and the Director follows whichever is worse.
+	Kept as separate fields rather than folded immediately into one scalar
+	because the special gate below needs the health read on its own.
+]]
+function DirectorService:_updatePressure()
+	self._healthStress = math.clamp((1 - self:_teamHealthFraction()) / HEALTH_STRESS_SPAN, 0, 1)
+	self._intensityStress = math.clamp(self._teamIntensity / math.max(INTENSITY.PeakThreshold, 1e-3), 0, 1)
+
+	local stress = math.max(self._healthStress, self._intensityStress)
+	self._pressure = BAND_PUSH + (BAND_BACKOFF - BAND_PUSH) * stress
+end
+
+--[[ Where inside the wave's band the Director currently sits. 1 is the wave's
+     own baseline. Exposed for the debug overlay and for tests. ]]
+function DirectorService:getPressure(): number
+	return self._pressure
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 --  Pacing
 -- ════════════════════════════════════════════════════════════════════════════
@@ -488,6 +777,12 @@ function DirectorService:_setState(newState: string)
 		state = newState,
 		previous = previous,
 		intensity = self._teamIntensity,
+		-- Where inside the wave's band this state is being played. A music mix
+		-- that reads only the state cannot tell a SustainPeak the Director is
+		-- leaning into from one it is already backing out of.
+		pressure = self._pressure,
+		wave = self._budget.waveIndex,
+		breather = self._budget.isBreather,
 	})
 
 	if newState == STATE.SustainPeak then
@@ -559,20 +854,51 @@ end
 --  Population
 -- ════════════════════════════════════════════════════════════════════════════
 
+--[[
+	The population plan in force.
+
+	A breather borrows the Relax plan VERBATIM, ignoring the wave's scales
+	entirely, so the calm between wave 6 and wave 7 is the same calm as the one
+	after wave 1. That consistency is the point: a breather that scales with the
+	wave it follows gets quieter and quieter in relative terms right when the
+	team most needs to recognise it as their moment to heal and reload.
+]]
+function DirectorService:_plan()
+	if self._budget.isBreather then
+		return POPULATION[STATE.Relax]
+	end
+	return POPULATION[self._state]
+end
+
 function DirectorService:_populationTarget(): number
-	local plan = POPULATION[self._state]
+	local plan = self:_plan()
 	if not plan then
 		return 0
 	end
-	return math.floor(plan.target * self._profile.populationScale + 0.5)
+	local scale = self._profile.populationScale * self._pressure
+	if not self._budget.isBreather then
+		scale *= self._budget.populationScale
+	end
+	return math.clamp(math.floor(plan.target * scale + 0.5), 0, COMMON_CEILING)
+end
+
+--[[ Seconds between batches. The same pressure scalar that thins the horde
+     stretches the gaps between what is left of it, so backing off is felt twice
+     — floored at the tick rate, below which an interval means nothing. ]]
+function DirectorService:_spawnInterval(plan): number
+	local rate = self._pressure
+	if not self._budget.isBreather then
+		rate *= self._budget.spawnRateScale
+	end
+	return math.max(plan.spawnInterval / math.max(rate, 1e-3), TICK_INTERVAL)
 end
 
 function DirectorService:_updatePopulation(now: number)
-	local plan = POPULATION[self._state]
+	local plan = self:_plan()
 	if not plan or now < self._nextPopulationAt then
 		return
 	end
-	self._nextPopulationAt = now + plan.spawnInterval
+	self._nextPopulationAt = now + self:_spawnInterval(plan)
 
 	local infected = Registry.find("InfectedService")
 	if not infected then
@@ -596,13 +922,17 @@ end
 --  Specials
 -- ════════════════════════════════════════════════════════════════════════════
 
+--[[ The wave names the interval; the config still owns how much it wanders. ]]
 function DirectorService:_rollSpecialInterval(): number
-	return math.max(1, SPECIALS.BaseInterval + random:NextNumber(-1, 1) * SPECIALS.IntervalJitter)
+	local base = self._budget.specialInterval
+	return math.max(1, base + random:NextNumber(-1, 1) * base * SPECIAL_JITTER_FRACTION)
 end
 
 --[[ Pacing scales the WAIT, not the roll, so a state change is felt immediately
      rather than at the next reroll: drop into Relax mid-countdown and the next
-     special is pushed out, climb into a peak and it arrives sooner. ]]
+     special is pushed out, climb into a peak and it arrives sooner. Pressure
+     rides on top of that — the same scalar that thins the horde stretches the
+     wait, so at the bottom of the band wave 5's 24s becomes 53s. ]]
 function DirectorService:_specialIntervalMultiplier(): number
 	local multiplier = self._profile.specialInterval
 	if self._state == STATE.Relax then
@@ -610,7 +940,37 @@ function DirectorService:_specialIntervalMultiplier(): number
 	elseif self._state == STATE.SustainPeak then
 		multiplier *= SPECIALS.PeakMultiplier
 	end
-	return multiplier
+	return multiplier / math.max(self._pressure, 1e-3)
+end
+
+--[[
+	Whether a NEW special may be requested at all.
+
+	Health is a hard gate and intensity is only a soft one, and the asymmetry is
+	about what each signal actually measures.
+
+	Intensity is a few-seconds read dominated by ProximityWeight: 0.020/s per
+	infected inside 30 studs against a 0.055/s decay, so any survivor with three
+	or more bodies on them saturates at 1.0 and STAYS there for as long as the
+	horde is in contact — which during waves 5-7 is most of the wave, by design.
+	Hanging a binary "no specials" on that would mean the maxSpecialsAlive budget
+	those waves are built around never spends at all. So intensity buys relief
+	continuously instead, through the band: fewer commons, longer gaps, and a
+	special wait stretched by the same factor.
+
+	Team health does not saturate — it only falls when the team is genuinely
+	losing — so it is the signal that gets to stop specials outright. A team
+	averaging the game's own hurt threshold is not sent one more thing.
+
+	The timer keeps running while suppressed, because _updateSpecials only
+	charges _lastSpecialAt on a successful request. Clawing your way back over
+	the threshold and immediately hearing a Hunter is the correct beat.
+]]
+function DirectorService:_specialsAllowed(): boolean
+	if self._budget.isBreather or self._budget.maxSpecialsAlive <= 0 then
+		return false
+	end
+	return self._healthStress < 1
 end
 
 function DirectorService:_aliveSpecials(): number
@@ -627,9 +987,9 @@ end
 
 --[[
 	Picks a special, weighted by the inverse of its spawnCost: the config already
-	says what each one is worth, so a Charger being twice a Boomer's problem
-	makes it correspondingly rarer without a second table of weights to keep in
-	agreement with the first.
+	says what each one is worth, so a Rusher at 28 turns up less often than a
+	Jockey at 22 without a second table of weights to keep in agreement with the
+	first.
 ]]
 function DirectorService:_pickSpecial(): string?
 	local infected = Registry.find("InfectedService")
@@ -663,6 +1023,10 @@ function DirectorService:_pickSpecial(): string?
 end
 
 function DirectorService:_updateSpecials(now: number)
+	if not self:_specialsAllowed() then
+		return
+	end
+
 	local sinceLast = now - self._lastSpecialAt
 	if sinceLast < SPECIALS.MinIntervalBetweenAny then
 		return
@@ -670,10 +1034,18 @@ function DirectorService:_updateSpecials(now: number)
 	if sinceLast < self._specialRoll * self:_specialIntervalMultiplier() then
 		return
 	end
-	if self:_aliveSpecials() >= SPECIALS.MaxAliveTotal then
+	if self:_aliveSpecials() >= self._budget.maxSpecialsAlive then
 		return
 	end
-	if self._specialsSpawned == 0 and self:_survivorFlow() < SPECIALS.MinFlowBeforeFirst then
+	--[[ MinFlowBeforeFirst is a campaign rule — it stops a special landing in the
+	     first corridor of a map. In wave mode the schedule already owns that
+	     (wave 1 asks for zero specials), and an arena with no FlowNodes reports a
+	     flow of 0 forever, which would silence specials for the entire round. ]]
+	if
+		not self._waveMode
+		and self._specialsSpawned == 0
+		and self:_survivorFlow() < SPECIALS.MinFlowBeforeFirst
+	then
 		return
 	end
 
@@ -693,9 +1065,18 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 --  Bosses
 --
---  Placed by FLOW DISTANCE, never by a timer, so every playthrough of a map has
---  a Tank roughly where the map was designed for one and a team that rushes
---  does not skip the set piece it was built around.
+--  In WAVE MODE, RoundService releases them: wave 4 is a Tank, wave 5 a Witch,
+--  wave 7 two Tanks, and it calls releaseBoss at the top of each. The flow
+--  scheduler below is the campaign model and is switched off the moment a wave
+--  budget arrives — a Tank that shows up twice, once on schedule and once by
+--  flow, is the worst possible bug to ship.
+--
+--  What does NOT change is HOW one is placed. A boss goes through exactly the
+--  same SpawnPlacement rules as a Common — the distance band, every survivor's
+--  view cone, a line-of-sight ray, ground and headroom — with an FL_BossZone
+--  preferred when the map offers one. A Tank materialising inside somebody's
+--  field of view destroys the illusion for the rest of the round; a Tank
+--  arriving four seconds late destroys nothing at all.
 -- ════════════════════════════════════════════════════════════════════════════
 
 function DirectorService:_survivorFlow(): number
@@ -746,6 +1127,12 @@ function DirectorService:_pickBossZone(teamFlow: number): BasePart?
 end
 
 function DirectorService:_updateBosses(now: number)
+	-- RoundService owns boss releases as soon as one exists. See the section
+	-- header: two schedulers for one Tank is two Tanks.
+	if self._waveMode then
+		return
+	end
+
 	local flow = self:_survivorFlow()
 	if flow <= 0 then
 		return
@@ -805,16 +1192,100 @@ function DirectorService:_rerollBossFlow(kind: string)
 	end
 end
 
-function DirectorService:_enqueueBoss(kind: string, flow: number)
+--[[ Where a boss search should be centred: the best FL_BossZone if the map has
+     one, otherwise nothing, which leaves the ordinary team-relative rules — and
+     that is still a perfectly legal Tank. ]]
+function DirectorService:_bossAnchor(flow: number): (Vector3?, number?)
 	local zone = self:_pickBossZone(flow)
-	if zone then
-		-- The zone's own footprint is the radius, floored at the minimum spawn
-		-- distance so the sampler always has a legal ring to draw from.
-		local extent = math.max(zone.Size.X, zone.Size.Z) * 0.5
-		self:_enqueue(SOURCE_BOSS, kind, zone.Position, math.max(extent, SPAWNING.MinDistanceFromSurvivor))
-	else
-		self:_enqueue(SOURCE_BOSS, kind, nil, nil)
+	if not zone then
+		return nil, nil
 	end
+	-- The zone's own footprint is the radius, floored at the minimum spawn
+	-- distance so the sampler always has a legal ring to draw from.
+	local extent = math.max(zone.Size.X, zone.Size.Z) * 0.5
+	return zone.Position, math.max(extent, SPAWNING.MinDistanceFromSurvivor)
+end
+
+function DirectorService:_enqueueBoss(kind: string, flow: number)
+	local anchor, radius = self:_bossAnchor(flow)
+	self:_enqueue(SOURCE_BOSS, kind, anchor, radius)
+end
+
+--[[
+	Releases one boss NOW, returning the model, or nil when there is nowhere
+	legal to stand it right now.
+
+	This is RoundService's entry point at the top of a wave whose definition
+	lists a boss. Placement is synchronous rather than queued because the caller
+	is announcing the wave in the same breath and a Tank that arrives a full
+	spawn-queue drain later has already missed its cue.
+
+	A nil return is "not yet", not "never": the request is handed to the ordinary
+	spawn queue on the way out, so the boss still arrives as soon as the team's
+	sight lines move. Callers should treat nil as informational and MUST NOT
+	retry — a retry loop on top of this is how you get four Tanks.
+]]
+function DirectorService:releaseBoss(kind: string): Model?
+	if not self._queue then
+		warn("[DirectorService] releaseBoss before init(); call it from start() or later")
+		return nil
+	end
+	if typeof(kind) ~= "string" or not InfectedConfig.get(kind) then
+		warn(string.format("[DirectorService] releaseBoss(%q): no such infected kind", tostring(kind)))
+		return nil
+	end
+
+	local infected = Registry.find("InfectedService")
+	if not infected then
+		warn("[DirectorService] releaseBoss: InfectedService is not registered")
+		return nil
+	end
+
+	-- Called from outside the tick, so the survivor snapshot the placement rules
+	-- read may be up to an eighth of a second stale — long enough for somebody to
+	-- have turned around, which is the one thing this search exists to catch.
+	self:_refreshSurvivors()
+	if #self._characters == 0 then
+		return nil
+	end
+
+	local now = os.clock()
+	local anchor, radius = self:_bossAnchor(self:_survivorFlow())
+	local position, failure =
+		self:_placeFor({ source = SOURCE_BOSS, kind = kind, anchor = anchor, radius = radius }, now)
+
+	if not position then
+		-- A placement failure fixes itself the moment somebody turns around, so
+		-- this one goes to the ordinary queue and the boss still arrives.
+		self._starved += 1
+		self._starvedReason = failure or "unknown"
+		self:_enqueue(SOURCE_BOSS, kind, anchor, radius)
+		return nil
+	end
+
+	local model = infected:spawn(kind, position)
+	if not model then
+		-- Not a placement problem, and waiting does not fix it: the roster is
+		-- already at this kind's maxAlive, or the rig could not be built.
+		-- Queueing a retry here would just burn placement searches forever.
+		warn(
+			string.format(
+				"[DirectorService] releaseBoss(%q): InfectedService refused the spawn — "
+					.. "most likely %d already alive against its maxAlive",
+				kind,
+				infected:getCount(kind)
+			)
+		)
+		return nil
+	end
+
+	broadcast(EVENT.Boss, { kind = kind, position = position })
+	-- A Tank IS the peak by definition; a Witch is a hazard the team can choose
+	-- to walk around, so she does not move the pacing state.
+	if kind == Enums.Infected.Tank then
+		self:_setState(STATE.SustainPeak)
+	end
+	return model
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -824,9 +1295,12 @@ end
 --[[
 	Runs a bounded crescendo of waves at a position, on top of whatever the
 	Director is already doing. An alarmed door, a lift, a car alarm — and every
-	Boomer that hits somebody, which is why this merges rather than stacks: one
-	burst can bile all four survivors and then explode, and four overlapping
-	panic events would be four times the horde the design asks for.
+	bile jar that lands on somebody, which is why this MERGES rather than stacks:
+	one jar can cover all four survivors, and four overlapping panic events would
+	be four times the horde the design asks for.
+
+	Wave mode does not schedule these; they are player- and map-triggered, and a
+	panic event a player caused during a breather is a panic event they earned.
 ]]
 function DirectorService:triggerPanicEvent(position: Vector3, waves: number?)
 	if not self._panic or typeof(position) ~= "Vector3" then
@@ -930,6 +1404,16 @@ function DirectorService:_dropQueued(source: string)
 		self._queueHead = 1
 		self._queueTail = 0
 	end
+end
+
+--[[ Drops everything. Used when the Director goes inactive: prep, a scoreboard
+     and a lobby all mean the phase that asked for these no longer exists. ]]
+function DirectorService:_clearQueue()
+	for index = self._queueHead, self._queueTail do
+		self._queue[index] = nil
+	end
+	self._queueHead = 1
+	self._queueTail = 0
 end
 
 function DirectorService:_dequeue()
@@ -1095,13 +1579,12 @@ function DirectorService:_publish()
 	setGameAttribute(Attributes.Game.PacingState, self._state)
 	setGameAttribute(Attributes.Game.AliveSurvivors, #self._survivors)
 
-	-- Two decimals. The raw value changes every tick and nothing reading it —
-	-- a music mix, a debug overlay — can tell 0.6231 from 0.6234.
-	local rounded = math.floor(self._teamIntensity * 100 + 0.5) / 100
-	if rounded ~= self._publishedIntensity then
-		self._publishedIntensity = rounded
-		Workspace:SetAttribute(Attributes.Game.TeamIntensity, rounded)
-	end
+	--[[ Written every tick, so the HUD vignette and the music mix have a live
+	     number to lerp against rather than a value that only moves on a state
+	     change. Rounded to two decimals first — nothing reading this can tell
+	     0.6231 from 0.6234 — and pushed through setGameAttribute, so a value
+	     that has not actually moved costs no replication at all. ]]
+	setGameAttribute(Attributes.Game.TeamIntensity, math.floor(self._teamIntensity * 100 + 0.5) / 100)
 
 	-- InfectedService keeps this current on every spawn and death; this only
 	-- catches a count that drifted, and costs nothing when it has not.
