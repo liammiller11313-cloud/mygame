@@ -127,6 +127,9 @@ local state = {
 	selected = "",
 	messageUntil = 0,
 	firstRow = nil :: TextButton?,
+	--[[ How many stat rows the column is tall enough for. Set by layoutDetail,
+	     read by refreshStats — see both. ]]
+	visibleStats = #STATS,
 }
 
 -- ── the roster's extremes, computed once ────────────────────────────────────
@@ -303,7 +306,11 @@ end
 local function refreshStats(definition: any)
 	for index, row in statRows do
 		local stat = STATS[index]
-		local has = definition ~= nil and typeof(definition[stat.key]) == "number"
+		--[[ Two reasons a row is not drawn: this weapon has no such number, or
+		     the column is too short to hold the row at all. See layoutDetail. ]]
+		local has = definition ~= nil
+			and typeof(definition[stat.key]) == "number"
+			and index <= state.visibleStats
 		row.holder.Visible = has
 		if has then
 			row.fill.Size = UDim2.new(math.clamp(statFraction(definition, stat), 0.02, 1), 0, 1, 0)
@@ -497,31 +504,22 @@ local function buildDetail(parent: Frame)
 	previewMissing.TextXAlignment = Enum.TextXAlignment.Center
 	previewMissing.Visible = false
 
-	local top = PREVIEW_HEIGHT
-
 	nameLabel = Widgets.label(detail, "Name", FONT.Display, TEXT.Heading, COLOR.TextPrimary)
-	nameLabel.Position = UDim2.new(0, 0, top, 0)
 	nameLabel.Size = UDim2.new(0.66, 0, 0, TEXT.Heading + 4)
 
 	priceLabel = Widgets.label(detail, "Price", FONT.Numeric, TEXT.Large, COLOR.Accent)
 	priceLabel.AnchorPoint = Vector2.new(1, 0)
-	priceLabel.Position = UDim2.new(1, 0, top, 2)
 	priceLabel.Size = UDim2.new(0.34, 0, 0, TEXT.Heading)
 	priceLabel.TextXAlignment = Enum.TextXAlignment.Right
 
 	classLabel = Widgets.label(detail, "Class", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
-	classLabel.Position = UDim2.new(0, 0, top, TEXT.Heading + 6)
 	classLabel.Size = UDim2.new(1, 0, 0, TEXT.Body)
 
 	blurbLabel = Widgets.label(detail, "Blurb", FONT.Body, TEXT.Small, COLOR.TextDim)
-	blurbLabel.Position = UDim2.new(0, 0, top, TEXT.Heading + TEXT.Body + 8)
 	blurbLabel.Size = UDim2.new(1, 0, 0, TEXT.Body)
 
-	local statTop = TEXT.Heading + TEXT.Body * 2 + 18
-	local statHeight = 22
 	for index, stat in STATS do
-		buildStatRow(index, stat, 0, statHeight)
-		statRows[index].holder.Position = UDim2.new(0, 0, top, statTop + (index - 1) * statHeight)
+		buildStatRow(index, stat, 0, STAT_HEIGHT)
 	end
 
 	buyButton = Widgets.button(detail, "Buy")
@@ -628,6 +626,101 @@ local function build()
 end
 
 --[[
+	Lays the detail column out against the height it actually has.
+
+	Everything under the preview was positioned as `PREVIEW_HEIGHT` (a fraction)
+	plus a fixed offset, which is fine at the design height and wrong everywhere
+	else: on a phone the panel is 430 reference pixels rather than 620, the
+	column is 306, and 214 pixels of name-price-class-blurb-and-six-stat-bars
+	starting 42% of the way down ran 80 pixels past the buy button and out of the
+	panel entirely. It was invisible on every desktop and every tablet.
+
+	So the fixed content is measured, the preview gets whatever is left, and
+	below COMPACT the least useful rows go: the blurb (which is empty for every
+	real weapon anyway — only placeholders carry one) and then the stat rows
+	shrink. The preview never goes below PREVIEW_MIN, because a shop with no
+	picture of the thing is not a shop.
+]]
+local STAT_HEIGHT = 22
+local STAT_HEIGHT_COMPACT = 17
+local PREVIEW_MIN = 96
+--[[ Below this there is no picture worth drawing, so the row goes entirely
+     rather than showing a letterbox. Only reachable in a desktop window
+     deliberately resized smaller than any device this game ships on. ]]
+local PREVIEW_HIDE = 40
+local BUY_HEIGHT = 40
+local BUY_HEIGHT_COMPACT = 34
+
+local function layoutDetail()
+	if not detail then
+		return
+	end
+	local height = detail.AbsoluteSize.Y / math.max(ScaleLayer.getFactor(), 0.01)
+	if height <= 0 then
+		return
+	end
+
+	local compact = height < 380
+	local statHeight = if compact then STAT_HEIGHT_COMPACT else STAT_HEIGHT
+	local buyHeight = if compact then BUY_HEIGHT_COMPACT else BUY_HEIGHT
+	local headBlock = TEXT.Heading + 6 + TEXT.Body + (if compact then 0 else TEXT.Body + 4)
+	local statBlock = #STATS * statHeight
+	local fixed = headBlock + statBlock + buyHeight + LAYOUT.ElementGap * 3
+
+	local previewHeight = height - fixed
+	local shown = #STATS
+
+	--[[
+		When even the minimum picture does not fit, stat rows come off rather than
+		the column overflowing.
+
+		The picture wins because it is what the player came to look at, and STATS
+		is ordered by how much the answer matters — damage, rate, magazine, then
+		accuracy, control, reload — so the rows that go are the ones nobody
+		decides on. Never below two: one bar compares nothing.
+	]]
+	if previewHeight < PREVIEW_MIN then
+		local shortfall = PREVIEW_MIN - previewHeight
+		shown -= math.clamp(math.ceil(shortfall / statHeight), 0, #STATS - 2)
+		fixed = headBlock + shown * statHeight + buyHeight + LAYOUT.ElementGap * 3
+		--[[ Whatever is left, and no floor this time. PREVIEW_MIN decided how many
+		     bars to drop; it is not a promise the column can keep at every size,
+		     and re-applying it here is what put a Roblox window resized down to
+		     300 pixels back into overflow. Below PREVIEW_HIDE there is no picture
+		     worth drawing and the row goes entirely. ]]
+		previewHeight = math.max(height - fixed, 0)
+	end
+	state.visibleStats = shown
+
+	local top = previewHeight + LAYOUT.ElementGap
+
+	local hasRoom = previewHeight >= PREVIEW_HIDE
+	preview.frame.Visible = hasRoom
+	preview.frame.Size = UDim2.new(1, 0, 0, previewHeight)
+	previewMissing.Position = UDim2.new(0.5, 0, 0, previewHeight * 0.5)
+	previewMissing.Visible = previewMissing.Visible and hasRoom
+
+	nameLabel.Position = UDim2.fromOffset(0, top)
+	priceLabel.Position = UDim2.new(1, 0, 0, top + 2)
+	classLabel.Position = UDim2.fromOffset(0, top + TEXT.Heading + 6)
+	blurbLabel.Visible = not compact
+	blurbLabel.Position = UDim2.fromOffset(0, top + TEXT.Heading + TEXT.Body + 8)
+
+	local statTop = top + headBlock + LAYOUT.ElementGap
+	for index, row in statRows do
+		row.holder.Position = UDim2.fromOffset(0, statTop + (index - 1) * statHeight)
+		row.holder.Size = UDim2.new(1, 0, 0, statHeight)
+	end
+	--[[ Which rows exist is this function's answer; whether a given weapon HAS
+	     that number is refreshStats'. Re-run so the two agree without either
+	     needing to know the other's rule. ]]
+	refreshStats(WeaponConfig.get(state.selected))
+
+	buyButton.Size = UDim2.fromOffset(if compact then 170 else 220, buyHeight)
+	messageLabel.Size = UDim2.new(0.6, 0, 0, buyHeight)
+end
+
+--[[
 	Fits the panel to the screen it is on.
 
 	The same problem the settings panel has: everything inside is laid out in
@@ -651,6 +744,9 @@ local function refreshPanelSize()
 	local height =
 		math.min(PANEL_MAX_HEIGHT, (if viewport then viewport.Y else PANEL_MAX_HEIGHT) * PANEL_HEIGHT_SCALE)
 	panel.Size = UDim2.fromOffset(width, height)
+	--[[ Deferred: the detail column's AbsoluteSize is a fraction of the panel
+	     that was just resized, and Roblox has not laid it out yet this frame. ]]
+	task.defer(layoutDetail)
 end
 
 -- ── suppression ─────────────────────────────────────────────────────────────
@@ -678,6 +774,7 @@ function ShopController:open()
 	gui.Enabled = true
 	refreshPanelSize()
 	renderCategory(state.category)
+	layoutDetail()
 	refreshBalance()
 	preview:setTurning(true)
 	GamepadFocus.capture(state.firstRow)

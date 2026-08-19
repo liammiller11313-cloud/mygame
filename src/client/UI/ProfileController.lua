@@ -18,11 +18,16 @@
 	every screen came from the server.
 
 	── TWO CHANNELS, ON PURPOSE ─────────────────────────────────────────────────
-	  * `ProfileSynced` carries the whole profile and fires on load and after any
-	    change. It is the truth.
+	  * `ProfileSynced` carries the whole profile — the unlock set and all three
+	    loadouts — and fires on load and after a STRUCTURAL change: something
+	    bought, a loadout edited, the active one switched.
 	  * `Attributes.Player.Dollars` carries the balance alone and moves on every
-	    kill — three hundred times a round. Routing that through a remote would
-	    be the noisiest thing in the game to say a number.
+	    kill, three hundred times a round.
+
+	The split is load-bearing rather than tidy. Syncing on every change meant
+	firing the entire profile at a client twice a second during a horde to say a
+	number that was already on its way as an attribute — see ProfileService's
+	`markChanged`.
 
 	The delta between two attribute values IS the earning, which is what feeds
 	the "+$4" that appears when something dies. No remote carries it, because the
@@ -42,6 +47,10 @@ local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
 local PA = Attributes.Player
+
+--[[ How long a purchase may sit unanswered before the button comes back. See
+     `buy` — without it a dropped remote locks the shop for the session. ]]
+local PURCHASE_TIMEOUT = 6
 
 local ProfileController = {}
 
@@ -150,6 +159,25 @@ function ProfileController:buy(itemId: string): boolean
 	state.pending = itemId
 	Remotes.Event.PurchaseItem:FireServer(itemId)
 	ProfileController.changed:fire()
+
+	--[[
+		A deadline on the answer.
+
+		`pending` greys the BUY button so nobody presses it four times while a
+		DataStore write is in flight. Without this it is also a permanent lock:
+		a dropped remote, a server-side error, or a request the server throttled
+		away leaves it set for the rest of the session and the player can never
+		buy anything again. PURCHASE_TIMEOUT is far longer than the round trip —
+		it has to survive a DataStore write — and far shorter than the session it
+		would otherwise cost.
+	]]
+	task.delay(PURCHASE_TIMEOUT, function()
+		if state.pending == itemId then
+			state.pending = ""
+			ProfileController.purchaseAnswered:fire(itemId, false, "NO ANSWER FROM THE SERVER")
+			ProfileController.changed:fire()
+		end
+	end)
 	return true
 end
 
@@ -198,7 +226,11 @@ local function onSynced(payload: any)
 	     should produce a drawable loadout rather than a nil index. ]]
 	state.loadouts = LoadoutConfig.sanitiseAll(payload.loadouts, nil)
 	state.ready = true
-	state.pending = ""
+	--[[ `pending` is deliberately NOT cleared here. A sync fires for any
+	     structural change — a loadout edited on another screen — and clearing it
+	     on one of those would re-enable BUY while a purchase was still in flight,
+	     which is a second purchase waiting to happen. PurchaseResult owns it, and
+	     the timeout in `buy` covers a result that never arrives. ]]
 
 	ProfileController.changed:fire()
 end

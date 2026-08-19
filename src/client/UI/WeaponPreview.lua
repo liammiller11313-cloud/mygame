@@ -313,18 +313,28 @@ function WeaponPreview.destroy(self: Preview)
 	self.frame:Destroy()
 end
 
---[[ Waits for the server to have built ReplicatedStorage.Assets.Weapons.
+--[[
+	Warms the reference to ReplicatedStorage.Assets.Weapons, in the background.
 
-     Called once at client start. The server populates that folder during its own
-     start-up, so a client that boots first would decide there are no models a
-     fraction of a second before there are — and the shop would show empty boxes
-     for the whole session. ]]
+	The server populates that folder during its own start-up, so the first client
+	into a fresh server can easily beat it and would otherwise resolve nothing —
+	`weaponsFolder` caches only a folder it actually found, so a later lookup
+	still succeeds, but the first shop opened would show empty boxes.
+
+	It MUST NOT yield the caller. The client bootstrap runs every controller's
+	start() sequentially in one loop, so a WaitForChild here would hold up every
+	controller after it — including MainMenuController, whose start() is what
+	puts the menu on screen. Two of these, at ten seconds each, is a twenty-second
+	black screen if the folder never appears.
+]]
 function WeaponPreview.awaitAssets()
-	local assets = ReplicatedStorage:WaitForChild(ASSETS_FOLDER, ASSET_WAIT)
-	if assets then
-		assets:WaitForChild(WEAPONS_FOLDER, ASSET_WAIT)
-	end
-	weaponsFolder()
+	task.spawn(function()
+		local assets = ReplicatedStorage:WaitForChild(ASSETS_FOLDER, ASSET_WAIT)
+		if assets then
+			assets:WaitForChild(WEAPONS_FOLDER, ASSET_WAIT)
+		end
+		weaponsFolder()
+	end)
 end
 
 return WeaponPreview

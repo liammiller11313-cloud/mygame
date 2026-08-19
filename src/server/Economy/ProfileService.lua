@@ -99,6 +99,10 @@ local RETRY_BASE = 1.5
      still play; nothing will be written. ]]
 local LOAD_TIMEOUT = 30
 
+--[[ How often one client may ask for its profile. A booting client asks once;
+     anything faster than this is not a booting client. ]]
+local REQUEST_COOLDOWN = 1.0
+
 local ProfileService = {}
 
 --[[ (player: Player, profile: Profile) — fired once per player, after their
@@ -277,12 +281,15 @@ end
 
 -- ── loading ─────────────────────────────────────────────────────────────────
 
+--[[ The balance, as an attribute, which is how every client learns it. There is
+     deliberately no "profile is ready" attribute alongside it: `isReady` on this
+     service is the server's gate and `ProfileSynced` is the client's, and a
+     third answer to the same question is a third thing that can disagree. ]]
 local function publish(player: Player, profile: Profile)
 	if not player.Parent then
 		return
 	end
 	player:SetAttribute(PA.Dollars, profile.dollars)
-	player:SetAttribute(PA.ProfileReady, true)
 end
 
 --[[ The whole profile, to the one client it belongs to. Sent on load and after
@@ -302,10 +309,27 @@ function ProfileService:sync(player: Player)
 	})
 end
 
-local function markChanged(player: Player, profile: Profile)
+--[[
+	Records a change, and tells the client about it in the cheapest way that
+	works.
+
+	`structural` is the whole distinction, and getting it wrong is expensive. A
+	balance move is one number and rides the attribute, which Roblox replicates
+	for nothing; a change to what you OWN or what your loadouts are has no
+	attribute and needs the full profile.
+
+	This was `sync` on every path at first, which meant every kill fired the
+	entire profile — the unlock set and all three loadouts — at that client.
+	Three hundred kills a round, four players, to say a number that was already
+	on its way as an attribute. It is exactly the thing Shared/Net/Remotes' own
+	header says not to do.
+]]
+local function markChanged(player: Player, profile: Profile, structural: boolean)
 	profile.dirty = true
 	publish(player, profile)
-	ProfileService:sync(player)
+	if structural then
+		ProfileService:sync(player)
+	end
 	ProfileService.changed:fire(player, profile)
 end
 
@@ -490,7 +514,9 @@ function ProfileService:addDollars(player: Player, amount: number): number
 		return if profile then profile.dollars else 0
 	end
 	profile.dollars = math.clamp(math.floor(profile.dollars + amount), 0, EconomyConfig.MaxDollars)
-	markChanged(player, profile)
+	--[[ Not structural: the balance is an attribute and is already on its way.
+	     See markChanged — this is the call that fires on every kill. ]]
+	markChanged(player, profile, false)
 	return profile.dollars
 end
 
@@ -506,7 +532,7 @@ function ProfileService:trySpend(player: Player, amount: number): boolean
 		return false
 	end
 	profile.dollars -= math.floor(amount)
-	markChanged(player, profile)
+	markChanged(player, profile, false)
 	return true
 end
 
@@ -519,7 +545,7 @@ function ProfileService:grant(player: Player, itemId: string): boolean
 		return false
 	end
 	profile.owned[itemId] = true
-	markChanged(player, profile)
+	markChanged(player, profile, true)
 	return true
 end
 
@@ -551,7 +577,7 @@ function ProfileService:setLoadout(player: Player, index: number, loadout: any):
 		return false
 	end
 	profile.loadouts[slot] = cleaned
-	markChanged(player, profile)
+	markChanged(player, profile, true)
 	return true
 end
 
@@ -565,7 +591,7 @@ function ProfileService:setActiveLoadout(player: Player, index: number): boolean
 		return false
 	end
 	profile.active = wanted
-	markChanged(player, profile)
+	markChanged(player, profile, true)
 	return true
 end
 
@@ -618,7 +644,16 @@ function ProfileService:init()
 	     which case the sync above fired into a listener that did not exist yet.
 	     The client asks once when it is ready; a request for a profile that has
 	     not loaded is answered by the load itself, a moment later. ]]
+	--[[ Throttled, because it is a client-triggered full-profile send and there
+	     is nothing stopping a crafted client asking for one every frame. Once a
+	     second is far more than the one call a booting client actually makes. ]]
+	local lastRequestAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
 	serviceTrove:connect(Remotes.Event.RequestProfile.OnServerEvent, function(player: Player)
+		local now = os.clock()
+		if lastRequestAt[player] and now - lastRequestAt[player] < REQUEST_COOLDOWN then
+			return
+		end
+		lastRequestAt[player] = now
 		ProfileService:sync(player)
 	end)
 end
@@ -638,16 +673,39 @@ function ProfileService:start()
 		server they join.
 	]]
 	serviceTrove:add(task.spawn(function()
+		--[[ Reused rather than reallocated: this runs once a second forever, and
+		     a fresh table per tick is a table per second for the life of the
+		     server to hold at most four players. ]]
+		local due: { Player } = {}
+
 		while true do
 			task.wait(1)
 			local now = os.clock()
+
+			--[[
+				Collected FIRST, then saved.
+
+				saveProfile yields — UpdateAsync is a network call — and yielding
+				inside `for player, profile in profiles` is a real hazard rather
+				than a stylistic one: a player joining during that yield adds a
+				key to the table being traversed, which is undefined in Lua and
+				shows up as "invalid key to 'next'" at some later, unrelated
+				moment.
+			]]
+			table.clear(due)
 			for player, profile in profiles do
 				if not profile.degraded and now >= (dueAt[player] or 0) then
-					--[[ Staggered by the number of players so a full server
-					     spreads its writes across the interval instead of
-					     bunching them. ]]
+					table.insert(due, player)
+				end
+			end
+
+			for _, player in due do
+				--[[ Re-read: this player may have left, or been saved and
+				     released, while an earlier save in this same batch yielded. ]]
+				local profile = profiles[player]
+				if profile and not profile.degraded then
 					local interval = if profile.dirty then AUTOSAVE_INTERVAL else LOCK_TTL * 0.5
-					dueAt[player] = now + interval
+					dueAt[player] = os.clock() + interval
 					saveProfile(player, profile, false)
 				end
 			end

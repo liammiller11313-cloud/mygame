@@ -1657,11 +1657,55 @@ function SurvivorService:init()
 	end
 end
 
+--[[
+	The shortest gap between two accepted requests on one of the two state
+	remotes below.
+
+	Both of them end in a SetAttribute on a Player, which Roblox replicates to
+	EVERY client. Neither has a natural rate limit — the "did it change" guard
+	only stops a repeat, not an alternation — so a crafted client toggling one
+	every frame makes the server broadcast a property change to the whole server
+	at frame rate. A tenth of a second is far faster than any human toggles
+	crouch and ends that entirely.
+]]
+local STATE_REMOTE_COOLDOWN = 0.1
+local lastStateRequestAt: { [Player]: { [string]: number } } = setmetatable({}, { __mode = "k" }) :: any
+
+local function stateRequestAllowed(player: Player, key: string, cooldown: number): boolean
+	local perPlayer = lastStateRequestAt[player]
+	if not perPlayer then
+		perPlayer = {}
+		lastStateRequestAt[player] = perPlayer
+	end
+	local now = os.clock()
+	if perPlayer[key] and now - perPlayer[key] < cooldown then
+		return false
+	end
+	perPlayer[key] = now
+	return true
+end
+
 function SurvivorService:start()
 	--[[ The client asks; the server decides and publishes. Nothing here trusts
 	     the request beyond "this player pressed crouch" — the speed clamp and the
 	     attribute are both computed on this side. ]]
 	serviceTrove:connect(Remotes.Event.SetCrouchState.OnServerEvent, function(player, wanted)
+		--[[
+			The PRESS is throttled. The RELEASE never is.
+
+			That asymmetry is the whole point. Crouch rides the key's down/up
+			edge, and a tap shorter than the cooldown would have its release
+			swallowed — leaving the player stuck crouched at eight studs a second
+			with no key held and no way to say so. Dropping a press costs a
+			re-press; dropping a release costs the round.
+
+			It still closes the spam: an alternation can only get its `false`
+			through, so the attribute settles rather than broadcasting at frame
+			rate.
+		]]
+		if wanted == true and not stateRequestAllowed(player, "crouch", STATE_REMOTE_COOLDOWN) then
+			return
+		end
 		local record = records[player]
 		if not record then
 			return
@@ -1685,6 +1729,12 @@ function SurvivorService:start()
 		which is what keeps this a comfort setting rather than a cheat.
 	]]
 	serviceTrove:connect(Remotes.Event.SetDifficulty.OnServerEvent, function(player, wanted)
+		--[[ A second between changes. Nobody moves a settings row faster than
+		     that, and this is the other remote that ends in a replicated
+		     attribute write. ]]
+		if not stateRequestAllowed(player, "difficulty", 1.0) then
+			return
+		end
 		local choice = SettingsConfig.coerce("difficulty", wanted)
 		if typeof(choice) ~= "string" then
 			return

@@ -49,6 +49,10 @@ local Trove = require(Shared.Util.Trove)
 
 local GA = Attributes.Game
 
+--[[ How often one client may attempt a purchase. See the handler: every refusal
+     costs a FireClient, and this is what stops that being unbounded. ]]
+local PURCHASE_COOLDOWN = 0.25
+
 local EconomyService = {}
 
 --[[ (player: Player, itemId: string, price: number) — after a successful
@@ -67,6 +71,22 @@ local serviceTrove = Trove.new()
 ]]
 type RoundTally = { kills: number, bonus: number }
 local tally: { [Player]: RoundTally } = {}
+
+--[[
+	Who was actually here for the round.
+
+	The round bonus is most of a round's money — $1,220 for a win — and paying it
+	to everyone in the server at the moment it ends pays it to somebody who
+	joined during the scoreboard. That is a farm: hop servers, land on a
+	scoreboard, collect. So a player is only paid if they were present while the
+	round was RUNNING, which is stamped on every wave change and on any join that
+	happens during one.
+
+	Deliberately generous inside that rule: somebody who joins at wave 6 is paid
+	the full bonus, because splitting it by waves-attended would pay a player who
+	fought the finale less than one who idled through the first four.
+]]
+local present: { [Player]: boolean } = {}
 
 --[[ Reasons a purchase is refused, as strings the shop prints verbatim. Written
      for a player rather than for a log: "YOU ALREADY OWN THIS" is an answer,
@@ -138,13 +158,23 @@ local function onInfectedDied(_model: Model, kind: string, ctx: any)
 	pay(attacker, EconomyConfig.rewardForKill(kind, isHeadshot), "kills")
 end
 
+--[[ Marks everybody currently in the server as having played this round.
+     Called on every wave edge rather than only the first, so a mid-round joiner
+     is picked up by the next wave. ]]
+local function markPresent()
+	for _, player in Players:GetPlayers() do
+		present[player] = true
+	end
+end
+
 --[[
 	The round bonus, and the report.
 
-	Paid to everyone who is still in the server, including players who died
-	earlier: they were there, they held wave 5 with everybody else, and paying
-	only the survivors would make the last two minutes of a lost round worth more
-	than the first forty of a good one.
+	Paid to everyone who was here for it, including players who died on wave two:
+	they held the line with everybody else, and paying only the survivors would
+	make the last two minutes of a lost round worth more than the first forty of
+	a good one. Players who were NOT here — who arrived while the scoreboard was
+	already up — are skipped; see `present`.
 ]]
 local function onRoundEnded(outcome: string)
 	local victory = outcome == Enums.RoundState.Victory
@@ -156,6 +186,12 @@ local function onRoundEnded(outcome: string)
 
 	local profiles = Registry.find("ProfileService")
 	for _, player in Players:GetPlayers() do
+		--[[ Not here for the round, not paid for it. See `present`: without this
+		     the biggest single payout in the game goes to anyone who arrives
+		     while the scoreboard is up. ]]
+		if not present[player] then
+			continue
+		end
 		local entry = tallyFor(player)
 		pay(player, total, "bonus")
 
@@ -182,6 +218,7 @@ end
 
 local function resetRound()
 	table.clear(tally)
+	table.clear(present)
 end
 
 -- ── spending ────────────────────────────────────────────────────────────────
@@ -305,20 +342,52 @@ function EconomyService:start()
 				if index <= 1 then
 					resetRound()
 				end
+				markPresent()
 			end))
 		end
 	else
 		warn("[EconomyService] no RoundService; round bonuses will not be paid")
 	end
 
-	serviceTrove:connect(Remotes.Event.PurchaseItem.OnServerEvent, onPurchase)
+	--[[
+		Purchases are throttled.
+
+		Not because a fast buyer is a problem — because every refusal answers with
+		a FireClient, so an unthrottled handler lets a crafted client turn one
+		socket into unlimited outbound traffic from the server. A quarter of a
+		second is imperceptible to somebody pressing BUY and ends that entirely.
+	]]
+	local lastPurchaseAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
+	serviceTrove:connect(Remotes.Event.PurchaseItem.OnServerEvent, function(player, itemId)
+		local now = os.clock()
+		if lastPurchaseAt[player] and now - lastPurchaseAt[player] < PURCHASE_COOLDOWN then
+			return
+		end
+		lastPurchaseAt[player] = now
+		onPurchase(player, itemId)
+	end)
+
+	--[[ Anyone joining while a round is already running counts as present for
+	     it. The wave edges cover everybody else. ]]
+	serviceTrove:connect(Players.PlayerAdded, function(player: Player)
+		local round = Registry.find("RoundService")
+		if round and typeof(round.isRunning) == "function" then
+			local ok, running = pcall(round.isRunning, round)
+			if ok and running then
+				present[player] = true
+			end
+		end
+	end)
+
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		tally[player] = nil
+		present[player] = nil
 	end)
 end
 
 function EconomyService:destroy()
 	table.clear(tally)
+	table.clear(present)
 	serviceTrove:destroy()
 end
 
