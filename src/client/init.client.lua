@@ -79,6 +79,14 @@ local CONTROLLERS = {
 	     last server should be in force before the first frame of play, not after
 	     somebody opens the panel. ]]
 	"UI/SettingsController",
+	--[[ The economy, in dependency order. ProfileController is the store the other
+	     two read; both of them look it up at start(), so it has to have connected
+	     its remotes first or the first sync lands in nothing. ]]
+	"UI/ProfileController",
+	"UI/ShopController",
+	"UI/LoadoutController",
+	--[[ After the screens it can open, and after the HUD whose corner it shares. ]]
+	"UI/PauseController",
 	"UI/MainMenuController",
 }
 

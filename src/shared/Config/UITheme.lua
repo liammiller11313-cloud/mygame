@@ -141,12 +141,12 @@ UITheme.Layout = table.freeze({
 	ItemSlotSize = 46,
 	ItemSlotGap = 5,
 
-	--[[ The settings button a touchscreen gets in the top-right corner. Here
-	     rather than privately in SettingsController for the same reason the
-	     hotbar's size is: the kill feed occupies that exact corner and has to
-	     step aside for it, and a second copy of the number is how the two ended
-	     up drawn on top of each other. One definition, two readers. ]]
-	SettingsButtonSize = 40,
+	--[[ The pause button in the top-right corner. Here rather than privately in
+	     PauseController for the same reason the hotbar's size is: the kill feed
+	     occupies that exact corner and has to step aside for it, and a second
+	     copy of the number is how the two ended up drawn on top of each other.
+	     One definition, two readers. ]]
+	PauseButtonSize = 40,
 })
 
 -- ── Crosshair ───────────────────────────────────────────────────────────────
@@ -235,10 +235,16 @@ UITheme.DisplayOrder = table.freeze({
 	     everything, because a teleport has to end on black. ]]
 	Menu = 80,
 	Vote = 85,
-	--[[ Above both, because it is a modal the player opened deliberately and it
-	     opens from inside either of them. A settings panel with a vote card
-	     drawn through it is a settings panel nobody can read. ]]
+	--[[ Above both, because these are modals the player opened deliberately and
+	     they open from inside either of them. A settings panel with a vote card
+	     drawn through it is a settings panel nobody can read. The shop and the
+	     loadout screen share this layer: they are the same kind of thing and
+	     they are never open at the same time. ]]
 	Settings = 88,
+	--[[ Above those, because the pause menu is what a player reaches for to get
+	     OUT of one of them. A pause menu that can end up behind the screen it is
+	     meant to escape is worse than no pause menu. ]]
+	Pause = 89,
 	Fade = 90,
 })
 

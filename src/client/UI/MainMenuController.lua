@@ -67,6 +67,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
+local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
 local MapConfig = require(Shared.Config.MapConfig)
@@ -254,11 +255,15 @@ local lobbyMode: TextLabel
 local lobbyMap: TextLabel
 local lobbyPlayers: TextLabel
 local lobbyMessage: TextLabel
+local balanceLabel: TextLabel
 
 local resultOutcome: TextLabel
 local resultVerdict: TextLabel
 local resultWave: TextLabel
 local resultTime: TextLabel
+local resultPayout: TextLabel
+local resultPayoutLine: TextLabel
+local payoutShown: any = nil
 local resultRows: { any } = {}
 local resultContinue: TextLabel
 --[[ The buttons a controller lands on when each screen opens. Held rather than
@@ -517,9 +522,12 @@ local function pushSuppression(value: boolean)
 	-- The touch pad goes with the HUD. Leaving fire buttons live under a menu is
 	-- how a phone player shoots the scoreboard.
 	callController("TouchController", "setVisible", not value)
-	-- Same reasoning as the pad: a settings button floating over the scoreboard
-	-- belongs to neither screen. The panel is reached from the menu's own entry.
-	callController("SettingsController", "setGearVisible", not value)
+	--[[ Same reasoning as the pad: a pause button floating over the scoreboard
+	     belongs to neither screen. It has to be told rather than working it out —
+	     this menu's backdrop is a plain Frame, and a Frame does not block input
+	     in Roblox, so an untold button would sit invisible behind the menu and
+	     still be pressable. ]]
+	callController("PauseController", "setButtonVisible", not value)
 end
 
 local function setSuppressed(value: boolean)
@@ -988,6 +996,30 @@ end
 --[[ The result screen. SURVIVED is white and quiet; WIPED OUT is the one place
      on this screen red belongs, and it gets the poster voice — the team did not
      lose a match, the light went out on them. ]]
+--[[ Draws an itemised payout, or clears the two lines when there is not one. ]]
+local function applyPayout(payload: any)
+	if not resultPayout then
+		return
+	end
+	if typeof(payload) ~= "table" then
+		resultPayout.Text = ""
+		resultPayoutLine.Text = ""
+		return
+	end
+	local total = math.max(tonumber(payload.total) or 0, 0)
+	local kills = math.max(tonumber(payload.kills) or 0, 0)
+	local bonus = math.max(tonumber(payload.bonus) or 0, 0)
+	local balance = math.max(tonumber(payload.balance) or 0, 0)
+
+	resultPayout.Text = "+" .. EconomyConfig.format(total)
+	resultPayoutLine.Text = string.format(
+		"%s FROM KILLS · %s FOR THE ROUND\nBALANCE %s",
+		EconomyConfig.format(kills),
+		EconomyConfig.format(bonus),
+		EconomyConfig.format(balance)
+	)
+end
+
 local function showResults(payload: any)
 	local outcome = if typeof(payload) == "table" then tostring(payload.outcome) else ROUND.TeamWipe
 	local survived = outcome == ROUND.Victory
@@ -1022,6 +1054,17 @@ local function showResults(payload: any)
 	end
 	resultTime.Text = string.format("TIME SURVIVED   %s", clockText(elapsed))
 
+	--[[
+		The payout, if it has arrived.
+
+		RoundPayout and RoundEnded are two remotes fired a moment apart and there
+		is no ordering guarantee between them, so this screen draws whichever it
+		has and `onPayout` fills the gap if the money lands second. Left blank
+		rather than showing a zero: a zero is a claim, and a blank is honest about
+		not knowing yet.
+	]]
+	applyPayout(payoutShown)
+
 	fillRows(payload and payload.scores)
 
 	-- Confetti is the one flourish this game gets, and it is earned: surviving
@@ -1047,6 +1090,9 @@ function MainMenuController:open()
 	end
 	state.open = true
 	state.results = false
+	--[[ Dropped on the way back to the menu, so the NEXT scoreboard cannot open
+	     showing what the LAST round paid while it waits for its own remote. ]]
+	payoutShown = nil
 	state.countdownShown = -1
 	refreshLobby()
 	refreshVisibility()
@@ -1471,39 +1517,114 @@ end
 	same panel here and over a live round, so there is one store and one set of
 	rows rather than a menu version and an in-game version drifting apart.
 ]]
-local function buildSettings()
-	local holder = newButton(menuLayer, "Settings")
-	holder.AnchorPoint = Vector2.new(0, 1)
-	holder.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
-	holder.Size = UDim2.fromOffset(260, TEXT.Large + TEXT.Body + 4)
+--[[
+	The row along the bottom: everything that is not a mode.
 
-	local rule = newRule(holder, "Rule", COLOR.Border)
+	Four compact entries rather than four more of the big mode blocks, because
+	UITheme's own header warns that a THIRD mode entry runs off the bottom of a
+	small phone at any scale floor — and these are not modes anyway. A mode is a
+	thing you commit to; these are places you visit first.
+
+	GUNSMITH is drawn and does nothing, on purpose. An entry that is visibly
+	coming reads as a plan; one that is absent reads as an idea nobody had.
+]]
+local NAV_ENTRIES = {
+	{ id = "Shop", title = "SHOP", line = "GUNS  MELEE  SPECIALS", controller = "ShopController" },
+	{
+		id = "Loadouts",
+		title = "LOADOUTS",
+		line = "THREE KITS  ONE ACTIVE",
+		controller = "LoadoutController",
+	},
+	{ id = "Gunsmith", title = "GUNSMITH", line = "COMING SOON", soon = true },
+	{
+		id = "Settings",
+		title = "SETTINGS",
+		line = "GRAPHICS  AUDIO  CONTROLS",
+		controller = "SettingsController",
+	},
+}
+
+local NAV_HEIGHT = 46
+local NAV_WIDTH = 0.21
+local NAV_GAP = 0.015
+
+local function buildNav()
+	local row = newFrame(menuLayer, "Nav", COLOR.Background, 1)
+	row.AnchorPoint = Vector2.new(0, 1)
+	row.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
+	row.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, NAV_HEIGHT)
+
+	local rule = newRule(row, "Rule", COLOR.Border)
 	rule.Position = UDim2.fromOffset(0, -LAYOUT.PanelPadding)
 	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 
-	local label = newLabel(holder, "Label", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
-	label.Size = UDim2.new(1, 0, 0, TEXT.Large + 2)
-	label.Text = "SETTINGS"
+	for index, definition in NAV_ENTRIES do
+		local holder = newButton(row, definition.id)
+		holder.Position = UDim2.new((index - 1) * (NAV_WIDTH + NAV_GAP), 0, 0, 0)
+		holder.Size = UDim2.new(NAV_WIDTH, 0, 1, 0)
 
-	local line = newLabel(holder, "Line", FONT.Body, TEXT.Tiny, COLOR.TextDim)
-	line.Position = UDim2.fromOffset(0, TEXT.Large + 2)
-	line.Size = UDim2.new(1, 0, 0, TEXT.Body)
-	line.Text = tracked("GRAPHICS  AUDIO  CONTROLS  DIFFICULTY")
+		local label = newLabel(holder, "Label", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
+		label.Size = UDim2.new(1, 0, 0, TEXT.Large + 2)
+		label.Text = definition.title
+		if definition.soon then
+			label.TextColor3 = COLOR.TextDim
+		end
 
-	--[[ Reachable without a cursor. The mode entries take selection when the menu
-	     opens; this is the one thing below them a pad has to be able to walk to. ]]
-	GamepadFocus.style(holder)
+		local line = newLabel(holder, "Line", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		line.Position = UDim2.fromOffset(0, TEXT.Large + 2)
+		line.Size = UDim2.new(1, 0, 0, TEXT.Body)
+		line.Text = tracked(definition.line)
 
-	trove:connect(holder.Activated, function()
-		playUi(AudioConfig.UI.MenuConfirm)
-		callController("SettingsController", "open")
-	end)
-	trove:connect(holder.MouseEnter, function()
-		label.TextColor3 = COLOR.AccentBright
-	end)
-	trove:connect(holder.MouseLeave, function()
-		label.TextColor3 = COLOR.TextPrimary
-	end)
+		--[[ Reachable without a cursor. The mode entries take selection when the
+		     menu opens; this row is what a pad walks down to from them. ]]
+		GamepadFocus.style(holder)
+		holder.Selectable = not definition.soon
+
+		if not definition.soon then
+			trove:connect(holder.Activated, function()
+				playUi(AudioConfig.UI.MenuConfirm)
+				callController(definition.controller, "open")
+			end)
+			trove:connect(holder.MouseEnter, function()
+				label.TextColor3 = COLOR.AccentBright
+			end)
+			trove:connect(holder.MouseLeave, function()
+				label.TextColor3 = COLOR.TextPrimary
+			end)
+		end
+	end
+end
+
+--[[ The balance, top-right, in the one place a player looks before opening the
+     shop. Driven by ProfileController's `changed` rather than polled. ]]
+local function buildBalance()
+	balanceLabel = newLabel(menuLayer, "Balance", FONT.Numeric, TEXT.Heading, COLOR.Accent)
+	balanceLabel.AnchorPoint = Vector2.new(1, 0)
+	balanceLabel.Position = UDim2.new(1 - COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2)
+	balanceLabel.Size = UDim2.fromOffset(240, TEXT.Heading + 4)
+	balanceLabel.TextXAlignment = Enum.TextXAlignment.Right
+	balanceLabel.Text = ""
+
+	local caption = newLabel(menuLayer, "BalanceCaption", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	caption.AnchorPoint = Vector2.new(1, 0)
+	caption.Position = UDim2.new(1 - COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2 + TEXT.Heading + 2)
+	caption.Size = UDim2.fromOffset(240, TEXT.Body)
+	caption.TextXAlignment = Enum.TextXAlignment.Right
+	caption.Text = tracked("DOLLARS")
+end
+
+local function refreshBalance()
+	if not balanceLabel then
+		return
+	end
+	local store = Registry.find("ProfileController")
+	if not store or typeof(store.getDollars) ~= "function" then
+		balanceLabel.Text = ""
+		return
+	end
+	local ok, dollars = pcall(store.getDollars, store)
+	balanceLabel.Text = if ok then EconomyConfig.format(dollars) else ""
 end
 
 local function buildTeleport()
@@ -1606,6 +1727,30 @@ local function buildResults()
 	resultTime.Position = UDim2.new(COLUMN_X, 0, 0.32, TEXT.Heading + LAYOUT.ElementGap)
 	resultTime.Size = UDim2.new(0.8, 0, 0, TEXT.Heading + 6)
 	resultTime.ZIndex = 2
+
+	--[[ What the round paid, on the right, itemised.
+
+	     Sent by the server rather than accumulated here: the client can watch its
+	     own balance move and could total the kills, but it cannot see the bonus
+	     arithmetic and should not be inventing it. The one number a player checks
+	     after a round is how much they made, so it is the same size as the
+	     outcome rather than a footnote under it. ]]
+	resultPayout = newLabel(resultsLayer, "Payout", FONT.Numeric, TEXT.Display, COLOR.Accent)
+	resultPayout.AnchorPoint = Vector2.new(1, 0)
+	resultPayout.Position = UDim2.new(1 - COLUMN_X, 0, 0.3, 0)
+	resultPayout.Size = UDim2.new(0.5, 0, 0, TEXT.Display + 6)
+	resultPayout.TextXAlignment = Enum.TextXAlignment.Right
+	resultPayout.ZIndex = 2
+	resultPayout.Text = ""
+
+	resultPayoutLine = newLabel(resultsLayer, "PayoutLine", FONT.Body, TEXT.Small, COLOR.TextDim)
+	resultPayoutLine.AnchorPoint = Vector2.new(1, 0)
+	resultPayoutLine.Position = UDim2.new(1 - COLUMN_X, 0, 0.3, TEXT.Display + 4)
+	resultPayoutLine.Size = UDim2.new(0.6, 0, 0, TEXT.Body * 2)
+	resultPayoutLine.TextXAlignment = Enum.TextXAlignment.Right
+	resultPayoutLine.TextYAlignment = Enum.TextYAlignment.Top
+	resultPayoutLine.ZIndex = 2
+	resultPayoutLine.Text = ""
 
 	-- Column headings, one row above the first player.
 	local header = newFrame(resultsLayer, "Header", COLOR.Background, 1)
@@ -1742,7 +1887,8 @@ local function build()
 	buildModes()
 	buildBriefing()
 	buildLobby()
-	buildSettings()
+	buildNav()
+	buildBalance()
 	buildResults()
 	buildTeleport()
 
@@ -1827,6 +1973,26 @@ function MainMenuController:start()
 		adopt(instance)
 	end
 	trove:connect(SoundService.DescendantAdded, adopt)
+
+	local store = Registry.find("ProfileController")
+	if store then
+		if store.changed then
+			trove:add(store.changed:connect(refreshBalance))
+		end
+		--[[ RoundPayout and RoundEnded are fired a moment apart with no ordering
+		     guarantee between them. Whichever lands first draws what it has; this
+		     is the case where the money arrives after the scoreboard is already
+		     up, and it has to fill in rather than wait for the next round. ]]
+		if store.paid then
+			trove:add(store.paid:connect(function(payload: any)
+				payoutShown = payload
+				if state.results then
+					applyPayout(payload)
+				end
+			end))
+		end
+	end
+	refreshBalance()
 
 	trove:connect(Remotes.Event.LobbyStateChanged.OnClientEvent, onLobbyState)
 	trove:connect(Remotes.Event.RoundEnded.OnClientEvent, showResults)

@@ -23,9 +23,14 @@
 
 	── WHEN IT APPLIES ──────────────────────────────────────────────────────────
 	At the moment InventoryService grants a starting loadout, which is on every
-	spawn. Changing your active loadout mid-round therefore does nothing until you
-	die or the round restarts, which is correct: the shop is not a way to
-	re-arm mid-fight, and the map's weapon pickups are.
+	spawn — plus one extra case. Changing your loadout while the round has NOT
+	started re-arms you on the spot, because the picker appears exactly when a
+	player is deciding what to spawn with and their character is usually already
+	standing in the lobby; a choice that visibly did nothing would read as broken.
+
+	Once a round is running, it waits for your next spawn. That is the same line
+	the two-slot limit draws: the shop is not a way to re-arm mid-fight, and the
+	map's weapon pickups are.
 ]]
 
 local Players = game:GetService("Players")
@@ -118,12 +123,69 @@ end
 
 function LoadoutService:init() end
 
+--[[
+	Hands a player the loadout they just chose, if the round has not started.
+
+	Without this, changing your active loadout in the lobby does nothing until
+	you die — which is technically consistent and reads as broken, because the
+	picker appears at exactly the moment a player is deciding what to spawn with
+	and their character is usually already standing there.
+
+	Refused once a round is RUNNING, deliberately and for the same reason the
+	loadout only covers two slots: the shop is not a way to re-arm mid-fight. The
+	map's weapon pickups are.
+]]
+local function reapply(player: Player)
+	local round = Registry.find("RoundService")
+	if round and typeof(round.isRunning) == "function" then
+		local ok, running = pcall(round.isRunning, round)
+		if ok and running then
+			return
+		end
+	end
+
+	local inventory = Registry.find("InventoryService")
+	if not inventory or typeof(inventory.giveStartingLoadout) ~= "function" then
+		return
+	end
+	--[[ Only for somebody who has a body to put it in. A player still in the
+	     menu with no character gets it on their next spawn, which is the same
+	     path and one they cannot miss. ]]
+	if player.Character then
+		pcall(inventory.giveStartingLoadout, inventory, player)
+	end
+end
+
 function LoadoutService:start()
+	serviceTrove:add(LoadoutService.activeChanged:connect(reapply))
+
+	--[[
+		A profile can land AFTER the player has already spawned.
+
+		A DataStore read takes a moment; joining a server that is already in its
+		lobby spawns you immediately. Without this, that player stands there
+		holding the default UMP-45 while their profile — which says they spawn
+		with an AK-12 — arrives a second later and changes nothing until they die.
+	]]
+	local profiles = Registry.find("ProfileService")
+	if profiles and profiles.loaded then
+		serviceTrove:add(profiles.loaded:connect(function(player: Player)
+			reapply(player)
+		end))
+	end
+
 	serviceTrove:connect(Remotes.Event.SetLoadout.OnServerEvent, function(player, payload)
 		if typeof(payload) ~= "table" or throttled(player) then
 			return
 		end
-		self:setLoadout(player, payload.index, payload.slots)
+		if self:setLoadout(player, payload.index, payload.slots) then
+			--[[ Editing the loadout you are currently spawning with is the same
+			     event as switching to a different one, from the player's point
+			     of view: they changed what they are holding. ]]
+			if LoadoutConfig.clampIndex(payload.index) == self:getActiveIndex(player) then
+				reapply(player)
+			end
+		end
 	end)
 
 	serviceTrove:connect(Remotes.Event.SetActiveLoadout.OnServerEvent, function(player, index)

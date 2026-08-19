@@ -143,13 +143,16 @@ end
 	and Roblox replicates that clone on its own, so a second copy sitting in
 	ReplicatedStorage is every mesh in the model duplicated for no reader.
 
-	The exception is the viewmodel, which the CLIENT assembles for itself out of
-	ReplicatedStorage.Assets.Viewmodels.<weaponId>. When the client has no way to
-	reach the source — we grey-boxed the gun, or the user keeps their models in
-	ServerStorage — the prepared template is published there so first person
-	still shows a weapon. Publishing never takes a name that is already occupied:
-	two children with one name makes FindFirstChild a coin toss for everybody
-	downstream, and the user's own model has to win that name.
+	The exception is anything the CLIENT has to assemble for itself: the viewmodel
+	it draws in first person, and the world model the shop spins in its preview.
+	When the client has no way to reach the source — we grey-boxed the gun, or the
+	user keeps their models in ServerStorage — the prepared template is published
+	so both of those still have something to show. A user who keeps their models
+	in ReplicatedStorage already has them on every client and nothing is copied.
+
+	Publishing never takes a name that is already occupied: two children with one
+	name makes FindFirstChild a coin toss for everybody downstream, and the user's
+	own model has to win that name.
 ]]
 local function park(category: string, name: string, model: Model, publish: boolean?): Model
 	model.Name = name
@@ -1676,11 +1679,22 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 	if not prepared then
 		return nil
 	end
-	-- Published only when the client would otherwise find nothing: it resolves a
-	-- viewmodel by modelName first, and reaches whatever the user put in
-	-- ReplicatedStorage without our help.
+	--[[
+		Published only when the client would otherwise find nothing.
+
+		Both categories now, not just viewmodels. The world model used to be
+		server-only on the reasoning that a second copy in ReplicatedStorage is
+		every mesh duplicated for no reader — and then the shop grew a rotating
+		3D preview, which is that reader.
+
+		The `reachable` test is what keeps the cost proportional. A user who put
+		their own models in ReplicatedStorage.Assets.Weapons already has them on
+		every client and the shop finds them by the same name lookup; only a
+		grey-box, or a model kept in ServerStorage, is published — and a grey-box
+		is a handful of Parts.
+	]]
 	local reachable = supplied ~= nil and supplied:IsDescendantOf(ReplicatedStorage)
-	cache[definition.id] = park(category, definition.id, prepared, viewmodel and not reachable)
+	cache[definition.id] = park(category, definition.id, prepared, not reachable)
 	return prepared
 end
 

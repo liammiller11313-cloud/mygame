@@ -23,6 +23,12 @@
 	preference restored from a previous server take effect before the first shot
 	rather than the first time the panel is opened.
 
+	── HOW IT IS REACHED ───────────────────────────────────────────────────────
+	From the main menu's SETTINGS entry, from the pause menu, and from `O` on a
+	keyboard. It used to draw its own button in the top-right corner on phones;
+	PauseController owns that corner now and settings is one press inside it, so
+	there is one button there rather than two fighting over it.
+
 	── PERSONAL DIFFICULTY ─────────────────────────────────────────────────────
 	The one setting with a server side, and the only one that leaves this
 	machine. The client says what it wants; the server validates it against the
@@ -100,20 +106,6 @@ local CAPTURE_GRACE = 0.2
 
 local SETTING_PREFIX = "FL_Setting_"
 
---[[ Where the on-screen button lives on a phone. The pad is bottom-right and
-     the HUD owns both bottom corners, so the top-right is the only quiet corner
-     left — and it is where a phone player already expects a pause. The kill feed
-     is drawn into that same corner and steps left by exactly this much under the
-     touch scheme, which is why the size lives in the theme. ]]
-local GEAR_SIZE = LAYOUT.SettingsButtonSize
---[[ Drawn as three bars rather than set as a gear character: the display faces
-     this interface uses are Latin text faces, and a glyph one of them happens
-     not to carry renders as an empty box on exactly the devices this button
-     exists for. ]]
-local GEAR_BAR_WIDTH = 18
-local GEAR_BAR_HEIGHT = 2
-local GEAR_BAR_GAP = 5
-
 local SettingsController = {}
 
 --[[ Fires (key, value) after a setting is stored and applied. For anything that
@@ -134,8 +126,6 @@ local panel: Frame
 local tabHolder: Frame
 local list: ScrollingFrame
 local hint: TextLabel
-local gearGui: ScreenGui
-local gearButton: TextButton
 
 local tabs: { any } = {}
 local rows: { any } = {}
@@ -153,11 +143,6 @@ local state = {
 	--[[ The keybind row waiting for an input, and when it started waiting. ]]
 	capturing = nil :: any,
 	captureAt = 0,
-	--[[ Whether the interface underneath wants its buttons on screen at all. The
-	     menu turns this off with everything else it suppresses; `menuIsOpen`
-	     alone cannot cover it, because nothing tells this file when the menu
-	     opens. ]]
-	gearAllowed = true,
 }
 
 local restore = {
@@ -920,16 +905,6 @@ local function menuIsOpen(): boolean
 	return ok and open == true
 end
 
---[[ The gear only exists on a phone: a keyboard has O and a controller has the
-     view button, and a button drawn permanently over the play space is a button
-     covering the Hunter about to land on you. ]]
-local function refreshGear()
-	if not gearGui then
-		return
-	end
-	gearGui.Enabled = state.gearAllowed and isTouch() and not state.open and not menuIsOpen()
-end
-
 -- ── public API ──────────────────────────────────────────────────────────────
 
 function SettingsController:isOpen(): boolean
@@ -948,7 +923,6 @@ function SettingsController:open()
 	     targets without having to rejoin. ]]
 	renderCategory(state.category)
 	setSuppressed(not menuIsOpen())
-	refreshGear()
 	GamepadFocus.capture(firstRowButton)
 	playUi(AudioConfig.UI.MenuConfirm)
 end
@@ -970,7 +944,6 @@ function SettingsController:close()
 	if menuIsOpen() then
 		callController("MainMenuController", "reassertSuppression")
 	end
-	refreshGear()
 	playUi(AudioConfig.UI.MenuBack)
 end
 
@@ -980,15 +953,6 @@ function SettingsController:toggle()
 	else
 		self:open()
 	end
-end
-
---[[ Whether the on-screen button may be drawn. Called by whatever is
-     suppressing the HUD — the menu, an end-of-round card — on the same footing
-     as it hides the touch pad, because a settings button floating over a
-     scoreboard belongs to neither screen. ]]
-function SettingsController:setGearVisible(value: boolean)
-	state.gearAllowed = value ~= false
-	refreshGear()
 end
 
 --[[ One setting's current value. For anything that wants to read a preference
@@ -1050,50 +1014,6 @@ local function buildTab(category: string, index: number, total: number)
 		end
 	end)
 	table.insert(tabs, tab)
-end
-
-local function buildGear()
-	gearGui = Instance.new("ScreenGui")
-	gearGui.Name = "FL_SettingsButton"
-	gearGui.ResetOnSpawn = false
-	gearGui.IgnoreGuiInset = true
-	--[[ On the HUD's layer rather than the panel's: it is part of the interface
-	     the player is playing through, and it has to sit under anything that
-	     covers the screen. ]]
-	gearGui.DisplayOrder = UITheme.DisplayOrder.Hud
-	gearGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gearGui.Enabled = false
-	gearGui.Parent = player:WaitForChild("PlayerGui")
-	trove:add(gearGui)
-
-	local layer = ScaleLayer.new(gearGui, "Scaled")
-	gearButton = newButton(layer, "Settings")
-	gearButton.AnchorPoint = Vector2.new(1, 0)
-	gearButton.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 0, LAYOUT.ScreenMargin)
-	gearButton.Size = UDim2.fromOffset(GEAR_SIZE, GEAR_SIZE)
-	gearButton.BackgroundColor3 = COLOR.Panel
-	gearButton.BackgroundTransparency = 0.25
-	gearButton.Text = ""
-
-	for index = 1, 3 do
-		local bar = newFrame(gearButton, "Bar" .. index, COLOR.TextSecondary, 0)
-		bar.AnchorPoint = Vector2.new(0.5, 0.5)
-		bar.Position = UDim2.new(0.5, 0, 0.5, (index - 2) * GEAR_BAR_GAP)
-		bar.Size = UDim2.fromOffset(GEAR_BAR_WIDTH, GEAR_BAR_HEIGHT)
-	end
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0.5, 0)
-	corner.Parent = gearButton
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = COLOR.Border
-	stroke.Thickness = LAYOUT.BorderThickness
-	stroke.Parent = gearButton
-
-	trove:connect(gearButton.Activated, function()
-		SettingsController:open()
-	end)
 end
 
 local function build()
@@ -1217,7 +1137,6 @@ local function build()
 		reset.TextColor3 = COLOR.TextDim
 	end)
 
-	buildGear()
 	refreshPanelSize()
 end
 
@@ -1309,15 +1228,6 @@ function SettingsController:start()
 			UserInputService.MouseIconEnabled = true
 		end)
 	end)
-
-	--[[ The gear is a phone control, and which scheme the player is using changes
-	     under them — a tablet with a keyboard attached is both. ]]
-	local input = Registry.find("InputController")
-	if input and input.schemeChanged then
-		trove:connect(input.schemeChanged, refreshGear)
-	end
-
-	refreshGear()
 
 	--[[ Re-fitted on every viewport change, and re-POINTED rather than re-added
 	     when the camera is replaced — which happens on death, on spectate and on

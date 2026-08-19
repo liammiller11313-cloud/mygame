@@ -63,6 +63,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
@@ -184,6 +185,36 @@ local NOTICE_Y = 0.42
 local NOTICE_SECONDS = 2.2
 local NOTICE_FADE = 0.5
 
+--[[
+	"+$4", when something dies.
+
+	BELOW the crosshair, where the notice is above it: the two are the only
+	things that appear in the middle of the screen and a player being warned
+	about friendly fire while collecting money should be able to read both.
+
+	It drifts up and fades, which is the oldest trick in the genre and works for
+	the reason it always has — motion in the periphery is noticed without being
+	looked at, and a number that merely appeared would have to be read.
+
+	The amount comes from the BALANCE moving rather than from any remote. Kills
+	pay three hundred times a round and a remote per kill to say "+2" would be
+	the noisiest thing in the game; ProfileController subtracts two attribute
+	values instead. That also means this covers the round bonus, and anything
+	else the server ever pays, without either of them knowing it exists.
+]]
+local EARN_Y = 0.565
+local EARN_SECONDS = 1.1
+local EARN_RISE = 26 -- reference pixels it travels before it is gone
+--[[ Two kills a second is normal in a horde and eight is possible. A pool of
+     six is enough that a burst reads as several numbers rather than one
+     flickering label, and small enough to cost nothing. ]]
+local EARN_POOL = 6
+--[[ Payments closer together than this merge into the newest number. Four
+     Commons killed by one shotgun blast is ONE event to the player, and four
+     "+$2"s climbing over each other is noise where "+$8" is the same
+     information read in a glance. ]]
+local EARN_MERGE_WINDOW = 0.35
+
 local HOTBAR_SLOT_WIDTH = LAYOUT.HotbarSlotWidth
 local HOTBAR_SLOT_HEIGHT = LAYOUT.HotbarSlotHeight
 
@@ -225,6 +256,8 @@ local itemSlots: {
 	{}
 local objective: { frame: Frame, label: TextLabel, bar: Frame, fill: Frame }
 local notice: { label: TextLabel, until_: number }
+local earnLabels: { { label: TextLabel, until_: number, amount: number } } = {}
+local earnCursor = 0
 local killFeedHolder: Frame
 
 local panels: { [Player]: any } = {}
@@ -984,12 +1017,14 @@ local function applyTouchLayout()
 
 	if killFeedHolder then
 		killFeedHolder.Size = UDim2.fromOffset(KILLFEED_WIDTH, feedLimit() * KILLFEED_ROW_HEIGHT)
-		--[[ And out from under the settings button, which only exists on a
-		     touchscreen and is drawn into this exact corner. The feed is
-		     right-aligned text in a 380-wide column with room to spare on its
-		     left, so stepping it aside costs nothing and sharing the corner
-		     costs both of them. ]]
-		local inset = if state.touch then LAYOUT.SettingsButtonSize + LAYOUT.ElementGap else 0
+		--[[ And out from under the pause button, which is drawn into this exact
+		     corner on every platform. The feed is right-aligned text in a
+		     380-wide column with room to spare on its left, so stepping it aside
+		     costs nothing and sharing the corner costs both of them.
+
+		     No longer touch-only: the settings gear this replaced was a phone
+		     control, and the pause button is not. ]]
+		local inset = LAYOUT.PauseButtonSize + LAYOUT.ElementGap
 		killFeedHolder.Position = UDim2.new(1, -(LAYOUT.ScreenMargin + inset), 0, LAYOUT.ScreenMargin)
 	end
 
@@ -1202,6 +1237,70 @@ local function approach(current: number, target: number, dt: number): number
 	return current + (target - current) * math.min(dt * BAR_CHASE_SPEED, 1)
 end
 
+--[[ A ring of labels, never grown and never destroyed, so a horde allocates
+     nothing. The oldest is reused when the ring comes round — which is correct
+     rather than merely cheap: the number that has been on screen longest is the
+     one a player has finished reading. ]]
+local function buildEarnPool()
+	for index = 1, EARN_POOL do
+		local label = newLabel(root, "Earn" .. index, FONT.Numeric, TEXT.Large, COLOR.Accent)
+		label.AnchorPoint = Vector2.new(0.5, 0.5)
+		label.Position = UDim2.fromScale(0.5, EARN_Y)
+		label.Size = UDim2.new(0, 160, 0, TEXT.Large + 4)
+		label.TextXAlignment = Enum.TextXAlignment.Center
+		label.TextStrokeColor3 = COLOR.Background
+		label.TextStrokeTransparency = 0.4
+		label.Visible = false
+		earnLabels[index] = { label = label, until_ = 0, amount = 0 }
+	end
+end
+
+local function showEarned(amount: number)
+	if amount <= 0 then
+		return
+	end
+	local now = os.clock()
+	local newest = earnLabels[earnCursor]
+	if newest and newest.until_ > 0 and now < newest.until_ - EARN_SECONDS + EARN_MERGE_WINDOW then
+		newest.amount += amount
+		newest.label.Text = "+" .. EconomyConfig.format(newest.amount)
+		return
+	end
+
+	earnCursor = (earnCursor % EARN_POOL) + 1
+	local slot = earnLabels[earnCursor]
+	if not slot then
+		return
+	end
+	slot.amount = amount
+	slot.until_ = now + EARN_SECONDS
+	slot.label.Text = "+" .. EconomyConfig.format(amount)
+	slot.label.TextTransparency = 0
+	slot.label.TextStrokeTransparency = 0.4
+	slot.label.Position = UDim2.fromScale(0.5, EARN_Y)
+	slot.label.Visible = true
+end
+
+local function stepEarned(now: number)
+	for _, slot in earnLabels do
+		if slot.until_ > 0 then
+			local remaining = slot.until_ - now
+			if remaining <= 0 then
+				slot.until_ = 0
+				slot.label.Visible = false
+			else
+				--[[ Squared, so it holds its brightness for most of its life and
+				     then goes. A linear fade spends half its time as a number
+				     nobody can read still taking up the middle of the screen. ]]
+				local alpha = 1 - remaining / EARN_SECONDS
+				slot.label.TextTransparency = alpha * alpha
+				slot.label.TextStrokeTransparency = 0.4 + alpha * 0.6
+				slot.label.Position = UDim2.new(0.5, 0, EARN_Y, -EARN_RISE * alpha)
+			end
+		end
+	end
+end
+
 local function update(dt: number)
 	local now = os.clock()
 
@@ -1280,6 +1379,8 @@ local function update(dt: number)
 		-- the same time, and matching rates would make them read as one effect.
 		ammo.mag.TextTransparency = (0.5 + 0.5 * math.sin(now * 5)) * 0.55
 	end
+
+	stepEarned(now)
 
 	if notice.until_ > 0 then
 		local remaining = notice.until_ - now
@@ -1639,6 +1740,7 @@ local function build()
 	buildAmmo()
 	buildItems()
 	buildNotice()
+	buildEarnPool()
 	buildObjective()
 end
 
@@ -1793,6 +1895,12 @@ function HudController:start()
 	setObjective(Attributes.get(Workspace, GA.ObjectiveText, ""), nil)
 
 	trove:connect(Remotes.Event.KillFeed.OnClientEvent, pushKill)
+
+	--[[ Money, from the balance moving rather than from a remote. See EARN_Y. ]]
+	local store = Registry.find("ProfileController")
+	if store and store.earned then
+		trove:add(store.earned:connect(showEarned))
+	end
 
 	trove:connect(Remotes.Event.Notice.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" then
