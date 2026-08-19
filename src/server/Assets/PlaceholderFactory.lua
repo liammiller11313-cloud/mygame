@@ -683,17 +683,39 @@ local function verifySeverable(key: string, model: Model)
 		end
 		table.sort(present)
 
-		warnOnce(
-			"severable:" .. key,
-			string.format(
-				"the %s rig is missing severable joints: %s — GoreService will silently refuse to "
-					.. "dismember those parts. The joints it does have are: %s. Rename one to match, "
-					.. "or add its name to GoreConfig.Dismemberment.Severable.",
-				key,
-				table.concat(missing, ", "),
-				if #present > 0 then table.concat(present, ", ") else "(none at all)"
+		if #present == 0 then
+			--[[ A rig with NO Motor6Ds is a different and much worse problem than
+			     one missing a few, and "missing severable joints" buries it.
+			     Nothing can animate a body with no joints: an AnimationTrack
+			     drives Motor6Ds, and so does the client's procedural fallback,
+			     which finds none and skips the body entirely. It will slide around
+			     rigid and no amount of configuration will change that — the model
+			     itself has to be rigged. ]]
+			warnOnce(
+				"nojoints:" .. key,
+				string.format(
+					"the %s rig has NO Motor6D joints at all. Nothing can animate it — animation "
+						.. "tracks drive Motor6Ds and so does the procedural fallback — and nothing "
+						.. "can dismember it. It will slide around rigid until the model is rigged. "
+						.. "Open it in Studio and check its limbs are joined to the torso with Motor6D "
+						.. "rather than welded.",
+					key
+				)
 			)
-		)
+		else
+			warnOnce(
+				"severable:" .. key,
+				string.format(
+					"the %s rig is missing severable joints: %s — GoreService will silently refuse to "
+						.. "dismember those parts, and animation cannot move them either. The joints "
+						.. "it does have are: %s. Rename one to match, or add its name to "
+						.. "GoreConfig.Dismemberment.Severable.",
+					key,
+					table.concat(missing, ", "),
+					table.concat(present, ", ")
+				)
+			)
+		end
 	end
 end
 

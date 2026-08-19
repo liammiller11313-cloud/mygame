@@ -120,7 +120,16 @@ local function sanitise(root: Instance, mapId: string)
 		for _, className in MAP_STRIPPED do
 			if descendant:IsA(className) then
 				if #names < 6 then
-					table.insert(names, descendant:GetFullName())
+					--[[ ClassName as well as path. The first run reported
+					     "PackageLink, TextureConfiguration", which reads as though
+					     it removed something it should not have, and the line gave
+					     no way to tell whether those were genuinely scripts or a
+					     class that inherits from one. The class name answers that
+					     without another playtest. ]]
+					table.insert(
+						names,
+						string.format("%s (%s)", descendant:GetFullName(), descendant.ClassName)
+					)
 				end
 				descendant:Destroy()
 				removed += 1
