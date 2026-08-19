@@ -34,6 +34,7 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 
 local COLOR = UITheme.Color
@@ -198,10 +199,14 @@ local function buildRows()
 		button.Size = UDim2.fromScale(1, 1)
 		button.ZIndex = 4
 		button.Parent = row
+		-- Reachable without a cursor: on a console this screen is the only way
+		-- into a round of Versus.
+		GamepadFocus.style(button)
 
 		local entry = {
 			kind = kind,
 			frame = row,
+			button = button,
 			stroke = stroke,
 			name = name,
 			blurb = blurb,
@@ -267,6 +272,19 @@ local function setVisible(visible: boolean)
 	screen.Enabled = visible
 	if visible then
 		state.shownClock = -1
+		--[[ The first row that is actually pickable, not simply the first row:
+		     landing a controller on a class somebody else already took means the
+		     player's first press does nothing and the screen reads as broken. ]]
+		local target = nil
+		for _, entry in rows do
+			if entry.available then
+				target = entry.button
+				break
+			end
+		end
+		GamepadFocus.capture(target or (rows[1] and rows[1].button))
+	else
+		GamepadFocus.release(nil)
 	end
 end
 

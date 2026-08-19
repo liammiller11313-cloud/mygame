@@ -28,6 +28,7 @@
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -46,8 +47,8 @@ type Binding = {
 	keys: { any }, -- Enum.KeyCode | Enum.UserInputType, keyboard/mouse/gamepad alike
 	slot: string?, -- set on the five slot actions; the slot they select
 	pass: boolean?, -- let the input fall through to Roblox's own controls
-	touch: string?, -- title of the on-screen button, when it earns one
-	touchPos: UDim2?,
+	touch: string?, -- label for the on-screen button, when the verb earns one
+	touchOrder: number?, -- where it sits in the touch pad; see TouchController
 }
 
 --[[ Every verb the player can express. Compare against these, never against a
@@ -64,6 +65,11 @@ local Action = table.freeze({
 	Interact = "Interact",
 	UseItem = "UseItem",
 	Throw = "Throw",
+	--[[ Primary <-> Secondary in one press. Exists because a controller has ten
+	     buttons and this game has eighteen verbs: the D-pad is worth more spent
+	     on the three consumables, which are unusable without it, than on two
+	     weapon slots that a single swap covers. ]]
+	CycleWeapon = "CycleWeapon",
 	Slot1 = "Slot1",
 	Slot2 = "Slot2",
 	Slot3 = "Slot3",
@@ -76,31 +82,49 @@ local Action = table.freeze({
 	THE KEYMAP. One table, one row per verb, keyboard/mouse/gamepad in the same
 	row because they are the same verb.
 
-	Gamepad coverage is deliberately incomplete: a controller has ten buttons and
-	this game has seventeen verbs, so the four that a pad player can live without
-	(throw, use item, pills slot, ping) are keyboard-only rather than buried in a
-	chord nobody would find. Touch gets the five buttons that make the game
-	playable and no more; a screen covered in buttons is a screen you cannot see
-	a Hunter through.
+	── THE GAMEPAD LAYOUT ───────────────────────────────────────────────────────
+	A controller has ten buttons and four D-pad directions for eighteen verbs, so
+	the D-pad follows Left 4 Dead 2's console layout rather than mirroring the
+	1-5 keys: up is pills, down is the medkit, right is the throwable, left swaps
+	weapon. That is not a stylistic choice — the previous layout spent all four
+	directions on weapon slots and left the three CONSUMABLES with no button at
+	all, so a pad player could carry a medkit and never use it, hold pills and
+	never take them, and pick up a molotov they could not throw.
+
+	The rest of the button budget is spent the way the platform expects it:
+	triggers shoot and aim, bumpers are the two panic moves, A jumps, B crouches,
+	X reloads, Y interacts.
+
+	── PRESS-AGAIN-TO-USE ───────────────────────────────────────────────────────
+	Selecting a consumable that is ALREADY selected uses it. That is what makes
+	the D-pad layout complete without a dedicated "use" button — one press equips,
+	the next commits — and it is worth as much on a phone, where the hotbar slots
+	are the buttons and there is no room for five more.
+
+	── TOUCH ────────────────────────────────────────────────────────────────────
+	`touch` marks the verbs that earn an on-screen button and `touchOrder` ranks
+	them; TouchController owns where they actually go, because it is the thing
+	that knows where the HUD already is. A screen covered in buttons is a screen
+	you cannot see a Hunter through, so the pad is deliberately six.
 ]]
 local BINDINGS: { Binding } = {
 	{
 		action = Action.Fire,
 		keys = { Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2 },
 		touch = "FIRE",
-		touchPos = UDim2.new(1, -128, 1, -128),
+		touchOrder = 1,
 	},
 	{
 		action = Action.Aim,
 		keys = { Enum.UserInputType.MouseButton2, Enum.KeyCode.ButtonL2 },
 		touch = "AIM",
-		touchPos = UDim2.new(1, -128, 1, -232),
+		touchOrder = 2,
 	},
 	{
 		action = Action.Reload,
 		keys = { Enum.KeyCode.R, Enum.KeyCode.ButtonX },
 		touch = "RELOAD",
-		touchPos = UDim2.new(1, -232, 1, -128),
+		touchOrder = 3,
 	},
 	-- The panic button. Mouse 3 rather than a letter because it has to be
 	-- reachable without taking a finger off movement.
@@ -108,9 +132,14 @@ local BINDINGS: { Binding } = {
 		action = Action.Shove,
 		keys = { Enum.UserInputType.MouseButton3, Enum.KeyCode.ButtonR1 },
 		touch = "PUSH",
-		touchPos = UDim2.new(1, -232, 1, -232),
+		touchOrder = 4,
 	},
-	{ action = Action.Melee, keys = { Enum.KeyCode.V, Enum.KeyCode.ButtonL1 } },
+	{
+		action = Action.Melee,
+		keys = { Enum.KeyCode.V, Enum.KeyCode.ButtonL1 },
+		touch = "MELEE",
+		touchOrder = 5,
+	},
 	{ action = Action.Sprint, keys = { Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3 } },
 	-- Passed through: Roblox's own control script owns the jump itself, and
 	-- sinking Space would break jumping to fix nothing. We only want to know.
@@ -120,24 +149,26 @@ local BINDINGS: { Binding } = {
 		action = Action.Interact,
 		keys = { Enum.KeyCode.E, Enum.KeyCode.ButtonY },
 		touch = "USE",
-		touchPos = UDim2.new(1, -128, 1, -336),
+		touchOrder = 6,
 	},
+	--[[ Keyboard-only, and they do not need a gamepad or touch key: on those two
+	     schemes the consumable slots use themselves when re-selected, which is
+	     what press-again-to-use is for. ]]
 	{ action = Action.UseItem, keys = { Enum.KeyCode.H } },
 	{ action = Action.Throw, keys = { Enum.KeyCode.G } },
+	{ action = Action.CycleWeapon, keys = { Enum.KeyCode.DPadLeft } },
 
-	{ action = Action.Slot1, keys = { Enum.KeyCode.One, Enum.KeyCode.DPadUp }, slot = Enums.Slot.Primary },
-	{
-		action = Action.Slot2,
-		keys = { Enum.KeyCode.Two, Enum.KeyCode.DPadLeft },
-		slot = Enums.Slot.Secondary,
-	},
+	--[[ The D-pad half of each row follows L4D2's console layout, not the 1-5
+	     order: up pills, down medkit, right throwable. See the header. ]]
+	{ action = Action.Slot1, keys = { Enum.KeyCode.One }, slot = Enums.Slot.Primary },
+	{ action = Action.Slot2, keys = { Enum.KeyCode.Two }, slot = Enums.Slot.Secondary },
 	{
 		action = Action.Slot3,
 		keys = { Enum.KeyCode.Three, Enum.KeyCode.DPadRight },
 		slot = Enums.Slot.Throwable,
 	},
 	{ action = Action.Slot4, keys = { Enum.KeyCode.Four, Enum.KeyCode.DPadDown }, slot = Enums.Slot.Health },
-	{ action = Action.Slot5, keys = { Enum.KeyCode.Five }, slot = Enums.Slot.Pills },
+	{ action = Action.Slot5, keys = { Enum.KeyCode.Five, Enum.KeyCode.DPadUp }, slot = Enums.Slot.Pills },
 
 	{ action = Action.Ping, keys = { Enum.KeyCode.Q, Enum.KeyCode.ButtonR3 } },
 }
@@ -165,7 +196,29 @@ InputController.Action = Action
 InputController.actionBegan = Signal.new() -- (action: string)
 InputController.actionEnded = Signal.new() -- (action: string)
 
+--[[
+	Which kind of thing the player is holding.
+
+	Not "what device is this" — a laptop with a touchscreen and a pad plugged in
+	is all three at once, and a Windows handheld is a keyboard device that nobody
+	is using a keyboard on. What the interface actually needs to know is which
+	input the player is USING right now, so this follows their last deliberate
+	press and changes under them when they pick something else up.
+
+	Everything that draws a key glyph, sizes a tap target, or decides whether to
+	put buttons on the screen reads this.
+]]
+local Scheme = table.freeze({
+	Desktop = "Desktop",
+	Touch = "Touch",
+	Gamepad = "Gamepad",
+})
+
+InputController.Scheme = Scheme
+InputController.schemeChanged = Signal.new() -- (scheme: string)
+
 local trove = Trove.new()
+local scheme = Scheme.Desktop
 local down: { [string]: boolean } = {}
 local beganSignals: { [string]: Signal.Signal } = {}
 local endedSignals: { [string]: Signal.Signal } = {}
@@ -221,6 +274,63 @@ local function setDown(action: string, isDown: boolean)
 	end
 end
 
+-- ── which input the player is actually using ────────────────────────────────
+
+--[[
+	The scheme a given input type implies, or nil for one that implies nothing.
+
+	MouseMovement is the notable exclusion. It fires continuously, and on a
+	console with a virtual cursor it fires while the player is holding a
+	controller — treating it as a deliberate press would flip a ten-foot
+	interface back to keyboard glyphs every time the stick nudged the pointer.
+	Focus and the motion sensors are excluded for the same reason: none of them
+	is somebody choosing an input.
+]]
+local function schemeFor(inputType: Enum.UserInputType): string?
+	if inputType == Enum.UserInputType.Touch then
+		return Scheme.Touch
+	end
+	if string.sub(inputType.Name, 1, 7) == "Gamepad" then
+		return Scheme.Gamepad
+	end
+	if
+		inputType == Enum.UserInputType.Keyboard
+		or inputType == Enum.UserInputType.MouseButton1
+		or inputType == Enum.UserInputType.MouseButton2
+		or inputType == Enum.UserInputType.MouseButton3
+		or inputType == Enum.UserInputType.MouseWheel
+	then
+		return Scheme.Desktop
+	end
+	return nil
+end
+
+local function setScheme(value: string)
+	if scheme == value then
+		return
+	end
+	scheme = value
+	InputController.schemeChanged:fire(scheme)
+end
+
+--[[ The starting guess, from what the device HAS rather than from what has been
+     pressed — nothing has been pressed yet, and a phone showing keyboard glyphs
+     for the first second of a round is a worse first impression than one that is
+     occasionally wrong on a hybrid. IsTenFootInterface is definitive for console
+     and is checked first for that reason. ]]
+local function initialScheme(): string
+	if GuiService:IsTenFootInterface() then
+		return Scheme.Gamepad
+	end
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+		return Scheme.Touch
+	end
+	if UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled then
+		return Scheme.Gamepad
+	end
+	return Scheme.Desktop
+end
+
 -- ── intents this controller forwards itself ─────────────────────────────────
 
 local function cameraRay(): (Vector3, Vector3)
@@ -267,10 +377,38 @@ end
 
 --[[ Intents with no local prediction. Everything with a predicted consequence
      belongs to WeaponController, which listens to the signals instead. ]]
+--[[ The slots whose whole purpose is to be spent. Selecting one of these when
+     it is already selected uses it — see the keymap header. Primary and
+     Secondary are absent on purpose: pressing 1 twice must never fire the gun. ]]
+local CONSUMABLE_SLOTS: { [string]: boolean } = {
+	[Enums.Slot.Throwable] = true,
+	[Enums.Slot.Health] = true,
+	[Enums.Slot.Pills] = true,
+}
+
 local function forward(action: string)
 	local binding = bindingFor[action]
 	if binding and binding.slot then
+		--[[ Re-selecting a consumable commits it. The server decides whether that
+		     is legal — an empty slot, a defibrillator with nothing to point it
+		     at, a survivor already mid-heal — so this only has to express the
+		     intent, and a UseItem for a slot holding nothing costs one ignored
+		     remote. ]]
+		if CONSUMABLE_SLOTS[binding.slot] and activeSlot() == binding.slot then
+			Remotes.Event.UseItem:FireServer(binding.slot)
+			return
+		end
 		Remotes.Event.SwitchSlot:FireServer(binding.slot)
+		return
+	end
+
+	if action == Action.CycleWeapon then
+		--[[ One press covers both weapon slots, which is what frees the D-pad for
+		     the consumables. From anything that is not a weapon it lands on the
+		     primary: coming off a medkit you almost always want the rifle. ]]
+		local current = activeSlot()
+		local target = if current == Enums.Slot.Primary then Enums.Slot.Secondary else Enums.Slot.Primary
+		Remotes.Event.SwitchSlot:FireServer(target)
 		return
 	end
 
@@ -312,21 +450,19 @@ local function handle(binding: Binding)
 	end
 end
 
+--[[ `false` for the touch-button argument, always. ContextActionService draws
+     its own round grey buttons at fixed pixel offsets from the bottom-right
+     corner — which is exactly where the ammo counter and the hotbar live, so
+     they landed on top of the HUD, and they ignore the theme and the viewport
+     scale besides. TouchController draws the pad instead and calls raise(). ]]
 local function bind(binding: Binding)
-	local name = PREFIX .. binding.action
 	ContextActionService:BindActionAtPriority(
-		name,
+		PREFIX .. binding.action,
 		handle(binding),
-		binding.touch ~= nil,
+		false,
 		PRIORITY,
 		table.unpack(binding.keys)
 	)
-	if binding.touch then
-		ContextActionService:SetTitle(name, binding.touch)
-		if binding.touchPos then
-			ContextActionService:SetPosition(name, binding.touchPos)
-		end
-	end
 end
 
 local function unbind(binding: Binding)
@@ -356,6 +492,46 @@ end
      edit them through :rebind, not by hand, or the CAS binding goes stale. ]]
 function InputController:getBindings(): { Binding }
 	return BINDINGS
+end
+
+--[[
+	Expresses a verb from something that is not a key.
+
+	TouchController's buttons are the only caller: an on-screen button is a
+	GuiButton, not a bound input, so it cannot reach the ContextActionService
+	handler that everything else goes through. Routing it here rather than
+	letting the touch layer fire remotes itself keeps ONE definition of what a
+	verb costs — the disabled check, the held-state bookkeeping and the forward
+	are the same code for a finger as for a trigger.
+
+	Returns false when the verb was refused, so a button can decline to light up.
+]]
+function InputController:raise(action: string, isDown: boolean): boolean
+	if not bindingFor[action] then
+		return false
+	end
+	if isDown and (not enabled or UserInputService:GetFocusedTextBox() ~= nil) then
+		return false
+	end
+	setDown(action, isDown)
+	if isDown then
+		forward(action)
+	end
+	return true
+end
+
+--[[ Which input the player is using right now: one of InputController.Scheme.
+     Anything drawing a key glyph or sizing a tap target reads this and listens
+     to schemeChanged. ]]
+function InputController:getScheme(): string
+	return scheme
+end
+
+--[[ True on a phone or tablet, as distinct from a desktop that merely has a
+     touchscreen. The distinction matters because only the former needs the
+     on-screen pad. ]]
+function InputController:isTouchScheme(): boolean
+	return scheme == Scheme.Touch
 end
 
 --[[
@@ -405,6 +581,17 @@ function InputController:start()
 			if isDown then
 				setDown(action, false)
 			end
+		end
+	end)
+
+	--[[ The scheme follows the player's last deliberate press. LastInputTypeChanged
+	     rather than polling: it fires exactly when the answer changes, and the
+	     answer changes about as often as somebody puts a controller down. ]]
+	setScheme(initialScheme())
+	trove:connect(UserInputService.LastInputTypeChanged, function(inputType: Enum.UserInputType)
+		local implied = schemeFor(inputType)
+		if implied then
+			setScheme(implied)
 		end
 	end)
 end

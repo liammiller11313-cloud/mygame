@@ -65,6 +65,8 @@ local CONTROLLERS = {
 	"UI/OverlayController",
 	"UI/InfectedController",
 	"UI/MapVoteController",
+	-- After the HUD, because it lays itself out around where the hotbar already is.
+	"UI/TouchController",
 	"Audio/MusicController",
 	"UI/MainMenuController",
 }

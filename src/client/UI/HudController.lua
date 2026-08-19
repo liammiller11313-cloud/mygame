@@ -193,6 +193,7 @@ local itemSlots: {
 		count: TextLabel,
 		marker: Frame,
 		stroke: UIStroke,
+		tap: TextButton,
 	},
 } =
 	{}
@@ -295,15 +296,60 @@ local function itemLabel(itemId: string): string
 	return string.upper(spaced)
 end
 
+--[[ What a controller's D-pad directions are called on screen. Arrows rather
+     than "DPADUP", which is four times as wide and reads as a debug string. The
+     face buttons keep their letters, which are the same on both platforms even
+     though the colours are not — a Roblox game cannot know whether it is on a
+     PlayStation or an Xbox, so it must not draw a glyph that would be wrong on
+     one of them. ]]
+local GAMEPAD_GLYPH: { [string]: string } = {
+	DPadUp = "▲",
+	DPadDown = "▼",
+	DPadLeft = "◄",
+	DPadRight = "►",
+	ButtonA = "A",
+	ButtonB = "B",
+	ButtonX = "X",
+	ButtonY = "Y",
+	ButtonL1 = "L1",
+	ButtonR1 = "R1",
+	ButtonL2 = "L2",
+	ButtonR2 = "R2",
+	ButtonL3 = "L3",
+	ButtonR3 = "R3",
+}
+
+local function isGamepadKey(key: any): boolean
+	return typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode and GAMEPAD_GLYPH[key.Name] ~= nil
+end
+
 --[[
-	The printable glyph for a bound key. Roblox's KeyCode values for letters and
-	digits ARE their ASCII codes, so the common cases turn into "E" and "3"
-	without a lookup table; anything else (LeftShift, MouseButton3) falls back to
-	its name, which is at least honest.
+	The printable glyph for a bound key, for the device the player is actually
+	holding.
+
+	A keyboard glyph on a console is not a small cosmetic problem: it tells the
+	player to press a key that does not exist, and the button that DOES work is
+	somewhere else entirely — this game's D-pad layout deliberately does not
+	mirror the 1-5 row. So the row is searched for a binding that matches the
+	scheme first, and the keyboard half is the fallback rather than the default.
+
+	Roblox's KeyCode values for letters and digits ARE their ASCII codes, so the
+	common cases turn into "E" and "3" without a lookup table.
 ]]
-local function keyGlyph(keys: { any }): string
+local function keyGlyph(keys: { any }, scheme: string?): string
+	if scheme == "Gamepad" then
+		for _, key in keys do
+			if isGamepadKey(key) then
+				return GAMEPAD_GLYPH[key.Name]
+			end
+		end
+		-- Bound to no gamepad button at all. Blank rather than a keyboard letter:
+		-- "there is no button for this" is true, and "press 5" is not.
+		return ""
+	end
+
 	for _, key in keys do
-		if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then
+		if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode and not isGamepadKey(key) then
 			local value = key.Value
 			if (value >= 48 and value <= 57) or (value >= 97 and value <= 122) then
 				return string.upper(string.char(value))
@@ -311,7 +357,7 @@ local function keyGlyph(keys: { any }): string
 		end
 	end
 	for _, key in keys do
-		if typeof(key) == "EnumItem" then
+		if typeof(key) == "EnumItem" and not isGamepadKey(key) then
 			return string.upper(key.Name)
 		end
 	end
@@ -843,6 +889,9 @@ local function refreshItems()
 	end
 end
 
+--[[ Re-run whenever the player picks up a different input, not just at boot.
+     A console player who plugs in a keyboard, or a tablet player who pairs a
+     controller, should see the buttons they are now holding. ]]
 local function bindItemKeys()
 	local input = Registry.find("InputController")
 	if not input or typeof(input.getBindings) ~= "function" then
@@ -852,10 +901,25 @@ local function bindItemKeys()
 	if not ok or typeof(bindings) ~= "table" then
 		return
 	end
+
+	local scheme = "Desktop"
+	if typeof(input.getScheme) == "function" then
+		local schemeOk, value = pcall(input.getScheme, input)
+		if schemeOk and typeof(value) == "string" then
+			scheme = value
+		end
+	end
+	local touch = scheme == "Touch"
+
 	for _, binding in bindings do
 		local entry = binding.slot and itemSlots[binding.slot]
 		if entry then
-			entry.key.Text = keyGlyph(binding.keys)
+			--[[ Nothing to press on a touchscreen, because the slot IS the
+			     button. A key glyph there would be instructions for hardware the
+			     player does not have. ]]
+			entry.key.Text = if touch then "" else keyGlyph(binding.keys, scheme)
+			-- Inert on desktop and console, so it can never swallow a click.
+			entry.tap.Active = touch
 		end
 	end
 end
@@ -1206,6 +1270,49 @@ local function buildItems()
 		corner(frame)
 		local line = stroke(frame)
 
+		--[[
+			On a touchscreen the slot IS the button.
+
+			Five more buttons for five slots would be five more things covering a
+			screen the player is trying to see a Hunter through, and the hotbar is
+			already on screen, already says what is in each slot, and is already in
+			the corner a thumb can reach. So a tap selects, and a second tap on a
+			consumable spends it — the same press-again-to-use rule the D-pad
+			follows on a controller, and it comes free because InputController owns
+			that decision rather than the keymap does.
+
+			The button sits ON TOP of the slot rather than replacing the Frame:
+			everything that draws a slot writes to `frame`, and turning that into a
+			TextButton would have meant auditing every one of those writes for the
+			sake of one property. Active is switched on only under the touch
+			scheme, so on desktop it cannot swallow a click.
+		]]
+		local tap = Instance.new("TextButton")
+		tap.Name = "Tap"
+		tap.BackgroundTransparency = 1
+		tap.BorderSizePixel = 0
+		tap.AutoButtonColor = false
+		tap.Text = ""
+		tap.Size = UDim2.fromScale(1, 1)
+		tap.ZIndex = frame.ZIndex + 4
+		tap.Active = false
+		tap.Selectable = false
+		tap.Parent = frame
+
+		trove:connect(tap.Activated, function()
+			local input = Registry.find("InputController")
+			if not input or typeof(input.raise) ~= "function" then
+				return
+			end
+			for _, binding in input:getBindings() do
+				if binding.slot == slot then
+					input:raise(binding.action, true)
+					input:raise(binding.action, false)
+					return
+				end
+			end
+		end)
+
 		--[[ A hairline down the left edge, lit only on the selected slot. It is
 		     the cheapest possible "this one" marker and it survives being read
 		     out of the corner of the eye, which is the only way this bar is ever
@@ -1256,6 +1363,7 @@ local function buildItems()
 			count = count,
 			marker = marker,
 			stroke = line,
+			tap = tap,
 		}
 	end
 end
@@ -1496,6 +1604,15 @@ function HudController:start()
 		manifest — and a HUD with a slightly late ammo count is worth far more
 		than no HUD at all.
 	]]
+	--[[ Glyphs follow the input the player is holding. A console player who plugs
+	     in a keyboard mid-round gets keyboard glyphs; a desktop player who picks
+	     up a pad gets the D-pad arrows, which matter here because the pad layout
+	     deliberately does not mirror the 1-5 row. ]]
+	local inputController = Registry.find("InputController")
+	if inputController and inputController.schemeChanged then
+		trove:add(inputController.schemeChanged:connect(bindItemKeys))
+	end
+
 	local weapons = Registry.find("WeaponController")
 	if weapons then
 		local function repaint()

@@ -746,6 +746,7 @@ local function broadcastCinematic(value: boolean)
 			"PromptController",
 			"SubtitleController",
 			"WaveController",
+			"TouchController",
 		}
 	do
 		local controller = Registry.find(name)

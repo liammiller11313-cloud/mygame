@@ -75,6 +75,8 @@ local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local GamepadFocus = require(script.Parent.GamepadFocus)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
@@ -301,6 +303,12 @@ local resultWave: TextLabel
 local resultTime: TextLabel
 local resultRows: { any } = {}
 local resultContinue: TextLabel
+--[[ The buttons a controller lands on when each screen opens. Held rather than
+     looked up, because "the first mode entry" and "the continue button" are the
+     only two answers and searching the tree for them every time would be a
+     lookup that can silently start returning the wrong thing. ]]
+local firstModeButton: TextButton? = nil
+local resultContinueButton: TextButton? = nil
 local resultReturn: TextLabel
 
 local masterGroup: SoundGroup
@@ -637,6 +645,9 @@ local function setSuppressed(value: boolean)
 	callController("CrosshairController", "setVisible", not value)
 	callController("PromptController", "setEnabled", not value)
 	callController("InputController", "setEnabled", not value)
+	-- The touch pad goes with the HUD. Leaving fire buttons live under a menu is
+	-- how a phone player shoots the scoreboard.
+	callController("TouchController", "setVisible", not value)
 
 	state.blurTarget = if value then BLUR_SIZE else 0
 
@@ -664,6 +675,18 @@ local function refreshVisibility()
 	resultsRoot.Visible = state.results
 	teleportRoot.Visible = state.teleporting
 	setSuppressed(state.open or state.results)
+
+	--[[ A controller has no cursor, so a screen nothing selects is a screen a pad
+	     player cannot press a single button on. Selection follows whichever of
+	     the three screens is up, and is handed back when none of them is —
+	     leaving it on a hidden button eats every D-pad press in the game. ]]
+	if state.results then
+		GamepadFocus.capture(resultContinueButton)
+	elseif state.open then
+		GamepadFocus.capture(firstModeButton)
+	else
+		GamepadFocus.release(nil)
+	end
 end
 
 -- ── lobby presentation ──────────────────────────────────────────────────────
@@ -1327,6 +1350,10 @@ local function buildModes()
 		local button = newButton(menuLayer, definition.id)
 		button.Position = UDim2.new(COLUMN_X, 0, 0.52, (index - 1) * (ENTRY_HEIGHT + ENTRY_GAP))
 		button.Size = UDim2.new(ENTRY_WIDTH, 0, 0, ENTRY_HEIGHT)
+		GamepadFocus.style(button)
+		if index == 1 then
+			firstModeButton = button
+		end
 
 		local rule = newRule(button, "Rule", COLOR.Border)
 
@@ -1712,6 +1739,8 @@ local function buildResults()
 	end
 
 	local continue = newButton(resultsLayer, "Continue")
+	GamepadFocus.style(continue)
+	resultContinueButton = continue
 	continue.AnchorPoint = Vector2.new(0, 1)
 	continue.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
 	continue.Size = UDim2.new(0.3, 0, 0, TEXT.Display + LAYOUT.PanelPadding)

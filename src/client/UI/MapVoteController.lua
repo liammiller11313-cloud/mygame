@@ -24,6 +24,7 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 
 local COLOR = UITheme.Color
@@ -179,10 +180,14 @@ local function buildCard(option: any, index: number, total: number)
 	button.Size = UDim2.fromScale(1, 1)
 	button.ZIndex = 4
 	button.Parent = frame
+	--[[ A vote a controller cannot reach is a vote a console player never casts,
+	     and the number keys that back this screen up are keyboard-only. ]]
+	GamepadFocus.style(button)
 
 	local card = {
 		id = option.id,
 		frame = frame,
+		button = button,
 		stroke = stroke,
 		name = name,
 		count = count,
@@ -240,6 +245,9 @@ local function setVisible(visible: boolean)
 	screen.Enabled = visible
 	if visible then
 		state.shownClock = -1
+		GamepadFocus.capture(cards[1] and cards[1].button)
+	else
+		GamepadFocus.release(cards[1] and cards[1].button)
 	end
 end
 
