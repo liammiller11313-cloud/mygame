@@ -100,6 +100,9 @@ local MODULES = {
 
 	"Audio/AudioService",
 	"Assets/PlaceholderFactory",
+	-- Populates ReplicatedStorage.Assets.Ammo, and only where it is empty: a
+	-- hand-made casing or magazine always wins over a generated one.
+	"Assets/AmmoFactory",
 	"Level/LevelService",
 	"Survivors/SurvivorService",
 	"Survivors/InventoryService",

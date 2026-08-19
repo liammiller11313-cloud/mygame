@@ -915,8 +915,14 @@ end
 ]]
 local CASING_POOL = 18
 
-type CasingPool = {
+type CasingSlot = {
+	container: Instance,
+	root: BasePart,
 	parts: { BasePart },
+}
+
+type CasingPool = {
+	slots: { CasingSlot },
 	expiry: { number },
 	cursor: number,
 	definition: any,
@@ -939,52 +945,99 @@ end
 
 --[[ Finds a supplied casing model, or nil. Looked up once per calibre and then
      cached inside the pool, because this walks ReplicatedStorage. ]]
-local function findCasingModel(name: string): BasePart?
+--[[
+	Finds a supplied model, or nil. Returns the instance AS IS — a BasePart or a
+	Model — because AmmoFactory builds real multi-part cartridges (a bottleneck
+	case is a body, a shoulder and a neck) and taking only the first part out of
+	one would leave the player watching a floating case mouth.
+]]
+local function findAmmoTemplate(folderName: string, name: string): Instance?
 	if name == "" then
 		return nil
 	end
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	local ammo = assets and assets:FindFirstChild(AmmoConfig.FolderName)
-	local casings = ammo and ammo:FindFirstChild(AmmoConfig.CasingFolder)
-	local entry = casings and casings:FindFirstChild(name)
-	if not entry then
-		return nil
-	end
-	if entry:IsA("BasePart") then
+	local group = ammo and ammo:FindFirstChild(folderName)
+	local entry = group and group:FindFirstChild(name)
+	if entry and (entry:IsA("BasePart") or entry:IsA("Model")) then
 		return entry
-	end
-	-- A Model wrapping one part is the common export shape; take the part.
-	if entry:IsA("Model") then
-		return entry:FindFirstChildWhichIsA("BasePart", true)
 	end
 	return nil
 end
 
-local function buildCasingPool(calibre: string, definition: any): CasingPool
-	local folder = ensureCasingFolder()
-	local template = findCasingModel(definition.model)
+--[[
+	Turns a template into something the pool can throw.
 
-	local pool: CasingPool = { parts = {}, expiry = {}, cursor = 0, definition = definition }
-
-	for index = 1, CASING_POOL do
-		local part: BasePart
-		if template then
-			part = template:Clone() :: BasePart
-			part:ClearAllChildren()
+	Returns the container to parent and reparent, the single part to apply
+	velocity to, and every part in it so visibility can be toggled. A model
+	arrives already welded to its PrimaryPart, so moving that one part carries
+	the rest — which is why the pool never has to know how many pieces a
+	cartridge is made of.
+]]
+local function instantiateAmmo(
+	template: Instance?,
+	fallbackSize: Vector3,
+	fallbackColor: Color3,
+	fallbackMaterial: Enum.Material
+): (Instance, BasePart, { BasePart })
+	if template then
+		local clone = template:Clone()
+		local root: BasePart?
+		if clone:IsA("BasePart") then
+			clone:ClearAllChildren()
+			root = clone
 		else
-			local block = Instance.new("Part")
-			block.Size = definition.size
-			block.Color = definition.color
-			block.Material = definition.material
-			part = block
+			local model = clone :: Model
+			root = model.PrimaryPart
+			if not root then
+				local best, bestVolume = nil, -1
+				for _, part in model:GetDescendants() do
+					if part:IsA("BasePart") then
+						local volume = part.Size.X * part.Size.Y * part.Size.Z
+						if volume > bestVolume then
+							best, bestVolume = part, volume
+						end
+					end
+				end
+				root = best
+			end
 		end
 
-		part.Name = "FL_Casing_" .. calibre
-		part.CanCollide = true
+		if root then
+			local parts = {}
+			if clone:IsA("BasePart") then
+				parts[1] = clone :: BasePart
+			else
+				for _, part in clone:GetDescendants() do
+					if part:IsA("BasePart") then
+						table.insert(parts, part)
+					end
+				end
+			end
+			return clone, root, parts
+		end
+		clone:Destroy()
+	end
+
+	local block = Instance.new("Part")
+	block.Size = fallbackSize
+	block.Color = fallbackColor
+	block.Material = fallbackMaterial
+	return block, block, { block }
+end
+
+--[[ Applies the properties every piece of thrown ammunition needs, whether it is
+     one part or seven. Only the root carries collision; the rest ride along
+     welded, which keeps the physics cost of a bottleneck case identical to a
+     block's. ]]
+local function configureAmmo(root: BasePart, parts: { BasePart }, collide: boolean)
+	for _, part in parts do
 		part.CanQuery = false
 		part.CanTouch = false
 		part.CastShadow = false
-		part.Massless = true
+		part.Anchored = false
+		part.Massless = part ~= root
+		part.CanCollide = collide and part == root
 		--[[ Debris never collides with a survivor or an infected, which is what
 		     stops a magazine's worth of brass from nudging a player off a ledge.
 		     The group is registered by the server bootstrap; if this client got
@@ -995,16 +1048,13 @@ local function buildCasingPool(calibre: string, definition: any): CasingPool
 		if not ok then
 			part.CanCollide = false
 		end
-		part.Transparency = 1
-		part.Anchored = true
-		part.Parent = folder
-
-		pool.parts[index] = part
-		pool.expiry[index] = 0
 	end
+end
 
-	casingPools[calibre] = pool
-	return pool
+local function setAmmoVisible(parts: { BasePart }, visible: boolean)
+	for _, part in parts do
+		part.Transparency = if visible then 0 else 1
+	end
 end
 
 local function ejectShell()
@@ -1025,17 +1075,21 @@ local function ejectShell()
 
 	local pool = casingPools[calibre] or buildCasingPool(calibre, definition)
 	pool.cursor = (pool.cursor % CASING_POOL) + 1
-	local shell = pool.parts[pool.cursor]
-	if not shell then
+	local slot = pool.slots[pool.cursor]
+	if not slot then
 		return
 	end
+	local shell = slot.root
 
 	--[[ Out of the right of the weapon, back from the muzzle by a fraction of the
 	     weapon's own length rather than by a fixed distance — a constant tuned
 	     for a rifle throws a pistol's brass out of the barrel. ]]
 	local base = muzzle.WorldCFrame * CFrame.new(0.18, 0, current.pose.length * 0.45)
-	shell.Anchored = false
-	shell.Transparency = 0
+	for _, part in slot.parts do
+		part.Anchored = false
+	end
+	setAmmoVisible(slot.parts, true)
+	-- The root carries the assembly: every other piece is welded to it.
 	shell.CFrame = base * CFrame.Angles(0, math.random() * math.pi * 2, 0)
 	shell.AssemblyLinearVelocity = base.RightVector * definition.ejectSpeed
 		+ base.UpVector * definition.ejectUp
@@ -1052,11 +1106,13 @@ local function stepShells(now: number)
 		for index = 1, CASING_POOL do
 			local expiry = pool.expiry[index]
 			if expiry > 0 and now >= expiry then
-				local shell = pool.parts[index]
-				if shell then
-					shell.Anchored = true
-					shell.Transparency = 1
-					shell.AssemblyLinearVelocity = Vector3.zero
+				local slot = pool.slots[index]
+				if slot then
+					slot.root.AssemblyLinearVelocity = Vector3.zero
+					setAmmoVisible(slot.parts, false)
+					for _, part in slot.parts do
+						part.Anchored = true
+					end
 				end
 				pool.expiry[index] = 0
 			end
@@ -1078,28 +1134,8 @@ end
 	landed simply recycles it.
 ]]
 local MAGAZINE_LIFETIME = 4
-local magazinePart: BasePart? = nil
+local magazineContainer: Instance? = nil
 local magazineExpiry = 0
-
-local function findMagazineModel(name: string): BasePart?
-	if name == "" then
-		return nil
-	end
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local ammo = assets and assets:FindFirstChild(AmmoConfig.FolderName)
-	local mags = ammo and ammo:FindFirstChild(AmmoConfig.MagazineFolder)
-	local entry = mags and mags:FindFirstChild(name)
-	if not entry then
-		return nil
-	end
-	if entry:IsA("BasePart") then
-		return entry
-	end
-	if entry:IsA("Model") then
-		return entry:FindFirstChildWhichIsA("BasePart", true)
-	end
-	return nil
-end
 
 local function dropMagazine()
 	local definition = AmmoConfig.magazineFor(current.weaponId)
@@ -1114,55 +1150,36 @@ local function dropMagazine()
 
 	local folder = ensureCasingFolder()
 
-	if magazinePart then
-		magazinePart:Destroy()
-		magazinePart = nil
+	if magazineContainer then
+		magazineContainer:Destroy()
+		magazineContainer = nil
 	end
 
-	local template = findMagazineModel(definition.model)
-	local part: BasePart
-	if template then
-		part = template:Clone() :: BasePart
-		part:ClearAllChildren()
-	else
-		local block = Instance.new("Part")
-		block.Size = definition.size
-		block.Color = definition.color
-		block.Material = definition.material
-		part = block
-	end
+	local template = findAmmoTemplate(AmmoConfig.MagazineFolder, definition.model)
+	local container, root, parts =
+		instantiateAmmo(template, definition.size, definition.color, definition.material)
 
-	part.Name = "FL_Magazine"
-	part.CanCollide = true
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CastShadow = false
-	part.Massless = true
-	local ok = pcall(function()
-		part.CollisionGroup = "Debris"
-	end)
-	if not ok then
-		part.CanCollide = false
-	end
-	part.Anchored = false
+	container.Name = "FL_Magazine"
+	configureAmmo(root, parts, true)
+	setAmmoVisible(parts, true)
 
 	-- Out of the magazine well: under the receiver, behind the muzzle.
 	local well = muzzle.WorldCFrame * CFrame.new(0, -0.28, current.pose.length * 0.55)
-	part.CFrame = well
-	part.AssemblyLinearVelocity = -well.UpVector * definition.dropSpeed
+	root.CFrame = well
+	root.AssemblyLinearVelocity = -well.UpVector * definition.dropSpeed
 		+ well.LookVector * (definition.dropSpeed * 0.25)
-	part.AssemblyAngularVelocity =
+	root.AssemblyAngularVelocity =
 		Vector3.new((math.random() - 0.5) * 6, (math.random() - 0.5) * 4, (math.random() - 0.5) * 6)
-	part.Parent = folder
+	container.Parent = folder
 
-	magazinePart = part
+	magazineContainer = container
 	magazineExpiry = os.clock() + MAGAZINE_LIFETIME
 end
 
 local function stepMagazine(now: number)
-	if magazinePart and magazineExpiry > 0 and now >= magazineExpiry then
-		magazinePart:Destroy()
-		magazinePart = nil
+	if magazineContainer and magazineExpiry > 0 and now >= magazineExpiry then
+		magazineContainer:Destroy()
+		magazineContainer = nil
 		magazineExpiry = 0
 	end
 end

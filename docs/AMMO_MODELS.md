@@ -1,43 +1,18 @@
-# Ammo Models — what to make and where to put it
+# Ammo Models
 
-Everything here is **optional**. The game builds a stand-in for anything missing,
-at the right size and colour, so a half-filled folder still plays. Drop a real
-model in and it's used automatically — no code changes.
+**These are now built for you.** `AmmoFactory` generates every casing, magazine
+and pickup at server start, proportioned from real cartridge dimensions — a 5.56
+really is a slender bottleneck next to a 7.62, a .357 case really is that long and
+thin, a 12 gauge hull really is a red tube on a brass head. You do not need to
+model anything.
 
-## The short list, by weapon type
+This document is here for when you want to **replace** one.
 
-Each weapon type needs a **casing** (flies out when you shoot) and a **magazine**
-(drops when you reload). Guns of the same type share them, so 16 guns need 14
-models, not 32.
+## How replacing works
 
-| Ammo type | Which guns | Casing model | Magazine model |
-|---|---|---|---|
-| **Shotgun ammo** | Shotgun | `Casing_12ga` | `Round_12ga` |
-| **Pistol ammo** | M1911A1 | `Casing_45ACP` | `Mag_Pistol` |
-| **Revolver ammo** | .357 Magnum | `Casing_357` | `Speedloader_357` |
-| **SMG ammo** | MP7A1, UMP-45, Kriss Vector | `Casing_45ACP`, `Casing_9mm` | `Mag_SMG` |
-| **PPSh ammo** | PPSh-41 | `Casing_762` | `Mag_Drum` |
-| **Rifle ammo** | M4A1, HK416A5, Mk 18 CQBR, Scoped Mk-18 | `Casing_556` | `Mag_STANAG` |
-| **AK ammo** | AKM, AK-12, AKS-74U | `Casing_762`, `Casing_556` | `Mag_AK` |
-| **Sniper ammo** | M1A EBR | `Casing_762` | `Mag_Marksman` |
-
-Plus **3 floor pickups**: `AmmoPile`, `AmmoBox`, `ShellBox`.
-
-### If you only make a few, make these
-
-1. **Shotgun ammo** — `Casing_12ga`. A red plastic hull with a brass base is the
-   only casing players consciously notice.
-2. **Rifle ammo** — `Mag_STANAG`. Covers four guns, and a dropped magazine is the
-   clearest signal in the game that a reload is happening.
-3. **AK ammo** — `Mag_AK`. Curved orange-brown bakelite, so it reads as obviously
-   *not* a STANAG at a glance.
-4. **PPSh ammo** — `Mag_Drum`. Big, round, unmistakable.
-
----
-
-## Folder layout
-
-Create this next to the folders you already made:
+Drop a model into the matching folder under the matching name and it wins. The
+factory only ever fills gaps — it never overwrites or deletes anything you put
+there. Delete yours and the generated one comes back on the next server start.
 
 ```
 ReplicatedStorage/
@@ -48,74 +23,39 @@ ReplicatedStorage/
         └── Pickups/      ammo on the floor
 ```
 
-Names must match **exactly** — they're the lookup keys.
+## The names, by weapon type
 
----
+| Ammo type | Which guns | Casing | Magazine |
+|---|---|---|---|
+| **Shotgun ammo** | Shotgun | `Casing_12ga` | `Round_12ga` |
+| **Pistol ammo** | M1911A1 | `Casing_45ACP` | `Mag_Pistol` |
+| **Revolver ammo** | .357 Magnum | `Casing_357` | `Speedloader_357` |
+| **SMG ammo** | MP7A1, UMP-45, Kriss Vector | `Casing_9mm`, `Casing_45ACP` | `Mag_SMG` |
+| **PPSh ammo** | PPSh-41 | `Casing_762` | `Mag_Drum` |
+| **Rifle ammo** | M4A1, HK416A5, Mk 18 CQBR, Scoped Mk-18 | `Casing_556` | `Mag_STANAG` |
+| **AK ammo** | AKM, AK-12, AKS-74U | `Casing_762`, `Casing_556` | `Mag_AK` |
+| **Sniper ammo** | M1A EBR | `Casing_762` | `Mag_Marksman` |
 
-## 1. Casings — 6 models
+Floor pickups: `AmmoPile`, `AmmoBox`, `ShellBox`.
 
-Ejected on every shot. At the Vector's 1100rpm that's eighteen a second, so keep
-these **cheap**: a single mesh part, no unions, no textures beyond a colour. They
-live under a second each and are only ever seen tumbling.
+## If you do replace one
 
-One per **calibre**, not per gun — 16 guns share 6 casings.
-
-| Model name | Used by | Should look like |
-|---|---|---|
-| `Casing_9mm` | MP7A1 | Small brass bottleneck case, ~17mm |
-| `Casing_45ACP` | M1911A1, UMP-45, Kriss Vector | Fatter, stubbier brass, straight-walled |
-| `Casing_357` | .357 Magnum | Long slim brass revolver case |
-| `Casing_556` | M4A1, HK416A5, Mk 18, Scoped Mk-18, AKS-74U | Slender bottleneck rifle brass |
-| `Casing_762` | AKM, M1A EBR, PPSh-41 | Noticeably longer and fatter than 5.56 |
-| `Casing_12ga` | Shotgun | **Red plastic hull with a brass base.** The only casing players consciously notice — worth the most effort. |
-
-> Orient them lying along **Z** (long axis forward). If you don't, they'll still
-> work, they'll just tumble from a different starting angle.
-
-## 2. Magazines — 8 models
-
-This is the one worth real effort. A magazine falls out of frame at arm's length
-over about a second, and it's the clearest signal in the game that a reload is
-happening. Players *look* at this one.
-
-| Model name | Used by | Should look like |
-|---|---|---|
-| `Mag_Pistol` | M1911A1 | Slim single-stack blued steel |
-| `Speedloader_357` | .357 Magnum | Round six-shot speedloader |
-| `Mag_SMG` | MP7A1, UMP-45, Kriss Vector | Straight box magazine |
-| `Mag_Drum` | PPSh-41 | **The 71-round drum.** Big, round, unmistakable |
-| `Mag_STANAG` | M4A1, HK416A5, Mk 18, Scoped Mk-18 | Grey/black polymer AR magazine |
-| `Mag_AK` | AKM, AK-12, AKS-74U | Curved, orange-brown bakelite — should read as *obviously* not a STANAG |
-| `Mag_Marksman` | M1A EBR | Shorter, fatter 20-round box |
-| `Round_12ga` | Shotgun | A single shell. The shotgun loads one at a time and drops no magazine |
-
-## 3. Pickups — 3 models
-
-Sat on the floor, seen from any angle and further away. These want to be readable
-in silhouette in a dark room, so favour a distinctive shape over detail.
-
-| Model name | What it is |
-|---|---|
-| `AmmoPile` | The shared refill everyone can draw from. A loose heap of boxes and belts |
-| `AmmoBox` | Single-use pickup. A sealed military ammo can |
-| `ShellBox` | Shotgun-specific. An open box of red hulls |
-
----
-
-## Format notes
-
-- **A `Part`, a `MeshPart`, or a `Model` wrapping one part** all work. If you give
-  a Model, the first BasePart inside it is used.
-- **Size doesn't need to be exact** — but keep it roughly to scale, because it's
-  cloned as-is. A stud is about 28cm. A rifle case should be around `0.06 × 0.06 ×
-  0.2` studs.
-- **Don't include scripts.** They're stripped anyway (that's a security measure,
-  not tidiness), and any child objects on casings are cleared for performance.
-- **No welds or constraints needed.** Casings and magazines are thrown by physics.
+- A `Part`, a `MeshPart`, or a `Model` with several parts all work. A multi-part
+  Model needs a `PrimaryPart`; if it has none, the largest part is used and the
+  rest are expected to be welded to it.
+- **Point casings along Z**, long axis forward. Everything else is orientation
+  agnostic.
+- Keep roughly to scale. A stud is about 28cm, and the generated models run
+  slightly over life size on purpose — a real 9mm case is three pixels at arm's
+  length and vanishes the instant it leaves the frame.
+- Don't include scripts. They are stripped, and that is a security measure rather
+  than tidiness.
 
 ## Tuning
 
-Every number — eject speed, spin, lifetime, how far a magazine falls — is in
-`src/shared/Config/AmmoConfig.lua`, one block per calibre and per magazine family,
-commented with what each does. Adding a **new** calibre is: add a block, point a
-weapon at it. No new code.
+Sizes, eject speed, spin, lifetime and how far a magazine falls are all in
+`src/shared/Config/AmmoConfig.lua`, one block per calibre and per magazine family.
+The geometry is in `src/server/Assets/AmmoFactory.lua`, one builder per shape.
+
+Adding a **new** calibre is: add a block to AmmoConfig, point a weapon at it, and
+either add a builder or let it fall back to a correctly-sized stand-in.
