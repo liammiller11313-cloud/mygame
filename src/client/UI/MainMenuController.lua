@@ -68,6 +68,7 @@ local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
+local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
@@ -289,6 +290,7 @@ local modeEntries: { any } = {}
 local lobbyBig: TextLabel
 local lobbyCaption: TextLabel
 local lobbyMode: TextLabel
+local lobbyMap: TextLabel
 local lobbyPlayers: TextLabel
 local lobbyMessage: TextLabel
 
@@ -702,6 +704,21 @@ end
 
 --[[ The big number, and what it means. Three honest states: a lobby counting
      down, a round already running, and a lobby with nobody in it to start one. ]]
+--[[ Reads the map straight off the Workspace attribute MapService writes, so it
+     is correct the instant a swap lands with no extra remote. ]]
+local function refreshMapLine()
+	if not lobbyMap then
+		return
+	end
+	local id = Attributes.get(Workspace, GA.CurrentMap, "")
+	if id == "" then
+		lobbyMap.Text = ""
+		return
+	end
+	local definition = MapConfig.get(id)
+	lobbyMap.Text = "MAP  " .. (if definition then definition.displayName else string.upper(id))
+end
+
 local function refreshLobby()
 	lobbyMode.Text = string.upper(lobby.mode)
 	lobbyPlayers.Text = string.format("%d / %d SURVIVORS", lobby.players, lobby.maxPlayers)
@@ -1366,6 +1383,85 @@ local function buildModes()
 	end
 end
 
+--[[
+	The briefing panel: what the game is, and how to play it.
+
+	Every zombie shooter on Roblox drops a new player straight into a horde with
+	no idea that shove exists, and shove is the single verb that most often
+	decides whether they survive their first wave. A controls list on the menu is
+	the cheapest possible fix, and putting the survival rules next to it means the
+	one screen everybody sees before their first round is also the one that
+	explains the game.
+
+	Deliberately quiet: dim text down the right-hand column, no border, no
+	heading bar. It is reference material, not an advertisement, and the mode
+	buttons must stay the loudest thing on the screen.
+]]
+local BRIEFING = {
+	{ key = "WASD", text = "Move" },
+	{ key = "SHIFT", text = "Sprint — costs stamina" },
+	{ key = "LMB", text = "Fire" },
+	{ key = "RMB", text = "Aim" },
+	{ key = "R", text = "Reload" },
+	{ key = "F", text = "Shove — frees a pinned teammate" },
+	{ key = "E", text = "Hold to revive, heal, or take a crate" },
+	{ key = "G", text = "Throw" },
+	{ key = "Q", text = "Call out what you are looking at" },
+	{ key = "1-5", text = "Weapons and items" },
+}
+
+local RULES = {
+	"HEADSHOTS KILL ANYTHING COMMON, WITH ANY GUN.",
+	"WHITE HEALTH DRAINS. PERMANENT HEALTH DOES NOT.",
+	"GO DOWN THREE TIMES AND YOU STAY DOWN.",
+	"AMMO CRATES ARE ONE USE AND COME BACK SLOWLY.",
+	"NOBODY SURVIVES ALONE.",
+}
+
+local function buildBriefing()
+	local column = newFrame(menuLayer, "Briefing", COLOR.Background, 1)
+	column.AnchorPoint = Vector2.new(1, 0.5)
+	column.Position = UDim2.new(1 - COLUMN_X, 0, 0.52, 0)
+	column.Size = UDim2.fromOffset(300, 420)
+
+	local heading = newLabel(column, "Heading", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	heading.Size = UDim2.new(1, 0, 0, TEXT.Body)
+	heading.TextXAlignment = Enum.TextXAlignment.Right
+	heading.Text = tracked("CONTROLS")
+
+	local y = TEXT.Body + 8
+	for _, entry in BRIEFING do
+		local key = newLabel(column, "K_" .. entry.key, FONT.Stencil, TEXT.Small, COLOR.Accent)
+		key.Position = UDim2.fromOffset(0, y)
+		key.Size = UDim2.fromOffset(64, TEXT.Body + 2)
+		key.TextXAlignment = Enum.TextXAlignment.Right
+		key.Text = entry.key
+
+		local text = newLabel(column, "T_" .. entry.key, FONT.Body, TEXT.Small, COLOR.TextSecondary)
+		text.Position = UDim2.fromOffset(74, y)
+		text.Size = UDim2.new(1, -74, 0, TEXT.Body + 2)
+		text.Text = entry.text
+
+		y += TEXT.Body + 6
+	end
+
+	y += 14
+	local rule = newRule(column, "Rule", COLOR.Border)
+	rule.Position = UDim2.fromOffset(0, y)
+	rule.Size = UDim2.new(1, 0, 0, 1)
+	y += 12
+
+	for index, line in RULES do
+		local label = newLabel(column, "Rule" .. index, FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		label.Position = UDim2.fromOffset(0, y)
+		label.Size = UDim2.new(1, 0, 0, TEXT.Body + 4)
+		label.TextXAlignment = Enum.TextXAlignment.Right
+		label.TextWrapped = true
+		label.Text = line
+		y += TEXT.Body + 6
+	end
+end
+
 local function buildLobby()
 	local panel = newFrame(menuLayer, "Lobby", COLOR.Background, 1)
 	panel.AnchorPoint = Vector2.new(1, 0)
@@ -1395,6 +1491,16 @@ local function buildLobby()
 	lobbyMode.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body)
 	lobbyMode.Size = UDim2.new(1, 0, 0, TEXT.Large + 4)
 	lobbyMode.TextXAlignment = Enum.TextXAlignment.Right
+
+	--[[ Which map is actually loaded. Worth a line of its own: with a map vote
+	     between rounds, "what am I about to play" stops being obvious, and a
+	     player deciding whether to join a round in progress wants to know. ]]
+	lobbyMap = newLabel(panel, "Map", FONT.Body, TEXT.Small, COLOR.TextDim)
+	lobbyMap.Position =
+		UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body + TEXT.Large + 8)
+	lobbyMap.Size = UDim2.new(1, 0, 0, TEXT.Body)
+	lobbyMap.TextXAlignment = Enum.TextXAlignment.Right
+	lobbyMap.Text = ""
 
 	lobbyPlayers = newLabel(panel, "Players", FONT.Body, TEXT.Small, COLOR.TextSecondary)
 	lobbyPlayers.Position =
@@ -1715,6 +1821,7 @@ local function build()
 
 	buildTitle()
 	buildModes()
+	buildBriefing()
 	buildLobby()
 	buildSettings()
 	buildResults()
@@ -1797,6 +1904,10 @@ function MainMenuController:start()
 
 	trove:connect(Remotes.Event.LobbyStateChanged.OnClientEvent, onLobbyState)
 	trove:connect(Remotes.Event.RoundEnded.OnClientEvent, showResults)
+
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.CurrentMap), refreshMapLine)
+	trove:connect(Remotes.Event.MapLoading.OnClientEvent, refreshMapLine)
+	refreshMapLine()
 	trove:connect(Remotes.Event.HitConfirmed.OnClientEvent, onHitConfirmed)
 	trove:connect(Remotes.Event.DamageTaken.OnClientEvent, onDamageTaken)
 	trove:connect(Remotes.Event.SurvivorStateChanged.OnClientEvent, onSurvivorStateChanged)
