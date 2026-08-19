@@ -18,7 +18,15 @@ Enums.Weapon = table.freeze({
 	-- Secondary
 	M1911A1 = "M1911A1",
 	Magnum357 = "Magnum357",
+
+	--[[ Melee. Five, each with a different reason to carry it: reach, speed,
+	     damage, how many bodies one swing goes through. Every one of them has a
+	     real model in the place; nothing here is a placeholder. ]]
 	Machete = "Machete",
+	FireAxe = "FireAxe",
+	BaseballBat = "BaseballBat",
+	LeadPipe = "LeadPipe",
+	Knife = "Knife",
 
 	-- Primary: shotgun
 	Shotgun = "Shotgun",
@@ -45,7 +53,17 @@ Enums.Weapon = table.freeze({
 -- Inventory slot. A survivor holds exactly one item per slot, L4D2 style.
 Enums.Slot = table.freeze({
 	Primary = "Primary", -- rifles, shotguns, SMGs
-	Secondary = "Secondary", -- pistols, melee
+	Secondary = "Secondary", -- pistols
+	--[[ Melee has its own slot rather than sharing Secondary with the pistols,
+	     which is where the machete used to live.
+
+	     That is a deliberate departure from Left 4 Dead 2, where picking up a
+	     crowbar costs you your sidearm. It is the more generous rule: a melee you
+	     always have is a tool for saving ammo and for the moment a Common is
+	     already on top of you, and neither of those is a decision worth making at
+	     the loadout screen. The cost is that a survivor is never truly out of
+	     options, which for a co-op game is the right side to err on. ]]
+	Melee = "Melee", -- machete, axe, bat, pipe, knife
 	Throwable = "Throwable", -- pipe bomb, molotov, bile
 	Health = "Health", -- medkit, defibrillator
 	Pills = "Pills", -- pain pills, adrenaline

@@ -52,6 +52,9 @@ Attributes.Loadout = table.freeze({
 	PrimaryReserve = "FL_PrimaryReserve", -- number, rounds in reserve
 	SecondaryId = "FL_SecondaryId",
 	SecondaryAmmo = "FL_SecondaryAmmo",
+	--[[ No ammo field, and there will not be one: a melee never runs out, which
+	     is the whole reason it is worth carrying alongside two guns. ]]
+	MeleeId = "FL_MeleeId",
 	ThrowableId = "FL_ThrowableId",
 	HealthItemId = "FL_HealthItemId",
 	PillItemId = "FL_PillItemId",

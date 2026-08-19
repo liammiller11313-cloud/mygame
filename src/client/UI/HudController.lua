@@ -156,16 +156,21 @@ local DEAD_X_ANGLE = math.deg(math.atan2(LAYOUT.SurvivorPanelHeight, LAYOUT.Surv
 	because in a firefight the question is never "how much do I have" in the
 	abstract — it is "can I finish this magazine or do I switch".
 
-	Five slots, and the key that selects each one is its position in this list.
+	Six slots. Every tile draws its OWN key glyph, so the order here is about what
+	reads well — the three weapons together, then the three things that save you —
+	rather than about matching the number row. Melee is deliberately third and
+	deliberately not on a number: it has a key of its own (V) because it is a
+	weapon you dip into and come back from, not one of the five you cycle.
 ]]
-local HOTBAR_SLOTS = { SLOT.Primary, SLOT.Secondary, SLOT.Throwable, SLOT.Health, SLOT.Pills }
-local WEAPON_SLOTS = { [SLOT.Primary] = true, [SLOT.Secondary] = true }
+local HOTBAR_SLOTS = { SLOT.Primary, SLOT.Secondary, SLOT.Melee, SLOT.Throwable, SLOT.Health, SLOT.Pills }
+local WEAPON_SLOTS = { [SLOT.Primary] = true, [SLOT.Secondary] = true, [SLOT.Melee] = true }
 
 --[[ What a slot is called when it is empty. Naming the empty slot rather than
      blanking it is what tells a new player the slot exists at all. ]]
 local SLOT_TITLE = {
 	[SLOT.Primary] = "PRIMARY",
 	[SLOT.Secondary] = "SIDEARM",
+	[SLOT.Melee] = "MELEE",
 	[SLOT.Throwable] = "THROWABLE",
 	[SLOT.Health] = "HEALTH",
 	[SLOT.Pills] = "PILLS",
@@ -280,6 +285,7 @@ local notice: { label: TextLabel, until_: number }
 local earnLabels: { { label: TextLabel, until_: number, amount: number } } = {}
 local earnCursor = 0
 local wallet: { label: TextLabel, litUntil: number }? = nil
+local hotbarHolder: Frame? = nil
 local killFeedHolder: Frame
 
 local panels: { [Player]: any } = {}
@@ -894,19 +900,18 @@ local function refreshItems()
 		elseif slot == SLOT.Secondary then
 			itemId = liveId or Attributes.get(player, LA.SecondaryId, "")
 			if itemId ~= "" then
-				local definition = WeaponConfig.get(itemId)
-				if definition and definition.magSize <= 0 then
-					-- Melee. A magazine count on a machete reads as a bug.
-					countText = "MELEE"
-				else
-					-- Sidearms have no finite reserve, and "15 / ∞" is noise:
-					-- the number that matters is what is in the gun.
-					local magazine = if liveId
-						then liveMagazine
-						else Attributes.get(player, LA.SecondaryAmmo, 0)
-					countText = string.format("%d", magazine)
-				end
+				--[[ Sidearms have no finite reserve, and "15 / ∞" is noise: the
+				     number that matters is what is in the gun. This used to have
+				     a melee branch as well, because the machete lived in this
+				     slot; melee has a slot of its own now. ]]
+				local magazine = if liveId then liveMagazine else Attributes.get(player, LA.SecondaryAmmo, 0)
+				countText = string.format("%d", magazine)
 			end
+		elseif slot == SLOT.Melee then
+			--[[ No count of any kind. A melee has no magazine and no reserve, and
+			     the tile saying so in words is what the SIDEARM tile does for a
+			     machete-shaped thing that used to live there. ]]
+			itemId = Attributes.get(player, LA.MeleeId, "")
 		elseif slot == SLOT.Throwable then
 			itemId = Attributes.get(player, LA.ThrowableId, "")
 		elseif slot == SLOT.Health then
@@ -1000,6 +1005,42 @@ end
 
 	Everything else is the same HUD. A phone is not a different game.
 ]]
+--[[
+	Fits the hotbar to the screen it is on.
+
+	Six tiles at the design width is 493 reference pixels. A phone held upright
+	is about 500 across, so the row would have started fifteen pixels off the
+	left edge of the screen — the tile count went from five to six when melee got
+	a slot, and five fitted.
+
+	So the tiles shrink instead. Never below MIN, because under that a weapon
+	name at TextSize.Tiny stops fitting and the tile is a coloured square; the
+	floor is not reachable on any device this game ships to, and is here so a
+	Roblox window dragged to nothing degrades rather than lies.
+]]
+local HOTBAR_SLOT_MIN_WIDTH = 46
+
+local function layoutHotbar()
+	if not hotbarHolder then
+		return
+	end
+	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+	if not camera or factor <= 0 then
+		return
+	end
+
+	local count = #HOTBAR_SLOTS
+	local gaps = (count - 1) * LAYOUT.ItemSlotGap
+	local available = camera.ViewportSize.X / factor - LAYOUT.ScreenMargin * 2
+	local width = math.clamp((available - gaps) / count, HOTBAR_SLOT_MIN_WIDTH, HOTBAR_SLOT_WIDTH)
+
+	hotbarHolder.Size = UDim2.fromOffset(count * width + gaps, HOTBAR_SLOT_HEIGHT)
+	for _, entry in itemSlots do
+		entry.frame.Size = UDim2.fromOffset(width, HOTBAR_SLOT_HEIGHT)
+	end
+end
+
 local function applyTouchLayout()
 	if panelHolder then
 		local lift = if state.touch then THUMBSTICK_INSET else 0
@@ -1025,6 +1066,8 @@ local function applyTouchLayout()
 	for _, entry in itemSlots do
 		entry.key.Visible = not state.touch
 	end
+
+	layoutHotbar()
 end
 
 --[[ Re-run whenever the player picks up a different input, not just at boot.
@@ -1568,8 +1611,11 @@ local function buildItems()
 	     and keeping the count and the slots together means one glance answers
 	     both "what am I holding" and "what could I switch to". ]]
 	local holder = Widgets.frame(root, "Hotbar", COLOR.Panel, 1)
+	hotbarHolder = holder
 	holder.AnchorPoint = Vector2.new(1, 1)
 	holder.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 1, -LAYOUT.ScreenMargin)
+	--[[ A starting size only. layoutHotbar owns it from the first resize onward
+	     and narrows the tiles when six of them do not fit. ]]
 	holder.Size = UDim2.fromOffset(
 		#HOTBAR_SLOTS * HOTBAR_SLOT_WIDTH + (#HOTBAR_SLOTS - 1) * LAYOUT.ItemSlotGap,
 		HOTBAR_SLOT_HEIGHT
@@ -1956,6 +2002,18 @@ function HudController:start()
 	setObjective(Attributes.get(Workspace, GA.ObjectiveText, ""), nil)
 
 	trove:connect(Remotes.Event.KillFeed.OnClientEvent, pushKill)
+
+	--[[
+		The hotbar re-fits itself when the viewport changes.
+
+		Driven off the scale layer's own size rather than off the camera, because
+		the camera is replaced on death, on spectate and on rejoin — one connection
+		here would become a stale one three times a round, and re-pointing it every
+		time is machinery ScaleLayer already owns. Its frame resizes on exactly the
+		events that matter and never goes away.
+	]]
+	trove:connect(root:GetPropertyChangedSignal("AbsoluteSize"), layoutHotbar)
+	layoutHotbar()
 
 	--[[ Money, from the balance moving rather than from a remote. See EARN_Y. ]]
 	local store = Registry.find("ProfileController")

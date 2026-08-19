@@ -2,14 +2,16 @@
 --[[
 	LoadoutConfig — what a saved loadout is, and what it is allowed to contain.
 
-	Three slots per player, each one a primary and a sidearm, one of them active.
-	You spawn with the active one. That is the whole feature, and this file is the
-	contract both ends agree on: the client draws from it, the server validates
-	against it, and neither has an opinion the other does not share.
+	Three loadouts per player, each one a rifle, a sidearm and a melee, one of
+	them active. You spawn with the active one. That is the whole feature, and
+	this file is the contract both ends agree on: the client draws from it, the
+	server validates against it, and neither has an opinion the other does not
+	share.
 
-	── WHY ONLY TWO SLOTS ───────────────────────────────────────────────────────
-	A loadout sets Primary and Secondary and nothing else. Medkits, pills and
-	throwables stay where they are — on the floor of the map, found by looking.
+	── WHY ONLY THESE THREE SLOTS ──────────────────────────────────────────────
+	A loadout sets Primary, Secondary and Melee and nothing else. Medkits, pills
+	and throwables stay where they are — on the floor of the map, found by
+	looking.
 
 	That is a deliberate line rather than a missing feature. The scavenging loop
 	is most of what makes a Left 4 Dead map worth walking through slowly: the
@@ -46,19 +48,26 @@ local LoadoutConfig = {}
 LoadoutConfig.MaxLoadouts = 3
 
 --[[ The slots a loadout controls, and the ONLY ones. Written as a list so the
-     UI can draw a row per slot without knowing which they are. ]]
-LoadoutConfig.Slots = table.freeze({ Enums.Slot.Primary, Enums.Slot.Secondary })
+     UI can draw a row per slot without knowing which they are, and in the order
+     they are drawn — which is also the order they are drawn from, longest reach
+     to shortest. ]]
+LoadoutConfig.Slots = table.freeze({ Enums.Slot.Primary, Enums.Slot.Secondary, Enums.Slot.Melee })
 
 --[[
 	What everybody starts with, and what an invalid loadout falls back to.
 
 	The same UMP-45 and M1911 survivors have spawned with since the game was
-	written. Nothing about a first round changes when the shop arrives, which is
-	the point: the economy is added to the game rather than in front of it.
+	written, plus the knife — which is free for the same reason they are. A melee
+	slot that starts empty would teach every new player that the melee key does
+	nothing, and they would be right for as long as it took them to earn one.
+
+	Nothing about a first round changes when the shop arrives, which is the point:
+	the economy is added to the game rather than in front of it.
 ]]
 LoadoutConfig.Default = table.freeze({
 	[Enums.Slot.Primary] = Enums.Weapon.UMP45,
 	[Enums.Slot.Secondary] = Enums.Weapon.M1911A1,
+	[Enums.Slot.Melee] = Enums.Weapon.Knife,
 })
 
 export type Loadout = { [string]: string }
@@ -70,8 +79,8 @@ function LoadoutConfig.defaultName(index: number): string
 end
 
 --[[ Whether `weaponId` can legally sit in `slot`. The weapon's own definition
-     decides — a Machete is a Secondary because WeaponConfig says so, and this
-     file does not get a second opinion about it. ]]
+     decides — a Machete is a Melee because WeaponConfig says so, and this file
+     does not get a second opinion about it. ]]
 function LoadoutConfig.fits(slot: string, weaponId: string): boolean
 	local definition = WeaponConfig.get(weaponId)
 	return definition ~= nil and definition.slot == slot

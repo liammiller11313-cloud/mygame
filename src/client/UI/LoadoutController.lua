@@ -77,7 +77,16 @@ local SLOT_HEIGHT = 52
 local PICK_ROW_HEIGHT = 38
 local PICK_ROW_HEIGHT_TOUCH = 50
 
-local PREVIEW_HEIGHT = 0.44
+--[[
+	How tall the weapon preview is, as a fraction of the right-hand column.
+
+	Cut from 0.44 when melee became a third slot. Three 52-pixel slot rows are
+	168 pixels rather than 110, and on a phone — where the panel is 430 reference
+	pixels rather than 520 — the bottom row landed exactly on the SET ACTIVE
+	button. The picture gives up the difference because it is the thing that
+	degrades most gracefully.
+]]
+local PREVIEW_HEIGHT = 0.38
 
 --[[
 	The round-start picker: how long it stays up, and how big it is.
@@ -266,8 +275,18 @@ local function weaponName(weaponId: string?): string
 	return if definition then string.upper(definition.displayName) else "—"
 end
 
+--[[ What a slot is called on screen. A table rather than a chain of ifs now
+     that there are three of them — the two-slot version returned "SIDEARM" for
+     everything that was not a primary, which would have labelled the new melee
+     row a sidearm. ]]
+local SLOT_LABEL = {
+	[Enums.Slot.Primary] = "PRIMARY",
+	[Enums.Slot.Secondary] = "SIDEARM",
+	[Enums.Slot.Melee] = "MELEE",
+}
+
 local function slotLabel(slot: string): string
-	return if slot == Enums.Slot.Primary then "PRIMARY" else "SIDEARM"
+	return SLOT_LABEL[slot] or string.upper(slot)
 end
 
 --[[ The loadout the panel is currently editing, as it exists on the server.
@@ -288,6 +307,7 @@ local function refreshCards()
 		local loadout = if store then store:getLoadout(index) else LoadoutConfig.sanitise(nil, nil)
 		card.primary.Text = weaponName(loadout[Enums.Slot.Primary])
 		card.secondary.Text = weaponName(loadout[Enums.Slot.Secondary])
+		card.melee.Text = weaponName(loadout[Enums.Slot.Melee])
 
 		local isActive = index == active
 		local isEditing = index == state.editing
@@ -604,6 +624,12 @@ local function buildCard(index: number, parent: Frame)
 	secondary.Position = UDim2.fromOffset(LAYOUT.PanelPadding, TEXT.Large + TEXT.Body + 10)
 	secondary.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Body)
 
+	--[[ The third line, added with the melee slot. A card that summarises two of
+	     the three things in a loadout is a card you have to open to trust. ]]
+	local melee = Widgets.label(button, "Melee", FONT.Body, TEXT.Small, COLOR.TextDim)
+	melee.Position = UDim2.fromOffset(LAYOUT.PanelPadding, TEXT.Large + TEXT.Body * 2 + 12)
+	melee.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Body)
+
 	cards[index] = {
 		button = button,
 		stroke = stroke,
@@ -611,6 +637,7 @@ local function buildCard(index: number, parent: Frame)
 		badge = badge,
 		primary = primary,
 		secondary = secondary,
+		melee = melee,
 	}
 	state.firstCard = state.firstCard or button
 

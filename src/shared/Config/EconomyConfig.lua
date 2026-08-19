@@ -126,7 +126,14 @@ EconomyConfig.MinKillReward = 2
 	measured the same way, and stacking it under the win bonus is what makes a
 	full round clearly the best use of an hour.
 ]]
-EconomyConfig.VictoryBonus = 800
+--[[ Raised from 800 when the melee roster went in. Five new things to want
+     added $8,800 to the catalogue and pushed the unlock curve from 37 rounds to
+     40 — the ceiling of the target band. The fix is on the income side rather
+     than the price side on purpose: melee is content a player should be able to
+     reach early, and paying more for a FINISHED round is the lever that costs
+     nothing anywhere else. scripts/economy.py is what decides whether this
+     number is right; it fails the build outside 30-40 rounds. ]]
+EconomyConfig.VictoryBonus = 1100
 EconomyConfig.DefeatBonus = 200
 EconomyConfig.WaveBonus = 60
 
@@ -210,34 +217,19 @@ EconomyConfig.Catalogue = table.freeze({
 	{ id = Enums.Weapon.M1AEBR, category = "GUNS", price = 10500 },
 
 	-- ── melee ───────────────────────────────────────────────────────────────
-	-- The machete is real and buyable today. The rest are named so there is
-	-- somewhere obvious for a model to land; rename them freely, nothing but
-	-- this table knows they exist.
-	{ id = Enums.Weapon.Machete, category = "MELEE", price = 2000 },
-	{
-		id = "Crowbar",
-		category = "MELEE",
-		price = 0,
-		soon = true,
-		displayName = "CROWBAR",
-		blurb = "Slow, heavy, and it goes through two of them.",
-	},
-	{
-		id = "FireAxe",
-		category = "MELEE",
-		price = 0,
-		soon = true,
-		displayName = "FIRE AXE",
-		blurb = "One swing, one Common, every time.",
-	},
-	{
-		id = "Katana",
-		category = "MELEE",
-		price = 0,
-		soon = true,
-		displayName = "KATANA",
-		blurb = "The fastest thing you can hold.",
-	},
+	--[[ All five are real now: model, WeaponConfig row, and a slot of their own.
+	     The knife is free for the same reason the UMP-45 and the M1911 are — a
+	     melee slot that starts empty teaches a new player that the melee key does
+	     nothing, and they would be right until they could afford one.
+
+	     Priced by what they do rather than by damage. The knife is fast and
+	     reaches nothing; the bat clears crowds and kills nothing quickly; the
+	     pipe and the machete are the middle; the axe is the one you buy last. ]]
+	{ id = Enums.Weapon.Knife, category = "MELEE", price = 0 },
+	{ id = Enums.Weapon.BaseballBat, category = "MELEE", price = 1400 },
+	{ id = Enums.Weapon.LeadPipe, category = "MELEE", price = 1800 },
+	{ id = Enums.Weapon.Machete, category = "MELEE", price = 2400 },
+	{ id = Enums.Weapon.FireAxe, category = "MELEE", price = 3200 },
 
 	-- ── specials ────────────────────────────────────────────────────────────
 	-- None of these exist yet: no model, no WeaponConfig row, no behaviour.

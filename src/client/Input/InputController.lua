@@ -131,10 +131,15 @@ local BINDINGS: { Binding } = {
 		keys = { Enum.UserInputType.MouseButton3, Enum.KeyCode.ButtonR1 },
 		touch = "PUSH",
 	},
+	--[[ Carries `slot` so the hotbar tile can draw the key that reaches it, the
+	     way every other slot row does. The BEHAVIOUR is not the generic slot
+	     switch though — see the Action.Melee branch in `forward`, which toggles
+	     rather than selects, and which runs before the generic path. ]]
 	{
 		action = Action.Melee,
 		keys = { Enum.KeyCode.V, Enum.KeyCode.ButtonL1 },
 		touch = "MELEE",
+		slot = Enums.Slot.Melee,
 	},
 	{ action = Action.Sprint, keys = { Enum.KeyCode.LeftShift, Enum.KeyCode.ButtonL3 } },
 	-- Passed through: Roblox's own control script owns the jump itself, and
@@ -424,6 +429,11 @@ local CONSUMABLE_SLOTS: { [string]: boolean } = {
 local SELECT_MEMORY = 1.0
 local lastSelect = { slot = "", at = 0 }
 
+--[[ What the melee key came FROM, so pressing it again puts that back. Empty
+     when the player got to the melee some other way — a number key, a pickup —
+     in which case the key falls back to the primary. ]]
+local meleeReturn = ""
+
 local function selectedSlot(): string
 	if lastSelect.slot ~= "" and os.clock() - lastSelect.at < SELECT_MEMORY then
 		return lastSelect.slot
@@ -433,6 +443,41 @@ end
 
 local function forward(action: string)
 	local binding = bindingFor[action]
+
+	--[[
+		The melee key: draw it, or put it away.
+
+		A toggle rather than a plain slot key, because a melee is something you
+		dip into and come back from. Shoving a Common off you and then having to
+		remember which number key your rifle was on is the kind of small friction
+		that gets people killed, and "press it again" is the answer every shooter
+		that has a melee key has landed on.
+
+		It used to SWING instead — Action.Melee called swingMelee() on whatever was
+		in your hands, so pressing V while holding a rifle sent the server a swing
+		with a rifle's definition. Now the key changes what you are holding and the
+		trigger swings it, which is the same two verbs on the two controls that
+		already mean them.
+	]]
+	if action == Action.Melee then
+		local current = selectedSlot()
+		local target
+		if current == Enums.Slot.Melee then
+			--[[ Back to whatever the key interrupted. The primary is the fallback
+			     for the same reason CycleWeapon uses it: coming off anything else,
+			     the rifle is almost always what you wanted. ]]
+			target = if meleeReturn ~= "" then meleeReturn else Enums.Slot.Primary
+			meleeReturn = ""
+		else
+			meleeReturn = current
+			target = Enums.Slot.Melee
+		end
+		lastSelect.slot = target
+		lastSelect.at = os.clock()
+		Remotes.Event.SwitchSlot:FireServer(target)
+		return
+	end
+
 	if binding and binding.slot then
 		--[[
 			Re-selecting a consumable commits it — but only where the player has

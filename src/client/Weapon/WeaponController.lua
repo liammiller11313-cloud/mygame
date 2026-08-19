@@ -951,9 +951,11 @@ function WeaponController:start()
 	trove:add(input:onBegan(Action.Shove):connect(function()
 		WeaponController:shove()
 	end))
-	trove:add(input:onBegan(Action.Melee):connect(function()
-		swingMelee()
-	end))
+	--[[ Action.Melee is a SLOT key now, handled entirely in InputController: it
+	     draws the melee or puts it away. Swinging is what the trigger does while
+	     it is out, through fireOnce's `fireMode == "Melee"` branch. It used to be
+	     bound here and called swingMelee() directly, which meant pressing V with a
+	     rifle in hand sent the server a swing carrying a rifle's definition. ]]
 
 	-- Sprinting cancels the sights. You cannot run and aim, and letting the
 	-- player try is how they end up doing neither.

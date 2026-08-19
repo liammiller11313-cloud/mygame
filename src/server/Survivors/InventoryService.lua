@@ -56,6 +56,11 @@ local SLOT_ITEMS = table.freeze({
      horde is survivable while they learn what the shotgun is for. ]]
 local STARTING_PRIMARY = Enums.Weapon.UMP45
 local STARTING_SECONDARY = Enums.Weapon.M1911A1
+--[[ And a knife, so the melee key does something on the very first spawn. A
+     slot that starts empty is a control that teaches a new player it is broken.
+     Mirrors LoadoutConfig.Default — these two are the same promise stated on
+     both sides of the wire. ]]
+local STARTING_MELEE = Enums.Weapon.Knife
 
 -- Reload phases. "Tail" is the pump-and-ready after the last shell goes in.
 local PHASE_LOAD = "Load"
@@ -178,8 +183,9 @@ end
 --[[
 	Mirrors the loadout into Attributes.Loadout.*, which is the only thing the
 	ammo counter reads. Note there is no SecondaryReserve field in the contract,
-	and there should not be: every secondary either has infinite reserve (pistol,
-	magnum) or no ammo at all (machete).
+	and there should not be: a secondary is a pistol, and every pistol in this
+	game has infinite reserve. Melee has neither field for the same reason in
+	reverse — it has no ammo at all.
 ]]
 function InventoryService:_publish(record)
 	local slots = record.slots
@@ -192,6 +198,11 @@ function InventoryService:_publish(record)
 	local secondary = slots[Enums.Slot.Secondary]
 	setAttribute(record, "sid", LA.SecondaryId, secondary and secondary.itemId or "")
 	setAttribute(record, "sammo", LA.SecondaryAmmo, secondary and secondary.ammo or 0)
+
+	--[[ No ammo counterpart, and there will not be one. A melee never runs out,
+	     which is most of why it is worth a slot of its own. ]]
+	local melee = slots[Enums.Slot.Melee]
+	setAttribute(record, "mid", LA.MeleeId, melee and melee.itemId or "")
 
 	local throwable = slots[Enums.Slot.Throwable]
 	setAttribute(record, "tid", LA.ThrowableId, throwable and throwable.itemId or "")
@@ -309,13 +320,13 @@ end
 	loadout that sanitised to nothing all end here holding the same UMP-45 and
 	M1911 the game has always started people with.
 
-	The secondary is granted FIRST and the primary second, which is not
-	arbitrary — `setActiveSlot` below selects the primary, and granting in this
-	order means the last thing to touch the inventory is the thing the player
-	will be looking at.
+	The primary is granted LAST, which is not arbitrary — `setActiveSlot` below
+	selects it, and granting in this order means the last thing to touch the
+	inventory is the thing the player will be looking at.
 ]]
 function InventoryService:giveStartingLoadout(player: Player)
 	local primary, secondary = STARTING_PRIMARY, STARTING_SECONDARY
+	local melee = STARTING_MELEE
 
 	local loadouts = Registry.find("LoadoutService")
 	if loadouts and typeof(loadouts.getSpawnLoadout) == "function" then
@@ -323,9 +334,11 @@ function InventoryService:giveStartingLoadout(player: Player)
 		if ok and typeof(chosen) == "table" then
 			primary = chosen[Enums.Slot.Primary] or primary
 			secondary = chosen[Enums.Slot.Secondary] or secondary
+			melee = chosen[Enums.Slot.Melee] or melee
 		end
 	end
 
+	self:giveWeapon(player, melee)
 	self:giveWeapon(player, secondary)
 	self:giveWeapon(player, primary)
 	self:setActiveSlot(player, Enums.Slot.Primary)

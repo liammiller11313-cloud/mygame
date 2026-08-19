@@ -983,7 +983,7 @@ WeaponConfig.Definitions = {
 		id = Enums.Weapon.Machete,
 		displayName = "Machete",
 		modelName = "Machete",
-		slot = Enums.Slot.Secondary,
+		slot = Enums.Slot.Melee,
 		class = "Melee",
 		fireMode = "Melee",
 
@@ -1031,6 +1031,250 @@ WeaponConfig.Definitions = {
 		gibPower = 0.2,
 		dismemberPower = 1.0,
 		knockback = 26,
+	},
+
+	--[[ Slow and enormous. One swing takes a Common apart at the shoulder and
+	     keeps going into the one behind it. The heaviest thing here, and the
+	     one most likely to get you killed if you miss. ]]
+	[Enums.Weapon.FireAxe] = {
+		id = Enums.Weapon.FireAxe,
+		displayName = "Fire Axe",
+		modelName = "Fire Axe",
+		slot = Enums.Slot.Melee,
+		class = "Melee",
+		fireMode = "Melee",
+
+		damage = 420,
+		rpm = 55,
+		pellets = 1,
+		magSize = 0,
+		reserveMax = 0,
+		--[[ `penetration` is the target CAP for a swing, not armour piercing —
+		     MeleeService reads it as how many bodies one arc goes through. It is
+		     the single number that separates these five from each other. ]]
+		penetration = 4,
+		penetrationFalloff = 0.9,
+
+		falloffStart = 13,
+		falloffEnd = 17,
+		falloffMin = 1.0,
+		maxRange = 17,
+
+		spreadHip = 0,
+		spreadAim = 0,
+		spreadMoving = 0,
+		spreadMax = 0,
+		bloomPerShot = 0,
+		bloomRecovery = 0,
+
+		recoilVertical = 0,
+		recoilHorizontal = 0,
+		recoilRecovery = 0,
+		kickback = 0.5,
+
+		reloadTime = 0,
+		reloadPerShell = 0,
+		drawTime = 0.3,
+		aimTime = 0.1,
+
+		walkSpeedScale = 1.02,
+		aimWalkSpeedScale = 1.0,
+		aimFov = 70,
+
+		shakeMagnitude = 1.5,
+		shakeRoughness = 7,
+		tracerWidth = 0,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 0,
+		shellEject = false,
+
+		gibPower = 0.55,
+		dismemberPower = 1.0,
+		knockback = 34,
+	},
+
+	--[[ No edge, so nothing comes off — but it sends them. The bat is the
+	     crowd-control melee: wide arc, real knockback, and the bodies it hits
+	     land on the ones behind them. ]]
+	[Enums.Weapon.BaseballBat] = {
+		id = Enums.Weapon.BaseballBat,
+		displayName = "Baseball Bat",
+		modelName = "Baseball Bat",
+		slot = Enums.Slot.Melee,
+		class = "Melee",
+		fireMode = "Melee",
+
+		damage = 300,
+		rpm = 80,
+		pellets = 1,
+		magSize = 0,
+		reserveMax = 0,
+		--[[ `penetration` is the target CAP for a swing, not armour piercing —
+		     MeleeService reads it as how many bodies one arc goes through. It is
+		     the single number that separates these five from each other, so the
+		     roster runs 1 to 5 with no two sharing a value: knife 1, pipe 2,
+		     machete 3, axe 4, bat 5. verify_melee fails the build if two ever
+		     collide, which is how the axe and the machete were caught both
+		     sitting on 3. ]]
+		penetration = 5,
+		penetrationFalloff = 0.9,
+
+		falloffStart = 12,
+		falloffEnd = 16,
+		falloffMin = 1.0,
+		maxRange = 16,
+
+		spreadHip = 0,
+		spreadAim = 0,
+		spreadMoving = 0,
+		spreadMax = 0,
+		bloomPerShot = 0,
+		bloomRecovery = 0,
+
+		recoilVertical = 0,
+		recoilHorizontal = 0,
+		recoilRecovery = 0,
+		kickback = 0.35,
+
+		reloadTime = 0,
+		reloadPerShell = 0,
+		drawTime = 0.3,
+		aimTime = 0.1,
+
+		walkSpeedScale = 1.06,
+		aimWalkSpeedScale = 1.0,
+		aimFov = 70,
+
+		shakeMagnitude = 1.2,
+		shakeRoughness = 7,
+		tracerWidth = 0,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 0,
+		shellEject = false,
+
+		gibPower = 0.15,
+		dismemberPower = 0.0,
+		knockback = 62,
+	},
+
+	--[[ Heavy and short. Fewer targets per swing than the bat and considerably
+	     more damage into each of them — the one to carry if what keeps killing
+	     you is a Hunter rather than a crowd. ]]
+	[Enums.Weapon.LeadPipe] = {
+		id = Enums.Weapon.LeadPipe,
+		displayName = "Lead Pipe",
+		modelName = "Pipe",
+		slot = Enums.Slot.Melee,
+		class = "Melee",
+		fireMode = "Melee",
+
+		damage = 380,
+		rpm = 70,
+		pellets = 1,
+		magSize = 0,
+		reserveMax = 0,
+		--[[ `penetration` is the target CAP for a swing, not armour piercing —
+		     MeleeService reads it as how many bodies one arc goes through. It is
+		     the single number that separates these five from each other. ]]
+		penetration = 2,
+		penetrationFalloff = 0.9,
+
+		falloffStart = 10,
+		falloffEnd = 14,
+		falloffMin = 1.0,
+		maxRange = 14,
+
+		spreadHip = 0,
+		spreadAim = 0,
+		spreadMoving = 0,
+		spreadMax = 0,
+		bloomPerShot = 0,
+		bloomRecovery = 0,
+
+		recoilVertical = 0,
+		recoilHorizontal = 0,
+		recoilRecovery = 0,
+		kickback = 0.4,
+
+		reloadTime = 0,
+		reloadPerShell = 0,
+		drawTime = 0.3,
+		aimTime = 0.1,
+
+		walkSpeedScale = 1.04,
+		aimWalkSpeedScale = 1.0,
+		aimFov = 70,
+
+		shakeMagnitude = 1.3,
+		shakeRoughness = 7,
+		tracerWidth = 0,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 0,
+		shellEject = false,
+
+		gibPower = 0.3,
+		dismemberPower = 0.35,
+		knockback = 44,
+	},
+
+	--[[ The fastest swing in the game and the shortest reach in it. Almost
+	     twice the machete's rate, one body at a time, and you have to be close
+	     enough that being wrong about the timing is fatal. ]]
+	[Enums.Weapon.Knife] = {
+		id = Enums.Weapon.Knife,
+		displayName = "Combat Knife",
+		modelName = "Knife",
+		slot = Enums.Slot.Melee,
+		class = "Melee",
+		fireMode = "Melee",
+
+		damage = 260,
+		rpm = 150,
+		pellets = 1,
+		magSize = 0,
+		reserveMax = 0,
+		--[[ `penetration` is the target CAP for a swing, not armour piercing —
+		     MeleeService reads it as how many bodies one arc goes through. It is
+		     the single number that separates these five from each other. ]]
+		penetration = 1,
+		penetrationFalloff = 0.9,
+
+		falloffStart = 7,
+		falloffEnd = 11,
+		falloffMin = 1.0,
+		maxRange = 11,
+
+		spreadHip = 0,
+		spreadAim = 0,
+		spreadMoving = 0,
+		spreadMax = 0,
+		bloomPerShot = 0,
+		bloomRecovery = 0,
+
+		recoilVertical = 0,
+		recoilHorizontal = 0,
+		recoilRecovery = 0,
+		kickback = 0.2,
+
+		reloadTime = 0,
+		reloadPerShell = 0,
+		drawTime = 0.3,
+		aimTime = 0.1,
+
+		walkSpeedScale = 1.1,
+		aimWalkSpeedScale = 1.0,
+		aimFov = 70,
+
+		shakeMagnitude = 0.7,
+		shakeRoughness = 7,
+		tracerWidth = 0,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 0,
+		shellEject = false,
+
+		gibPower = 0.1,
+		dismemberPower = 0.85,
+		knockback = 18,
 	},
 } :: { [string]: WeaponDefinition }
 
