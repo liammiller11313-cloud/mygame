@@ -970,7 +970,10 @@ local function burstConfetti()
 
 		piece.x = if fromLeft then -0.02 else 1.02
 		piece.y = 1.02
-		piece.vx = math.cos(angle) * speed * (if fromLeft then -1.6 else 1.6)
+		-- cos(angle) already carries the correct sign for both cannons: the left
+		-- one opens clockwise from straight up and the right one anticlockwise,
+		-- so each is thrown inward. Negating one sent half the pool off-screen.
+		piece.vx = math.cos(angle) * speed * 1.6
 		piece.vy = math.sin(angle) * speed
 		piece.age = -(index % 9) * 0.035 -- stagger, so it reads as a burst not a wall
 		piece.phase = math.random() * math.pi * 2
@@ -1108,9 +1111,20 @@ function MainMenuController:open()
 	refreshVisibility()
 end
 
+--[[
+	Closes whichever of the two screens is showing. The result screen counts: it
+	sets `open = false` while it is up, so a version of this that only checked
+	`open` did nothing when a new round started underneath the scoreboard — and
+	the client's own return timer then reopened the menu on top of a live round
+	with input and the HUD still suppressed.
+]]
 function MainMenuController:close()
-	if not state.open then
+	if not state.open and not state.results then
 		return
+	end
+	if state.results then
+		state.results = false
+		clearConfetti()
 	end
 	state.open = false
 	refreshVisibility()

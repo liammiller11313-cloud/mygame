@@ -538,8 +538,17 @@ function RoundService:_restock(wave)
 	local slot = 0
 	for _, player in Players:GetPlayers() do
 		slot += 1
+		--[[
+			Only a real in-round death counts. Spectating is NOT a synonym for
+			dead here: SurvivorService reports it for anyone with no record at
+			all, which covers a Versus player who is currently an infected ghost
+			and anyone who joined mid-round and is still sitting in the menu.
+			Treating those as dead conscripted them into the survivor team every
+			single breather — destroying the ghost's body, and dropping a player
+			who was reading the menu into the middle of a wave.
+		]]
 		local state = survivors:getState(player)
-		local isGone = state == Enums.SurvivorState.Dead or state == Enums.SurvivorState.Spectating
+		local isGone = state == Enums.SurvivorState.Dead
 
 		if isGone and CLASSIC.BreatherRespawnsDead then
 			self:_respawnSurvivor(survivors, player, slot)
@@ -629,6 +638,18 @@ function RoundService:startRound(requestedMode: string?)
 	roundEndsAt = startedAt + CLASSIC.TotalDuration
 	sawLivingSurvivor = false
 	warnedFinal = false
+
+	--[[
+		Claim the round BEFORE anything below yields. spawnSurvivor ends in
+		player:LoadCharacter(), which yields once per player and can hold this
+		function for a quarter of a second on a full server — long enough for
+		MatchmakingService's own tick to see Lobby again and call startRound a
+		second time, which would bump the generation, cancel in-flight boss
+		releases, and re-LoadCharacter everyone. _enterPrep re-publishes the same
+		value, and setGameAttribute skips an unchanged write, so this costs
+		nothing.
+	]]
+	roundState = Enums.RoundState.Starting
 
 	setGameAttribute(Attributes.Game.Mode, mode)
 	setGameAttribute(Attributes.Game.RoundEndsAt, roundEndsAt)
@@ -762,7 +783,14 @@ function RoundService:_startIfReady()
 	if roundState ~= Enums.RoundState.Lobby then
 		return
 	end
-	if Registry.find("MatchmakingService") then
+	--[[
+		Only stand down for a matchmaking service that actually finished starting.
+		It sets `started` as the final statement of its own start(), which the
+		bootstrap pcalls — so a service that threw partway through is registered
+		but inert, and if we deferred to it nothing would ever start a round.
+	]]
+	local matchmaking = Registry.find("MatchmakingService")
+	if matchmaking and matchmaking.started then
 		return
 	end
 	if #Players:GetPlayers() < CLASSIC.MinPlayersToStart then

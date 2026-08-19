@@ -1009,6 +1009,17 @@ function MatchmakingService:start()
 	end
 
 	self:_step()
+
+	--[[
+		Last statement on purpose. The bootstrap pcalls start(), so anything that
+		throws above leaves this false, and RoundService reads it to decide
+		whether matchmaking is actually driving the lifecycle or whether it has
+		to start rounds itself. Being *registered* is not the same as working:
+		a service that died halfway through start() has a RequestMode listener
+		that never attached, and gating on Registry.find alone meant the one
+		degraded path the bootstrap exists to rescue would stall forever.
+	]]
+	self.started = true
 end
 
 function MatchmakingService:destroy()

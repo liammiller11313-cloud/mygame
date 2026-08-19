@@ -32,6 +32,11 @@ GameConfig.HitRegionMultipliers = table.freeze({
 ]]
 GameConfig.PartRegions = table.freeze({
 	Head = Enums.HitRegion.Head,
+	-- The supplied Hunter rig carries a visible "FakeHead" over a hidden "Head".
+	-- Without this line a shot that visibly lands on the head resolves as a torso
+	-- hit: no 4x multiplier, no headshotAlwaysKills, no decapitation. A hitbox
+	-- that disagrees with what the player can see is the worst bug a shooter has.
+	FakeHead = Enums.HitRegion.Head,
 	UpperTorso = Enums.HitRegion.Torso,
 	LowerTorso = Enums.HitRegion.Torso,
 	Torso = Enums.HitRegion.Torso,

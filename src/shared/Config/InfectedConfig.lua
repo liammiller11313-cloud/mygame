@@ -299,7 +299,10 @@ InfectedConfig.Definitions = {
 		loseInterestTime = 25,
 
 		spawnCost = 100,
-		maxAlive = 1,
+		-- Two, because wave 7 releases a pair and the finale announces it. A
+		-- single-Tank ceiling made the second release silently fail while the
+		-- callout still promised two.
+		maxAlive = 2,
 
 		bodyColor = Color3.fromRGB(126, 98, 82),
 		accentColor = Color3.fromRGB(88, 62, 52),

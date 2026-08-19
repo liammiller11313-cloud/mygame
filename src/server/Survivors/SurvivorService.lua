@@ -97,6 +97,17 @@ SurvivorService.died = Signal.new() -- (player, ctx)
 local records: { [Player]: any } = {}
 local bodies: { [Model]: Player } = {} -- corpse model -> the player it belongs to
 local awaitingRescue: { Player } = {} -- dead players queued for a closet, oldest first
+--[[ Ping callouts. One key, one line of dialogue, and a cooldown so it cannot be
+     held down to flood every client's subtitle queue. ]]
+local PING_COOLDOWN = 1.6
+local PING_MAX_RANGE = 700
+local PING_SUBTITLE_SECONDS = 2.4
+local PING_LINES = table.freeze({
+	Location = "Over here!",
+	Infected = "Contact!",
+	Pickup = "Supplies here!",
+})
+
 local serviceTrove = Trove.new()
 
 --[[ Squared distance without building an intermediate Vector3. Called for every
@@ -1579,6 +1590,53 @@ function SurvivorService:start()
 		if record then
 			self:_cancelInteraction(record)
 		end
+	end)
+
+	--[[
+		Pings. The client raycasts and classifies what it hit; we validate that it
+		is plausible and turn it into a spoken callout everyone hears, which is how
+		Left 4 Dead does it — "Pills here!" is a line of dialogue, not a marker
+		floating in space. Rate-limited per player, because the alternative is one
+		bound key that can spam every client's subtitle queue.
+	]]
+	serviceTrove:connect(Remotes.Event.PingLocation.OnServerEvent, function(player, payload)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local position = payload.position
+		if typeof(position) ~= "Vector3" then
+			return
+		end
+		-- Reject NaN and anything absurdly far away rather than trusting the ray.
+		if position ~= position or position.Magnitude > 1e5 then
+			return
+		end
+
+		local record = records[player]
+		if not record or record.state == Enums.SurvivorState.Spectating then
+			return
+		end
+
+		local now = os.clock()
+		if now - (record.lastPingAt or 0) < PING_COOLDOWN then
+			return
+		end
+		record.lastPingAt = now
+
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if root and (root.Position - position).Magnitude > PING_MAX_RANGE then
+			return
+		end
+
+		local kind = if typeof(payload.kind) == "string" then payload.kind else "Location"
+		local line = PING_LINES[kind] or PING_LINES.Location
+		Remotes.Event.Subtitle:FireAllClients({
+			speaker = player.DisplayName,
+			text = line,
+			duration = PING_SUBTITLE_SECONDS,
+			position = position,
+		})
 	end)
 
 	serviceTrove:add(RunService.Heartbeat:Connect(function(dt)
