@@ -594,6 +594,60 @@ Shadows are off on both: four shadow-casting spotlights in a horde is the most
 expensive thing this game could ask a phone to draw, and against fog that thick
 the shadows are invisible.
 
+### Dollars, the shop, and loadouts
+
+The only persistent state in the game. Everything else is round-scoped and dies
+with the server.
+
+| File | Owns |
+|---|---|
+| `Shared/Config/EconomyConfig.lua` | earning AND pricing, in one table |
+| `Shared/Config/LoadoutConfig.lua` | what a loadout is; `sanitise` is the only way one enters the game |
+| `Server/Economy/ProfileService.lua` | the DataStore, the session lock, the in-memory profile |
+| `Server/Economy/EconomyService.lua` | the earning rules and the purchase path |
+| `Server/Survivors/LoadoutService.lua` | which two weapons you spawn holding |
+| `Client/UI/ProfileController.lua` | this client's mirror; the shop and loadout screens both read it |
+
+**Earning and pricing live together** because they are two ends of one number.
+`scripts/economy.py` models a round from the real wave table and the real
+catalogue and fails when the roster stops taking 30–40 rounds to unlock; it runs
+in `check.sh`. The one thing it cannot derive is how many infected a player kills
+— the Director replaces what you shoot — so that is a stated assumption printed
+in every report.
+
+**The one rule in `ProfileService`: a profile that failed to LOAD is never
+SAVED.** If the store is unreachable the player gets a working default for the
+session, marked `degraded`, and nothing is written — the alternative is a
+transient outage replacing forty rounds of progress with a starting balance.
+Session locking (`lock = {jobId, at}`, taken inside an `UpdateAsync`, stolen only
+once stale) exists because Roblox will run one player in two servers at once.
+Every operation on the key is an `UpdateAsync`; a Get-then-Set cannot notice a
+lock changing between the two.
+
+**The client never names a price.** A purchase carries an item id; cost,
+availability and affordability are all answered server-side.
+
+**Balance is an attribute**, not a remote — it moves on every kill. The `+$4`
+popup is derived from the delta, so no remote carries it and the round bonus gets
+the same treatment for free.
+
+**A loadout is Primary + Secondary only.** Medkits, pills and throwables stay on
+the floor of the map: the scavenging loop is most of what makes a level worth
+walking slowly through, and a loadout that could carry a kit turns Dollars into a
+purchase of survivability rather than of preference.
+
+### The menu at phone height
+
+`MainMenuController.layoutColumns` measures the title, the mode entries and the
+bottom nav row against the real reference height and lays them out so they cannot
+overlap. Below `COMPACT_HEIGHT` the poster becomes a phone menu: smaller title,
+shorter entries with their pitch lines hidden, and the control briefing dropped.
+
+This exists because at the 0.75 scale floor a phone in landscape reports about
+500 reference pixels rather than 900, and the layout had been overlapping itself
+there — invisibly on every desktop and tablet, which is the shape of bug that
+ships. `verify_menu.py` ports the function to Python and checks nine viewports.
+
 ### Settings
 
 `Shared/Config/SettingsConfig.lua` declares WHAT the options are — key, kind,

@@ -244,8 +244,13 @@ local teleportLayer: Frame
 --[[ Every scaled content layer, and the UIScale driving it. See `newLayer`. ]]
 local layers: { { frame: Frame, scale: UIScale } } = {}
 
+local titleKicker: TextLabel
+local titleFading: TextLabel
 local titleLight: TextLabel
 local titleRule: Frame
+local briefingColumn: Frame
+local navRow: Frame
+local navEntries: { any } = {}
 
 local modeEntries: { any } = {}
 
@@ -1289,12 +1294,14 @@ end
 -- ── build ───────────────────────────────────────────────────────────────────
 
 local function buildTitle()
-	local kicker = newLabel(menuLayer, "Kicker", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	titleKicker = newLabel(menuLayer, "Kicker", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	local kicker = titleKicker
 	kicker.Position = UDim2.new(COLUMN_X, 0, 0.13, 0)
 	kicker.Size = UDim2.new(0.5, 0, 0, TEXT.Body)
 	kicker.Text = tracked("A CO-OP SURVIVAL SHOOTER")
 
-	local fading = newLabel(menuLayer, "Fading", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
+	titleFading = newLabel(menuLayer, "Fading", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
+	local fading = titleFading
 	fading.Position = UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap)
 	fading.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	fading.Text = "FADING"
@@ -1410,7 +1417,8 @@ local RULES = {
 }
 
 local function buildBriefing()
-	local column = newFrame(menuLayer, "Briefing", COLOR.Background, 1)
+	briefingColumn = newFrame(menuLayer, "Briefing", COLOR.Background, 1)
+	local column = briefingColumn
 	column.AnchorPoint = Vector2.new(1, 0.5)
 	column.Position = UDim2.new(1 - COLUMN_X, 0, 0.52, 0)
 	column.Size = UDim2.fromOffset(300, 420)
@@ -1550,7 +1558,8 @@ local NAV_WIDTH = 0.21
 local NAV_GAP = 0.015
 
 local function buildNav()
-	local row = newFrame(menuLayer, "Nav", COLOR.Background, 1)
+	navRow = newFrame(menuLayer, "Nav", COLOR.Background, 1)
+	local row = navRow
 	row.AnchorPoint = Vector2.new(0, 1)
 	row.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
 	row.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, NAV_HEIGHT)
@@ -1575,6 +1584,8 @@ local function buildNav()
 		line.Position = UDim2.fromOffset(0, TEXT.Large + 2)
 		line.Size = UDim2.new(1, 0, 0, TEXT.Body)
 		line.Text = tracked(definition.line)
+
+		table.insert(navEntries, { button = holder, label = label, line = line })
 
 		--[[ Reachable without a cursor. The mode entries take selection when the
 		     menu opens; this row is what a pad walks down to from them. ]]
@@ -1809,6 +1820,100 @@ end
 
 --[[ Bound to the viewport's changed signal rather than sampled per frame: a
      window is resized about as often as it is created. ]]
+--[[
+	COMPACT LAYOUT — what this poster does on a screen it does not fit on.
+
+	Every offset on this screen was chosen against a 900-pixel-tall viewport, and
+	ScaleLayer's floor means a phone in landscape reports about 500 REFERENCE
+	pixels rather than 900 — the scale is clamped at 0.75 so the type stays
+	legible, which is right, and the consequence is that the layout has 55% of
+	the vertical room it was drawn for.
+
+	It did not fit, and had not for a while: at 500 reference pixels the two mode
+	entries ran from 260 to 456, the title block ended at 275, and the row along
+	the bottom started at 400. All three overlapped. It was invisible on every
+	desktop and on every tablet, which is exactly the shape of bug that ships.
+
+	So below COMPACT_HEIGHT the poster becomes a phone menu:
+	  * the title drops from TEXT.Title to TEXT.Display — 84 to 54, which is the
+	    difference between two lines taking 180 pixels and taking 120;
+	  * the mode entries lose their sub-line and shorten to fit what is left;
+	  * the briefing column goes. It is the control list, and a phone player is
+	    not reading a keyboard reference.
+
+	Everything is measured rather than guessed: the stack is laid out from the
+	title's real bottom down to the nav row's real top, so the three blocks
+	cannot overlap at any height.
+]]
+local COMPACT_HEIGHT = 620
+--[[ The shortest a mode entry is allowed to get. Its title is TEXT.Heading in
+     compact, so this has to clear 30 plus its padding — and a 640x360 phone,
+     which is 480 reference pixels, needs every one of the studs between. ]]
+local ENTRY_HEIGHT_COMPACT = 48
+local TITLE_LINE_COMPACT = TEXT.Display + 6
+
+local function layoutColumns(referenceHeight: number)
+	if not titleKicker or not navRow then
+		return
+	end
+	local compact = referenceHeight < COMPACT_HEIGHT
+	local titleSize = if compact then TEXT.Display else TEXT.Title
+	local titleLine = if compact then TITLE_LINE_COMPACT else TITLE_LINE
+	local top = referenceHeight * 0.13
+
+	titleKicker.Position = UDim2.new(COLUMN_X, 0, 0, top)
+	titleFading.TextSize = titleSize
+	titleFading.Position = UDim2.new(COLUMN_X, 0, 0, top + TEXT.Body + LAYOUT.ElementGap)
+	titleFading.Size = UDim2.new(0.8, 0, 0, titleLine)
+	titleLight.TextSize = titleSize
+	titleLight.Position = UDim2.new(COLUMN_X, 0, 0, top + TEXT.Body + LAYOUT.ElementGap + titleLine)
+	titleLight.Size = UDim2.new(0.8, 0, 0, titleLine)
+
+	local titleBottom = top + TEXT.Body + LAYOUT.ElementGap + titleLine * 2 + LAYOUT.PanelPadding
+	titleRule.Position = UDim2.new(COLUMN_X, 0, 0, titleBottom)
+
+	--[[ The nav row is anchored to the bottom and does not move; the mode stack
+	     is fitted into whatever is left between the title and it. ]]
+	local navTop = referenceHeight - LAYOUT.ScreenMargin * 2 - NAV_HEIGHT - LAYOUT.PanelPadding * 2
+	local count = math.max(#modeEntries, 1)
+	--[[ One gap short of the real room, so the bottom entry never lands exactly
+	     on the nav row's top edge. Two blocks touching reads as one block. ]]
+	local room = navTop - (titleBottom + LAYOUT.ScreenMargin) - LAYOUT.ElementGap
+	local height = math.clamp((room - (count - 1) * ENTRY_GAP) / count, ENTRY_HEIGHT_COMPACT, ENTRY_HEIGHT)
+	local stack = count * height + (count - 1) * ENTRY_GAP
+	--[[ Centred in the room rather than pinned to the top of it, so a desktop
+	     keeps the deliberate gap under the title that the 0.52 anchor gave it. ]]
+	local entryTop = titleBottom + LAYOUT.ScreenMargin + math.max((room - stack) * 0.5, 0)
+
+	for index, entry in modeEntries do
+		entry.button.Position = UDim2.new(COLUMN_X, 0, 0, entryTop + (index - 1) * (height + ENTRY_GAP))
+		entry.button.Size = UDim2.new(ENTRY_WIDTH, 0, 0, height)
+		entry.title.TextSize = if compact then TEXT.Heading else TEXT.Display
+		entry.title.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, entry.title.TextSize + 6)
+		--[[ The pitch line is the first thing to go: it is flavour, and on a
+		     phone it is flavour sitting on top of the next entry's title. ]]
+		entry.line.Visible = not compact
+		entry.line.Position =
+			UDim2.fromOffset(ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding + entry.title.TextSize + 8)
+	end
+
+	if briefingColumn then
+		briefingColumn.Visible = not compact
+		briefingColumn.Position = UDim2.new(1 - COLUMN_X, 0, 0, entryTop + stack * 0.5)
+	end
+
+	--[[ The nav row narrows with the screen — four entries across 82% of a phone
+	     held upright is about 86 reference pixels each, and "LOADOUTS" at
+	     TEXT.Large does not fit in that. The sub-line goes with it: two lines of
+	     type in a 46-pixel row that has shrunk is one line too many. ]]
+	for _, entry in navEntries do
+		entry.label.TextSize = if compact then TEXT.Body else TEXT.Large
+		entry.label.Size = UDim2.new(1, 0, 0, entry.label.TextSize + 2)
+		entry.line.Visible = not compact
+		entry.line.Position = UDim2.fromOffset(0, entry.label.TextSize + 2)
+	end
+end
+
 local function refreshScale()
 	local camera = Workspace.CurrentCamera
 	if not camera then
@@ -1825,6 +1930,11 @@ local function refreshScale()
 		layer.scale.Scale = factor
 		layer.frame.Size = inverse
 	end
+
+	--[[ The layout follows the scale, because the two are the same question:
+	     how much room this screen actually has in the units everything below is
+	     written in. See layoutColumns. ]]
+	layoutColumns(height / factor)
 end
 
 --[[ The viewport signal belongs to the camera, and the camera is replaced on
@@ -2072,6 +2182,7 @@ end
 function MainMenuController:destroy()
 	setSuppressed(false)
 	table.clear(modeEntries)
+	table.clear(navEntries)
 	table.clear(resultRows)
 	table.clear(uiSounds)
 	trove:destroy()

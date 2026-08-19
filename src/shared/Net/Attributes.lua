@@ -130,4 +130,22 @@ function Attributes.get<T>(instance: Instance, name: string, default: T): T
 	return value :: any
 end
 
+--[[
+	Writes an attribute. Server-side only in practice — see the header: a client
+	writing one of these is a no-op that will be overwritten.
+
+	The counterpart to `get`, and it existed as a call site before it existed as
+	a function: three places wrote `Attributes.set(...)` against a module that
+	only had `get`, and every one of them threw the first time it ran. Crouching
+	and personal difficulty were both broken by it. `scripts/audit.py` check 9i
+	is the thing that now catches that shape.
+
+	It writes unconditionally rather than comparing first. Roblox already skips
+	the replication when a value has not changed, and a guard here would only
+	move that check somewhere it costs a table lookup.
+]]
+function Attributes.set(instance: Instance, name: string, value: any)
+	instance:SetAttribute(name, value)
+end
+
 return Attributes

@@ -549,6 +549,78 @@ for bootstrap, folder in (
                 )
 
 
+# ── 9i. Calling a function a required module does not have ──────────────────
+# The bug this exists for: `Attributes.set(player, key, value)` was written in
+# three places against a module that only ever defined `get`. Every call threw
+# "attempt to call a nil value (field 'set')" the first time it ran, which took
+# out crouching and personal difficulty — and nothing said so until somebody
+# happened to grep the module for what it actually exported.
+#
+# Luau's own analysis would catch it in a strict file. Most of this codebase is
+# --!nonstrict, deliberately, because Roblox instance types fight it constantly.
+# So this does the one narrow version that is worth doing without a type checker:
+# for `local X = require(Shared.Foo)`, resolve Foo, collect what it defines, and
+# flag `X.name(` where `name` is not one of them.
+#
+# DOT calls only, never colon: a method call on a returned object is not a call
+# on the module. Fields that are tables of data (X.Config.Thing) are skipped for
+# the same reason — only a direct call is checked, which is where the runtime
+# error actually is.
+SHARED_DIR = ROOT / "src" / "shared"
+
+
+def _module_exports(path):
+    """Every name a Shared module makes callable, by any of the four spellings."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    module = path.stem
+    names = set()
+    names |= set(re.findall(r"^function [\w.]+\.(\w+)", text, re.M))
+    names |= set(re.findall(r"^\s*(\w+)\s*=\s*function", text, re.M))
+    names |= set(re.findall(rf"^{re.escape(module)}\.(\w+)\s*=", text, re.M))
+    names |= set(re.findall(r"^\s*(\w+)\s*=\s*[^=]", text, re.M))
+    return names
+
+
+_export_cache = {}
+
+
+def _exports_for(dotted):
+    if dotted in _export_cache:
+        return _export_cache[dotted]
+    parts = dotted.split(".")
+    candidates = [SHARED_DIR.joinpath(*parts).with_suffix(".lua"),
+                  SHARED_DIR.joinpath(*parts) / "init.lua"]
+    result = None
+    for candidate in candidates:
+        if candidate.exists():
+            result = _module_exports(candidate)
+            break
+    _export_cache[dotted] = result
+    return result
+
+
+for p, text in sources.items():
+    for m in re.finditer(r"^local (\w+) = require\(Shared\.([\w.]+)\)$", text, re.M):
+        alias, dotted = m.group(1), m.group(2)
+        exports = _exports_for(dotted)
+        # Unresolvable module, or one whose shape this parser cannot read: say
+        # nothing rather than guess. A false positive here would be noise on
+        # every file that requires it.
+        if not exports:
+            continue
+        for call in re.finditer(r"(?<![.:\w])" + re.escape(alias) + r"\.(\w+)\s*\(", text):
+            name = call.group(1)
+            if name not in exports:
+                problems.append(
+                    f"{rel(p)}:{lineno(text, call.start())}  {alias}.{name}() is called, but "
+                    f"Shared/{dotted.replace('.', '/')} does not define {name} — this throws "
+                    f"'attempt to call a nil value' the first time it runs"
+                )
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no
