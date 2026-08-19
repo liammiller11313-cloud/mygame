@@ -123,6 +123,10 @@ local schedule: { any } = {}
 local cursor = 0
 local generation = 0 -- invalidates every delayed callback from an older round
 
+--[[ False until every module's start() has run. _startIfReady refuses to do
+     anything before then; see the comment there for why that matters. ]]
+local bootComplete = false
+
 local sawLivingSurvivor = false
 local warnedFinal = false
 local accumulator = 0
@@ -860,6 +864,27 @@ function RoundService:_startIfReady()
 	if roundState ~= Enums.RoundState.Lobby then
 		return
 	end
+
+	--[[
+		Nothing auto-starts until the server has finished booting.
+
+		This is the whole reason the main menu kept vanishing, and it took two
+		goes to get right because there are two callers. The check below asks
+		whether MatchmakingService has `started`, and during the boot the honest
+		answer is "not yet" — RoundService is third in the module list and
+		matchmaking is fifth. Read as "there is no matchmaking here", that starts
+		a round in the middle of boot.
+
+		Deferring the call at the end of start() fixed only that one caller.
+		Players.PlayerAdded is the other, and in Studio's Play Solo the player
+		joins WHILE modules are still starting, so it walked straight through the
+		same hole. Gating the function itself covers every caller there will ever
+		be, including the next one somebody adds.
+	]]
+	if not bootComplete then
+		return
+	end
+
 	--[[
 		Only stand down for a matchmaking service that actually finished starting.
 		It sets `started` as the final statement of its own start(), which the
@@ -873,6 +898,18 @@ function RoundService:_startIfReady()
 	if #Players:GetPlayers() < CLASSIC.MinPlayersToStart then
 		return
 	end
+
+	--[[ Said out loud, because it is the unusual path. A round beginning without
+	     anybody choosing a mode is correct only when there is genuinely no
+	     matchmaking on this server, and if that is ever wrong again this line is
+	     what says so in the first second of the log. ]]
+	print(
+		string.format(
+			"[RoundService] starting %s directly — no MatchmakingService is running, %d player(s) present",
+			mode,
+			#Players:GetPlayers()
+		)
+	)
 	self:startRound(mode)
 end
 
@@ -1096,17 +1133,23 @@ function RoundService:start()
 		task.defer puts this after the whole start phase, which is the earliest
 		moment the flag means what it says.
 	]]
+	--[[ task.defer lands after the bootstrap's synchronous start phase, which is
+	     the earliest moment MatchmakingService's `started` flag means what it
+	     says. Everything that wants to auto-start a round waits for this. ]]
 	local booted = generation
 	task.defer(function()
 		-- Not if the service was torn down in between; destroy() bumps generation.
-		if generation == booted then
-			self:_startIfReady()
+		if generation ~= booted then
+			return
 		end
+		bootComplete = true
+		self:_startIfReady()
 	end)
 end
 
 function RoundService:destroy()
 	generation += 1
+	bootComplete = false
 	serviceTrove:destroy()
 end
 
