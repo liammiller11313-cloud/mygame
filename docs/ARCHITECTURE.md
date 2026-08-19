@@ -594,6 +594,33 @@ Shadows are off on both: four shadow-casting spotlights in a horde is the most
 expensive thing this game could ask a phone to draw, and against fog that thick
 the shadows are invisible.
 
+### Animations
+
+`Shared/Util/AnimationCache.lua` owns one `Animation` instance per asset id, for
+the life of the server, and preloads them. Nothing else may build one.
+
+Two things make an animation fail intermittently, and both were happening:
+
+1. **Destroying the `Animation` after `LoadAnimation`.** The track resolves its
+   asset fetch *through* that instance, so destroying it leaves the track
+   pointing at nothing — which works when the id was already cached and silently
+   never plays when it was not.
+2. **Not preloading.** A track whose asset has not arrived reports `IsPlaying`,
+   has `Length == 0`, and moves nothing. Forty zombies spawn in the first ten
+   seconds of a round.
+
+A third made it hard to diagnose: `LoadAnimation` does **not** throw for an id
+that is missing, private, or owned by another account — it returns an ordinary
+track that never plays. `PreloadAsync`'s per-asset status is what actually knows,
+so `AnimationCache.hasFailed(id)` is how a broken id gets named in the log.
+
+Roblox only plays animations owned by the place's creator or by Roblox itself.
+An id uploaded under a personal account, in a group-owned game, fails exactly
+this way — and that is now the message you get.
+
+Audit check **9j** rejects both `Instance.new("Animation")` outside the cache and
+any destroy-after-load.
+
 ### Dollars, the shop, and loadouts
 
 The only persistent state in the game. Everything else is round-scoped and dies

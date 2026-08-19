@@ -60,6 +60,8 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AnimationCache = require(Shared.Util.AnimationCache)
+local AnimationConfig = require(Shared.Config.AnimationConfig)
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
@@ -188,6 +190,23 @@ function InfectedService:init()
 end
 
 function InfectedService:start()
+	--[[
+		Fetch every animation the game declares, once, before the first horde.
+
+		An AnimationTrack whose asset has not arrived plays NOTHING — it reports
+		itself as playing, its Length is zero, and the body does not move. Forty
+		zombies spawn inside the first ten seconds of a round, so without this the
+		opening wave animates only for whichever clips happened to be cached
+		already. It is the difference between "sometimes my animations do not
+		load" and "they load".
+
+		Every id from AnimationConfig, including the survivors' hold pose, because
+		this is the one place with a start() early enough to warm them and the
+		call costs the same whether it is one id or twenty. It does not yield —
+		see AnimationCache.preload.
+	]]
+	AnimationCache.preload(AnimationConfig.allIds())
+
 	-- THE loop. One connection for the entire horde, forever.
 	self._trove:connect(RunService.Heartbeat, function()
 		self:_step()

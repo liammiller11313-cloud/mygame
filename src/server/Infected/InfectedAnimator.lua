@@ -23,6 +23,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AnimationCache = require(Shared.Util.AnimationCache)
 local AnimationConfig = require(Shared.Config.AnimationConfig)
 
 local InfectedAnimator = {}
@@ -151,6 +152,12 @@ function InfectedAnimator.new(model: Model, kind: string)
 				local bucket = store:FindFirstChild(name)
 				local animation = bucket and bucket:FindFirstChildOfClass("Animation")
 				if animation and adopt(role, animation) then
+					--[[ Warmed even though the instance is the rig's own and
+					     outlives the load. Keeping the instance is only half the
+					     problem: a track whose asset has not arrived plays
+					     nothing either way, and this is the first spawn of this
+					     rig, so nothing has fetched it yet. ]]
+					AnimationCache.preload({ animation.AnimationId })
 					break
 				end
 			end
@@ -191,21 +198,48 @@ function InfectedAnimator.new(model: Model, kind: string)
 			     same doorway get different idles, which costs nothing and is most
 			     of what stops a crowd reading as one animation. ]]
 			local id = ids[random:NextInteger(1, #ids)]
-			local animation = Instance.new("Animation")
-			animation.AnimationId = "rbxassetid://" .. tostring(id)
-			if not adopt(role, animation) then
+
+			--[[
+				From the cache, and NOT destroyed afterwards.
+
+				This used to build an Animation, load it, and destroy it on the
+				next line. A track resolves its asset fetch through the instance
+				it was given, so destroying it left the track pointing at nothing
+				— which works when the id happened to already be cached and
+				silently never plays when it was not. That was the whole of
+				"sometimes my animations do not load".
+
+				AnimationCache keeps one instance per id for the life of the
+				server and preloads it. See its header.
+			]]
+			local animation = AnimationCache.get(id)
+			if not animation then
 				warnOnce(
 					"badid:" .. tostring(id),
+					string.format("%s is not a usable animation id (%s/%s)", tostring(id), kind, role)
+				)
+			elseif not adopt(role, animation) then
+				warnOnce(
+					"refused:" .. tostring(id),
+					string.format("the Animator refused animation %d for %s/%s", id, kind, role)
+				)
+			elseif AnimationCache.hasFailed(id) then
+				--[[ LoadAnimation does not throw for an id that does not exist or
+				     is not owned by this place — it hands back an ordinary track
+				     that never plays. The cache's preload is what actually knows,
+				     and it says so by id rather than leaving a silent rig. ]]
+				warnOnce(
+					"unfetchable:" .. tostring(id),
 					string.format(
-						"animation %d failed to load for %s/%s. Roblox only plays animations owned by "
-							.. "this place's creator or by Roblox itself.",
+						"animation %d loaded but its asset could not be fetched, so %s/%s will not "
+							.. "move. Roblox only plays animations owned by this place's creator or "
+							.. "by Roblox itself.",
 						id,
 						kind,
 						role
 					)
 				)
 			end
-			animation:Destroy()
 		end
 	end
 

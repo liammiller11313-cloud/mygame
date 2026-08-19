@@ -621,6 +621,54 @@ for p, text in sources.items():
                 )
 
 
+# ── 9j. An Animation destroyed after it was loaded ──────────────────────────
+# The bug this exists for: animations that loaded "sometimes".
+#
+#     local animation = Instance.new("Animation")
+#     animation.AnimationId = "rbxassetid://" .. id
+#     local track = animator:LoadAnimation(animation)
+#     animation:Destroy()
+#
+# LoadAnimation returns a track immediately but the KeyframeSequence behind it is
+# fetched ASYNCHRONOUSLY, and the track resolves that fetch through the Animation
+# instance it was handed. Destroy the instance and the track is left pointing at
+# nothing: it works when the id happened to be cached already and silently never
+# plays when it was not. Two files did this, and the symptom was intermittent in
+# exactly the way that makes it hard to attribute.
+#
+# Shared/Util/AnimationCache exists so nobody has to write that sequence again.
+#
+# `code` rather than `sources`: sources blanks string literals so that a warn()
+# mentioning "spawn(" is not read as a call, which also means `Instance.new(
+# "Animation")` can never match there. code keeps the strings and drops only the
+# comments, which is exactly what this needs.
+for p, text in code.items():
+    if p.name == "AnimationCache.lua":
+        continue
+    for m in re.finditer(r'Instance\.new\(\s*"Animation"\s*\)', text):
+        line = lineno(text, m.start())
+        problems.append(
+            f"{rel(p)}:{line}  builds an Animation by hand — use AnimationCache.get(id) or "
+            f".load(animator, id) instead. A hand-built one is destroyed on the next line "
+            f"often enough that it is worth not offering the option; see check 9j"
+        )
+    for m in re.finditer(r"(\w+)\s*:\s*Destroy\(\)", text):
+        name = m.group(1)
+        if name not in ("animation", "anim", "track"):
+            continue
+        # Only when the same name was loaded just above: this is the sequence,
+        # not any variable that happens to be called `animation`.
+        window = text[max(0, m.start() - 400) : m.start()]
+        if re.search(r"LoadAnimation\s*\([^)]*" + re.escape(name), window) or re.search(
+            r"LoadAnimation,\s*\w+,\s*" + re.escape(name), window
+        ):
+            problems.append(
+                f"{rel(p)}:{lineno(text, m.start())}  destroys {name} after LoadAnimation — the "
+                f"track resolves its asset fetch through that instance, so this plays only when "
+                f"the id was already cached. Use AnimationCache; see check 9j"
+            )
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no

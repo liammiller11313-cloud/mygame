@@ -177,6 +177,56 @@ AnimationConfig.ByRig = table.freeze({
 ]]
 AnimationConfig.Infected = table.freeze({} :: { [string]: AnimationSet })
 
+--[[
+	Every animation id this game declares, once each.
+
+	For preloading. An AnimationTrack whose asset has not arrived yet plays
+	NOTHING — it reports itself as playing, its Length is zero, and nothing moves
+	— so the first zombies of a fresh server animate only if the clips happen to
+	already be in the content cache. That is exactly the shape of "sometimes my
+	animations do not load".
+
+	Enumerated here rather than in the animator because this file is the only
+	place that knows what has been declared, and a set added below would
+	otherwise have to be remembered in two places.
+]]
+function AnimationConfig.allIds(): { number }
+	local seen: { [number]: boolean } = {}
+	local out: { number } = {}
+
+	local function take(value: any)
+		if typeof(value) == "number" and not seen[value] then
+			seen[value] = true
+			table.insert(out, value)
+		end
+	end
+
+	local function takeSet(set: any)
+		if typeof(set) ~= "table" then
+			return
+		end
+		for role, ids in set do
+			if role ~= "rig" and typeof(ids) == "table" then
+				for _, id in ids do
+					take(id)
+				end
+			end
+		end
+	end
+
+	for _, set in AnimationConfig.ByRig do
+		takeSet(set)
+	end
+	for _, set in AnimationConfig.Infected do
+		takeSet(set)
+	end
+	for _, id in AnimationConfig.SurvivorHold do
+		take(id)
+	end
+
+	return out
+end
+
 --[[ "R6" or "R15", from the joints the model actually has rather than from
      Humanoid.RigType. A supplied rig frequently reports R6 while being built
      with R15 limb names, and it is the NAMES an animation addresses. ]]

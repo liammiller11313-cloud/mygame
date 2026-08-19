@@ -63,6 +63,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AnimationCache = require(Shared.Util.AnimationCache)
 local AnimationConfig = require(Shared.Config.AnimationConfig)
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
@@ -554,9 +555,24 @@ local function setHoldPose(player: Player, wanted: boolean)
 	end
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
-	if not animator then
+	if not humanoid then
 		return
+	end
+
+	--[[
+		Created if it is missing, rather than giving up.
+
+		Roblox normally puts an Animator under a player's Humanoid when the
+		character loads, but "normally" is not "always" — a rig assembled by
+		something other than the default character pipeline may arrive without
+		one, and this file's answer used to be to silently not pose the arm. That
+		is indistinguishable from the animation failing to load, which is the bug
+		this whole path has been chased for.
+	]]
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
 	end
 
 	local id = AnimationConfig.SurvivorHold[AnimationConfig.rigOf(character)]
@@ -564,12 +580,19 @@ local function setHoldPose(player: Player, wanted: boolean)
 		return
 	end
 
-	local animation = Instance.new("Animation")
-	animation.AnimationId = "rbxassetid://" .. tostring(id)
-
-	local ok, track = pcall(animator.LoadAnimation, animator, animation)
-	animation:Destroy()
-	if not ok or not track then
+	--[[ From the cache, which keeps the Animation instance alive for the life of
+	     the server. Building one here and destroying it after LoadAnimation — as
+	     this did — leaves the track unable to resolve its own asset fetch, so it
+	     plays only when the id happened to be cached already. See
+	     Shared/Util/AnimationCache. ]]
+	local track = AnimationCache.load(animator, id)
+	if not track then
+		return
+	end
+	if AnimationCache.hasFailed(id) then
+		--[[ A track for an unfetchable id is an ordinary track that never plays.
+		     Not worth a warning here — the cache already named the id once — but
+		     it is worth not pretending the pose is on. ]]
 		return
 	end
 	--[[ Stated rather than inherited. The clip ships at Action priority and that
