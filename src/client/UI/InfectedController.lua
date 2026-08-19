@@ -40,7 +40,6 @@ local ScaleLayer = require(script.Parent.ScaleLayer)
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
-local MOTION = UITheme.Motion
 local TEXT = UITheme.TextSize
 
 local player = Players.LocalPlayer

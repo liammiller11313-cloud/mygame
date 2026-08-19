@@ -157,6 +157,19 @@ local cardSubtitle: TextLabel
 local fadeGui: ScreenGui
 local fadeLayer: Frame
 
+--[[
+	The player's gore setting, as it applies to the lens.
+
+	Blood on the screen is drawn here rather than by GoreController — this owns
+	the layer the vignette and the bile wash composite on — so turning gore off
+	has to reach this file too, or the setting removes the gibs and leaves the
+	player looking through a red smear.
+
+	Only the blood. The damage vignette is not gore, it is the readout that says
+	how close to dead you are, and it stays whatever this is set to.
+]]
+local bloodEnabled = true
+
 local state = {
 	survivorState = STATE.Spectating,
 	blackAndWhite = false,
@@ -659,7 +672,7 @@ end
 -- ── blood on the lens ───────────────────────────────────────────────────────
 
 local function spawnDroplets(count: number)
-	if not SCREEN_BLOOD.Enabled then
+	if not SCREEN_BLOOD.Enabled or not bloodEnabled then
 		return
 	end
 	for _ = 1, count do
@@ -1105,6 +1118,12 @@ function OverlayController:addDamageIndicator(position: Vector3)
 	if typeof(position) == "Vector3" then
 		addIndicator(position)
 	end
+end
+
+--[[ Whether blood may be drawn on the lens. Pushed by SettingsController from
+     the gore setting; see `bloodEnabled`. ]]
+function OverlayController:setBloodEnabled(value: boolean)
+	bloodEnabled = value ~= false
 end
 
 function OverlayController:screenEffect(effect: string, duration: number?, intensity: number?)

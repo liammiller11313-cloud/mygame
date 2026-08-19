@@ -359,6 +359,16 @@ function SurvivorService:_setState(record, newState: string)
 		return
 	end
 	record.state = newState
+
+	--[[ A body that is not upright is not crouching. The client normally clears
+	     this itself — releasing the key sends the release, and a menu opening
+	     synthesises one — but a player who goes down or dies while still holding
+	     it has nothing to release, and the clamp would follow them back up. ]]
+	if record.crouching and not self:_isUpright(record) then
+		record.crouching = false
+		Attributes.set(record.player, Attributes.Player.IsCrouching, false)
+	end
+
 	self:_publish(record)
 	self:_applyHumanoid(record)
 

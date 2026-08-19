@@ -495,6 +495,60 @@ for p, text in sources.items():
             )
 
 
+# ── 9g. A require or a constant nobody uses ─────────────────────────────────
+# Cheap, and it catches the residue of every refactor: a service still required
+# after the code that used it moved out, a constant left behind by the block it
+# tuned. Neither breaks anything, but both read as "this file does that" to the
+# next person, and a require that is not used is a module loaded for nothing.
+#
+# A note rather than a problem: something declared a minute ago and about to be
+# used is a normal state to be in halfway through writing a file.
+for p, text in sources.items():
+    for pattern in (
+        r'^local (\w+) = (?:require\([^)]*\)|game:GetService\("[^"]+"\))\s*$',
+        r'^local ([A-Z][A-Z0-9_]{2,}) = ',
+    ):
+        for m in re.finditer(pattern, text, re.M):
+            name = m.group(1)
+            elsewhere = text[: m.start()] + text[m.end() :]
+            if not re.search(r"(?<![.\w])" + re.escape(name) + r"(?![\w])", elsewhere):
+                notes.append(
+                    f"{rel(p)}:{lineno(text, m.start())}  {name} is declared and never used"
+                )
+
+
+# ── 9h. A bootstrap list naming a module that is not there ──────────────────
+# Both bootstraps walk a list of paths and require each one. A path that does not
+# resolve is REPORTED AND SKIPPED — deliberately, because during development
+# something in that list is always half-written and the rest of the game still
+# has to run. The cost of that kindness is that a typo costs you a whole
+# controller and says so once, in a boot log, among twenty other lines.
+#
+# Nothing else in this file can catch it: the name is a string, and the module it
+# names never existed to be cross-referenced.
+for bootstrap, folder in (
+    ("src/client/init.client.lua", "src/client"),
+    ("src/server/init.server.lua", "src/server"),
+):
+    path = ROOT / bootstrap
+    if not path.exists():
+        continue
+    text = path.read_text(encoding="utf-8")
+    for list_name in ("CONTROLLERS", "MODULES", "SERVICES"):
+        marker = f"local {list_name} = {{"
+        if marker not in text:
+            continue
+        block = text[text.index(marker) :]
+        block = block[: block.index("\n}")]
+        for m in re.finditer(r'^\t"([\w/]+)",', block, re.M):
+            if not (ROOT / folder / f"{m.group(1)}.lua").exists():
+                problems.append(
+                    f"{bootstrap}  {list_name} names {m.group(1)!r}, but "
+                    f"{folder}/{m.group(1)}.lua does not exist — the bootstrap will "
+                    f"warn once and run without it"
+                )
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no

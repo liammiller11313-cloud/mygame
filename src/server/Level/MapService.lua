@@ -23,7 +23,6 @@
 	spawn nodes, the ammo crates — rebuilds from tags after `mapChanged` fires.
 ]]
 
-local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")

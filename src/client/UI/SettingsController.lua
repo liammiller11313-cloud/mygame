@@ -493,6 +493,11 @@ local function applyGoreBudget()
 	end
 	callController("GoreController", "setEnabled", values.gore ~= "OFF")
 	callController("GoreController", "setQuality", scale)
+	--[[ And the lens, which is drawn by OverlayController rather than by the gore
+	     controller — it owns the layer the vignette composites on. Without this
+	     the setting takes the gibs away and leaves the player looking through the
+	     blood. ]]
+	callController("OverlayController", "setBloodEnabled", values.gore ~= "OFF")
 end
 
 --[[ Pushes one setting at whatever owns it. The single place in this file that
@@ -1139,7 +1144,9 @@ local function build()
 	local closeButton = newButton(panel, "Close")
 	closeButton.AnchorPoint = Vector2.new(1, 0)
 	closeButton.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 4)
-	closeButton.Size = UDim2.fromOffset(90, TEXT.Heading)
+	--[[ The full header height rather than the height of its own text: this is
+	     the panel's way out on a phone, and a thumb needs something to hit. ]]
+	closeButton.Size = UDim2.fromOffset(96, HEADER_HEIGHT - 6)
 	closeButton.Font = FONT.Heading
 	closeButton.TextSize = TEXT.Body
 	closeButton.TextColor3 = COLOR.TextSecondary
@@ -1259,6 +1266,15 @@ function SettingsController:start()
 			then
 				completeCapture(input.UserInputType)
 			end
+			return
+		end
+
+		--[[ B closes it, which is what B does on every console screen there has
+		     ever been. Checked before the processed guard because the panel is
+		     focused while it is up, so its own presses arrive marked processed —
+		     and a pad player who cannot back out of a menu is stuck in it. ]]
+		if state.open and input.KeyCode == Enum.KeyCode.ButtonB then
+			SettingsController:close()
 			return
 		end
 

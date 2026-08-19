@@ -943,7 +943,11 @@ end
 	without that controller still gets the feedback.
 ]]
 function GoreController:screenBlood(count: number?)
-	if not SCREEN.Enabled then
+	--[[ `enabled` as well as the config flag: a player who turned gore off did
+	     not ask for a clean kill and a red screen. The damage vignette is
+	     OverlayController's and is untouched by the setting — that one is a
+	     health readout, not gore. ]]
+	if not SCREEN.Enabled or not enabled then
 		return
 	end
 	local overlay = Registry.find("OverlayController")
