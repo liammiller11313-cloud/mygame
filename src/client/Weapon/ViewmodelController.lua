@@ -639,18 +639,41 @@ local R15_LEFT = { "LeftUpperArm", "LeftLowerArm", "LeftHand" }
 
 --[[ Strips a cloned avatar part down to something safe to weld onto a viewmodel:
      no physics, no queries, no scripts that came in on an accessory. ]]
+--[[
+	Strips a cloned avatar part down to something safe to weld onto a viewmodel.
+
+	THE JOINTS MUST GO FIRST, AND ALL OF THEM.
+
+	Roblox's clone semantics keep references that point OUTSIDE the cloned
+	subtree. A limb cloned off a live character therefore arrives still carrying
+	joints whose Part0 is the real body — so anchoring the clone anchors the
+	whole assembly it is still attached to, and the player's actual avatar floats
+	in the air rotating to follow the camera.
+
+	Stripping Motor6D and Weld was not enough: accessories and layered clothing
+	attach with WeldConstraint, and the older rigs use Snap and ManualWeld. So
+	this removes every JointInstance, every WeldConstraint and every Constraint,
+	and only then changes any property.
+]]
 local function prepareArmPart(part: BasePart)
+	for _, descendant in part:GetDescendants() do
+		if
+			descendant:IsA("JointInstance")
+			or descendant:IsA("WeldConstraint")
+			or descendant:IsA("Constraint")
+			or descendant:IsA("LuaSourceContainer")
+			or descendant:IsA("BodyMover")
+		then
+			descendant:Destroy()
+		end
+	end
+
 	part.Anchored = true
 	part.CanCollide = false
 	part.CanQuery = false
 	part.CanTouch = false
 	part.CastShadow = false
 	part.Massless = true
-	for _, descendant in part:GetDescendants() do
-		if descendant:IsA("LuaSourceContainer") or descendant:IsA("Motor6D") or descendant:IsA("Weld") then
-			descendant:Destroy()
-		end
-	end
 end
 
 --[[ Clones one avatar part by name, or nil when the character has not loaded it
@@ -747,6 +770,38 @@ local function buildAvatarArm(
 end
 
 --[[
+	Safety net for the one failure this system can produce that ruins a round.
+
+	Cloning a limb off a LIVE character and anchoring the copy is only safe while
+	every joint the copy carries has been removed — Roblox preserves references
+	that point outside a cloned subtree, so a surviving joint anchors the real
+	body through it, and the player floats in the air rotating to follow the
+	camera. prepareArmPart strips every joint type there is, and this checks that
+	it worked rather than trusting it.
+
+	Cheap: a handful of parts, once per weapon swap. And it repairs rather than
+	just complaining, because a player who cannot walk does not care whose fault
+	it was.
+]]
+local function releaseCharacter(character: Model?)
+	if not character then
+		return
+	end
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") and part.Anchored then
+			part.Anchored = false
+			warn(
+				string.format(
+					"[ViewmodelController] %s was left anchored by an arm clone and has been released. "
+						.. "A joint type is getting past prepareArmPart.",
+					part:GetFullName()
+				)
+			)
+		end
+	end
+end
+
+--[[
 	Places both arms on a built weapon.
 
 	The support hand is skipped for a pistol: a one-handed grip with a second hand
@@ -790,6 +845,8 @@ local function buildArms(built: Model, definition: any)
 		R15_LEFT,
 		"Left Arm"
 	)
+
+	releaseCharacter(character)
 end
 
 --[[ Every model gets a Muzzle. When the art did not ship one it is invented at
