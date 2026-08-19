@@ -123,4 +123,199 @@ DirectorConfig.Difficulty = table.freeze({
 
 DirectorConfig.DefaultDifficulty = "Normal"
 
+--[[
+	TEMPERAMENT — the reason two rounds of the same map never play the same.
+
+	The pacing machine above is deterministic: given the same intensity it makes
+	the same decision every time. That is correct for readability and wrong for
+	replay value, because a team that plays a map twice learns exactly when the
+	pressure comes and stops being afraid of it.
+
+	So the Director rolls a TEMPERAMENT at the start of each round, and a lighter
+	MOOD at the start of each wave. Neither changes what the Director is willing
+	to do — it still refuses to spawn in your field of view, still backs off when
+	the team is hurt, still respects the wave budget — only how it leans inside
+	those rules. The result is a Director that is unpredictable without ever
+	being unfair, which is the only kind of unpredictability worth having.
+
+	Every field is a MULTIPLIER on something the wave already decided, and the
+	bands are deliberately narrow. A temperament that doubled the horde would not
+	read as personality, it would read as the difficulty changing at random.
+]]
+export type Temperament = {
+	id: string,
+	displayName: string,
+	weight: number, -- relative odds of being rolled
+
+	population: number, -- multiplier on the common-infected target
+	spawnRate: number, -- multiplier on how fast they arrive
+	specialRate: number, -- multiplier on the gap between specials
+	burstiness: number, -- 0 steady stream, 1 arrives in clumps
+
+	ambushChance: number, -- odds a wave opens with a pre-placed silent group
+	fakeoutChance: number, -- odds a build-up deliberately does not deliver
+	pairChance: number, -- odds two specials are sent together
+	flankChance: number, -- odds a group spawns BEHIND the team instead of ahead
+}
+
+DirectorConfig.Temperaments = {
+	{
+		-- The default read of the pacing machine, with no lean at all. Kept in
+		-- the pool so that "normal" is a thing a round can actually roll.
+		id = "Measured",
+		displayName = "Measured",
+		weight = 22,
+		population = 1.0,
+		spawnRate = 1.0,
+		specialRate = 1.0,
+		burstiness = 0.35,
+		ambushChance = 0.15,
+		fakeoutChance = 0.15,
+		pairChance = 0.10,
+		flankChance = 0.20,
+	},
+	{
+		-- Long quiet, then everything at once. The most frightening one to play
+		-- against, because the silence stops being reassuring.
+		id = "Patient",
+		displayName = "Patient",
+		weight = 18,
+		population = 1.1,
+		spawnRate = 0.72,
+		specialRate = 1.25,
+		burstiness = 0.85,
+		ambushChance = 0.45,
+		fakeoutChance = 0.35,
+		pairChance = 0.25,
+		flankChance = 0.30,
+	},
+	{
+		-- Never stops. Fewer at a time, but the stream does not end, so nobody
+		-- gets the ten seconds they need to heal.
+		id = "Relentless",
+		displayName = "Relentless",
+		weight = 18,
+		population = 0.92,
+		spawnRate = 1.35,
+		specialRate = 0.85,
+		burstiness = 0.12,
+		ambushChance = 0.10,
+		fakeoutChance = 0.08,
+		pairChance = 0.15,
+		flankChance = 0.25,
+	},
+	{
+		-- Specials over commons. Punishes a team that has stopped watching each
+		-- other and rewards one that holds a tight formation.
+		id = "Stalker",
+		displayName = "Stalker",
+		weight = 14,
+		population = 0.8,
+		spawnRate = 0.9,
+		specialRate = 0.6,
+		burstiness = 0.4,
+		ambushChance = 0.3,
+		fakeoutChance = 0.2,
+		pairChance = 0.45,
+		flankChance = 0.5,
+	},
+	{
+		-- Bodies. Enormous crowds, almost no specials — the wave that makes a
+		-- shotgun feel like the correct answer to everything.
+		id = "Swarm",
+		displayName = "Swarm",
+		weight = 14,
+		population = 1.35,
+		spawnRate = 1.15,
+		specialRate = 1.5,
+		burstiness = 0.7,
+		ambushChance = 0.2,
+		fakeoutChance = 0.12,
+		pairChance = 0.05,
+		flankChance = 0.35,
+	},
+	{
+		-- Changes its mind constantly. Rolls a fresh mood far more often than the
+		-- others, so it never settles into a rhythm you can read.
+		id = "Erratic",
+		displayName = "Erratic",
+		weight = 14,
+		population = 1.0,
+		spawnRate = 1.0,
+		specialRate = 0.9,
+		burstiness = 0.6,
+		ambushChance = 0.35,
+		fakeoutChance = 0.4,
+		pairChance = 0.3,
+		flankChance = 0.45,
+	},
+} :: { Temperament }
+
+--[[ The per-wave mood sits on top of the round's temperament, and is much
+     narrower — it is the difference between two waves of the same round, not
+     between two rounds. ]]
+DirectorConfig.Mood = table.freeze({
+	PopulationJitter = 0.18, -- +/- fraction
+	SpawnRateJitter = 0.22,
+	SpecialRateJitter = 0.25,
+	-- Erratic rerolls mid-wave; everything else holds its mood for the wave.
+	ErraticRerollSeconds = 22,
+})
+
+--[[
+	AMBUSH — a group placed silently ahead of the team, dormant until they are
+	close, instead of walked in from behind.
+
+	This is the single biggest thing the base pacing machine lacks. A trickle
+	that always arrives from behind is learnable within one round; a crowd that
+	was already waiting in the building you are about to enter is not, and it is
+	how Left 4 Dead makes a corridor frightening on the second playthrough.
+]]
+DirectorConfig.Ambush = table.freeze({
+	MinSize = 6,
+	MaxSize = 16,
+	-- Placed this far along the team's own direction of travel.
+	MinFlowAhead = 90,
+	MaxFlowAhead = 260,
+	-- They stand still and silent until a survivor is inside this range.
+	TriggerRadius = 46,
+	-- And give up and behave normally after this long, so a team that never goes
+	-- that way does not leave a frozen crowd in the level forever.
+	PatienceSeconds = 75,
+	MaxConcurrent = 1,
+})
+
+--[[ A build-up that deliberately does not deliver. The horde audio rises, the
+     population ticks up, and then it stops — and lands thirty seconds later
+     when the team has decided it was nothing. Used sparingly: a Director that
+     cries wolf constantly just teaches players to ignore the cue. ]]
+DirectorConfig.Fakeout = table.freeze({
+	MinDelay = 14,
+	MaxDelay = 34,
+	FollowUpScale = 1.25, -- the real one hits harder for having been doubted
+	MaxPerWave = 1,
+})
+
+--[[
+	SKILL READ — a slow measure of how well the team is actually handling itself,
+	separate from the fast intensity signal.
+
+	Intensity answers "is this moment rough". This answers "are these players
+	good", and they are genuinely different questions: a strong team can sit at
+	low intensity all round because they are killing things before the pressure
+	lands, and the Director should notice that and push rather than concluding
+	the wave is going fine.
+
+	Deliberately slow and tightly bounded, because a difficulty that visibly
+	chases the player's performance feels like being punished for playing well.
+]]
+DirectorConfig.Skill = table.freeze({
+	Window = 45, -- seconds of history the read is built from
+	KillsPerSecondBaseline = 1.6, -- what an average team clears
+	DamageTakenBaseline = 12, -- per survivor per minute
+	MaxBoost = 0.28, -- most a strong team can add to the population
+	MaxRelief = 0.35, -- most a struggling team can have taken off
+	Responsiveness = 0.12, -- how fast the read moves toward the truth
+})
+
 return table.freeze(DirectorConfig)

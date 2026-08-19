@@ -277,6 +277,24 @@ local POPULATION_OPTIONS = {
 	attempts = SPAWNING.MaxSpawnAttempts,
 }
 
+--[[
+	The flank window: the same search, inverted, so the group forms BEHIND the
+	team instead of ahead of it.
+
+	Being cut off from the way you came is a genuinely different kind of pressure
+	from being blocked, and a Director that only ever arrives from in front
+	teaches a team to face one way and stop checking. Alternating between the two
+	is most of what stops that.
+]]
+local FLANK_OPTIONS = {
+	minDistance = SPAWNING.MinDistanceFromSurvivor,
+	maxDistance = SPAWNING.MaxDistanceFromSurvivor,
+	requireOutOfSight = SPAWNING.RequireOutOfSight,
+	minFlowAhead = -SPAWNING.MaxFlowAhead,
+	maxFlowAhead = -SPAWNING.MinDistanceFromSurvivor * 0.5,
+	attempts = SPAWNING.MaxSpawnAttempts,
+}
+
 local ANCHORED_OPTIONS = {
 	minDistance = SPAWNING.MinDistanceFromSurvivor,
 	maxDistance = PANIC.SpawnRadius,
@@ -284,6 +302,27 @@ local ANCHORED_OPTIONS = {
 	attempts = SPAWNING.MaxSpawnAttempts,
 	anchor = Vector3.zero,
 }
+
+--[[
+	The round temperament's multiplier for one dimension, or 1 when the layer is
+	not up. Looked up per call rather than cached: DirectorTemperament rerolls
+	its mood between waves — and mid-wave when the round is Erratic — so a cached
+	scalar would quietly freeze the personality in place.
+]]
+local function temperamentScale(dimension: string): number
+	local temperament = Registry.find("DirectorTemperament")
+	if not temperament then
+		return 1
+	end
+	if dimension == "population" then
+		return temperament:getPopulationScale()
+	elseif dimension == "spawnRate" then
+		return temperament:getSpawnRateScale()
+	elseif dimension == "specialInterval" then
+		return temperament:getSpecialIntervalScale()
+	end
+	return 1
+end
 
 local function broadcast(kind: string, payload: any?)
 	Remotes.Event.DirectorEvent:FireAllClients({ kind = kind, payload = payload })
@@ -431,6 +470,14 @@ function DirectorService:_tick(dt: number, now: number)
 	self:_updatePressure()
 	self:_updatePacing(now)
 
+	--[[ The personality layer ticks first so every decision below this line sees
+	     the same mood. Erratic rerolls itself here; everything else is a no-op. ]]
+	local temperament = Registry.find("DirectorTemperament")
+	if temperament then
+		temperament:update()
+		temperament:updateSkill(#self._characters)
+	end
+
 	if self:_isPlaying() then
 		self:_updatePopulation(now)
 		self:_updateSpecials(now)
@@ -497,6 +544,9 @@ end
 	roster's own ceiling and the spawn interval is floored at the tick rate, so
 	an absurd number produces a saturated Director rather than a broken one.
 ]]
+--[[ RoundService calls this on every phase change, which makes it the natural
+     place to reroll the per-wave mood: a new wave gets a new lean, and the
+     breather that precedes it does not. ]]
 function DirectorService:setWaveBudget(budget: WaveBudget?)
 	-- The Director inits late in the boot order. A neighbour that announces a
 	-- phase from its own init() must not take that init down with a nil index.
@@ -606,7 +656,22 @@ end
 	DamageTakenWeight itself, and passes -KillRelief on a kill — so this stays a
 	single, honest accumulator with one clamp and no opinions of its own.
 ]]
+--[[ The slow skill read is fed from the same events that drive intensity, so it
+     costs no new listeners. Damage and kills arrive here already. ]]
+function DirectorService:_feedSkill(amount: number)
+	local temperament = Registry.find("DirectorTemperament")
+	if not temperament then
+		return
+	end
+	if amount > 0 then
+		temperament:recordDamage(amount / math.max(INTENSITY.DamageTakenWeight, 1e-6))
+	else
+		temperament:recordKill()
+	end
+end
+
 function DirectorService:addIntensity(player: Player, amount: number)
+	self:_feedSkill(amount)
 	-- The Director inits last in the boot order; a neighbour that reports damage
 	-- from its own init() must not take that init down with a nil index.
 	if not self._intensity then
@@ -879,6 +944,11 @@ function DirectorService:_populationTarget(): number
 	if not self._budget.isBreather then
 		scale *= self._budget.populationScale
 	end
+	--[[ The round's temperament and the slow skill read lean the number inside
+	     the wave's ceiling. Applied last and still clamped, so no personality can
+	     push the horde past what the wave allows — the lean is in where you sit
+	     inside the budget, never in the budget itself. ]]
+	scale *= temperamentScale("population")
 	return math.clamp(math.floor(plan.target * scale + 0.5), 0, COMMON_CEILING)
 end
 
@@ -890,6 +960,7 @@ function DirectorService:_spawnInterval(plan): number
 	if not self._budget.isBreather then
 		rate *= self._budget.spawnRateScale
 	end
+	rate *= temperamentScale("spawnRate")
 	return math.max(plan.spawnInterval / math.max(rate, 1e-3), TICK_INTERVAL)
 end
 
@@ -913,8 +984,24 @@ function DirectorService:_updatePopulation(now: number)
 		return
 	end
 
-	for _ = 1, math.min(plan.batchSize, deficit) do
-		self:_enqueue(SOURCE_POPULATION, Enums.Infected.Common, nil, nil)
+	--[[ Burstiness reshapes the batch without changing the target: a Patient
+	     Director holds several batches back and sends them as one wall, a
+	     Relentless one sends a thinner stream that never stops. Same total
+	     population either way, and the difference between them is most of what
+	     separates "busy" from "frightening". ]]
+	local temperament = Registry.find("DirectorTemperament")
+	local batch = plan.batchSize
+	local flank = false
+	if temperament then
+		batch = math.max(1, math.floor(batch * temperament:getBurstScale() + 0.5))
+		--[[ Decided ONCE for the whole batch. A batch split between in front and
+		     behind is not a pincer, it is noise — the point of a flank is that
+		     the whole group comes from somewhere the team was not watching. ]]
+		flank = temperament:shouldFlank()
+	end
+
+	for _ = 1, math.min(batch, deficit) do
+		self:_enqueue(SOURCE_POPULATION, Enums.Infected.Common, nil, nil, flank)
 	end
 end
 
@@ -924,7 +1011,7 @@ end
 
 --[[ The wave names the interval; the config still owns how much it wanders. ]]
 function DirectorService:_rollSpecialInterval(): number
-	local base = self._budget.specialInterval
+	local base = self._budget.specialInterval * temperamentScale("specialInterval")
 	return math.max(1, base + random:NextNumber(-1, 1) * base * SPECIAL_JITTER_FRACTION)
 end
 
@@ -1059,6 +1146,22 @@ function DirectorService:_updateSpecials(now: number)
 		-- turns into three specials arriving the instant one gets through.
 		self._lastSpecialAt = now
 		self._specialRoll = self:_rollSpecialInterval()
+
+		--[[ Coordinated pairs. One special at a time is answerable by one
+		     survivor turning around; two at once forces the team to split its
+		     attention, which is the difference between an inconvenience and a
+		     genuine problem. Still bounded by maxSpecialsAlive, so a pair can
+		     never exceed what the wave allowed — it only spends the budget in
+		     one moment instead of two. ]]
+		local temperament = Registry.find("DirectorTemperament")
+		if temperament and temperament:shouldPairSpecials() then
+			if self:_aliveSpecials() + 1 < self._budget.maxSpecialsAlive then
+				local partner = self:_pickSpecial()
+				if partner then
+					self:_enqueue(SOURCE_SPECIAL, partner, nil, nil)
+				end
+			end
+		end
 	end
 end
 
@@ -1359,7 +1462,13 @@ end
 --  and "the server builds 46 rigs in one frame".
 -- ════════════════════════════════════════════════════════════════════════════
 
-function DirectorService:_enqueue(source: string, kind: string, anchor: Vector3?, radius: number?): boolean
+function DirectorService:_enqueue(
+	source: string,
+	kind: string,
+	anchor: Vector3?,
+	radius: number?,
+	flank: boolean?
+): boolean
 	if self._queueTail - self._queueHead + 1 >= MAX_QUEUED_SPAWNS then
 		self._dropped += 1
 		return false
@@ -1370,6 +1479,7 @@ function DirectorService:_enqueue(source: string, kind: string, anchor: Vector3?
 		kind = kind,
 		anchor = anchor,
 		radius = radius,
+		flank = flank,
 	}
 	return true
 end
@@ -1457,6 +1567,8 @@ function DirectorService:_placeFor(request, now: number): (Vector3?, string?)
 		options = ANCHORED_OPTIONS
 		options.anchor = request.anchor
 		options.maxDistance = request.radius or PANIC.SpawnRadius
+	elseif request.flank then
+		options = FLANK_OPTIONS
 	else
 		options = POPULATION_OPTIONS
 	end

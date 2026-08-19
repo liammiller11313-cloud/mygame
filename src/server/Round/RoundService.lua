@@ -417,6 +417,11 @@ function RoundService:_enterPrep(entry)
 end
 
 function RoundService:_enterWave(entry)
+	local temperament = Registry.find("DirectorTemperament")
+	if temperament then
+		temperament:beginWave(entry.index or 0)
+	end
+
 	local wave = entry.wave
 	self:_publishPhase(entry)
 	if roundState ~= Enums.RoundState.InProgress then

@@ -117,6 +117,8 @@ local MODULES = {
 	"Combat/ProjectileService",
 	"Infected/InfectedService",
 	"Director/ItemPlacer",
+	-- Rolled before the Director asks it anything.
+	"Director/DirectorTemperament",
 	"Director/DirectorService",
 	-- Stats listens to signals the combat services own, so it loads after them.
 	"Round/StatsService",
