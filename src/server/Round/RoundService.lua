@@ -47,6 +47,7 @@ local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
+local MapConfig = require(Shared.Config.MapConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -109,6 +110,8 @@ local random = Random.new()
 -- ── round state ─────────────────────────────────────────────────────────────
 local mode = GameModeConfig.DefaultMode
 local roundState = Enums.RoundState.Lobby
+--[[ Map the next round will load, decided by the vote as the last one ended. ]]
+local pendingMap = ""
 local phase = PHASE.Over
 local waveIndex = 0
 
@@ -657,6 +660,27 @@ function RoundService:startRound(requestedMode: string?)
 		statsService:reset()
 	end
 
+	--[[ Swap to whatever the vote landed on. `ensure` is a no-op when the winner
+	     is already live, so voting to replay a map costs nothing rather than
+	     throwing away a perfectly good world and paying for a reload. ]]
+	local vote = Registry.find("MapVoteService")
+	if vote and vote:isActive() then
+		pendingMap = vote:finishNow()
+	end
+
+	local maps = Registry.find("MapService")
+	if maps then
+		maps:ensure(if pendingMap ~= "" then pendingMap else MapConfig.DefaultMap)
+	end
+	pendingMap = ""
+
+	-- Every crate back, so a new round never opens with half its resupply still
+	-- on cooldown from the last one.
+	local crates = Registry.find("AmmoCrateService")
+	if crates then
+		crates:resetAll()
+	end
+
 	setGameAttribute(Attributes.Game.Mode, mode)
 	setGameAttribute(Attributes.Game.RoundEndsAt, roundEndsAt)
 
@@ -729,6 +753,14 @@ function RoundService:endRound(outcome: string)
 	end
 
 	self.roundEnded:fire(outcome)
+
+	--[[ The map vote runs UNDER the scoreboard rather than after it, so it costs
+	     no extra dead time, and the winner is cloned into storage the moment it
+	     is known — by the time the next round starts the swap is a reparent. ]]
+	local vote = Registry.find("MapVoteService")
+	if vote then
+		pendingMap = vote:beginVote()
+	end
 
 	-- A server that sits on a result screen forever cannot be playtested twice.
 	-- MatchmakingService owns this decision when it exists; until then the round

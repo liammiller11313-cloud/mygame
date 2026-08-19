@@ -64,6 +64,7 @@ local CONTROLLERS = {
 	"UI/SubtitleController",
 	"UI/OverlayController",
 	"UI/InfectedController",
+	"UI/MapVoteController",
 	"Audio/MusicController",
 	"UI/MainMenuController",
 }

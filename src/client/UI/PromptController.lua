@@ -35,6 +35,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local MapConfig = require(Shared.Config.MapConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
@@ -64,6 +65,8 @@ local MAX_HEALTH = GameConfig.Survivor.MaxHealth
      and no extra state. The strings are duplicated from that service because
      neither is in the shared layer; being wrong costs a prompt, never a crash. ]]
 local BODY_TAG = "FL_SurvivorBody"
+local AMMO_CRATE_TAG = MapConfig.AmmoCrates.Tag
+local CRATE = Attributes.Crate
 local CLOSET_TAG = "FL_RescueCloset"
 
 -- Ten scans a second. A prompt that appears a frame late is imperceptible; a
@@ -282,6 +285,15 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 		end
 		if CollectionService:HasTag(node, CLOSET_TAG) then
 			return node, "RESCUE", "SURVIVOR", true, COLOR.TextPrimary
+		end
+		if CollectionService:HasTag(node, AMMO_CRATE_TAG) then
+			--[[ A spent crate is not a prompt. The ghost stays visible so the spot
+			     still reads as a resupply point, but offering a hold that the
+			     server will refuse is worse than offering nothing. ]]
+			if node:GetAttribute(CRATE.Spent) == true then
+				return nil, nil, nil, false, nil
+			end
+			return node, "RESUPPLY", "AMMO", true, COLOR.Accent
 		end
 		if CollectionService:HasTag(node, BODY_TAG) then
 			-- A body is only a prompt while you are carrying the thing that

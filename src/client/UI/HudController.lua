@@ -1216,6 +1216,26 @@ function HudController:start()
 		flashSlot(tostring(payload.slot or ""))
 	end)
 
+	--[[ A crate is a bigger moment than a pickup: it is the resupply you crossed
+	     the map for, and it is gone for nearly three minutes afterwards. So it
+	     says how many rounds it gave rather than just flashing a slot, and it
+	     tells the whole team which crate went — a burned crate is information
+	     everyone needs when they plan where to fall back to. ]]
+	trove:connect(Remotes.Event.AmmoCrateUsed.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		if payload.player == player then
+			local given = tonumber(payload.given) or 0
+			setObjective(string.format("RESUPPLIED  +%d ROUNDS", given), nil)
+			task.delay(2.5, function()
+				if state.objectiveText:sub(1, 11) == "RESUPPLIED " then
+					setObjective(Attributes.get(Workspace, GA.ObjectiveText, ""), nil)
+				end
+			end)
+		end
+	end)
+
 	trove:connect(Remotes.Event.ObjectiveChanged.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" then
 			return

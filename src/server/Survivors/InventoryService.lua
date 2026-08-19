@@ -528,6 +528,66 @@ end
 	This is what makes an ammo-starved primary a real decision instead of a chore:
 	the gun you put down is still the gun somebody else finds.
 ]]
+--[[
+	Tops a survivor back up from an ammo crate.
+
+	Returns the number of rounds actually given, and gives NOTHING when there was
+	nothing to give — which is what lets AmmoCrateService refuse to spend a crate
+	on a player who is already full. Walking into a resupply at full ammo and
+	burning it for nothing would be a genuinely infuriating way to lose one.
+
+	Infinite-reserve secondaries are skipped for the same reason: a pistol can
+	never be topped up, so it must never count toward "this crate did something".
+]]
+function InventoryService:refillReserve(player: Player, fraction: number, alsoMagazine: boolean): number
+	local record = records[player]
+	if not record then
+		return 0
+	end
+
+	local given = 0
+	local share = math.clamp(fraction or 1, 0, 1)
+
+	for slot, entry in record.slots do
+		if not entry or entry.itemId == "" then
+			continue
+		end
+		local definition = WeaponConfig.get(entry.itemId)
+		-- Melee has no ammunition, and reserveMax below zero is the
+		-- infinite-reserve marker rather than a count.
+		if not definition or definition.magSize <= 0 or definition.reserveMax < 0 then
+			continue
+		end
+
+		local missingReserve = definition.reserveMax - entry.reserve
+		if missingReserve > 0 then
+			local amount = math.floor(definition.reserveMax * share + 0.5)
+			amount = math.min(amount, missingReserve)
+			entry.reserve += amount
+			given += amount
+		end
+
+		if alsoMagazine then
+			local missingMagazine = definition.magSize - entry.ammo
+			if missingMagazine > 0 then
+				local fromReserve = math.min(missingMagazine, entry.reserve)
+				entry.ammo += fromReserve
+				entry.reserve -= fromReserve
+				given += fromReserve
+			end
+		end
+
+		if given > 0 then
+			self:_announce(record, slot)
+		end
+	end
+
+	if given > 0 then
+		self:_publish(record)
+	end
+	return given
+end
+
 function InventoryService:dropWeapon(player: Player, slot: string): Model?
 	local record = records[player]
 	local entry = record and record.slots[slot]

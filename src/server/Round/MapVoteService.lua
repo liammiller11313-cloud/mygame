@@ -1,0 +1,245 @@
+--!nonstrict
+--[[
+	MapVoteService — the end-of-round map vote.
+
+	Runs while the scoreboard is already on screen, so it costs no extra dead
+	time. Twenty seconds, one vote each, changeable until the clock runs out.
+
+	Two rules that matter more than they look:
+
+	  A TIE BREAKS AWAY FROM THE CURRENT MAP. With two maps and an even split,
+	  picking the one you just played would mean a coin-flip decides whether the
+	  team plays the same map twice — and playing the same map twice because
+	  nobody could agree feels like the game ignored the vote. Breaking away from
+	  the current map means an even split always produces a change, which is what
+	  people voting evenly actually want.
+
+	  NOBODY VOTING IS NOT AN ERROR. An empty tally picks the map that is not
+	  current, so a team that walks away between rounds still gets variety.
+
+	The winner is prewarmed the moment it is known — cloned into ServerStorage
+	while the scoreboard is still up — so the actual swap is a reparent and the
+	loading screen is nearly instant.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local MapConfig = require(Shared.Config.MapConfig)
+local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
+local Signal = require(Shared.Util.Signal)
+local Trove = require(Shared.Util.Trove)
+
+local VOTE = MapConfig.Vote
+
+local MapVoteService = {}
+
+MapVoteService.voteFinished = Signal.new() -- (winnerId: string)
+
+local serviceTrove = Trove.new()
+
+local active = false
+local endsAt = 0
+local options: { string } = {}
+local votes: { [Player]: string } = {}
+local accumulator = 0
+
+local TICK_INTERVAL = 0.25
+
+local function serverNow(): number
+	return Workspace:GetServerTimeNow()
+end
+
+local function tally(): { [string]: number }
+	local counts = {}
+	for _, id in options do
+		counts[id] = 0
+	end
+	for player, id in votes do
+		if player.Parent and counts[id] ~= nil then
+			counts[id] += 1
+		end
+	end
+	return counts
+end
+
+local function countVoters(): number
+	local n = 0
+	for player in votes do
+		if player.Parent then
+			n += 1
+		end
+	end
+	return n
+end
+
+local function broadcastTally()
+	Remotes.Event.MapVoteUpdated:FireAllClients({ tally = tally(), voters = countVoters() })
+end
+
+--[[ Resolves the vote. See the header for why a tie deliberately moves away from
+     whatever was just played. ]]
+local function resolve(): string
+	local counts = tally()
+	local mapService = Registry.find("MapService")
+	local current = mapService and mapService:getCurrentId() or ""
+
+	local best, bestCount = "", -1
+	local tied: { string } = {}
+
+	for _, id in options do
+		local count = counts[id] or 0
+		if count > bestCount then
+			best, bestCount = id, count
+			tied = { id }
+		elseif count == bestCount then
+			table.insert(tied, id)
+		end
+	end
+
+	if #tied > 1 and VOTE.BreakTiesAwayFromCurrent then
+		for _, id in tied do
+			if id ~= current then
+				return id
+			end
+		end
+	end
+
+	return if best ~= "" then best else (options[1] or MapConfig.DefaultMap)
+end
+
+function MapVoteService:isActive(): boolean
+	return active
+end
+
+function MapVoteService:getOptions(): { string }
+	return table.clone(options)
+end
+
+--[[ Opens a vote. Returns the id it will land on if nobody votes, so a caller
+     that cannot run a vote (one map, no players) still knows what comes next. ]]
+--[[ NOT called `start`: the bootstrap calls :start() on every registered
+     service, and a vote that opened itself at boot would be running before there
+     was ever a round to vote after. ]]
+function MapVoteService:beginVote(): string
+	local mapService = Registry.find("MapService")
+	options = if mapService then mapService:getAvailableIds() else MapConfig.ids()
+
+	table.clear(votes)
+	accumulator = 0
+
+	-- Nothing to decide. Skip the ceremony rather than showing a vote with one
+	-- button on it.
+	if #options <= 1 then
+		active = false
+		local only = options[1] or MapConfig.DefaultMap
+		self:_finish(only)
+		return only
+	end
+
+	active = true
+	endsAt = serverNow() + VOTE.DurationSeconds
+
+	local cards = {}
+	for _, id in options do
+		local definition = MapConfig.get(id)
+		table.insert(cards, {
+			id = id,
+			displayName = if definition then definition.displayName else string.upper(id),
+			blurb = if definition then definition.blurb else "",
+		})
+	end
+
+	Remotes.Event.MapVoteStarted:FireAllClients({ options = cards, endsAt = endsAt })
+	broadcastTally()
+
+	return resolve()
+end
+
+function MapVoteService:cast(player: Player, mapId: string)
+	if not active then
+		return
+	end
+	if typeof(mapId) ~= "string" or table.find(options, mapId) == nil then
+		return
+	end
+	if votes[player] and not VOTE.AllowChangingVote then
+		return
+	end
+	if votes[player] == mapId then
+		return
+	end
+	votes[player] = mapId
+	broadcastTally()
+end
+
+function MapVoteService:_finish(winner: string)
+	active = false
+	local counts = tally()
+
+	Remotes.Event.MapVoteResult:FireAllClients({ winner = winner, tally = counts })
+
+	--[[ Cloned NOW, while the scoreboard is still up and nobody is looking at the
+	     world. By the time the round actually starts the clone already exists and
+	     the swap is a reparent. ]]
+	local mapService = Registry.find("MapService")
+	if mapService then
+		mapService:prewarm(winner)
+	end
+
+	MapVoteService.voteFinished:fire(winner)
+end
+
+--[[ Ends the vote early — used when a round is forced to start before the clock
+     runs out, so the winner is still honoured rather than discarded. ]]
+function MapVoteService:finishNow(): string
+	if not active then
+		return resolve()
+	end
+	local winner = resolve()
+	self:_finish(winner)
+	return winner
+end
+
+function MapVoteService:_step()
+	if not active then
+		return
+	end
+	if serverNow() >= endsAt then
+		self:_finish(resolve())
+	end
+end
+
+function MapVoteService:init()
+	serviceTrove:connect(Remotes.Event.CastMapVote.OnServerEvent, function(player, mapId)
+		self:cast(player, mapId)
+	end)
+	serviceTrove:connect(Players.PlayerRemoving, function(player)
+		if votes[player] then
+			votes[player] = nil
+			if active then
+				broadcastTally()
+			end
+		end
+	end)
+	serviceTrove:connect(RunService.Heartbeat, function(dt)
+		accumulator += dt
+		if accumulator < TICK_INTERVAL then
+			return
+		end
+		accumulator = 0
+		self:_step()
+	end)
+end
+
+function MapVoteService:destroy()
+	serviceTrove:destroy()
+end
+
+Registry.register("MapVoteService", MapVoteService)
+
+return MapVoteService

@@ -94,6 +94,9 @@ local COLLISION_RULES: { { any } } = {
 	it has nothing to say until there is a round to be far through.
 ]]
 local MODULES = {
+	-- Maps first: the world has to exist before anything that reads it loads.
+	"Level/MapService",
+	"Round/MapVoteService",
 	"Round/RoundService",
 	"Round/VersusService",
 	"Round/MatchmakingService",
@@ -104,6 +107,7 @@ local MODULES = {
 	-- hand-made casing or magazine always wins over a generated one.
 	"Assets/AmmoFactory",
 	"Level/LevelService",
+	"Level/AmmoCrateService",
 	"Survivors/SurvivorService",
 	"Survivors/InventoryService",
 	"Combat/GoreService",

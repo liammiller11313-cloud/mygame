@@ -87,6 +87,16 @@ Attributes.Game = table.freeze({
 	WaveEndsAt = "FL_WaveEndsAt", -- number, server time the current phase ends
 	RoundEndsAt = "FL_RoundEndsAt", -- number, server time the whole round ends
 	Difficulty = "FL_Difficulty", -- string, DirectorConfig.Difficulty key
+	CurrentMap = "FL_CurrentMap", -- string, MapConfig map id
+	MapPhase = "FL_MapPhase", -- string, "Ready" | "Unload" | "Load"
+})
+
+--[[ Written on an ammo crate model. The client reads Spent to grey out a crate
+     it cannot use yet, and RespawnAt to show how long until it is back. ]]
+Attributes.Crate = table.freeze({
+	Spent = "FL_CrateSpent", -- boolean
+	RespawnAt = "FL_CrateRespawnAt", -- number, absolute server time
+	Index = "FL_CrateIndex", -- number, 1-6 as named in the map
 })
 
 --[[

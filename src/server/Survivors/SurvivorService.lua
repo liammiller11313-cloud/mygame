@@ -35,6 +35,7 @@ local AudioConfig = require(Shared.Config.AudioConfig)
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
+local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
@@ -60,12 +61,15 @@ local BODY_TAG = "FL_SurvivorBody"
 local CLOSET_TAG = "FL_RescueCloset"
 
 -- Kinds of hold-to-complete interaction this service arbitrates.
+local AMMO_CRATE_TAG = MapConfig.AmmoCrates.Tag
+
 local INTERACT = table.freeze({
 	Revive = "Revive",
 	LedgePull = "LedgePull",
 	HealAlly = "HealAlly",
 	Defib = "Defib",
 	Rescue = "Rescue",
+	Resupply = "Resupply",
 })
 
 --[[ Stamina hysteresis: without it, a survivor who empties the bar stutters
@@ -1237,6 +1241,16 @@ function SurvivorService:_classify(record, target: Instance)
 		return INTERACT.Rescue, nil, S.ClosetRescueTime, "Rescue"
 	end
 
+	--[[ An ammo crate. Asked of the service rather than of the tag alone, because
+	     a spent crate keeps its tag while it is on cooldown — the ghost is still
+	     there, it just has nothing to give yet. ]]
+	if CollectionService:HasTag(target, AMMO_CRATE_TAG) then
+		local crates = Registry.find("AmmoCrateService")
+		if crates and crates:isAvailable(target) then
+			return INTERACT.Resupply, nil, MapConfig.AmmoCrates.UseSeconds, "Resupply"
+		end
+	end
+
 	return nil
 end
 
@@ -1397,6 +1411,11 @@ function SurvivorService:_completeInteraction(record)
 		task.spawn(function()
 			self:rescueFromCloset(target)
 		end)
+	elseif kind == INTERACT.Resupply then
+		local crates = Registry.find("AmmoCrateService")
+		if crates and target then
+			crates:consume(player, target)
+		end
 	end
 end
 

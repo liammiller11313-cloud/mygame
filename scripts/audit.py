@@ -68,8 +68,31 @@ for p, text in sources.items():
 
 # ── 2. Remotes ──────────────────────────────────────────────────────────────
 rem_text = read(SRC / "shared/Net/Remotes.lua")
-events = set(re.findall(r'^\t"(\w+)",', rem_text.split("local EVENTS")[1].split("]")[0], re.M))
-funcs = set(re.findall(r'^\t"(\w+)",', rem_text.split("local FUNCTIONS")[1].split("\n}")[0], re.M))
+def manifest_block(text, marker):
+    """
+    The names between `local <marker> ... = {` and its matching closing brace.
+
+    Splitting on the first "]" was wrong: a comment like `{[string]: number}`
+    contains one, which silently truncated the manifest and made every remote
+    declared after it look missing.
+    """
+    start = text.index(marker)
+    # Anchor on the assignment, not the first brace: `local EVENTS: { string } = {`
+    # opens a brace in its TYPE annotation before the table itself begins.
+    open_brace = text.index("{", text.index("=", start))
+    depth, i = 0, open_brace
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    return set(re.findall(r'^\t"(\w+)"', text[open_brace:i], re.M))
+
+events = manifest_block(rem_text, "local EVENTS")
+funcs = manifest_block(rem_text, "local FUNCTIONS")
 
 used_events, fired, listened = set(), set(), set()
 for p, text in sources.items():

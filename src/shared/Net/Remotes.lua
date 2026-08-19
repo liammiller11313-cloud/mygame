@@ -74,6 +74,14 @@ local EVENTS: { string } = {
 	"VersusTeamChanged", -- {player, team}
 	"RequestInfectedSpawn", -- C->S (kind: string) — versus class pick
 	"InfectedSpawnOptions", -- {kinds: {string}, respawnAt: number}
+
+	-- ── Maps, crates and the map vote ───────────────────────────────────────
+	"MapVoteStarted", -- {options: {{id, displayName, blurb}}, endsAt: number}
+	"CastMapVote", -- C->S (mapId: string)
+	"MapVoteUpdated", -- {tally: {[string]: number}, voters: number}
+	"MapVoteResult", -- {winner: string, tally: {[string]: number}}
+	"MapLoading", -- {mapId: string, phase: string}  "Unload" | "Load" | "Ready"
+	"AmmoCrateUsed", -- {player, crate: Instance, index, respawnAt: number, given: number}
 }
 
 -- Every RemoteFunction. Keep this list SHORT: remote functions block and can be
