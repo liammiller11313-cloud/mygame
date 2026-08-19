@@ -34,6 +34,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
@@ -327,12 +329,16 @@ local function build()
 	screen.Name = "FL_InfectedPicker"
 	screen.ResetOnSpawn = false
 	screen.IgnoreGuiInset = true
-	screen.DisplayOrder = UITheme.DisplayOrder.Overlay
+	--[[ One above the overlay layer, not level with it. You pick your next class
+	     while the death card is still up, so the picker has to be the thing on
+	     top rather than whichever ScreenGui happened to be built first. ]]
+	screen.DisplayOrder = UITheme.DisplayOrder.Overlay + 1
+	screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screen.Enabled = false
 	screen.Parent = player:WaitForChild("PlayerGui")
 	trove:add(screen)
 
-	root = newFrame(screen, "Root", COLOR.Background, 0.25)
+	root = newFrame(ScaleLayer.new(screen, "Scaled"), "Root", COLOR.Background, 0.25)
 	root.AnchorPoint = Vector2.new(0, 0.5)
 	root.Position = UDim2.new(0, LAYOUT.ScreenMargin, 0.5, 0)
 	root.Size = UDim2.fromOffset(PANEL_WIDTH, 0)

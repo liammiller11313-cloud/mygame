@@ -39,6 +39,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local MARK = UITheme.Hitmarker
@@ -65,6 +67,9 @@ local trove = Trove.new()
 local random = Random.new()
 
 local gui: ScreenGui
+--[[ The scaled content layer. A hitmarker is sized in reference pixels like
+     everything else, so a 4K player does not get a speck. ]]
+local root: Frame
 local marks: { [string]: any } = {}
 local numbers: { any } = {}
 local numberCursor = 1
@@ -92,7 +97,7 @@ local function buildMark(name: string, size: number, color: Color3, rotation: nu
 	holder.BackgroundTransparency = 1
 	holder.Rotation = rotation
 	holder.Visible = false
-	holder.Parent = gui
+	holder.Parent = root
 
 	local scale = Instance.new("UIScale")
 	scale.Scale = 1
@@ -150,7 +155,7 @@ local function buildNumbers()
 		label.Size = UDim2.fromOffset(90, 20)
 		label.Visible = false
 		label.Text = ""
-		label.Parent = gui
+		label.Parent = root
 		numbers[index] = {
 			label = label,
 			elapsed = math.huge,
@@ -166,10 +171,12 @@ local function build()
 	gui.Name = "FL_Hitmarkers"
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = UITheme.DisplayOrder.Crosshair
+	gui.DisplayOrder = UITheme.DisplayOrder.Hitmarker
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
+
+	root = ScaleLayer.new(gui, "Scaled")
 
 	marks.Hit = buildMark("Hit", MARK.Size, MARK.NormalColor, 0)
 	marks.Headshot = buildMark("Headshot", MARK.HeadshotSize, MARK.HeadshotColor, 0)
@@ -227,16 +234,26 @@ end
      crosshair if the camera cannot see the hit (a pierced body, a hit behind a
      corner). Never off-screen, where it would silently cost the player their
      only readout of what the shot did. ]]
+--[[ Where a damage number goes, in LAYER pixels rather than screen pixels.
+
+     WorldToViewportPoint answers in real hardware pixels, and the numbers are
+     drawn inside the scale layer, where an offset is multiplied by the layer's
+     factor before it reaches the screen. Handing the layer a raw viewport point
+     would put the number at 1.35x its position on a 4K display — off the bottom
+     right of the screen for anything near the edge. Dividing here converts once,
+     at the boundary, so everything downstream stays in one coordinate space. ]]
 local function screenPointFor(position: Vector3?): (number, number)
 	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+
 	if position and camera then
 		local point, onScreen = camera:WorldToViewportPoint(position)
 		if onScreen then
-			return point.X, point.Y
+			return point.X / factor, point.Y / factor
 		end
 	end
 	local viewport = camera and camera.ViewportSize or Vector2.new(1920, 1080)
-	return viewport.X * 0.5, viewport.Y * 0.5
+	return viewport.X * 0.5 / factor, viewport.Y * 0.5 / factor
 end
 
 local function pushNumber(damage: number, position: Vector3?)

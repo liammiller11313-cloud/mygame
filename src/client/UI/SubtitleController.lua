@@ -26,6 +26,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
@@ -52,6 +54,8 @@ local player = Players.LocalPlayer
 local trove = Trove.new()
 
 local gui: ScreenGui
+-- The scaled content layer. See Client/UI/ScaleLayer.
+local root: Frame
 local line: TextLabel
 
 local queue: { { speaker: string, text: string, dwell: number } } = {}
@@ -165,6 +169,8 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
+	root = ScaleLayer.new(gui, "Scaled")
+
 	line = Instance.new("TextLabel")
 	line.Name = "Line"
 	line.AnchorPoint = Vector2.new(0.5, 1)
@@ -184,7 +190,7 @@ local function build()
 	line.TextStrokeTransparency = 0.5
 	line.Visible = false
 	line.Text = ""
-	line.Parent = gui
+	line.Parent = root
 end
 
 -- ── public API ──────────────────────────────────────────────────────────────

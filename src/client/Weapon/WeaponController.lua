@@ -819,6 +819,33 @@ function WeaponController:isReloading(): boolean
 	return state.reload ~= nil
 end
 
+--[[
+	How far the load step now running has got, 0-1, or -1 when nothing is
+	reloading.
+
+	For a magazine reload that is the whole reload. For a shell-fed gun it is the
+	one shell going in right now, so the bar ticks once per shell alongside the
+	count climbing — which is both what the player is actually waiting on and
+	what a single bar spanning the whole reload would misrepresent, since a
+	shotgun reload can be cancelled after any shell. The tail (pump, ready)
+	reports 1: the ammo is already in the gun by then.
+]]
+function WeaponController:getReloadProgress(): number
+	local reload = state.reload
+	local definition = state.definition
+	if not reload or not definition then
+		return -1
+	end
+	if reload.phase ~= "Load" then
+		return 1
+	end
+	local step = if reload.perShell then definition.reloadPerShell else definition.reloadTime
+	if step <= 0 then
+		return 1
+	end
+	return math.clamp(reload.timer / step, 0, 1)
+end
+
 function WeaponController:isFiring(): boolean
 	return state.firing
 end

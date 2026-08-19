@@ -344,6 +344,7 @@ Same Registry pattern, same lifecycle.
 | `init.client.lua` | — | bootstrap |
 | `Input/InputController.lua` | `"InputController"` | keybinds, forwards intent, exposes `Signal`s per action |
 | `Weapon/WeaponController.lua` | `"WeaponController"` | fire loop, bloom, reload, ammo prediction, sends `FireWeapon` |
+|  | | *ammo is PREDICTED here. Anything drawing a count reads `getAmmo()`/`getWeaponId()` for the slot `getActiveSlot()` reports, and repaints on `ammoChanged`/`weaponChanged`. Reading `LA.PrimaryAmmo` for the gun in hand puts the counter a round trip behind the muzzle flash — and a local Studio server has no round trip, so it looks perfect while you test it.* |
 | `Weapon/ViewmodelController.lua` | `"ViewmodelController"` | first-person model, sway, bob, recoil kick, muzzle flash |
 | `Effects/CameraController.lua` | `"CameraController"` | FOV, aim transition, shake, recoil, hit-stop |
 | `UI/HudController.lua` | `"HudController"` | survivor panels, ammo, item slots, objective |
@@ -472,6 +473,34 @@ Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes 
 |---|---|---|
 | `UI/MainMenuController.lua` | `"MainMenuController"` | mode select, server browser, lobby countdown |
 | `UI/WaveController.lua` | `"WaveController"` | wave timer, wave pips, wave announcements |
+| `UI/InfectedController.lua` | `"InfectedController"` | Versus special-infected class picker |
+| `UI/MapVoteController.lua` | `"MapVoteController"` | end-of-round and fresh-server map vote |
+| `UI/ScaleLayer.lua` | *(none — a helper, not a controller)* | resolution independence for every ScreenGui |
+
+### Screen layout contract
+
+Two rules, and everything on screen follows both.
+
+**1. Lay out in reference pixels, never in hardware pixels.** Offsets are chosen
+against a 900px-tall viewport. Every ScreenGui that draws in offsets puts its
+content inside `ScaleLayer.new(gui)` and parents to the returned Frame, never to
+the ScreenGui. `UITheme.Scale` / `UITheme.scaleFor` own the factor, so two layers
+built by two controllers always agree — which is what lets `WaveController` hand
+`HudController` a pixel inset and have it land correctly on a phone.
+
+The one boundary that has to convert: anything reading a real screen coordinate
+(`WorldToViewportPoint`, a mouse position) must divide by `ScaleLayer.getFactor()`
+before using it as an offset inside a layer. `AbsolutePosition`/`AbsoluteSize`
+need no conversion — both already account for the scale.
+
+Full-bleed washes with no offsets in them (the vignette, the teleport fade) stay
+outside a layer. There is nothing there for a scale to correct.
+
+**2. `UITheme.DisplayOrder` owns the stack.** No controller invents its own
+number. Ties are resolved by ScreenGui creation order, which is boot order, which
+is not a decision anyone made — so anything that must cover something else gets
+its own entry. The map vote sits **above** the menu because the vote runs at the
+same time as the end-of-round scoreboard, not after it.
 
 ## Asset loading
 

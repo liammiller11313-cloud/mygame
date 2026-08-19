@@ -306,6 +306,44 @@ for p, text in sources.items():
         )
 
 
+# ── 10. Signals fired into the void ─────────────────────────────────────────
+# The bug this exists for: a module declares a Signal, fires it faithfully on
+# every state change, and nothing anywhere connects to it. Nothing errors, no
+# test fails, and the feature it was carrying is simply absent — WeaponController
+# predicted the ammo count down on the frame the trigger went and fired
+# ammoChanged for a year with no listener, so the HUD rendered the server's
+# number a full round trip late and looked, in Studio, exactly right.
+#
+# A note rather than a problem: a signal with no consumer yet is a normal state
+# during development, and the point is to make it visible rather than to fail
+# the build over it.
+SIGNAL_DECL_RE = re.compile(r"(?:^|\n)\s*(?:local\s+)?[\w.]*?(\w+)\s*=\s*Signal\.new\(\)")
+
+declared = {}   # signal name -> file that declares it
+for p, text in sources.items():
+    for m in SIGNAL_DECL_RE.finditer(text):
+        declared.setdefault(m.group(1), []).append((p, lineno(text, m.start())))
+
+for name, sites in sorted(declared.items()):
+    consumed = False
+    for p, text in sources.items():
+        # `x.name:connect(` / `:once(` anywhere, including the declaring file.
+        if re.search(r"[.:]" + re.escape(name) + r"\s*[:.]\s*(?:connect|Connect|once|Once)\b", text):
+            consumed = True
+            break
+        # Passed to something that will connect it: `trove:connect(x.name, fn)`.
+        if re.search(r"connect\s*\(\s*[\w.]*\.?" + re.escape(name) + r"\s*,", text):
+            consumed = True
+            break
+    if not consumed:
+        where = ", ".join(f"{rel(f)}:{ln}" for f, ln in sites)
+        notes.append(
+            f"{where}  Signal '{name}' is declared and fired but nothing connects to it "
+            f"— either a consumer is missing, or a direct call/attribute already does the job "
+            f"and the signal is dead weight"
+        )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

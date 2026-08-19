@@ -24,6 +24,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
@@ -350,13 +352,16 @@ local function build()
 	screen.Name = "FL_MapVote"
 	screen.ResetOnSpawn = false
 	screen.IgnoreGuiInset = true
-	-- Above the results card, below a teleport fade.
-	screen.DisplayOrder = UITheme.DisplayOrder.Fade - 2
+	--[[ Above the menu, and so above the scoreboard the menu draws, because the
+	     vote runs at the same time as the scoreboard rather than after it. Below
+	     a teleport fade. ]]
+	screen.DisplayOrder = UITheme.DisplayOrder.Vote
+	screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screen.Enabled = false
 	screen.Parent = player:WaitForChild("PlayerGui")
 	trove:add(screen)
 
-	root = newFrame(screen, "Root", COLOR.Background, 1)
+	root = newFrame(ScaleLayer.new(screen, "Scaled"), "Root", COLOR.Background, 1)
 	root.AnchorPoint = Vector2.new(0.5, 1)
 	root.Position = UDim2.new(0.5, 0, 1, -LAYOUT.ScreenMargin * 2)
 	root.Size = UDim2.fromOffset(760, CARD_HEIGHT + 56)

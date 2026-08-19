@@ -36,6 +36,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local CROSSHAIR = UITheme.Crosshair
 local HITMARKER = UITheme.Hitmarker
 local PA = Attributes.Player
@@ -64,6 +66,10 @@ local player = Players.LocalPlayer
 local trove = Trove.new()
 
 local gui: ScreenGui
+--[[ The scaled content layer. The gap is a tuned pixel figure rather than a
+     projection of the real cone, so scaling it keeps the reticle the same
+     apparent size on every display instead of a four-pixel speck at 4K. ]]
+local root: Frame
 local ticks: { Frame } = {}
 local dot: Frame?
 
@@ -93,6 +99,8 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
+	root = ScaleLayer.new(gui, "Scaled")
+
 	for index = 1, 4 do
 		local tick = Instance.new("Frame")
 		tick.Name = "Tick" .. index
@@ -104,7 +112,7 @@ local function build()
 		tick.Size = if vertical
 			then UDim2.fromOffset(CROSSHAIR.Thickness, CROSSHAIR.Length)
 			else UDim2.fromOffset(CROSSHAIR.Length, CROSSHAIR.Thickness)
-		tick.Parent = gui
+		tick.Parent = root
 		ticks[index] = tick
 	end
 
@@ -117,7 +125,7 @@ local function build()
 		centre.BackgroundColor3 = CROSSHAIR.Color
 		centre.BackgroundTransparency = CROSSHAIR.Transparency
 		centre.BorderSizePixel = 0
-		centre.Parent = gui
+		centre.Parent = root
 		dot = centre
 	end
 end

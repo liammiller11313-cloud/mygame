@@ -43,6 +43,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
@@ -101,6 +103,8 @@ local player = Players.LocalPlayer
 local trove = Trove.new()
 
 local gui: ScreenGui
+-- The scaled content layer. See Client/UI/ScaleLayer.
+local root: Frame
 local panel: Frame
 local keyBox: Frame
 local keyLabel: TextLabel
@@ -149,6 +153,8 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
+	root = ScaleLayer.new(gui, "Scaled")
+
 	panel = Instance.new("Frame")
 	panel.Name = "Prompt"
 	panel.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -158,7 +164,7 @@ local function build()
 	panel.Size = UDim2.fromOffset(PROMPT_WIDTH, PROMPT_HEIGHT)
 	panel.BackgroundTransparency = 1
 	panel.Visible = false
-	panel.Parent = gui
+	panel.Parent = root
 
 	keyBox = Instance.new("Frame")
 	keyBox.Name = "Key"

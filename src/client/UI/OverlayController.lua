@@ -53,6 +53,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local INDICATOR = UITheme.DamageIndicator
@@ -123,6 +125,11 @@ local random = Random.new()
 
 local vignetteGui: ScreenGui
 local overlayGui: ScreenGui
+--[[ The scaled content layer, on the overlay ScreenGui only. The vignette and
+     the fade are full-bleed washes with no pixel offsets in them — there is
+     nothing there for a scale to correct, and a fade that has to end on solid
+     black is safest as a plain full-screen frame. ]]
+local overlayRoot: Frame
 local edges: { Frame } = {}
 local scrim: Frame
 local droplets: { any } = {}
@@ -355,7 +362,7 @@ end
 
 local function buildIndicators()
 	for index = 1, INDICATOR.MaxSimultaneous do
-		local arrow = newFrame(overlayGui, "Damage" .. index, INDICATOR.Color, 1)
+		local arrow = newFrame(overlayRoot, "Damage" .. index, INDICATOR.Color, 1)
 		arrow.AnchorPoint = Vector2.new(0.5, 0.5)
 		arrow.Size = UDim2.fromOffset(INDICATOR.Width, INDICATOR.Height)
 		arrow.Visible = false
@@ -375,7 +382,7 @@ local function buildIndicators()
 end
 
 local function buildStatus()
-	statusPanel = newFrame(overlayGui, "Status", COLOR.Background, 1)
+	statusPanel = newFrame(overlayRoot, "Status", COLOR.Background, 1)
 	statusPanel.AnchorPoint = Vector2.new(0.5, 0.5)
 	statusPanel.Position = UDim2.fromScale(0.5, 0.58)
 	statusPanel.Size = UDim2.fromOffset(760, 120)
@@ -407,7 +414,7 @@ local function buildStatus()
 end
 
 local function buildCard()
-	cardPanel = newFrame(overlayGui, "Card", COLOR.Background, 1)
+	cardPanel = newFrame(overlayRoot, "Card", COLOR.Background, 1)
 	cardPanel.Size = UDim2.fromScale(1, 1)
 	cardPanel.Visible = false
 
@@ -446,6 +453,8 @@ local function build()
 	overlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	overlayGui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(overlayGui)
+
+	overlayRoot = ScaleLayer.new(overlayGui, "Scaled")
 
 	--[[ The fade owns its own layer above everything, including whatever the main
 	     menu draws: it is the seam between the round and the menu, and a seam

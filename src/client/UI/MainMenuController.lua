@@ -87,18 +87,17 @@ local MODES = GameModeConfig.Modes
 local ROUND = Enums.RoundState
 local STATE = Enums.SurvivorState
 
---[[ UITheme.DisplayOrder has no menu layer, and should not: the menu is not part
-     of the HUD stack. It has to cover everything the game draws — including
-     OverlayController's end-of-round card at Overlay — while still sitting under
-     the fade that covers a teleport. ]]
-local MENU_ORDER = UITheme.DisplayOrder.Fade - 1
+--[[ The menu covers everything the game draws — including OverlayController's
+     end-of-round card at Overlay — and is in turn covered by the map vote and
+     by the fade that ends a teleport. ]]
+local MENU_ORDER = UITheme.DisplayOrder.Menu
 
 --[[ The layout is drawn against a 900px-tall viewport and scaled from there, so
      the poster keeps its proportions on a phone and on a 4K monitor instead of
-     turning into a wall of type or a stamp in the corner. ]]
-local REFERENCE_HEIGHT = 900
-local MIN_SCALE = 0.62
-local MAX_SCALE = 1.35
+     turning into a wall of type or a stamp in the corner. The menu keeps its own
+     layer list — it has several, and they fade independently — but the FACTOR
+     comes from UITheme so the menu and the HUD are never drawn at two different
+     sizes across the same transition. ]]
 
 --[[ Not fully opaque: the blurred world stays faintly visible behind the black,
      which is the difference between a menu that sits in front of the game and a
@@ -1755,7 +1754,7 @@ local function refreshScale()
 		return
 	end
 
-	local factor = math.clamp(height / REFERENCE_HEIGHT, MIN_SCALE, MAX_SCALE)
+	local factor = UITheme.scaleFor(height)
 	local inverse = UDim2.fromScale(1 / factor, 1 / factor)
 	for _, layer in layers do
 		layer.scale.Scale = factor

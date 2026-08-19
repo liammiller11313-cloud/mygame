@@ -201,11 +201,55 @@ UITheme.DisplayOrder = table.freeze({
 	Vignette = 5,
 	Hud = 10,
 	Crosshair = 15,
+	-- One above the crosshair rather than level with it. Two ScreenGuis on the
+	-- same DisplayOrder fall back to sibling order, which is creation order,
+	-- which is boot order — and a hit confirmation that sometimes draws under
+	-- the reticle is worse than one that never does.
+	Hitmarker = 16,
 	Prompt = 20,
 	Subtitle = 25,
 	Overlay = 40, -- incap / death / chapter cards
+
+	--[[ The three layers above the game, in the order they have to cover each
+	     other. The menu covers the HUD and the end-of-round card; the map vote
+	     covers the menu, because the vote runs UNDERNEATH the scoreboard in time
+	     and the scoreboard draws a near-opaque scrim over the whole screen — a
+	     vote nobody can see is a vote nobody casts; and the fade covers
+	     everything, because a teleport has to end on black. ]]
+	Menu = 80,
+	Vote = 85,
 	Fade = 90,
 })
+
+--[[
+	Resolution independence, as one number.
+
+	Every pixel offset in this interface was chosen against a 900px-tall
+	viewport. Left alone that is a wall of type on a phone and a postage stamp
+	on a 4K display, so anything laying out in offsets carries a UIScale driven
+	by this. Clamped at both ends deliberately: below Min the type stops being
+	legible at all, and above Max the HUD starts eating the play space, which on
+	a big display is the whole reason you bought the display.
+
+	Client/UI/ScaleLayer is the machinery; this is the contract it and the main
+	menu share, so two independently built layers land on the same factor.
+]]
+UITheme.Scale = table.freeze({
+	ReferenceHeight = 900,
+	Min = 0.62,
+	Max = 1.35,
+})
+
+--[[ The scale factor for a viewport height. A height of zero means the camera
+     has not resolved yet, which happens for a frame or two at boot; it returns
+     1 rather than dividing into nonsense, and the real value arrives with the
+     next ViewportSize change. ]]
+function UITheme.scaleFor(viewportHeight: number): number
+	if viewportHeight <= 0 then
+		return 1
+	end
+	return math.clamp(viewportHeight / UITheme.Scale.ReferenceHeight, UITheme.Scale.Min, UITheme.Scale.Max)
+end
 
 --[[ Health colour across the bar's range. Deliberately non-linear: it holds
      white all the way down to 60% so that the first hint of orange genuinely

@@ -22,11 +22,30 @@
 	about what is really there.
 
 	── WHERE THE DATA COMES FROM ───────────────────────────────────────────────
-	Everything is attributes and their changed signals. Nothing here polls a
-	value, and nothing here asks a service for state it could read off a Player.
-	Attributes replicate on write, so a HUD driven by them costs zero bandwidth
-	while nothing is happening, which during a breather and most of a wave is
-	most of the time.
+	Attributes and their changed signals, with one exception. Nothing here polls
+	a value, and nothing here asks a service for state it could read off a
+	Player. Attributes replicate on write, so a HUD driven by them costs zero
+	bandwidth while nothing is happening, which during a breather and most of a
+	wave is most of the time.
+
+	The exception is the magazine of the gun actually in the player's hands.
+	WeaponController predicts that count down on the frame the trigger goes and
+	reconciles itself against the server afterwards; the attribute only moves
+	once the server has answered. Drawing the attribute would put the one number
+	that has to change at the same instant as the muzzle flash a full round trip
+	behind it. So the counter and the hotbar ask WeaponController for the held
+	slot and repaint on its ammoChanged, and everything else — every other slot,
+	every other player, the reserve for a gun that is stowed — still comes from
+	attributes. Note that this is invisible in Studio: a local server has no
+	round trip, so the attribute-only version looked perfect right up until it
+	shipped.
+
+	── EVERYTHING IS DRAWN IN REFERENCE PIXELS ─────────────────────────────────
+	Every offset in this file is chosen against a 900px-tall viewport and drawn
+	inside a ScaleLayer, so it holds its proportions from a phone to a 4K
+	display. Parent new elements to `root`, never to `gui`. The pixel inset
+	WaveController pushes in through setTopInset is in the same space, which is
+	the only reason the two agree about where the top of the screen ends.
 
 	── PERFORMANCE ─────────────────────────────────────────────────────────────
 	One RenderStepped connection for the entire HUD. Bars chase their targets in
@@ -52,6 +71,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
+
+local ScaleLayer = require(script.Parent.ScaleLayer)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -145,6 +166,11 @@ local player = Players.LocalPlayer
 local trove = Trove.new()
 
 local gui: ScreenGui
+--[[ Everything the HUD draws hangs off this, not off the ScreenGui. It is the
+     viewport scale layer: the whole HUD is laid out in 900px-tall reference
+     pixels and the layer is what turns those into the player's actual screen.
+     See Client/UI/ScaleLayer. ]]
+local root: Frame
 local panelHolder: Frame
 local ammo: {
 	panel: Frame,
@@ -152,8 +178,24 @@ local ammo: {
 	mag: TextLabel,
 	reserve: TextLabel,
 	reloading: TextLabel,
+	reloadBar: Frame,
+	reloadFill: Frame,
 }
-local itemSlots: { [string]: { frame: Frame, key: TextLabel, label: TextLabel, stroke: UIStroke } } = {}
+--[[ Kept exhaustive on purpose. An entry that carries a field this type does
+     not mention is a field refreshItems can silently read as nil, which is
+     precisely how the ammo counts froze once already. ]]
+local itemSlots: {
+	[string]: {
+		frame: Frame,
+		key: TextLabel,
+		title: TextLabel,
+		label: TextLabel,
+		count: TextLabel,
+		marker: Frame,
+		stroke: UIStroke,
+	},
+} =
+	{}
 local objective: { frame: Frame, label: TextLabel, bar: Frame, fill: Frame }
 local killFeedHolder: Frame
 
@@ -169,6 +211,10 @@ local state = {
 	visible = true,
 	cinematic = false,
 	reloading = false,
+	--[[ An empty gun is not the same message as a nearly-empty one, and at a
+	     glance a red 0 and a red 3 look identical. The zero pulses; the low
+	     count sits still. Set by refreshAmmo, read by the frame loop. ]]
+	ammoEmpty = false,
 	objectiveText = "",
 	-- How much of the top of the screen WaveController has claimed. Pushed in
 	-- rather than read, so the HUD needs to know nothing about waves.
@@ -527,11 +573,57 @@ end
 
 -- ── ammo ────────────────────────────────────────────────────────────────────
 
+--[[
+	The held weapon's live magazine and reserve, or nil if WeaponController is
+	not holding this slot.
+
+	WeaponController drops the count on the frame the trigger goes and reconciles
+	itself against the server afterwards; the attributes only move once the
+	server has answered. Reading the attribute for the gun in your hands puts the
+	one number that has to change at the same instant as the muzzle flash a full
+	round trip behind it — which is the whole thing prediction exists to prevent,
+	and it is invisible in Studio because a local server has no round trip.
+
+	Only ever asked about the slot it says it is holding. Every other slot still
+	comes from attributes, which is the only truth for a gun that is not in hand.
+]]
+local function predictedAmmo(slot: string): (string?, number, number)
+	if not WEAPON_SLOTS[slot] then
+		return nil, 0, 0
+	end
+	local weapons = Registry.find("WeaponController")
+	if not weapons or typeof(weapons.getAmmo) ~= "function" then
+		return nil, 0, 0
+	end
+
+	local ok, held = pcall(weapons.getActiveSlot, weapons)
+	if not ok or held ~= slot then
+		return nil, 0, 0
+	end
+
+	local idOk, id = pcall(weapons.getWeaponId, weapons)
+	if not idOk or typeof(id) ~= "string" or id == "" then
+		return nil, 0, 0
+	end
+
+	local ammoOk, magazine, reserve = pcall(weapons.getAmmo, weapons)
+	if not ammoOk or typeof(magazine) ~= "number" or typeof(reserve) ~= "number" then
+		return nil, 0, 0
+	end
+	return id, magazine, reserve
+end
+
 --[[ Which weapon the counter is describing, straight off the loadout
      attributes. Returns a reserve of -1 for "infinite", which is what a pistol
      carries and what the counter draws as a dash rather than a number. ]]
 local function activeWeapon(): (string, number, number)
 	local slot = Attributes.get(player, LA.ActiveSlot, SLOT.Primary)
+
+	local liveId, liveMagazine, liveReserve = predictedAmmo(slot)
+	if liveId then
+		return liveId, liveMagazine, liveReserve
+	end
+
 	if slot == SLOT.Secondary then
 		local id = Attributes.get(player, LA.SecondaryId, "")
 		local definition = WeaponConfig.get(id)
@@ -568,7 +660,10 @@ local function refreshAmmo()
 		ammo.name.Text = itemLabel(itemId)
 		ammo.mag.Text = if itemId ~= "" then "1" else "—"
 		ammo.mag.TextColor3 = COLOR.TextPrimary
+		ammo.mag.TextTransparency = 0
 		ammo.reserve.Text = ""
+		ammo.reserve.TextColor3 = COLOR.TextSecondary
+		state.ammoEmpty = false
 		ammo.panel.Visible = true
 		return
 	end
@@ -580,7 +675,10 @@ local function refreshAmmo()
 		-- Melee. No magazine to count, and a "0" here would read as empty.
 		ammo.mag.Text = "—"
 		ammo.mag.TextColor3 = COLOR.TextPrimary
+		ammo.mag.TextTransparency = 0
 		ammo.reserve.Text = ""
+		ammo.reserve.TextColor3 = COLOR.TextSecondary
+		state.ammoEmpty = false
 		return
 	end
 
@@ -588,7 +686,20 @@ local function refreshAmmo()
 	ammo.mag.TextColor3 = if magazine <= math.max(definition.magSize * LOW_AMMO_FRACTION, 1)
 		then COLOR.Danger
 		else COLOR.TextPrimary
+
+	--[[ Only pulses while the gun is genuinely dry and nobody is fixing it. A
+	     zero that is already being reloaded is not news, and a counter flashing
+	     through every reload would be the HUD crying wolf sixty times a round. ]]
+	state.ammoEmpty = magazine <= 0 and not state.reloading
+	if not state.ammoEmpty then
+		ammo.mag.TextTransparency = 0
+	end
+
 	ammo.reserve.Text = if reserve < 0 then "/ ∞" else "/ " .. tostring(reserve)
+	--[[ Out of reserve is a different problem from out of magazine: it is the one
+	     the ammo crates exist to solve, and it is the only reason to break off
+	     and go looking for one. It gets its own red. ]]
+	ammo.reserve.TextColor3 = if reserve == 0 then COLOR.Danger else COLOR.TextSecondary
 end
 
 --[[
@@ -634,8 +745,9 @@ end
 
 --[[
 	Draws the hotbar. Weapon slots show what is loaded; item slots show what is
-	carried. Everything is read from attributes, so this runs on change rather
-	than on a timer, and the only thing that animates is the pickup flash.
+	carried. Read from attributes — except the gun actually in hand, whose count
+	comes from WeaponController's prediction — so this runs on change rather than
+	on a timer, and the only thing that animates is the pickup flash.
 ]]
 local function refreshItems()
 	local active = Attributes.get(player, LA.ActiveSlot, SLOT.Primary)
@@ -650,17 +762,26 @@ local function refreshItems()
 		local itemId = ""
 		local countText = ""
 
+		--[[ Live for whichever gun is in hand, attributes for the other one. The
+		     hotbar sits directly under the big counter, and the two disagreeing
+		     by a round trip on every shot is more distracting than either being
+		     slightly late on its own. ]]
+		local liveId, liveMagazine, liveReserve = predictedAmmo(slot)
+
 		if slot == SLOT.Primary then
-			itemId = Attributes.get(player, LA.PrimaryId, "")
+			itemId = liveId or Attributes.get(player, LA.PrimaryId, "")
 			if itemId ~= "" then
-				countText = string.format(
-					"%d / %d",
-					Attributes.get(player, LA.PrimaryAmmo, 0),
-					Attributes.get(player, LA.PrimaryReserve, 0)
-				)
+				local magazine, reserve
+				if liveId then
+					magazine, reserve = liveMagazine, liveReserve
+				else
+					magazine = Attributes.get(player, LA.PrimaryAmmo, 0)
+					reserve = Attributes.get(player, LA.PrimaryReserve, 0)
+				end
+				countText = string.format("%d / %d", magazine, reserve)
 			end
 		elseif slot == SLOT.Secondary then
-			itemId = Attributes.get(player, LA.SecondaryId, "")
+			itemId = liveId or Attributes.get(player, LA.SecondaryId, "")
 			if itemId ~= "" then
 				local definition = WeaponConfig.get(itemId)
 				if definition and definition.magSize <= 0 then
@@ -669,7 +790,10 @@ local function refreshItems()
 				else
 					-- Sidearms have no finite reserve, and "15 / ∞" is noise:
 					-- the number that matters is what is in the gun.
-					countText = string.format("%d", Attributes.get(player, LA.SecondaryAmmo, 0))
+					local magazine = if liveId
+						then liveMagazine
+						else Attributes.get(player, LA.SecondaryAmmo, 0)
+					countText = string.format("%d", magazine)
 				end
 			end
 		elseif slot == SLOT.Throwable then
@@ -922,6 +1046,32 @@ local function update(dt: number)
 		ammo.reloading.TextTransparency = blink * 0.7
 	end
 
+	--[[ Asked rather than pushed: the reload clock lives in WeaponController and
+	     ticks every frame there anyway, so mirroring it into an attribute would
+	     be a second copy of a number that is already local. Missing controller,
+	     or a build where it predates getReloadProgress, just means no bar. ]]
+	local progress = -1
+	local weapons = Registry.find("WeaponController")
+	if weapons and typeof(weapons.getReloadProgress) == "function" then
+		local ok, value = pcall(weapons.getReloadProgress, weapons)
+		if ok and typeof(value) == "number" then
+			progress = value
+		end
+	end
+	if progress >= 0 then
+		ammo.reloadBar.Visible = true
+		ammo.reloadFill.Size = UDim2.new(progress, 0, 1, 0)
+	elseif ammo.reloadBar.Visible then
+		ammo.reloadBar.Visible = false
+		ammo.reloadFill.Size = UDim2.new(0, 0, 1, 0)
+	end
+
+	if state.ammoEmpty then
+		-- Slower than the RELOADING blink on purpose: the two are never up at
+		-- the same time, and matching rates would make them read as one effect.
+		ammo.mag.TextTransparency = (0.5 + 0.5 * math.sin(now * 5)) * 0.55
+	end
+
 	for index = #killFeed, 1, -1 do
 		local entry = killFeed[index]
 		entry.age += dt
@@ -938,7 +1088,7 @@ end
 -- ── build ───────────────────────────────────────────────────────────────────
 
 local function buildAmmo()
-	local panel = newFrame(gui, "Ammo", COLOR.Panel, 0.12)
+	local panel = newFrame(root, "Ammo", COLOR.Panel, 0.12)
 	panel.AnchorPoint = Vector2.new(1, 1)
 	-- Clear of the hotbar below it, which owns the bottom margin now.
 	panel.Position =
@@ -1002,7 +1152,30 @@ local function buildAmmo()
 	magazineBounds.MinTextSize = TEXT.Heading
 	magazineBounds.Parent = magazine
 
-	ammo = { panel = panel, name = name, mag = magazine, reserve = reserve, reloading = reloading }
+	--[[ A hairline across the bottom of the panel that fills over the reload.
+	     For a shell-fed gun it fills once per shell rather than once per reload,
+	     because a shotgun reload can be interrupted after any shell and a single
+	     bar spanning the whole thing would be promising something the gun does
+	     not owe. Hidden entirely when nothing is reloading — a permanently empty
+	     bar is furniture. ]]
+	local reloadBar = newFrame(panel, "ReloadTrack", COLOR.Border, 0.45)
+	reloadBar.AnchorPoint = Vector2.new(0.5, 1)
+	reloadBar.Position = UDim2.new(0.5, 0, 1, -2)
+	reloadBar.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, 2)
+	reloadBar.Visible = false
+
+	local reloadFill = newFrame(reloadBar, "Fill", COLOR.Accent)
+	reloadFill.Size = UDim2.new(0, 0, 1, 0)
+
+	ammo = {
+		panel = panel,
+		name = name,
+		mag = magazine,
+		reserve = reserve,
+		reloading = reloading,
+		reloadBar = reloadBar,
+		reloadFill = reloadFill,
+	}
 end
 
 local function buildItems()
@@ -1010,7 +1183,7 @@ local function buildItems()
 	     corner is where Left 4 Dead keeps everything about what you are holding,
 	     and keeping the count and the slots together means one glance answers
 	     both "what am I holding" and "what could I switch to". ]]
-	local holder = newFrame(gui, "Hotbar", COLOR.Panel, 1)
+	local holder = newFrame(root, "Hotbar", COLOR.Panel, 1)
 	holder.AnchorPoint = Vector2.new(1, 1)
 	holder.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 1, -LAYOUT.ScreenMargin)
 	holder.Size = UDim2.fromOffset(
@@ -1088,7 +1261,7 @@ local function buildItems()
 end
 
 local function buildObjective()
-	local frame = newFrame(gui, "Objective", COLOR.Panel, 1)
+	local frame = newFrame(root, "Objective", COLOR.Panel, 1)
 	frame.AnchorPoint = Vector2.new(0.5, 0)
 	frame.Position = UDim2.new(0.5, 0, 0, state.topInset)
 	frame.Size = UDim2.fromOffset(560, 28)
@@ -1122,7 +1295,9 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
-	panelHolder = newFrame(gui, "Survivors", COLOR.Panel, 1)
+	root = ScaleLayer.new(gui, "Scaled")
+
+	panelHolder = newFrame(root, "Survivors", COLOR.Panel, 1)
 	panelHolder.AnchorPoint = Vector2.new(0, 1)
 	panelHolder.Position = UDim2.new(0, LAYOUT.ScreenMargin, 1, -LAYOUT.ScreenMargin)
 	panelHolder.Size = UDim2.fromOffset(
@@ -1133,7 +1308,7 @@ local function build()
 	--[[ Fixed height and clipped, so no volume of kills can grow the feed down
 	     the side of the screen and into the play space. The rows it can hold are
 	     the rows that exist. ]]
-	killFeedHolder = newFrame(gui, "KillFeed", COLOR.Panel, 1)
+	killFeedHolder = newFrame(root, "KillFeed", COLOR.Panel, 1)
 	killFeedHolder.AnchorPoint = Vector2.new(1, 0)
 	killFeedHolder.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 0, LAYOUT.ScreenMargin)
 	killFeedHolder.Size = UDim2.fromOffset(KILLFEED_WIDTH, KILLFEED_HARD_MAX * KILLFEED_ROW_HEIGHT)
@@ -1306,6 +1481,38 @@ function HudController:start()
 	setObjective(Attributes.get(Workspace, GA.ObjectiveText, ""), nil)
 
 	trove:connect(Remotes.Event.KillFeed.OnClientEvent, pushKill)
+
+	--[[
+		The predicted half of the ammo counter.
+
+		WeaponController drops the count on the frame the trigger goes and fires
+		these; the attributes catch up a round trip later and refresh it again
+		through the subscriptions in init(). Both paths call the same two
+		functions, so a disagreement resolves the moment the server answers
+		rather than needing its own reconciliation here.
+
+		Connected defensively because WeaponController is the one controller the
+		HUD reaches for that can fail to load — its start() touches the network
+		manifest — and a HUD with a slightly late ammo count is worth far more
+		than no HUD at all.
+	]]
+	local weapons = Registry.find("WeaponController")
+	if weapons then
+		local function repaint()
+			refreshAmmo()
+			refreshItems()
+		end
+		if weapons.ammoChanged then
+			trove:connect(weapons.ammoChanged, repaint)
+		end
+		if weapons.weaponChanged then
+			trove:connect(weapons.weaponChanged, repaint)
+		end
+	else
+		warn(
+			"[HudController] WeaponController is missing; the ammo counter will lag the server by a round trip"
+		)
+	end
 
 	trove:connect(RunService.RenderStepped, update)
 end

@@ -45,6 +45,8 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ScaleLayer = require(script.Parent.ScaleLayer)
+
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
@@ -107,6 +109,10 @@ local player = Players.LocalPlayer
 local trove = Trove.new()
 
 local gui: ScreenGui
+--[[ The scaled content layer. It has to be the same one the HUD uses, because
+     getReservedTopHeight hands the HUD a pixel inset and both sides only agree
+     on what a pixel is while both are drawing in reference space. ]]
+local root: Frame
 local block: Frame
 local waveLabel: TextLabel
 local clockLabel: TextLabel
@@ -191,7 +197,7 @@ local CLOCK_HEIGHT = TEXT.Heading + 4
 local BLOCK_HEIGHT = LABEL_HEIGHT + CLOCK_HEIGHT + PIP_HEIGHT + LAYOUT.ElementGap * 2
 
 local function buildBlock()
-	block = newFrame(gui, "Round", COLOR.Panel, 1)
+	block = newFrame(root, "Round", COLOR.Panel, 1)
 	block.AnchorPoint = Vector2.new(0.5, 0)
 	block.Position = UDim2.new(0.5, 0, 0, LAYOUT.ScreenMargin)
 	block.Size = UDim2.fromOffset(BLOCK_WIDTH, BLOCK_HEIGHT)
@@ -233,7 +239,7 @@ end
 -- ── the countdown ───────────────────────────────────────────────────────────
 
 local function buildCallout()
-	callout = newFrame(gui, "Countdown", COLOR.Panel, 1)
+	callout = newFrame(root, "Countdown", COLOR.Panel, 1)
 	callout.AnchorPoint = Vector2.new(0.5, 0.5)
 	callout.Position = UDim2.fromScale(0.5, FOCUS_Y)
 	callout.Size = UDim2.new(1, 0, 0, TEXT.Title + TEXT.Small + LAYOUT.ElementGap)
@@ -255,7 +261,7 @@ end
 -- ── the announcement card ───────────────────────────────────────────────────
 
 local function buildCard()
-	card = newFrame(gui, "Announcement", COLOR.Panel, 1)
+	card = newFrame(root, "Announcement", COLOR.Panel, 1)
 	card.AnchorPoint = Vector2.new(0.5, 0.5)
 	card.Position = UDim2.fromScale(0.5, FOCUS_Y)
 	card.Size = UDim2.new(1, 0, 0, TEXT.Display + TEXT.Large + LAYOUT.ElementGap * 4)
@@ -311,6 +317,8 @@ local function build()
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
+
+	root = ScaleLayer.new(gui, "Scaled")
 
 	buildBlock()
 	buildCallout()
