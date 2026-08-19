@@ -586,22 +586,29 @@ end
 -- ── arms ────────────────────────────────────────────────────────────────────
 
 --[[
-	First-person arms.
+	First-person arms, cloned from the player's own avatar.
 
-	Until now the player saw a gun floating in front of them with nothing holding
-	it, which is the single biggest tell that a Roblox shooter is a Roblox
-	shooter. Two arms fix most of that for eight parts.
+	These are the ACTUAL arm parts off the local character, not stand-ins: the
+	same mesh, the same skin tone, the same shirt texture, the same accessories
+	if any are welded to them. That is the whole point — a player should see their
+	own hands, and a generic pair of blocks in front of a customised avatar reads
+	as somebody else's arms.
 
 	They are built as CHILDREN OF THE WEAPON MODEL rather than posed separately.
-	That is what makes them free: the weapon is already moved once per frame with
+	That is what makes them cheap: the weapon is already moved once per frame with
 	one PivotTo, and anything parented into it inherits every bit of the sway,
 	bob, recoil kick and aim transition without a second line of maths. It also
 	makes them correct by construction — hands welded to a gun cannot drift off
 	it, which is exactly the failure mode of arms driven by their own IK.
 
+	R6 and R15 both work and are handled separately, because they are genuinely
+	different problems: R6 has one part per arm, so the whole limb is a single
+	rigid piece placed at the grip. R15 has three (upper, lower, hand) and they
+	are chained so the arm bends at the elbow.
+
 	The shoulder end runs off the bottom of the frame on purpose. Nobody sees an
-	elbow in a first-person shooter, and pretending to solve one costs geometry
-	for something the player will never look at.
+	elbow in a first-person shooter, and solving for one costs geometry for
+	something the player will never look at.
 ]]
 
 -- Where the hands sit on the weapon, as fractions of its own bounding box, so
@@ -611,111 +618,143 @@ local GRIP_DROP = 0.34 -- below the bore line: a grip hangs under the receiver
 local SUPPORT_FORWARD = 0.28 -- the off hand, forward along the handguard
 local SUPPORT_DROP = 0.22
 
--- How far the forearms run back toward the camera, and in which direction. The
--- right arm comes in tighter than the left because the shooting hand is behind
--- the gun while the support hand reaches across for it.
-local FOREARM_LENGTH = 1.45
+-- Which way each arm runs back toward the camera. The right arm comes in tighter
+-- than the left because the shooting hand sits behind the gun while the support
+-- hand reaches across for it.
 local RIGHT_RUN = Vector3.new(0.42, -0.34, 1.0)
 local LEFT_RUN = Vector3.new(-0.58, -0.30, 1.0)
 
-local HAND_SIZE = Vector3.new(0.30, 0.30, 0.34)
-local FOREARM_THICKNESS = 0.27
+-- Fallback geometry, used only when the character has no arm to clone — which
+-- happens for exactly as long as it takes an avatar to load.
+local FALLBACK_HAND = Vector3.new(0.30, 0.30, 0.34)
+local FALLBACK_THICKNESS = 0.27
+local FALLBACK_LENGTH = 1.45
+local FALLBACK_SKIN = Color3.fromRGB(198, 158, 122)
+local FALLBACK_SLEEVE = Color3.fromRGB(64, 62, 58)
 
---[[ Jacket colours, indexed the same way the survivor outlines are, so the
-     sleeve a player sees on their own arms matches the silhouette their
-     teammates see through a wall. Muted: this is clothing seen at arm's length
-     under a muzzle flash, not a team indicator. ]]
-local SLEEVE_COLORS = {
-	Color3.fromRGB(84, 62, 40),
-	Color3.fromRGB(58, 60, 64),
-	Color3.fromRGB(54, 66, 52),
-	Color3.fromRGB(76, 48, 48),
-}
-local DEFAULT_SKIN = Color3.fromRGB(198, 158, 122)
+--[[ R15 arm chain, shoulder outward. Cloning the whole chain is what lets the
+     arm bend rather than being one rigid stick. ]]
+local R15_RIGHT = { "RightUpperArm", "RightLowerArm", "RightHand" }
+local R15_LEFT = { "LeftUpperArm", "LeftLowerArm", "LeftHand" }
 
---[[ Reads the player's real skin tone off their own character so the hands in
-     front of them are theirs. Falls back rather than yielding: this runs during
-     a weapon swap and a HumanoidDescription fetch would stall the swap. ]]
-local function skinTone(): Color3
-	local character = player.Character
-	if character then
-		for _, name in { "RightHand", "Right Arm", "LeftHand", "Left Arm", "Head" } do
-			local part = character:FindFirstChild(name)
-			if part and part:IsA("BasePart") then
-				return part.Color
-			end
+--[[ Strips a cloned avatar part down to something safe to weld onto a viewmodel:
+     no physics, no queries, no scripts that came in on an accessory. ]]
+local function prepareArmPart(part: BasePart)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Massless = true
+	for _, descendant in part:GetDescendants() do
+		if descendant:IsA("LuaSourceContainer") or descendant:IsA("Motor6D") or descendant:IsA("Weld") then
+			descendant:Destroy()
 		end
 	end
-	return DEFAULT_SKIN
 end
 
-local function sleeveColor(): Color3
-	local index = 1
-	local hud = Registry.find("HudController")
-	if hud and typeof(hud.getSurvivorIndex) == "function" then
-		local ok, value = pcall(function()
-			return hud:getSurvivorIndex(player)
-		end)
-		if ok and typeof(value) == "number" then
-			index = value
-		end
+--[[ Clones one avatar part by name, or nil when the character has not loaded it
+     yet. Everything about the original is kept: mesh, texture, colour, size. ]]
+local function cloneAvatarPart(character: Model?, name: string): BasePart?
+	if not character then
+		return nil
 	end
-	return SLEEVE_COLORS[((index - 1) % #SLEEVE_COLORS) + 1]
+	local source = character:FindFirstChild(name)
+	if not source or not source:IsA("BasePart") then
+		return nil
+	end
+	local clone = source:Clone()
+	prepareArmPart(clone)
+	return clone
 end
 
---[[ One arm: a hand at the weapon, and a forearm running away from it. Both are
-     welded into the model's frame at build time and never touched again. ]]
-local function buildArm(
+--[[
+	Places one arm.
+
+	`handAt` is where the hand goes, in the weapon's own frame. `run` is the
+	direction the rest of the arm travels away from it. The chain is laid out by
+	walking outward from the hand, each segment placed end to end, so an R15 arm
+	comes out bent at roughly the angle a real one would be.
+]]
+local function buildAvatarArm(
 	built: Model,
+	character: Model?,
 	origin: CFrame,
 	handAt: Vector3,
 	run: Vector3,
-	skin: Color3,
-	sleeve: Color3
+	chain: { string },
+	r6Name: string
 )
-	local direction = run.Unit
+	local direction = origin:VectorToWorldSpace(run.Unit)
 	local handWorld = origin * CFrame.new(handAt)
 
+	-- R15 first: three parts, hand at the weapon, upper arm furthest away.
+	local parts: { BasePart } = {}
+	for index = #chain, 1, -1 do
+		local part = cloneAvatarPart(character, chain[index])
+		if part then
+			table.insert(parts, part)
+		end
+	end
+
+	if #parts > 0 then
+		local cursor = 0
+		-- parts[1] is the hand; each subsequent segment is pushed further back
+		-- along `direction` by its own length.
+		for _, part in parts do
+			local length = math.max(part.Size.Y, part.Size.Z, 0.2)
+			local centre = handWorld.Position + direction * (cursor + length * 0.5)
+			-- Limb meshes are authored along their own Y axis, so the arm is
+			-- aimed by pointing that axis down the run direction.
+			part.CFrame = CFrame.lookAt(centre, centre + direction) * CFrame.Angles(math.pi / 2, 0, 0)
+			part.Parent = built
+			cursor += length * 0.92 -- slight overlap, so there is no seam at a joint
+		end
+		return
+	end
+
+	-- R6: one part for the entire arm, placed so its lower end is at the grip.
+	local single = cloneAvatarPart(character, r6Name)
+	if single then
+		local length = math.max(single.Size.Y, 0.4)
+		local centre = handWorld.Position + direction * (length * 0.42)
+		single.CFrame = CFrame.lookAt(centre, centre + direction) * CFrame.Angles(math.pi / 2, 0, 0)
+		single.Parent = built
+		return
+	end
+
+	--[[ Nothing to clone. This is the window between spawning and the avatar
+	     replicating, and it is short — but a weapon floating with no hands at all
+	     during it looks far worse than a plain pair, so one is built. ]]
 	local hand = Instance.new("Part")
 	hand.Name = "FL_Hand"
-	hand.Size = HAND_SIZE
-	hand.Color = skin
+	hand.Size = FALLBACK_HAND
+	hand.Color = FALLBACK_SKIN
 	hand.Material = Enum.Material.SmoothPlastic
-	hand.Anchored = true
-	hand.CanCollide = false
-	hand.CanQuery = false
-	hand.CanTouch = false
-	hand.CastShadow = false
+	prepareArmPart(hand)
 	hand.CFrame = handWorld
 	hand.Parent = built
 
-	-- The forearm starts inside the hand and runs backwards, so there is no seam
-	-- at the wrist however the weapon is angled.
-	local mid = handWorld.Position + origin:VectorToWorldSpace(direction) * (FOREARM_LENGTH * 0.5 - 0.1)
-
+	local mid = handWorld.Position + direction * (FALLBACK_LENGTH * 0.5 - 0.1)
 	local forearm = Instance.new("Part")
 	forearm.Name = "FL_Forearm"
-	forearm.Size = Vector3.new(FOREARM_THICKNESS, FOREARM_THICKNESS, FOREARM_LENGTH)
-	forearm.Color = sleeve
+	forearm.Size = Vector3.new(FALLBACK_THICKNESS, FALLBACK_THICKNESS, FALLBACK_LENGTH)
+	forearm.Color = FALLBACK_SLEEVE
 	forearm.Material = Enum.Material.Fabric
-	forearm.Anchored = true
-	forearm.CanCollide = false
-	forearm.CanQuery = false
-	forearm.CanTouch = false
-	forearm.CastShadow = false
-	forearm.CFrame = CFrame.lookAt(mid, mid + origin:VectorToWorldSpace(direction))
+	prepareArmPart(forearm)
+	forearm.CFrame = CFrame.lookAt(mid, mid + direction)
 	forearm.Parent = built
 end
 
 --[[
 	Places both arms on a built weapon.
 
-	`support` is skipped for a pistol and a revolver: a one-handed grip with a
-	second hand floating under the barrel looks far worse than no second hand,
-	and the whole point of a sidearm silhouette is that it is held in one.
+	The support hand is skipped for a pistol: a one-handed grip with a second hand
+	floating under the barrel looks far worse than no second hand, and the whole
+	point of a sidearm silhouette is that it is held in one.
 ]]
 local function buildArms(built: Model, definition: any)
-	local ok, boxCFrame, size = pcall(function()
+	local ok, _, size = pcall(function()
 		return built:GetBoundingBox()
 	end)
 	if not ok or not size then
@@ -726,24 +765,31 @@ local function buildArms(built: Model, definition: any)
 	-- Weapons point down -Z, so +Z is toward the shooter.
 	local depth = math.max(size.Z, 0.4)
 	local drop = math.max(size.Y, 0.25)
+	local character = player.Character
 
-	local skin = skinTone()
-	local sleeve = sleeveColor()
+	buildAvatarArm(
+		built,
+		character,
+		origin,
+		Vector3.new(0.02, -drop * GRIP_DROP, depth * GRIP_BACK),
+		RIGHT_RUN,
+		R15_RIGHT,
+		"Right Arm"
+	)
 
-	buildArm(built, origin, Vector3.new(0.02, -drop * GRIP_DROP, depth * GRIP_BACK), RIGHT_RUN, skin, sleeve)
-
-	local class = definition and definition.class
-	local oneHanded = class == "Pistol"
-	if not oneHanded then
-		buildArm(
-			built,
-			origin,
-			Vector3.new(-0.04, -drop * SUPPORT_DROP, -depth * SUPPORT_FORWARD),
-			LEFT_RUN,
-			skin,
-			sleeve
-		)
+	if definition and definition.class == "Pistol" then
+		return
 	end
+
+	buildAvatarArm(
+		built,
+		character,
+		origin,
+		Vector3.new(-0.04, -drop * SUPPORT_DROP, -depth * SUPPORT_FORWARD),
+		LEFT_RUN,
+		R15_LEFT,
+		"Left Arm"
+	)
 end
 
 --[[ Every model gets a Muzzle. When the art did not ship one it is invented at
@@ -1526,6 +1572,29 @@ end
 
 function ViewmodelController:start()
 	refreshHidden()
+
+	--[[ The arms are clones of the avatar, so a respawn invalidates them: the
+	     character they came from no longer exists. Rebuilding the weapon is the
+	     simplest correct answer and costs one model swap on a respawn, which is
+	     already the most expensive frame in the round.
+
+	     Waiting on the parts matters as much as the event does. CharacterAdded
+	     fires before limbs replicate, and building at that instant would clone
+	     nothing and fall through to the plain fallback hands for the rest of the
+	     life — so this waits for an arm to actually exist first. ]]
+	trove:connect(player.CharacterAdded, function(character)
+		task.spawn(function()
+			local arm = character:WaitForChild("RightHand", 5) or character:WaitForChild("Right Arm", 5)
+			if not arm then
+				return
+			end
+			local weaponId, definition = current.weaponId, current.definition
+			if weaponId and model then
+				current.weaponId = nil
+				ViewmodelController:setWeapon(weaponId, definition)
+			end
+		end)
+	end)
 
 	RunService:BindToRenderStep(RENDER_NAME, RENDER_PRIORITY, update)
 	trove:add(function()
