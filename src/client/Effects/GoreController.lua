@@ -59,6 +59,10 @@ local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local Registry = require(Shared.Util.Registry)
+
+--[[ For the screen-blood droplets: they lay out in offsets, so they have to be
+     sized in the same reference pixels the rest of the interface uses. ]]
+local ScaleLayer = require(script.Parent.Parent.UI.ScaleLayer)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
@@ -847,7 +851,13 @@ local function spawnDroplets(count: number)
 	for _ = 1, count do
 		dropletCursor = (dropletCursor % #droplets) + 1
 		local entry = droplets[dropletCursor]
-		local size = random:NextNumber(18, 56)
+		--[[ Sized in REFERENCE pixels, like everything else that lays out in
+		     offsets. Raw pixels made a droplet cover three times as much of a
+		     phone as of a desktop — 14% of a handset's height at the top of the
+		     range against 5% at 1080p — so being hit on mobile blacked out the
+		     screen in a way it never did anywhere else. ]]
+		local scale = ScaleLayer.getFactor()
+		local size = random:NextNumber(18, 56) * scale
 		entry.frame.Size = UDim2.fromOffset(size, size * random:NextNumber(0.5, 1.15))
 		entry.frame.Position = UDim2.fromScale(random:NextNumber(0.04, 0.96), random:NextNumber(0.04, 0.96))
 		entry.frame.Rotation = random:NextNumber(0, 180)

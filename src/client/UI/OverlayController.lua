@@ -666,7 +666,13 @@ local function spawnDroplets(count: number)
 		local entry = droplets[dropletCursor]
 		dropletCursor = (dropletCursor % #droplets) + 1
 
-		local size = random:NextNumber(16, 54)
+		--[[ Sized in REFERENCE pixels, like everything else that lays out in
+		     offsets. Raw pixels made a droplet cover three times as much of a
+		     phone as of a desktop — 14% of a handset's height at the top of the
+		     range against 5% at 1080p — so being hit on mobile blacked out the
+		     screen in a way it never did anywhere else. ]]
+		local scale = ScaleLayer.getFactor()
+		local size = random:NextNumber(16, 54) * scale
 		entry.frame.Size = UDim2.fromOffset(size, size * random:NextNumber(0.5, 1.1))
 		entry.frame.Position = UDim2.fromScale(random:NextNumber(0.04, 0.96), random:NextNumber(0.04, 0.96))
 		entry.frame.Rotation = random:NextNumber(0, 180)

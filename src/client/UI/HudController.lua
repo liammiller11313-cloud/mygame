@@ -1010,13 +1010,32 @@ local function bindItemKeys()
 	state.touch = touch
 	applyTouchLayout()
 
+	--[[ The button that swaps between the two weapon slots. On a controller
+	     neither of them has a D-pad direction of its own — all four are spent on
+	     the consumables, which is what makes the layout complete — so both would
+	     otherwise show a blank glyph and read as unreachable when they are one
+	     press away. ]]
+	local cycleGlyph = ""
+	if scheme == "Gamepad" then
+		for _, binding in bindings do
+			if binding.action == "CycleWeapon" then
+				cycleGlyph = keyGlyph(binding.keys, scheme)
+				break
+			end
+		end
+	end
+
 	for _, binding in bindings do
 		local entry = binding.slot and itemSlots[binding.slot]
 		if entry then
 			--[[ Nothing to press on a touchscreen, because the slot IS the
 			     button. A key glyph there would be instructions for hardware the
 			     player does not have. ]]
-			entry.key.Text = if touch then "" else keyGlyph(binding.keys, scheme)
+			local glyph = if touch then "" else keyGlyph(binding.keys, scheme)
+			if glyph == "" and WEAPON_SLOTS[binding.slot] then
+				glyph = cycleGlyph
+			end
+			entry.key.Text = glyph
 			-- Inert on desktop and console, so it can never swallow a click.
 			entry.tap.Active = touch
 		end

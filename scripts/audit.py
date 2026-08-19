@@ -419,6 +419,43 @@ for p, text in sources.items():
                 break
 
 
+# ── 9e. A style table missing a field its applier reads ─────────────────────
+# The bug this exists for: GoreController's STYLES holds one entry per look and
+# applyStyle copies every field of it onto an emitter. Add a field to one entry
+# and forget the other, and the effect works everywhere except the one case that
+# uses the other style — a Char burst that only happens when something burns.
+# Silent, rare, and exactly the shape that reaches players.
+#
+# Generalises to any `local NAME = { A = { ... }, B = { ... } }` whose sibling
+# entries are meant to be interchangeable: they must all carry the same keys.
+for p, text in sources.items():
+    for table_match in re.finditer(
+        r'local ([A-Z][A-Z_]*) = \{\n(.*?)\n\}\n', text, re.S
+    ):
+        name, block = table_match.group(1), table_match.group(2)
+        entries = {}
+        for m in re.finditer(r'\n\t(\w+) = \{(.*?)\n\t\},', "\n" + block, re.S):
+            keys = set(re.findall(r'\n\t\t(\w+) = ', m.group(2)))
+            if keys:
+                entries[m.group(1)] = keys
+        if len(entries) < 2:
+            continue
+        union = set()
+        for keys in entries.values():
+            union |= keys
+        for entry, keys in sorted(entries.items()):
+            gap = union - keys
+            # Only complain when an entry is nearly complete. Two tables that
+            # share three keys out of thirty are not siblings, they just live in
+            # the same variable.
+            if gap and len(keys) >= len(union) * 0.6:
+                problems.append(
+                    f"{rel(p)}:{lineno(text, table_match.start())}  {name}.{entry} is missing "
+                    f"{', '.join(sorted(gap))} — its siblings define them, so whatever reads this "
+                    f"table gets nil for that entry"
+                )
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no
