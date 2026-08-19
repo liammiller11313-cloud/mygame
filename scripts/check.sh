@@ -54,3 +54,19 @@ if command -v python3 >/dev/null 2>&1 && [ -f scripts/audit.py ]; then
   echo
   python3 scripts/audit.py || exit 1
 fi
+
+# The economy is a set of numbers that only mean something together: change a
+# payout without changing prices and the whole progression moves. economy.py
+# models a round from the real config and fails when the pacing has drifted out
+# of the band EconomyConfig's header promises.
+if command -v python3 >/dev/null 2>&1 && [ -f scripts/economy.py ]; then
+  if ! python3 scripts/economy.py --check > /tmp/fl_economy.$$ 2>&1; then
+    echo
+    tail -n 20 /tmp/fl_economy.$$ >&2
+    rm -f /tmp/fl_economy.$$
+    exit 1
+  fi
+  rm -f /tmp/fl_economy.$$
+  echo
+  echo "economy pacing within target"
+fi

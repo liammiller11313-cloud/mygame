@@ -88,6 +88,29 @@ local EVENTS: { string } = {
 	"RequestInfectedSpawn", -- C->S (kind: string) — versus class pick
 	"InfectedSpawnOptions", -- {kinds: {string}, respawnAt: number}
 
+	-- ── Economy, the shop and loadouts ──────────────────────────────────────
+	--[[ Balance rides Attributes.Player.Dollars, not a remote — see the header
+	     of Shared/Net/Attributes. These carry the things balance cannot: what
+	     you own, what you tried to buy, and what happened. ]]
+	"PurchaseItem", -- C->S (itemId: string)
+	"PurchaseResult", -- {itemId, ok: boolean, reason: string, price: number?}
+	--[[ The whole profile, once, when it has finished loading, and again after
+	     anything changes it. One event rather than four because the shop and the
+	     loadout screen both need all of it and a partial profile is a screen
+	     that draws half a truth. ]]
+	"ProfileSynced", -- {dollars, owned: {[id]: true}, loadouts: {...}, active: number}
+	--[[ The client asking for that push. A profile can finish loading before the
+	     client has finished booting, in which case the sync fired into a listener
+	     that did not exist yet — so the client asks once when it is ready rather
+	     than hoping it was listening. ]]
+	"RequestProfile", -- C->S ()
+	"SetLoadout", -- C->S {index: number, slots: {[slot]: weaponId}}
+	"SetActiveLoadout", -- C->S (index: number)
+	--[[ What a round paid, itemised, for the end-of-round screen. Sent once at
+	     the end rather than accumulated on the client, because the client cannot
+	     see the bonus arithmetic and should not be inventing it. ]]
+	"RoundPayout", -- {kills, bonus, waves, total, balance}
+
 	-- ── Maps, crates and the map vote ───────────────────────────────────────
 	"MapVoteStarted", -- {options: {{id, displayName, blurb}}, endsAt: number}
 	"CastMapVote", -- C->S (mapId: string)

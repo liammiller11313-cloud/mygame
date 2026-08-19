@@ -37,6 +37,17 @@ Attributes.Player = table.freeze({
 	     be able to say so, and because a setting the team can see is a setting
 	     nobody can quietly abuse. ]]
 	Difficulty = "FL_Difficulty", -- string, a key of SettingsConfig.Difficulty
+	--[[ Dollars. An attribute rather than a remote because it moves on every
+	     kill — three hundred times a round — and because the client can read
+	     the earning off the DELTA, which is a "+$4" popup for no network cost
+	     at all. Public, like everything on a Player: a teammate seeing your
+	     balance costs nothing and the end-of-round screen wants it. ]]
+	Dollars = "FL_Dollars", -- number, server-owned, see EconomyService
+	--[[ Whether this player's profile has finished loading. Nothing may spend,
+	     equip or save until it has: a DataStore read takes a moment and a
+	     purchase made against an empty profile would be a purchase made
+	     against somebody's real balance a second later. ]]
+	ProfileReady = "FL_ProfileReady", -- boolean
 })
 
 -- Written on the Player instance, read by the ammo counter.

@@ -108,6 +108,12 @@ local MODULES = {
 	"Assets/AmmoFactory",
 	"Level/LevelService",
 	"Level/AmmoCrateService",
+	--[[ Before anything that reads what a player owns. ProfileService is the only
+	     thing in the game that persists, and a purchase or a spawn that happened
+	     before it finished loading would be made against an empty profile. ]]
+	"Economy/ProfileService",
+	"Economy/EconomyService",
+	"Survivors/LoadoutService",
 	"Survivors/SurvivorService",
 	"Survivors/InventoryService",
 	-- Both listen to InventoryService's signals, so they load after it. MedkitService

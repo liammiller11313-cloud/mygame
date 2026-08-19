@@ -300,9 +300,34 @@ function InventoryService:giveItem(player: Player, slot: string, itemId: string)
 	return true
 end
 
+--[[
+	What a survivor spawns holding.
+
+	Asks LoadoutService, which reads the player's saved active loadout out of
+	their profile. The constants above are the fallback and stay the fallback:
+	a profile that has not loaded, a service that is not registered, or a
+	loadout that sanitised to nothing all end here holding the same UMP-45 and
+	M1911 the game has always started people with.
+
+	The secondary is granted FIRST and the primary second, which is not
+	arbitrary — `setActiveSlot` below selects the primary, and granting in this
+	order means the last thing to touch the inventory is the thing the player
+	will be looking at.
+]]
 function InventoryService:giveStartingLoadout(player: Player)
-	self:giveWeapon(player, STARTING_SECONDARY)
-	self:giveWeapon(player, STARTING_PRIMARY)
+	local primary, secondary = STARTING_PRIMARY, STARTING_SECONDARY
+
+	local loadouts = Registry.find("LoadoutService")
+	if loadouts and typeof(loadouts.getSpawnLoadout) == "function" then
+		local ok, chosen = pcall(loadouts.getSpawnLoadout, loadouts, player)
+		if ok and typeof(chosen) == "table" then
+			primary = chosen[Enums.Slot.Primary] or primary
+			secondary = chosen[Enums.Slot.Secondary] or secondary
+		end
+	end
+
+	self:giveWeapon(player, secondary)
+	self:giveWeapon(player, primary)
 	self:setActiveSlot(player, Enums.Slot.Primary)
 end
 

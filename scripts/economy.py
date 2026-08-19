@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""
+Models Fading Light's economy from the real config, and reports how long the
+roster actually takes to unlock.
+
+EconomyConfig's header claims "roughly 30-40 rounds". This is what makes that
+claim true rather than asserted: it reads the real catalogue and the real wave
+table, and fails when the pacing drifts out of the band.
+
+    ./scripts/economy.py            report
+    ./scripts/economy.py --check    report, and exit 1 on drift
+
+── THE ONE THING THIS CANNOT DERIVE ──────────────────────────────────────────
+How many infected a player kills in a round. The Director is a feedback loop:
+it holds a target population and replaces what you kill, so the kill count is a
+function of how fast the team shoots rather than of anything written down. So
+that number is an ASSUMPTION, stated below and printed in the report. Everything
+else — wave durations, pacing targets, prices, payouts — is read from the config.
+
+If the live game turns out to play faster or slower than TEAM_KILLS_PER_SECOND,
+change it here and re-run; the prices follow from it.
+"""
+
+import re
+import sys
+import pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
+def read(rel):
+    return (ROOT / rel).read_text(encoding="utf-8")
+
+
+ECON = read("src/shared/Config/EconomyConfig.lua")
+MODE = read("src/shared/Config/GameModeConfig.lua")
+DIRECTOR = read("src/shared/Config/DirectorConfig.lua")
+
+# The band EconomyConfig's header promises. Change this only with the header.
+TARGET_MIN, TARGET_MAX = 30, 40
+
+# The per-kill band the design promises, read from the config that enforces it.
+BAND_MIN = int(re.search(r"EconomyConfig\.MinKillReward = (\d+)", read("src/shared/Config/EconomyConfig.lua")).group(1))
+BAND_MAX = int(re.search(r"EconomyConfig\.MaxKillReward = (\d+)", read("src/shared/Config/EconomyConfig.lua")).group(1))
+
+# ── the assumptions, all in one place ───────────────────────────────────────
+# A four-survivor team fighting a horde held near its target population. At the
+# Director's SustainPeak target of 46 alive this is conservative; during Relax it
+# is generous. It is the average across a whole round that matters.
+TEAM_KILLS_PER_SECOND = 1.2
+PLAYERS = 4
+# One player's share of the team's kills. Above an even 25% because the model is
+# for a DECENT player — the one the pacing target is written for.
+KILL_SHARE = 0.35
+HEADSHOT_RATE = 0.25
+
+
+def scalar(name):
+    m = re.search(rf"^EconomyConfig\.{name} = ([0-9_]+)$", ECON, re.M)
+    assert m, f"EconomyConfig.{name} not found"
+    return int(m.group(1).replace("_", ""))
+
+
+def kill_rewards():
+    block = ECON.split("EconomyConfig.KillReward")[1].split("})")[0]
+    return {k: int(v) for k, v in re.findall(r"\[Enums\.Infected\.(\w+)\] = (\d+)", block)}
+
+
+def catalogue():
+    block = ECON.split("EconomyConfig.Catalogue")[1].split("\n} :: { ShopEntry })")[0]
+    out = []
+    for m in re.finditer(
+        r"id = (Enums\.Weapon\.\w+|\"\w+\"),\s*\n?\s*category = \"(\w+)\",\s*\n?\s*price = (\d+),?"
+        r"(\s*\n?\s*soon = true)?",
+        block,
+    ):
+        out.append(
+            {
+                "id": m.group(1).replace("Enums.Weapon.", "").strip('"'),
+                "category": m.group(2),
+                "price": int(m.group(3)),
+                "soon": bool(m.group(4)),
+            }
+        )
+    return out
+
+
+def waves():
+    """Every wave's duration and how hard it leans on the horde."""
+    block = MODE.split("GameModeConfig.Waves = {")[1]
+    out = []
+    for chunk in re.split(r"\n\t\{", block):
+        d = re.search(r"duration = (\d+)", chunk)
+        p = re.search(r"populationScale = ([\d.]+)", chunk)
+        s = re.search(r"specialInterval = (\d+)", chunk)
+        b = re.findall(r"Enums\.Infected\.(\w+)", chunk)
+        if d and p:
+            out.append(
+                {
+                    "duration": int(d.group(1)),
+                    "population": float(p.group(1)),
+                    "specialInterval": int(s.group(1)) if s else 0,
+                    "bosses": b,
+                }
+            )
+    return out
+
+
+REWARDS = kill_rewards()
+CATALOGUE = catalogue()
+WAVES = waves()
+
+START = scalar("StartingDollars")
+HEADSHOT = scalar("HeadshotBonus")
+VICTORY = scalar("VictoryBonus")
+DEFEAT = scalar("DefeatBonus")
+WAVE_BONUS = scalar("WaveBonus")
+CAP = scalar("MaxPerRound")
+
+
+def round_income(waves_reached: int, won: bool) -> dict:
+    """What ONE player banks for a round that got this far."""
+    commons = specials = bosses = 0.0
+    seconds = 0
+    for wave in WAVES[:waves_reached]:
+        seconds += wave["duration"]
+        # Commons scale with how hard the wave leans on the horde.
+        commons += TEAM_KILLS_PER_SECOND * wave["duration"] * wave["population"]
+        if wave["specialInterval"] > 0:
+            specials += wave["duration"] / wave["specialInterval"]
+        bosses += len(wave["bosses"])
+
+    mine = lambda n: n * KILL_SHARE  # noqa: E731
+
+    common_pay = mine(commons) * (REWARDS.get("Common", 2) + HEADSHOT * HEADSHOT_RATE)
+    special_pay = mine(specials) * (REWARDS.get("Hunter", 5) + HEADSHOT * HEADSHOT_RATE)
+    boss_pay = mine(bosses) * REWARDS.get("Tank", 8)
+    bonus = (VICTORY if won else DEFEAT) + WAVE_BONUS * waves_reached
+
+    kills = common_pay + special_pay + boss_pay
+    return {
+        "kills": kills,
+        "bonus": bonus,
+        "total": min(kills + bonus, CAP),
+        "seconds": seconds,
+        "commons": mine(commons),
+        "specials": mine(specials),
+        "bosses": mine(bosses),
+    }
+
+
+def main() -> int:
+    buyable = [e for e in CATALOGUE if not e["soon"] and e["price"] > 0]
+    free = [e for e in CATALOGUE if not e["soon"] and e["price"] == 0]
+    soon = [e for e in CATALOGUE if e["soon"]]
+    roster = sum(e["price"] for e in buyable)
+
+    bar = "─" * 68
+    print(f"{bar}\n  FADING LIGHT — economy model\n{bar}\n")
+
+    print(f"  {len(WAVES)} waves, {sum(w['duration'] for w in WAVES) / 60:.0f} minutes of combat")
+    print(f"  ASSUMED: the team kills {TEAM_KILLS_PER_SECOND}/s, one player takes "
+          f"{KILL_SHARE:.0%} of it, {HEADSHOT_RATE:.0%} headshots")
+    print("  (everything else below is read from the config)\n")
+
+    won = round_income(len(WAVES), True)
+    deep = round_income(len(WAVES) - 2, False)
+    early = round_income(2, False)
+
+    print(f"  {'':<18}{'kills':>9}{'bonus':>9}{'total':>10}   what you killed")
+    for label, r in (("won round", won), (f"wiped wave {len(WAVES) - 2}", deep), ("wiped wave 2", early)):
+        print(f"  {label:<18}${r['kills']:>8,.0f}${r['bonus']:>8,.0f}${r['total']:>9,.0f}   "
+              f"{r['commons']:.0f} commons, {r['specials']:.0f} specials, {r['bosses']:.1f} bosses")
+    print(f"\n  a deep loss is worth {deep['total'] / early['total']:.1f}x a shallow one")
+    print(f"  kills are {won['kills'] / won['total']:.0%} of a won round — the rest is finishing it\n")
+
+    print(f"  free at the start  {len(free)}: {', '.join(e['id'] for e in free)}")
+    print(f"  purchasable        {len(buyable)}, ${roster:,} in total")
+    print(f"  coming soon        {len(soon)}: {', '.join(e['id'] for e in soon)}\n")
+
+    cheapest = min(buyable, key=lambda e: e["price"])
+    rounds = (roster - START) / won["total"]
+    print(f"  starting balance   ${START:,}")
+    print(f"  first purchase     {cheapest['id']} at ${cheapest['price']:,}"
+          f"{' — affordable on the first visit' if START >= cheapest['price'] else ''}")
+    print(f"  ROSTER UNLOCKED IN {rounds:.0f} won rounds   (target {TARGET_MIN}-{TARGET_MAX})\n")
+
+    print(f"  {'price':>8}  {'category':<9} id")
+    for entry in sorted(CATALOGUE, key=lambda e: (e["category"], e["soon"], e["price"], e["id"])):
+        price = "soon" if entry["soon"] else ("free" if entry["price"] == 0 else f"${entry['price']:,}")
+        print(f"  {price:>8}  {entry['category']:<9} {entry['id']}")
+
+    problems = []
+    if not TARGET_MIN <= rounds <= TARGET_MAX:
+        problems.append(
+            f"the roster unlocks in {rounds:.0f} rounds, outside the {TARGET_MIN}-{TARGET_MAX} "
+            f"EconomyConfig's header promises"
+        )
+    # The band is enforced by EconomyConfig.rewardForKill's clamp, so what is
+    # checked here is that the clamp is still there and still says 2-8 — a table
+    # entry outside the band would otherwise be silently corrected rather than
+    # noticed.
+    for kind, pay in REWARDS.items():
+        if not BAND_MIN <= pay <= BAND_MAX:
+            problems.append(f"{kind} pays {pay}, outside the {BAND_MIN}-{BAND_MAX} band")
+    if "math.clamp(total" not in ECON:
+        problems.append("rewardForKill no longer clamps into the band")
+    if deep["total"] <= early["total"]:
+        problems.append("a deep loss pays no more than a shallow one")
+    if START < cheapest["price"]:
+        problems.append(
+            f"a new player cannot afford anything: ${START:,} against a cheapest of "
+            f"${cheapest['price']:,}"
+        )
+    if START >= cheapest["price"] * 2:
+        problems.append("the starting balance buys more than one thing on the first visit")
+    if won["total"] > CAP * 0.8:
+        problems.append(f"a normal won round (${won['total']:,.0f}) is close to MaxPerRound (${CAP:,})")
+
+    if problems:
+        print(f"\n{bar}")
+        for p in problems:
+            print(f"  DRIFT: {p}")
+        print(bar)
+        return 1 if "--check" in sys.argv else 0
+
+    print(f"\n  ── the pacing matches what EconomyConfig claims ──\n{bar}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
