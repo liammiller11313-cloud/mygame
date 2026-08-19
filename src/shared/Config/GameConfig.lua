@@ -59,6 +59,35 @@ GameConfig.PartRegions = table.freeze({
 	RightFoot = Enums.HitRegion.Leg,
 	["Left Leg"] = Enums.HitRegion.Leg,
 	["Right Leg"] = Enums.HitRegion.Leg,
+
+	-- The Hunter's back hump. Real body mass rather than decoration, so it takes
+	-- hits like a torso instead of passing them through.
+	Hunch = Enums.HitRegion.Torso,
+})
+
+--[[
+	Geometry that sits ON a rig rather than being part of it.
+
+	These are made non-queryable when a rig is imported, so a shot passes straight
+	through them to the body underneath. That is the only correct answer for
+	anything overlaying the HEAD: hair and hoods are routinely modelled larger
+	than the skull they cover, so scoring them as a head hit hands out free
+	headshots, and scoring them as a torso hit — which is what an unrecognised
+	part defaults to — silently eats the headshot the player actually earned. A
+	part that cannot be queried at all avoids both: the ray keeps going and
+	resolves on the real head.
+
+	`Handle` is here because Roblox names every Accessory's part that, and
+	hand-built rigs routinely weld a loose one on for a claw or a prop. Nothing
+	the player shoots should ever resolve on a prop.
+]]
+GameConfig.PassThroughParts = table.freeze({
+	Hair = true,
+	Hood = true,
+	Hat = true,
+	Cap = true,
+	Mask = true,
+	Handle = true,
 })
 
 --[[ Survivor health model, lifted from L4D2 because it is very well balanced. ]]

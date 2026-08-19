@@ -1077,7 +1077,32 @@ function RoundService:start()
 		self:_step()
 	end)
 
-	self:_startIfReady()
+	--[[
+		Deferred, not called here.
+
+		This runs during the bootstrap's start phase, and MatchmakingService is
+		two entries further down the list — so at this instant its `started` flag
+		is still false and _startIfReady cannot tell "no matchmaking on this
+		server" from "matchmaking has not had its turn yet". It read the second as
+		the first and started a round at boot.
+
+		Live servers hid it: players arrive after the boot completes, so the
+		PlayerAdded path always saw a started matchmaking. Studio's Play Solo does
+		not — the player is already there while modules are still starting, Classic
+		needs one player, and the round began before the client had drawn its main
+		menu. The menu then opened onto a round already in progress and
+		immediately closed itself, which looks exactly like the menu being gone.
+
+		task.defer puts this after the whole start phase, which is the earliest
+		moment the flag means what it says.
+	]]
+	local booted = generation
+	task.defer(function()
+		-- Not if the service was torn down in between; destroy() bumps generation.
+		if generation == booted then
+			self:_startIfReady()
+		end
+	end)
 end
 
 function RoundService:destroy()

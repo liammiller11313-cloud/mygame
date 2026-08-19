@@ -381,6 +381,44 @@ for p, text in sources.items():
                 break
 
 
+# ── 9d. A local used inside a closure written before it is declared ─────────
+# The general form of 9c: not just `local function`, any module-level local. A
+# closure binds the locals that exist where it is WRITTEN, so a name declared
+# further down resolves to a nil global instead. Reported as a note rather than a
+# problem because the crude function-boundary tracking here can pick up a mention
+# inside a long comment block.
+DECL_RE = re.compile(r'^local (?:function )?([A-Za-z_]\w*)')
+
+for p, text in sources.items():
+    lines = text.split("\n")
+    decl = {}
+    for index, line in enumerate(lines, start=1):
+        m = DECL_RE.match(line)
+        if m:
+            decl.setdefault(m.group(1), index)
+
+    fn_start = None
+    for index, line in enumerate(lines, start=1):
+        if re.match(r'(local function|function)\b', line):
+            fn_start = index
+            continue
+        if fn_start is None:
+            continue
+        if re.match(r'end\b', line):
+            fn_start = None
+            continue
+        if re.match(r'\s*(--|\s*\])', line):
+            continue
+        for m in re.finditer(r'(?<![.:\w"])([A-Za-z_]\w*)\s*\(', line):
+            at = decl.get(m.group(1))
+            if at and at > fn_start:
+                notes.append(
+                    f"{rel(p)}:{index}  '{m.group(1)}' is called here but `local {m.group(1)}` is "
+                    f"line {at} — if that is a real reference it binds a nil global"
+                )
+                break
+
+
 # ── 10. Signals fired into the void ─────────────────────────────────────────
 # The bug this exists for: a module declares a Signal, fires it faithfully on
 # every state change, and nothing anywhere connects to it. Nothing errors, no

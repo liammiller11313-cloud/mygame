@@ -74,6 +74,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local AnimationConfig = require(Shared.Config.AnimationConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
@@ -668,13 +669,29 @@ local function verifySeverable(key: string, model: Model)
 		table.insert(missing, "Head")
 	end
 	if #missing > 0 then
+		--[[ What the rig DOES have, alongside what it does not.
+
+		     "Missing Left Arm" on its own is a dead end — the natural reading is
+		     that the limb is absent, when in practice the joint is there under a
+		     name nobody standardised: "LeftArm", "Arm_L", "l_arm". Listing the
+		     rig's actual Motor6D names turns the warning from a complaint into
+		     the two-minute fix, which is either renaming the joint or adding its
+		     name to GoreConfig.Dismemberment.Severable. ]]
+		local present = {}
+		for name in motors do
+			table.insert(present, name)
+		end
+		table.sort(present)
+
 		warnOnce(
 			"severable:" .. key,
 			string.format(
 				"the %s rig is missing severable joints: %s — GoreService will silently refuse to "
-					.. "dismember those parts",
+					.. "dismember those parts. The joints it does have are: %s. Rename one to match, "
+					.. "or add its name to GoreConfig.Dismemberment.Severable.",
 				key,
-				table.concat(missing, ", ")
+				table.concat(missing, ", "),
+				if #present > 0 then table.concat(present, ", ") else "(none at all)"
 			)
 		)
 	end
@@ -686,10 +703,43 @@ end
 	symptom is a rig that simply never takes a headshot — silent, and fatal to
 	the one rule the whole combat loop is built on.
 ]]
+--[[
+	Makes cosmetic geometry non-queryable so shots pass through it.
+
+	Anything named in GameConfig.PassThroughParts, plus every part inside an
+	Accessory — Roblox calls those "Handle" too, and a rig assembled from Toolbox
+	parts brings both kinds. Returns how many it changed.
+
+	This has to run BEFORE auditHitRegions or the audit reports the very parts
+	this just made unhittable.
+]]
+local function applyPassThrough(model: Model): number
+	local changed = 0
+	for _, descendant in model:GetDescendants() do
+		if not descendant:IsA("BasePart") then
+			continue
+		end
+		local cosmetic = GameConfig.PassThroughParts[descendant.Name] == true
+			or descendant:FindFirstAncestorWhichIsA("Accessory") ~= nil
+		if cosmetic and descendant.CanQuery then
+			descendant.CanQuery = false
+			descendant.CanTouch = false
+			changed += 1
+		end
+	end
+	return changed
+end
+
 local function auditHitRegions(kind: string, model: Model)
 	local hasHead = false
 	local unknown = {}
 	for _, part in RigUtil.getBodyParts(model) do
+		--[[ A part nothing can raycast against cannot score as anything, so it is
+		     not a hit-region problem. Reporting it would be telling somebody to
+		     name a part in PartRegions that will never be consulted. ]]
+		if not part.CanQuery then
+			continue
+		end
 		local region = GameConfig.PartRegions[part.Name]
 		if region == Enums.HitRegion.Head then
 			hasHead = true
@@ -749,15 +799,21 @@ local function reconcileFakeHead(kind: string, model: Model)
 			math.max(head.Size.Z, fake.Size.Z)
 		)
 	end
-	warnOnce(
-		"fakehead:" .. kind,
-		string.format(
-			"the %s rig has both Head and FakeHead; FakeHead is now non-queryable so hits pass "
-				.. "through to the real head. Adding `FakeHead = Enums.HitRegion.Head` to "
-				.. "GameConfig.PartRegions would make that unnecessary",
-			kind
+	--[[ Only worth saying when the suggestion is still outstanding. PartRegions
+	     has carried FakeHead for a while now, so this fired every boot telling
+	     somebody to do a thing that was already done — which is how a log full of
+	     real warnings stops being read. ]]
+	if not GameConfig.PartRegions.FakeHead then
+		warnOnce(
+			"fakehead:" .. kind,
+			string.format(
+				"the %s rig has both Head and FakeHead; FakeHead is now non-queryable so hits pass "
+					.. "through to the real head. Adding `FakeHead = Enums.HitRegion.Head` to "
+					.. "GameConfig.PartRegions would make that unnecessary",
+				kind
+			)
 		)
-	)
+	end
 end
 
 --[[
@@ -996,13 +1052,26 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	-- is destroyed.
 	local harvested = harvestAnimations(model)
 	sanitise(model)
-	if harvested == 0 then
+	--[[
+		A rig with no ids of its own is only a problem if nothing else can animate
+		it.
+
+		AnimationConfig supplies a complete set per rig type, so for every kind in
+		the roster this is now the normal case rather than a fault — and the old
+		warning told somebody to go and add an Animate script that would have been
+		ignored in favour of the config anyway. It fires only when the config has
+		nothing addressed to this rig's joints either, which is the case where the
+		body really does fall through to the client's procedural poser.
+	]]
+	if harvested == 0 and not AnimationConfig.forInfected(kind, AnimationConfig.rigOf(model)) then
 		warnOnce(
 			"noanims:" .. kind,
 			string.format(
-				"the %s rig carries no Animation ids, so it will slide rather than walk. "
-					.. "Give the rig an Animate script (or any Folder of Animations) before it is imported.",
-				kind
+				"the %s rig carries no Animation ids and AnimationConfig has no set for an %s rig, "
+					.. "so it falls through to the client's procedural gait. Add a set under "
+					.. "AnimationConfig.ByRig, or give the rig an Animate script before importing it.",
+				kind,
+				AnimationConfig.rigOf(model)
 			)
 		)
 	end
@@ -1086,6 +1155,9 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	end
 
 	reconcileFakeHead(kind, model)
+	-- Before the audit: it reports parts that can be hit, and this is what
+	-- decides which ones those are.
+	applyPassThrough(model)
 	auditHitRegions(kind, model)
 	verifySeverable(kind, model)
 
