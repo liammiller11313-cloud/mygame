@@ -1029,23 +1029,61 @@ local function buildItems()
 	for order, slot in HOTBAR_SLOTS do
 		local frame = newFrame(holder, slot, COLOR.Panel, 0.55)
 		frame.LayoutOrder = order
-		frame.Size = UDim2.fromOffset(LAYOUT.ItemSlotSize, LAYOUT.ItemSlotSize)
+		frame.Size = UDim2.fromOffset(HOTBAR_SLOT_WIDTH, HOTBAR_SLOT_HEIGHT)
 		corner(frame)
 		local line = stroke(frame)
 
-		local key = newLabel(frame, "Key", FONT.Body, TEXT.Tiny, COLOR.TextDim)
-		key.Position = UDim2.fromOffset(4, 2)
-		key.Size = UDim2.fromOffset(16, 12)
+		--[[ A hairline down the left edge, lit only on the selected slot. It is
+		     the cheapest possible "this one" marker and it survives being read
+		     out of the corner of the eye, which is the only way this bar is ever
+		     actually read during a fight. ]]
+		local marker = newFrame(frame, "Marker", COLOR.Accent)
+		marker.Size = UDim2.new(0, 2, 1, 0)
+		marker.Visible = false
 
-		local label = newLabel(frame, "Label", FONT.Body, TEXT.Tiny, COLOR.TextDim)
-		label.AnchorPoint = Vector2.new(0.5, 1)
-		label.Position = UDim2.new(0.5, 0, 1, -3)
-		label.Size = UDim2.new(1, -6, 0, 26)
-		label.TextXAlignment = Enum.TextXAlignment.Center
-		label.TextYAlignment = Enum.TextYAlignment.Bottom
-		label.TextWrapped = true
+		-- Stencil digits: the one place in the HUD that gets to look stamped on.
+		local key = newLabel(frame, "Key", FONT.Stencil, TEXT.Small, COLOR.TextDim)
+		key.Position = UDim2.fromOffset(7, 3)
+		key.Size = UDim2.fromOffset(14, 14)
 
-		itemSlots[slot] = { frame = frame, key = key, label = label, stroke = line }
+		--[[ The slot's own name, shown even when it is empty. Naming an empty
+		     slot is what tells a new player the slot exists at all. ]]
+		local title = newLabel(frame, "Title", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+		title.AnchorPoint = Vector2.new(1, 0)
+		title.Position = UDim2.new(1, -6, 0, 4)
+		title.Size = UDim2.fromOffset(HOTBAR_SLOT_WIDTH - 26, 12)
+		title.TextXAlignment = Enum.TextXAlignment.Right
+		title.Text = SLOT_TITLE[slot] or ""
+
+		local label = newLabel(frame, "Label", FONT.Heading, TEXT.Small, COLOR.TextDim)
+		label.Position = UDim2.fromOffset(7, 18)
+		label.Size = UDim2.new(1, -14, 0, 16)
+		label.TextXAlignment = Enum.TextXAlignment.Left
+		label.TextScaled = true
+		label.TextWrapped = false
+		local bounds = Instance.new("UITextSizeConstraint")
+		bounds.MaxTextSize = TEXT.Small
+		bounds.MinTextSize = TEXT.Tiny
+		bounds.Parent = label
+
+		--[[ Only weapon slots ever fill this in. It still exists on the others
+		     rather than being conditional, so every slot keeps the same height
+		     and refreshItems never has to check whether a field is there. ]]
+		local count = newLabel(frame, "Count", FONT.Numeric, TEXT.Small, COLOR.TextSecondary)
+		count.AnchorPoint = Vector2.new(0, 1)
+		count.Position = UDim2.new(0, 7, 1, -4)
+		count.Size = UDim2.new(1, -14, 0, 14)
+		count.TextXAlignment = Enum.TextXAlignment.Left
+
+		itemSlots[slot] = {
+			frame = frame,
+			key = key,
+			title = title,
+			label = label,
+			count = count,
+			marker = marker,
+			stroke = line,
+		}
 	end
 end
 

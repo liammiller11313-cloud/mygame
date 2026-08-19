@@ -623,12 +623,54 @@ function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 		return CFrame.lookAt(point, point + flatLook(direction or Vector3.new(0, 0, -1)))
 	end
 
+	--[[
+		Nothing in the map says where to stand, so stand on the map itself.
+
+		This is the case that matters most in practice: a map that has been
+		dropped in but not tagged yet. Every earlier branch needs the author to
+		have marked something, and until they do, the old behaviour was to spawn
+		at the world origin — which for a map built anywhere else is empty space,
+		and presents as being flung off the world the instant a round starts.
+
+		Measuring the loaded map's own bounding box and dropping the team onto the
+		middle of it makes an untagged map playable immediately. It is not where
+		the author would have chosen, and the warning says so, but it is on solid
+		ground and that is the difference between "not tagged yet" and "broken".
+	]]
+	local mapService = Registry.find("MapService")
+	local root = mapService and mapService:getCurrentRoot()
+	if root then
+		local ok, boxCFrame, size = pcall(function()
+			return root:GetBoundingBox()
+		end)
+		if ok and boxCFrame and size and size.Magnitude > 1 then
+			warnOnce(
+				"nosurvivorspawn",
+				string.format(
+					"the map carries no %s part, no SpawnLocation and no %s parts, so survivors are "
+						.. "being dropped onto the middle of the map's own geometry. Tag ONE part "
+						.. "with %s where you want the team to begin — its rotation is the direction "
+						.. "they face.",
+					TAG_SURVIVOR_SPAWN,
+					TAG_FLOW,
+					TAG_SURVIVOR_SPAWN
+				)
+			)
+			-- From above the box, so the ground cast lands on the highest surface
+			-- rather than starting inside a building and finding its floor.
+			local above = boxCFrame.Position + Vector3.new(0, size.Y * 0.5 + 8, 0)
+			local point = standOn(ringPoint(above, index))
+			return CFrame.lookAt(point, point + Vector3.new(0, 0, -1))
+		end
+	end
+
 	warnOnce(
 		"nosurvivorspawn",
 		string.format(
-			"the map carries no %s part, no SpawnLocation and no %s parts, so there is nothing that "
-				.. "says where the team should stand. Survivors are being dropped onto whatever is "
-				.. "under the world origin. Tag ONE part in your map with %s to fix this.",
+			"the map carries no %s part, no SpawnLocation and no %s parts, and no map is loaded, so "
+				.. "there is nothing that says where the team should stand. Survivors are being "
+				.. "dropped onto whatever is under the world origin. Tag ONE part in your map with "
+				.. "%s to fix this.",
 			TAG_SURVIVOR_SPAWN,
 			TAG_FLOW,
 			TAG_SURVIVOR_SPAWN
@@ -815,6 +857,49 @@ function LevelService:init()
 		serviceTrove:connect(CollectionService:GetInstanceAddedSignal(tag), invalidate)
 		serviceTrove:connect(CollectionService:GetInstanceRemovedSignal(tag), invalidate)
 	end
+end
+
+--[[
+	Re-reads the whole level from tags.
+
+	MapService calls this the moment a map finishes loading, and it is not
+	optional: without it the service keeps the PREVIOUS map's flow spline, spawn
+	nodes and survivor spawn CFrames after a swap. Those point at instances that
+	have been destroyed, so the Director spawns into nothing and survivors get
+	placed at coordinates belonging to a map that no longer exists — which
+	presents as being flung off the world the instant a round starts.
+
+	Marking every cache dirty rather than rebuilding inline lets the existing lazy
+	rebuilds do the work at the next question, which is also the only path that is
+	safe to call while the level loop is mid-tick.
+]]
+function LevelService:rebuild()
+	flowDirty = true
+	spawnDirty = true
+	sectionsDirty = true
+	panicDirty = true
+	bossDirty = true
+	survivorSpawnDirty = true
+
+	rebuildFlow()
+	rebuildSpawnNodes()
+	rebuildBossZones()
+	rebuildSurvivorSpawns()
+	rebuildPanicTriggers()
+	rebuildSections()
+
+	print(
+		string.format(
+			"[LevelService] rebuilt for the new map: %d flow nodes over %.0f studs, "
+				.. "%d spawn nodes, %d boss zones, %d survivor spawns, %d item sections",
+			#flowPoints,
+			flowTotal,
+			#spawnNodes,
+			#bossZones,
+			#survivorSpawns,
+			#sections
+		)
+	)
 end
 
 function LevelService:start()
