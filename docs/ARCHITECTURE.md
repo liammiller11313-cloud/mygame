@@ -538,6 +538,21 @@ Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes 
 | `UI/GamepadFocus.lua` | *(none — a helper)* | GuiService.SelectedObject, so a controller can reach a screen |
 | `UI/TouchController.lua` | `"TouchController"` | the on-screen pad, only under the touch scheme |
 
+### Where a shot comes from
+
+Two origins, and they are not the same:
+
+- **The ray** starts at `CameraController:getAimCFrame()`. You shoot where you
+  look, and the aim carries only its share of the recoil and none of the shake.
+- **The tracer** starts at `ViewmodelController:getMuzzlePosition()`. In first
+  person the gun sits below and right of the eye, so a tracer drawn from the
+  camera visibly leaves the player's face.
+
+Same hit point either way — only the line between differs, and the line is the
+only part anybody sees. The camera origin is still what goes over the wire and
+what `rememberEcho` records, so the server's copy of a shot you already drew is
+still recognised as yours.
+
 ### Input schemes
 
 `InputController:getScheme()` returns `"Desktop"`, `"Touch"` or `"Gamepad"` —
