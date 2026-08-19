@@ -245,6 +245,76 @@ local function buildVignette()
 	buildEdge("Right", UDim2.fromScale(0.26, 1), UDim2.fromScale(1, 0), Vector2.new(1, 0), 180)
 end
 
+--[[
+	GRIT — the permanent, always-on layer that makes the game feel like a horror
+	game rather than a shooting range with zombies in it.
+
+	Two things, both deliberately almost invisible:
+
+	  A DARK VIGNETTE at the corners, separate from the red damage one above. It
+	  is on at all times at a level you cannot consciously see, and it does the
+	  same job a camera lens does — it pulls the eye to the centre of the frame
+	  and makes the edges of the screen feel like the edges of what you can see,
+	  rather than where the monitor stops.
+
+	  A SLOW BREATHE on that vignette, a few percent over several seconds. Static
+	  darkness reads as a UI element; darkness that moves reads as the room.
+
+	Both are capped low on purpose. The moment a player notices this layer, it has
+	stopped being atmosphere and started being something between them and the
+	horde — and the whole design rule here is that readability beats mood.
+]]
+local GRIT_BASE = 0.30 -- resting opacity of the corner darkening
+local GRIT_BREATHE = 0.05 -- how far it drifts either side of that
+local GRIT_BREATHE_RATE = 0.22 -- cycles per second: slow enough to feel like breath
+local GRIT_COLOR = Color3.fromRGB(4, 3, 3)
+
+local gritEdges: { Frame } = {}
+
+local function buildGritEdge(name: string, size: UDim2, position: UDim2, anchor: Vector2, rotation: number)
+	local frame = newFrame(vignetteGui, name, GRIT_COLOR, 1 - GRIT_BASE)
+	frame.Size = size
+	frame.Position = position
+	frame.AnchorPoint = anchor
+	-- Under the damage vignette and everything else: this is the floor of the
+	-- stack, not a thing that ever covers information.
+	frame.ZIndex = 0
+
+	local gradient = Instance.new("UIGradient")
+	gradient.Rotation = rotation
+	gradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.55, 0.82),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	gradient.Parent = frame
+
+	table.insert(gritEdges, frame)
+end
+
+local function buildGrit()
+	buildGritEdge("GritTop", UDim2.fromScale(1, 0.30), UDim2.fromScale(0, 0), Vector2.new(0, 0), 90)
+	buildGritEdge("GritBottom", UDim2.fromScale(1, 0.34), UDim2.fromScale(0, 1), Vector2.new(0, 1), 270)
+	buildGritEdge("GritLeft", UDim2.fromScale(0.30, 1), UDim2.fromScale(0, 0), Vector2.new(0, 0), 0)
+	buildGritEdge("GritRight", UDim2.fromScale(0.30, 1), UDim2.fromScale(1, 0), Vector2.new(1, 0), 180)
+end
+
+--[[ One sine, four writes, and only when the value actually moved enough to be
+     worth the property assignment. ]]
+local gritApplied = -1
+
+local function updateGrit(now: number)
+	local level = GRIT_BASE + math.sin(now * math.pi * 2 * GRIT_BREATHE_RATE) * GRIT_BREATHE
+	if math.abs(level - gritApplied) < 0.004 then
+		return
+	end
+	gritApplied = level
+	local transparency = 1 - level
+	for _, edge in gritEdges do
+		edge.BackgroundTransparency = transparency
+	end
+end
+
 local function buildBlood()
 	for index = 1, SCREEN_BLOOD.MaxDroplets do
 		local drop = newFrame(vignetteGui, "Droplet" .. index, COLOR.Blood, 1)
@@ -397,6 +467,7 @@ local function build()
 	scrim = newFrame(vignetteGui, "Scrim", COLOR.Background, 1)
 	scrim.Size = UDim2.fromScale(1, 1)
 
+	buildGrit()
 	buildVignette()
 	buildBlood()
 	buildBile()
@@ -979,6 +1050,7 @@ end
 
 local function update(dt: number)
 	local now = os.clock()
+	updateGrit(now)
 	updateVignette(dt, now)
 	updateGrade(dt, now)
 	updateDroplets(dt)

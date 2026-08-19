@@ -56,6 +56,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local AmmoConfig = require(Shared.Config.AmmoConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local Registry = require(Shared.Util.Registry)
 local Spring = require(Shared.Util.Spring)
@@ -244,12 +245,6 @@ local FLASH_LIGHT_BRIGHTNESS = 5
 --[[ Sized for the fastest gun in the roster, not for a comfortable average: the
      Vector cycles at 1100rpm, so a ten-shell ring is recycling brass that is
      still in the air and a burst looks like it ejected three cases. ]]
-local SHELL_POOL = 24
-local SHELL_LIFETIME = 2.5
-local SHELL_SIZE = Vector3.new(0.09, 0.09, 0.22)
-local SHELL_SPEED = 7
-local SHELL_SPIN = 22
-local SHELL_COLOR = Color3.fromRGB(196, 158, 74)
 
 -- Placeholder geometry only. Real weapons come from Assets/Viewmodels; these
 -- colours exist so a missing model reads as "no art yet" rather than as a bug.
@@ -278,11 +273,6 @@ local muzzle: Attachment? = nil
 local flashPart: BasePart? = nil
 local flashLight: PointLight? = nil
 local flashUntil = 0
-
-local shells: { BasePart } = {}
-local shellExpiry: { number } = {}
-local shellCursor = 0
-local shellFolder: Folder? = nil
 
 local swayPosition = Spring.new(Vector3.zero, SWAY_SPEED, SWAY_DAMPING)
 local swayRotation = Spring.new(Vector3.zero, SWAY_SPEED, SWAY_DAMPING)
@@ -593,6 +583,169 @@ local function fitScale(built: Model, pose: Pose)
 	end
 end
 
+-- ── arms ────────────────────────────────────────────────────────────────────
+
+--[[
+	First-person arms.
+
+	Until now the player saw a gun floating in front of them with nothing holding
+	it, which is the single biggest tell that a Roblox shooter is a Roblox
+	shooter. Two arms fix most of that for eight parts.
+
+	They are built as CHILDREN OF THE WEAPON MODEL rather than posed separately.
+	That is what makes them free: the weapon is already moved once per frame with
+	one PivotTo, and anything parented into it inherits every bit of the sway,
+	bob, recoil kick and aim transition without a second line of maths. It also
+	makes them correct by construction — hands welded to a gun cannot drift off
+	it, which is exactly the failure mode of arms driven by their own IK.
+
+	The shoulder end runs off the bottom of the frame on purpose. Nobody sees an
+	elbow in a first-person shooter, and pretending to solve one costs geometry
+	for something the player will never look at.
+]]
+
+-- Where the hands sit on the weapon, as fractions of its own bounding box, so
+-- the same numbers land correctly on a pistol and on a battle rifle.
+local GRIP_BACK = 0.16 -- toward the shooter, along the weapon's length
+local GRIP_DROP = 0.34 -- below the bore line: a grip hangs under the receiver
+local SUPPORT_FORWARD = 0.28 -- the off hand, forward along the handguard
+local SUPPORT_DROP = 0.22
+
+-- How far the forearms run back toward the camera, and in which direction. The
+-- right arm comes in tighter than the left because the shooting hand is behind
+-- the gun while the support hand reaches across for it.
+local FOREARM_LENGTH = 1.45
+local RIGHT_RUN = Vector3.new(0.42, -0.34, 1.0)
+local LEFT_RUN = Vector3.new(-0.58, -0.30, 1.0)
+
+local HAND_SIZE = Vector3.new(0.30, 0.30, 0.34)
+local FOREARM_THICKNESS = 0.27
+
+--[[ Jacket colours, indexed the same way the survivor outlines are, so the
+     sleeve a player sees on their own arms matches the silhouette their
+     teammates see through a wall. Muted: this is clothing seen at arm's length
+     under a muzzle flash, not a team indicator. ]]
+local SLEEVE_COLORS = {
+	Color3.fromRGB(84, 62, 40),
+	Color3.fromRGB(58, 60, 64),
+	Color3.fromRGB(54, 66, 52),
+	Color3.fromRGB(76, 48, 48),
+}
+local DEFAULT_SKIN = Color3.fromRGB(198, 158, 122)
+
+--[[ Reads the player's real skin tone off their own character so the hands in
+     front of them are theirs. Falls back rather than yielding: this runs during
+     a weapon swap and a HumanoidDescription fetch would stall the swap. ]]
+local function skinTone(): Color3
+	local character = player.Character
+	if character then
+		for _, name in { "RightHand", "Right Arm", "LeftHand", "Left Arm", "Head" } do
+			local part = character:FindFirstChild(name)
+			if part and part:IsA("BasePart") then
+				return part.Color
+			end
+		end
+	end
+	return DEFAULT_SKIN
+end
+
+local function sleeveColor(): Color3
+	local index = 1
+	local hud = Registry.find("HudController")
+	if hud and typeof(hud.getSurvivorIndex) == "function" then
+		local ok, value = pcall(function()
+			return hud:getSurvivorIndex(player)
+		end)
+		if ok and typeof(value) == "number" then
+			index = value
+		end
+	end
+	return SLEEVE_COLORS[((index - 1) % #SLEEVE_COLORS) + 1]
+end
+
+--[[ One arm: a hand at the weapon, and a forearm running away from it. Both are
+     welded into the model's frame at build time and never touched again. ]]
+local function buildArm(
+	built: Model,
+	origin: CFrame,
+	handAt: Vector3,
+	run: Vector3,
+	skin: Color3,
+	sleeve: Color3
+)
+	local direction = run.Unit
+	local handWorld = origin * CFrame.new(handAt)
+
+	local hand = Instance.new("Part")
+	hand.Name = "FL_Hand"
+	hand.Size = HAND_SIZE
+	hand.Color = skin
+	hand.Material = Enum.Material.SmoothPlastic
+	hand.Anchored = true
+	hand.CanCollide = false
+	hand.CanQuery = false
+	hand.CanTouch = false
+	hand.CastShadow = false
+	hand.CFrame = handWorld
+	hand.Parent = built
+
+	-- The forearm starts inside the hand and runs backwards, so there is no seam
+	-- at the wrist however the weapon is angled.
+	local mid = handWorld.Position + origin:VectorToWorldSpace(direction) * (FOREARM_LENGTH * 0.5 - 0.1)
+
+	local forearm = Instance.new("Part")
+	forearm.Name = "FL_Forearm"
+	forearm.Size = Vector3.new(FOREARM_THICKNESS, FOREARM_THICKNESS, FOREARM_LENGTH)
+	forearm.Color = sleeve
+	forearm.Material = Enum.Material.Fabric
+	forearm.Anchored = true
+	forearm.CanCollide = false
+	forearm.CanQuery = false
+	forearm.CanTouch = false
+	forearm.CastShadow = false
+	forearm.CFrame = CFrame.lookAt(mid, mid + origin:VectorToWorldSpace(direction))
+	forearm.Parent = built
+end
+
+--[[
+	Places both arms on a built weapon.
+
+	`support` is skipped for a pistol and a revolver: a one-handed grip with a
+	second hand floating under the barrel looks far worse than no second hand,
+	and the whole point of a sidearm silhouette is that it is held in one.
+]]
+local function buildArms(built: Model, definition: any)
+	local ok, boxCFrame, size = pcall(function()
+		return built:GetBoundingBox()
+	end)
+	if not ok or not size then
+		return
+	end
+
+	local origin = built:GetPivot()
+	-- Weapons point down -Z, so +Z is toward the shooter.
+	local depth = math.max(size.Z, 0.4)
+	local drop = math.max(size.Y, 0.25)
+
+	local skin = skinTone()
+	local sleeve = sleeveColor()
+
+	buildArm(built, origin, Vector3.new(0.02, -drop * GRIP_DROP, depth * GRIP_BACK), RIGHT_RUN, skin, sleeve)
+
+	local class = definition and definition.class
+	local oneHanded = class == "Pistol"
+	if not oneHanded then
+		buildArm(
+			built,
+			origin,
+			Vector3.new(-0.04, -drop * SUPPORT_DROP, -depth * SUPPORT_FORWARD),
+			LEFT_RUN,
+			skin,
+			sleeve
+		)
+	end
+end
+
 --[[ Every model gets a Muzzle. When the art did not ship one it is invented at
      the forward-most point of the bounding box — the tip of the barrel, for any
      model posed the way the table above assumes — so the flash, the tracer
@@ -729,6 +882,12 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 
 	buildFlash(definition)
 
+	--[[ Arms go on LAST, and that ordering is load-bearing: an invented muzzle is
+	     the forward-most point of the bounding box and the sight offset is
+	     measured off it too, so adding a forearm before either of them would put
+	     the muzzle flash on the player's elbow. ]]
+	buildArms(built, definition)
+
 	local camera = Workspace.CurrentCamera
 	if camera and not current.hidden then
 		built.Parent = camera
@@ -737,53 +896,136 @@ end
 
 -- ── shells ──────────────────────────────────────────────────────────────────
 
-local function ensureShells()
-	if shellFolder then
-		return
+--[[
+	Brass, by calibre.
+
+	The pool used to be one shape for every gun in the game, which meant a
+	shotgun threw the same little rifle case a Vector did. AmmoConfig now names a
+	calibre per weapon, and each calibre gets its own small pool built the first
+	time a gun that uses it is drawn.
+
+	Pools are per calibre rather than per weapon on purpose: sixteen guns share
+	six calibres, so a full loadout costs six pools instead of sixteen, and
+	swapping between two rifles that both eject 5.56 reuses the same brass.
+
+	If the artist has supplied a real model at
+	`ReplicatedStorage.Assets.Ammo.Casings.<name>` it is cloned; otherwise the
+	pool is blocks at the size AmmoConfig gives, which is still the right SHAPE
+	per calibre and is most of what the eye is reading at this distance.
+]]
+local CASING_POOL = 18
+
+type CasingPool = {
+	parts: { BasePart },
+	expiry: { number },
+	cursor: number,
+	definition: any,
+}
+
+local casingPools: { [string]: CasingPool } = {}
+local casingFolder: Folder? = nil
+
+local function ensureCasingFolder(): Folder
+	if casingFolder then
+		return casingFolder
 	end
 	local folder = Instance.new("Folder")
-	folder.Name = "FL_Shells"
+	folder.Name = "FL_Casings"
 	folder.Parent = Workspace
-	shellFolder = folder
+	casingFolder = folder
 	trove:add(folder)
+	return folder
+end
 
-	for index = 1, SHELL_POOL do
-		local shell = Instance.new("Part")
-		shell.Name = "FL_Shell"
-		shell.Size = SHELL_SIZE
-		shell.Color = SHELL_COLOR
-		shell.Material = Enum.Material.Metal
-		shell.CanCollide = true
-		shell.CanQuery = false
-		shell.CanTouch = false
-		shell.CastShadow = false
-		shell.Massless = true
+--[[ Finds a supplied casing model, or nil. Looked up once per calibre and then
+     cached inside the pool, because this walks ReplicatedStorage. ]]
+local function findCasingModel(name: string): BasePart?
+	if name == "" then
+		return nil
+	end
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local ammo = assets and assets:FindFirstChild(AmmoConfig.FolderName)
+	local casings = ammo and ammo:FindFirstChild(AmmoConfig.CasingFolder)
+	local entry = casings and casings:FindFirstChild(name)
+	if not entry then
+		return nil
+	end
+	if entry:IsA("BasePart") then
+		return entry
+	end
+	-- A Model wrapping one part is the common export shape; take the part.
+	if entry:IsA("Model") then
+		return entry:FindFirstChildWhichIsA("BasePart", true)
+	end
+	return nil
+end
+
+local function buildCasingPool(calibre: string, definition: any): CasingPool
+	local folder = ensureCasingFolder()
+	local template = findCasingModel(definition.model)
+
+	local pool: CasingPool = { parts = {}, expiry = {}, cursor = 0, definition = definition }
+
+	for index = 1, CASING_POOL do
+		local part: BasePart
+		if template then
+			part = template:Clone() :: BasePart
+			part:ClearAllChildren()
+		else
+			local block = Instance.new("Part")
+			block.Size = definition.size
+			block.Color = definition.color
+			block.Material = definition.material
+			part = block
+		end
+
+		part.Name = "FL_Casing_" .. calibre
+		part.CanCollide = true
+		part.CanQuery = false
+		part.CanTouch = false
+		part.CastShadow = false
+		part.Massless = true
 		--[[ Debris never collides with a survivor or an infected, which is what
-		     stops a magazine's worth of brass from nudging the player off a
-		     ledge. The group is registered by the server bootstrap; if this
-		     client got here first, non-colliding brass is the safe failure. ]]
+		     stops a magazine's worth of brass from nudging a player off a ledge.
+		     The group is registered by the server bootstrap; if this client got
+		     here first, non-colliding brass is the safe failure. ]]
 		local ok = pcall(function()
-			shell.CollisionGroup = "Debris"
+			part.CollisionGroup = "Debris"
 		end)
 		if not ok then
-			shell.CanCollide = false
+			part.CanCollide = false
 		end
-		shell.Transparency = 1
-		shell.Anchored = true
-		shell.Parent = folder
-		shells[index] = shell
-		shellExpiry[index] = 0
+		part.Transparency = 1
+		part.Anchored = true
+		part.Parent = folder
+
+		pool.parts[index] = part
+		pool.expiry[index] = 0
 	end
+
+	casingPools[calibre] = pool
+	return pool
 end
 
 local function ejectShell()
 	if not muzzle then
 		return
 	end
-	ensureShells()
 
-	shellCursor = (shellCursor % SHELL_POOL) + 1
-	local shell = shells[shellCursor]
+	local entry = AmmoConfig.forWeapon(current.weaponId)
+	local calibre = entry and entry.casing or ""
+	if calibre == "" then
+		return -- melee, and anything else that does not throw brass
+	end
+
+	local definition = AmmoConfig.Casings[calibre]
+	if not definition then
+		return
+	end
+
+	local pool = casingPools[calibre] or buildCasingPool(calibre, definition)
+	pool.cursor = (pool.cursor % CASING_POOL) + 1
+	local shell = pool.parts[pool.cursor]
 	if not shell then
 		return
 	end
@@ -794,28 +1036,134 @@ local function ejectShell()
 	local base = muzzle.WorldCFrame * CFrame.new(0.18, 0, current.pose.length * 0.45)
 	shell.Anchored = false
 	shell.Transparency = 0
-	shell.CFrame = base
-	shell.AssemblyLinearVelocity = base.RightVector * SHELL_SPEED + base.UpVector * (SHELL_SPEED * 0.45)
+	shell.CFrame = base * CFrame.Angles(0, math.random() * math.pi * 2, 0)
+	shell.AssemblyLinearVelocity = base.RightVector * definition.ejectSpeed
+		+ base.UpVector * definition.ejectUp
 	shell.AssemblyAngularVelocity = Vector3.new(
-		(math.random() - 0.5) * SHELL_SPIN,
-		(math.random() - 0.5) * SHELL_SPIN,
-		(math.random() - 0.5) * SHELL_SPIN
+		(math.random() - 0.5) * definition.spin,
+		(math.random() - 0.5) * definition.spin,
+		(math.random() - 0.5) * definition.spin
 	)
-	shellExpiry[shellCursor] = os.clock() + SHELL_LIFETIME
+	pool.expiry[pool.cursor] = os.clock() + definition.lifetime
 end
 
 local function stepShells(now: number)
-	for index = 1, SHELL_POOL do
-		local expiry = shellExpiry[index]
-		if expiry > 0 and now >= expiry then
-			local shell = shells[index]
-			if shell then
-				shell.Anchored = true
-				shell.Transparency = 1
-				shell.AssemblyLinearVelocity = Vector3.zero
+	for _, pool in casingPools do
+		for index = 1, CASING_POOL do
+			local expiry = pool.expiry[index]
+			if expiry > 0 and now >= expiry then
+				local shell = pool.parts[index]
+				if shell then
+					shell.Anchored = true
+					shell.Transparency = 1
+					shell.AssemblyLinearVelocity = Vector3.zero
+				end
+				pool.expiry[index] = 0
 			end
-			shellExpiry[index] = 0
 		end
+	end
+end
+
+-- ── magazines ───────────────────────────────────────────────────────────────
+
+--[[
+	The dropped magazine.
+
+	Worth its own system rather than reusing the brass pool, because it is the
+	one piece of ammunition the player genuinely looks at: it falls out of frame
+	over about a second at arm's length, and it is the clearest signal in the
+	game that a reload is happening and how far through it you are.
+
+	One at a time is enough — a second reload before the first magazine has
+	landed simply recycles it.
+]]
+local MAGAZINE_LIFETIME = 4
+local magazinePart: BasePart? = nil
+local magazineExpiry = 0
+
+local function findMagazineModel(name: string): BasePart?
+	if name == "" then
+		return nil
+	end
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local ammo = assets and assets:FindFirstChild(AmmoConfig.FolderName)
+	local mags = ammo and ammo:FindFirstChild(AmmoConfig.MagazineFolder)
+	local entry = mags and mags:FindFirstChild(name)
+	if not entry then
+		return nil
+	end
+	if entry:IsA("BasePart") then
+		return entry
+	end
+	if entry:IsA("Model") then
+		return entry:FindFirstChildWhichIsA("BasePart", true)
+	end
+	return nil
+end
+
+local function dropMagazine()
+	local definition = AmmoConfig.magazineFor(current.weaponId)
+	-- A shell-by-shell weapon has no magazine to drop; the shotgun's reload reads
+	-- through the pump and the shells instead.
+	if not definition or definition.perShellRound then
+		return
+	end
+	if not model or not muzzle then
+		return
+	end
+
+	local folder = ensureCasingFolder()
+
+	if magazinePart then
+		magazinePart:Destroy()
+		magazinePart = nil
+	end
+
+	local template = findMagazineModel(definition.model)
+	local part: BasePart
+	if template then
+		part = template:Clone() :: BasePart
+		part:ClearAllChildren()
+	else
+		local block = Instance.new("Part")
+		block.Size = definition.size
+		block.Color = definition.color
+		block.Material = definition.material
+		part = block
+	end
+
+	part.Name = "FL_Magazine"
+	part.CanCollide = true
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Massless = true
+	local ok = pcall(function()
+		part.CollisionGroup = "Debris"
+	end)
+	if not ok then
+		part.CanCollide = false
+	end
+	part.Anchored = false
+
+	-- Out of the magazine well: under the receiver, behind the muzzle.
+	local well = muzzle.WorldCFrame * CFrame.new(0, -0.28, current.pose.length * 0.55)
+	part.CFrame = well
+	part.AssemblyLinearVelocity = -well.UpVector * definition.dropSpeed
+		+ well.LookVector * (definition.dropSpeed * 0.25)
+	part.AssemblyAngularVelocity =
+		Vector3.new((math.random() - 0.5) * 6, (math.random() - 0.5) * 4, (math.random() - 0.5) * 6)
+	part.Parent = folder
+
+	magazinePart = part
+	magazineExpiry = os.clock() + MAGAZINE_LIFETIME
+end
+
+local function stepMagazine(now: number)
+	if magazinePart and magazineExpiry > 0 and now >= magazineExpiry then
+		magazinePart:Destroy()
+		magazinePart = nil
+		magazineExpiry = 0
 	end
 end
 
@@ -871,6 +1219,7 @@ function ViewmodelController:onDryFire()
 end
 
 function ViewmodelController:onReloadStarted(_definition: any, _perShell: boolean)
+	dropMagazine()
 	current.reloading = true
 end
 
@@ -986,6 +1335,7 @@ local function update(deltaTime: number)
 		end
 	end
 	stepShells(now)
+	stepMagazine(now)
 
 	if not model or current.hidden then
 		return

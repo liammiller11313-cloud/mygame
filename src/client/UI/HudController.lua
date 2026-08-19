@@ -114,7 +114,30 @@ local STRIPE_WIDTH = 3
 -- as "this slot is struck out" rather than as a decorative cross.
 local DEAD_X_ANGLE = math.deg(math.atan2(LAYOUT.SurvivorPanelHeight, LAYOUT.SurvivorPanelWidth))
 
-local ITEM_SLOTS = { SLOT.Throwable, SLOT.Health, SLOT.Pills }
+--[[
+	The hotbar, in Left 4 Dead's order: what you shoot with, what you fall back
+	to, and the three things that save you. Weapon slots carry their own ammo,
+	because in a firefight the question is never "how much do I have" in the
+	abstract — it is "can I finish this magazine or do I switch".
+
+	Five slots, and the key that selects each one is its position in this list.
+]]
+local HOTBAR_SLOTS = { SLOT.Primary, SLOT.Secondary, SLOT.Throwable, SLOT.Health, SLOT.Pills }
+local WEAPON_SLOTS = { [SLOT.Primary] = true, [SLOT.Secondary] = true }
+
+--[[ What a slot is called when it is empty. Naming the empty slot rather than
+     blanking it is what tells a new player the slot exists at all. ]]
+local SLOT_TITLE = {
+	[SLOT.Primary] = "PRIMARY",
+	[SLOT.Secondary] = "SIDEARM",
+	[SLOT.Throwable] = "THROWABLE",
+	[SLOT.Health] = "HEALTH",
+	[SLOT.Pills] = "PILLS",
+}
+
+-- Wider than they are tall: a weapon name and an ammo count have to fit.
+local HOTBAR_SLOT_WIDTH = 92
+local HOTBAR_SLOT_HEIGHT = 54
 
 local HudController = {}
 
@@ -609,13 +632,47 @@ end
 
 -- ── item slots ──────────────────────────────────────────────────────────────
 
+--[[
+	Draws the hotbar. Weapon slots show what is loaded; item slots show what is
+	carried. Everything is read from attributes, so this runs on change rather
+	than on a timer, and the only thing that animates is the pickup flash.
+]]
 local function refreshItems()
 	local active = Attributes.get(player, LA.ActiveSlot, SLOT.Primary)
-	for _, slot in ITEM_SLOTS do
+
+	for _, slot in HOTBAR_SLOTS do
 		local entry = itemSlots[slot]
+		if not entry then
+			continue
+		end
+
 		local flash = flashAmount(slot)
 		local itemId = ""
-		if slot == SLOT.Throwable then
+		local countText = ""
+
+		if slot == SLOT.Primary then
+			itemId = Attributes.get(player, LA.PrimaryId, "")
+			if itemId ~= "" then
+				countText = string.format(
+					"%d / %d",
+					Attributes.get(player, LA.PrimaryAmmo, 0),
+					Attributes.get(player, LA.PrimaryReserve, 0)
+				)
+			end
+		elseif slot == SLOT.Secondary then
+			itemId = Attributes.get(player, LA.SecondaryId, "")
+			if itemId ~= "" then
+				local definition = WeaponConfig.get(itemId)
+				if definition and definition.magSize <= 0 then
+					-- Melee. A magazine count on a machete reads as a bug.
+					countText = "MELEE"
+				else
+					-- Sidearms have no finite reserve, and "15 / ∞" is noise:
+					-- the number that matters is what is in the gun.
+					countText = string.format("%d", Attributes.get(player, LA.SecondaryAmmo, 0))
+				end
+			end
+		elseif slot == SLOT.Throwable then
 			itemId = Attributes.get(player, LA.ThrowableId, "")
 		elseif slot == SLOT.Health then
 			itemId = Attributes.get(player, LA.HealthItemId, "")
@@ -624,12 +681,25 @@ local function refreshItems()
 		end
 
 		local filled = itemId ~= ""
-		entry.label.Text = if filled then itemLabel(itemId) else "—"
-		entry.label.TextColor3 = if filled then COLOR.TextPrimary else COLOR.TextDim
-		entry.key.TextColor3 = if filled then COLOR.TextSecondary else COLOR.TextDim
-		entry.frame.BackgroundTransparency = if filled then 0.15 else 0.55
+		local selected = slot == active
 
-		local base = if slot == active and filled
+		if filled then
+			local definition = WEAPON_SLOTS[slot] and WeaponConfig.get(itemId)
+			entry.label.Text = if definition then string.upper(definition.displayName) else itemLabel(itemId)
+		else
+			entry.label.Text = "—"
+		end
+		entry.count.Text = countText
+
+		entry.label.TextColor3 = if filled then COLOR.TextPrimary else COLOR.TextDim
+		entry.title.TextColor3 = if selected and filled then COLOR.Accent else COLOR.TextDim
+		entry.key.TextColor3 = if filled then COLOR.TextSecondary else COLOR.TextDim
+		entry.count.TextColor3 = if selected then COLOR.AccentBright else COLOR.TextSecondary
+		entry.marker.Visible = selected and filled
+
+		entry.frame.BackgroundTransparency = if selected and filled then 0.05 elseif filled then 0.3 else 0.62
+
+		local base = if selected and filled
 			then COLOR.Accent
 			elseif filled then COLOR.BorderBright
 			else COLOR.Border
@@ -638,11 +708,13 @@ local function refreshItems()
 		-- pickup reads the same whether the slot was empty, full, or selected.
 		if flash > 0 then
 			entry.stroke.Color = base:Lerp(COLOR.AccentBright, flash)
-			entry.stroke.Thickness = LAYOUT.BorderThickness + flash * 1.5
-			entry.frame.BackgroundTransparency = (if filled then 0.15 else 0.55) * (1 - flash * 0.6)
+			entry.stroke.Thickness = LAYOUT.BorderThickness + flash * 1.8
+			entry.frame.BackgroundTransparency *= 1 - flash * 0.7
 		else
 			entry.stroke.Color = base
-			entry.stroke.Thickness = LAYOUT.BorderThickness
+			entry.stroke.Thickness = if selected and filled
+				then LAYOUT.BorderThickness + 1
+				else LAYOUT.BorderThickness
 		end
 	end
 end
@@ -868,7 +940,9 @@ end
 local function buildAmmo()
 	local panel = newFrame(gui, "Ammo", COLOR.Panel, 0.12)
 	panel.AnchorPoint = Vector2.new(1, 1)
-	panel.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 1, -LAYOUT.ScreenMargin)
+	-- Clear of the hotbar below it, which owns the bottom margin now.
+	panel.Position =
+		UDim2.new(1, -LAYOUT.ScreenMargin, 1, -(LAYOUT.ScreenMargin + HOTBAR_SLOT_HEIGHT + LAYOUT.ElementGap))
 	panel.Size = UDim2.fromOffset(LAYOUT.AmmoPanelWidth, LAYOUT.AmmoPanelHeight)
 	corner(panel)
 	stroke(panel)
@@ -912,7 +986,10 @@ local function buildAmmo()
 	reserveBounds.MinTextSize = TEXT.Small
 	reserveBounds.Parent = reserve
 
-	local magazine = newLabel(panel, "Magazine", FONT.Numeric, TEXT.Display, COLOR.TextPrimary)
+	--[[ Stencil, not the numeric face. This is the single largest element on the
+	     screen and the one place the in-game HUD gets to carry the same worn,
+	     stamped voice the main menu does. ]]
+	local magazine = newLabel(panel, "Magazine", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
 	magazine.AnchorPoint = Vector2.new(1, 1)
 	magazine.Position = UDim2.new(1, -(LAYOUT.PanelPadding + RESERVE_WIDTH), 1, -4)
 	magazine.Size =
@@ -929,17 +1006,21 @@ local function buildAmmo()
 end
 
 local function buildItems()
-	local holder = newFrame(gui, "Items", COLOR.Panel, 1)
-	holder.AnchorPoint = Vector2.new(0.5, 1)
-	holder.Position = UDim2.new(0.5, 0, 1, -LAYOUT.ScreenMargin)
+	--[[ Bottom right, with the ammo counter stacked directly above it. That
+	     corner is where Left 4 Dead keeps everything about what you are holding,
+	     and keeping the count and the slots together means one glance answers
+	     both "what am I holding" and "what could I switch to". ]]
+	local holder = newFrame(gui, "Hotbar", COLOR.Panel, 1)
+	holder.AnchorPoint = Vector2.new(1, 1)
+	holder.Position = UDim2.new(1, -LAYOUT.ScreenMargin, 1, -LAYOUT.ScreenMargin)
 	holder.Size = UDim2.fromOffset(
-		#ITEM_SLOTS * LAYOUT.ItemSlotSize + (#ITEM_SLOTS - 1) * LAYOUT.ItemSlotGap,
-		LAYOUT.ItemSlotSize
+		#HOTBAR_SLOTS * HOTBAR_SLOT_WIDTH + (#HOTBAR_SLOTS - 1) * LAYOUT.ItemSlotGap,
+		HOTBAR_SLOT_HEIGHT
 	)
 
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
 	layout.VerticalAlignment = Enum.VerticalAlignment.Center
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, LAYOUT.ItemSlotGap)
