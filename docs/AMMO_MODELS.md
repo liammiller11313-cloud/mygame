@@ -1,8 +1,39 @@
 # Ammo Models — what to make and where to put it
 
 Everything here is **optional**. The game builds a stand-in for anything missing,
-at the right size and colour for its calibre, so a half-filled folder still plays.
-Drop a real model in and it's used automatically — no code changes.
+at the right size and colour, so a half-filled folder still plays. Drop a real
+model in and it's used automatically — no code changes.
+
+## The short list, by weapon type
+
+Each weapon type needs a **casing** (flies out when you shoot) and a **magazine**
+(drops when you reload). Guns of the same type share them, so 16 guns need 14
+models, not 32.
+
+| Ammo type | Which guns | Casing model | Magazine model |
+|---|---|---|---|
+| **Shotgun ammo** | Shotgun | `Casing_12ga` | `Round_12ga` |
+| **Pistol ammo** | M1911A1 | `Casing_45ACP` | `Mag_Pistol` |
+| **Revolver ammo** | .357 Magnum | `Casing_357` | `Speedloader_357` |
+| **SMG ammo** | MP7A1, UMP-45, Kriss Vector | `Casing_45ACP`, `Casing_9mm` | `Mag_SMG` |
+| **PPSh ammo** | PPSh-41 | `Casing_762` | `Mag_Drum` |
+| **Rifle ammo** | M4A1, HK416A5, Mk 18 CQBR, Scoped Mk-18 | `Casing_556` | `Mag_STANAG` |
+| **AK ammo** | AKM, AK-12, AKS-74U | `Casing_762`, `Casing_556` | `Mag_AK` |
+| **Sniper ammo** | M1A EBR | `Casing_762` | `Mag_Marksman` |
+
+Plus **3 floor pickups**: `AmmoPile`, `AmmoBox`, `ShellBox`.
+
+### If you only make a few, make these
+
+1. **Shotgun ammo** — `Casing_12ga`. A red plastic hull with a brass base is the
+   only casing players consciously notice.
+2. **Rifle ammo** — `Mag_STANAG`. Covers four guns, and a dropped magazine is the
+   clearest signal in the game that a reload is happening.
+3. **AK ammo** — `Mag_AK`. Curved orange-brown bakelite, so it reads as obviously
+   *not* a STANAG at a glance.
+4. **PPSh ammo** — `Mag_Drum`. Big, round, unmistakable.
+
+---
 
 ## Folder layout
 
