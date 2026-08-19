@@ -1026,7 +1026,7 @@ local function buildItems()
 	layout.Padding = UDim.new(0, LAYOUT.ItemSlotGap)
 	layout.Parent = holder
 
-	for order, slot in ITEM_SLOTS do
+	for order, slot in HOTBAR_SLOTS do
 		local frame = newFrame(holder, slot, COLOR.Panel, 0.55)
 		frame.LayoutOrder = order
 		frame.Size = UDim2.fromOffset(LAYOUT.ItemSlotSize, LAYOUT.ItemSlotSize)

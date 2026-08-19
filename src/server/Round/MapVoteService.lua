@@ -44,6 +44,10 @@ local serviceTrove = Trove.new()
 
 local active = false
 local endsAt = 0
+--[[ Cleared when a round starts, set when a vote resolves. It is what stops the
+     idle check below from reopening a vote every tick once one has been held. ]]
+local decided = false
+local lastWinner = ""
 local options: { string } = {}
 local votes: { [Player]: string } = {}
 local accumulator = 0
@@ -125,6 +129,19 @@ end
 --[[ NOT called `start`: the bootstrap calls :start() on every registered
      service, and a vote that opened itself at boot would be running before there
      was ever a round to vote after. ]]
+--[[ Called by RoundService as a round begins. The decision has been spent, so
+     the next lull is allowed to open a fresh vote. ]]
+function MapVoteService:consumeDecision(): string
+	local winner = lastWinner
+	decided = false
+	lastWinner = ""
+	return winner
+end
+
+function MapVoteService:hasDecided(): boolean
+	return decided
+end
+
 function MapVoteService:beginVote(): string
 	local mapService = Registry.find("MapService")
 	options = if mapService then mapService:getAvailableIds() else MapConfig.ids()
@@ -179,6 +196,8 @@ end
 
 function MapVoteService:_finish(winner: string)
 	active = false
+	decided = true
+	lastWinner = winner
 	local counts = tally()
 
 	Remotes.Event.MapVoteResult:FireAllClients({ winner = winner, tally = counts })
@@ -205,8 +224,42 @@ function MapVoteService:finishNow(): string
 	return winner
 end
 
+--[[
+	Opens a vote on a fresh server, or after a round has been decided and the
+	next one has not started.
+
+	A server that boots straight into a default map never asks anybody what they
+	wanted to play, which is the one moment a vote is most useful — the map is
+	about to be loaded and nobody has any investment in it yet. So the same vote
+	that runs between rounds also runs before the first one.
+
+	Gated on there being somebody to ask: a vote held in an empty server would
+	resolve to nothing and then block the first real player from getting one.
+]]
+function MapVoteService:_maybeOpenIdleVote()
+	if active or decided then
+		return
+	end
+	if #Players:GetPlayers() == 0 then
+		return
+	end
+
+	local round = Registry.find("RoundService")
+	if round and typeof(round.getState) == "function" then
+		local roundState = round:getState()
+		-- Only while nothing is being played. A vote over a live round would be
+		-- deciding a map for a round that is already using one.
+		if roundState ~= "Lobby" and roundState ~= "" then
+			return
+		end
+	end
+
+	self:beginVote()
+end
+
 function MapVoteService:_step()
 	if not active then
+		self:_maybeOpenIdleVote()
 		return
 	end
 	if serverNow() >= endsAt then

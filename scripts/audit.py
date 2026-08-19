@@ -257,6 +257,55 @@ for p, text in sources.items():
         )
 
 
+
+# ── 9. Constants used but never defined ─────────────────────────────────────
+# The bug this exists for: a rename replaces a constant's definition and some,
+# but not all, of its uses. Luau reads the survivors as nil globals and only
+# fails when that line runs — which for UI construction means the whole
+# controller dies at init and takes everything built after it down with it.
+#
+# Limited to SCREAMING_CASE names on purpose. Those are module constants by
+# convention, so an undefined one is essentially always a real bug, whereas
+# checking every lowercase identifier would need a real scope analysis to avoid
+# drowning in false positives.
+CONST_RE = re.compile(r"(?<![.:\w])([A-Z][A-Z0-9_]{2,})\b")
+
+for p, text in sources.items():
+    defined = set()
+    for m in re.finditer(r"local\s+([A-Z][A-Z0-9_]{2,})\s*[:=]", text):
+        defined.add(m.group(1))
+    for m in re.finditer(r"local\s+function\s+([A-Z][A-Z0-9_]{2,})", text):
+        defined.add(m.group(1))
+    # Multiple declarations on one line: `local A, B = 1, 2`
+    for m in re.finditer(r"local\s+([A-Z][A-Z0-9_,\s]*?)\s*=", text):
+        for name in re.split(r"[,\s]+", m.group(1)):
+            if name:
+                defined.add(name)
+    # Loop variables and parameters can be shouty too.
+    for m in re.finditer(r"for\s+([\w\s,]+?)\s+in\b", text):
+        for name in re.split(r"[,\s]+", m.group(1)):
+            if name:
+                defined.add(name)
+    for m in re.finditer(r"function\s*[\w.:]*\s*\(([^)]*)\)", text):
+        for param in m.group(1).split(","):
+            name = param.split(":")[0].strip()
+            if name:
+                defined.add(name)
+
+    for m in CONST_RE.finditer(text):
+        name = m.group(1)
+        if name in defined or name in LUA_GLOBALS:
+            continue
+        # A name being ASSIGNED is a declaration or a table key, not a read.
+        # `SMG = { ... }` inside a config table is the common case.
+        after = text[m.end():m.end() + 4]
+        if re.match(r"\s*=(?!=)", after):
+            continue
+        problems.append(
+            f"{rel(p)}:{lineno(text, m.start())}  uses {name} which is never defined in this file"
+        )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

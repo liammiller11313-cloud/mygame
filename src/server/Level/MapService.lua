@@ -270,6 +270,29 @@ function MapService:init()
 	end
 end
 
+--[[
+	Puts a world up as soon as the server is running, before any round exists.
+
+	Without this the place is empty until the first round starts, which is fine
+	for a full server (everybody is looking at the menu) and awful for a developer
+	pressing Play alone and finding a void. The map vote still runs and still
+	swaps this out — loading the default here only guarantees there is always
+	SOMETHING to swap from.
+]]
+function MapService:start()
+	if currentRoot and currentRoot.Parent then
+		return
+	end
+
+	local available = self:getAvailableIds()
+	if #available == 0 then
+		return
+	end
+
+	local first = if table.find(available, MapConfig.DefaultMap) then MapConfig.DefaultMap else available[1]
+	self:load(first)
+end
+
 function MapService:destroy()
 	serviceTrove:destroy()
 	for _, clone in prewarmed do

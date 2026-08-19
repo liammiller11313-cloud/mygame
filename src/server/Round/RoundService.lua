@@ -669,8 +669,19 @@ function RoundService:startRound(requestedMode: string?)
 	     is already live, so voting to replay a map costs nothing rather than
 	     throwing away a perfectly good world and paying for a reload. ]]
 	local vote = Registry.find("MapVoteService")
-	if vote and vote:isActive() then
-		pendingMap = vote:finishNow()
+	if vote then
+		if vote:isActive() then
+			-- Forced start before the clock ran out: honour the vote as it stands
+			-- rather than discarding it.
+			pendingMap = vote:finishNow()
+		end
+		--[[ Spend the decision. Clearing it here is what lets the next lull open a
+		     fresh vote instead of the server believing the map was already
+		     chosen for every subsequent round. ]]
+		local decided = vote:consumeDecision()
+		if decided ~= "" then
+			pendingMap = decided
+		end
 	end
 
 	local maps = Registry.find("MapService")

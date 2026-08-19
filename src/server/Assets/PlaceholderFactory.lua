@@ -2606,6 +2606,27 @@ local function hasRealLevel(): boolean
 	if maps and maps ~= ours and maps:FindFirstChildWhichIsA("BasePart", true) then
 		return true
 	end
+
+	--[[
+		And the maps MapService owns.
+
+		This check used to look only at Workspace, which was wrong the moment maps
+		moved into storage: MapService's init runs first and relocates every map
+		out of Workspace.Maps into ServerStorage.Maps, so by the time this ran the
+		world looked empty and the grey-box chapter built itself on top of a place
+		that had two perfectly good maps in it. Ask the service, not the world.
+	]]
+	local mapService = Registry.find("MapService")
+	if mapService and #mapService:getAvailableIds() > 0 then
+		return true
+	end
+
+	-- Direct fallback, for the window before MapService has registered.
+	local stored = ServerStorage:FindFirstChild("Maps")
+	if stored and stored:FindFirstChildWhichIsA("BasePart", true) then
+		return true
+	end
+
 	return false
 end
 
