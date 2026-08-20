@@ -52,6 +52,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
+local Device = require(Shared.Util.Device)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 
@@ -64,18 +65,44 @@ local trove = Trove.new()
 
 -- ── tuning ──────────────────────────────────────────────────────────────────
 
---[[ Past this a body is left in whatever pose it last held. At 220 studs a
-     Common is a handful of pixels tall and its elbows are not a gameplay
-     signal; the frame time is better spent on the ones in the room. ]]
+--[[
+	── THESE THREE ARE THE WHOLE COST CONTROL, AND THEY WERE DEVICE-BLIND ───────
+	This loop poses every live body every frame and the map allows sixty Commons
+	at once, which makes it the largest single per-frame cost the client has. A
+	phone was animating exactly the same 220-stud horde a desktop was.
+
+	Scaled rather than capped. A cap — "pose the nearest N" — sounds equivalent
+	and is worse: it needs a per-frame sort, it desynchronises stride from
+	distance, and on a bad frame it can freeze the body that is currently chewing
+	on you, which is the one body that must never stop moving. Shrinking the
+	bands keeps the rule "closer bodies get more" intact and simply draws the
+	circle tighter.
+
+	At 130 studs a Common on a phone screen is a couple of pixels tall. At 50 the
+	stride drop is invisible. Neither number changes what a player can SEE well
+	enough to act on; they change how much is spent on what they cannot.
+]]
 local CULL_DISTANCE = 220
 local CULL_DISTANCE_SQUARED = CULL_DISTANCE * CULL_DISTANCE
-
---[[ Bodies past this get every third frame instead of every frame. A walk cycle
-     sampled at 20Hz is indistinguishable at ninety studs and costs a third as
-     much, which is what lets the near ones stay smooth during a horde. ]]
 local NEAR_DISTANCE = 90
 local NEAR_DISTANCE_SQUARED = NEAR_DISTANCE * NEAR_DISTANCE
 local FAR_STRIDE = 3
+
+--[[ Re-read at start and whenever Device revises its answer. Not resolved at
+     module scope: Device deliberately answers Mobile before the camera exists,
+     and a desktop that asked too early would spend the round posing a 130-stud
+     horde. The values above are the desktop defaults and the floor. ]]
+local function adoptDeviceBands()
+	CULL_DISTANCE = Device.pick({ Mobile = 130, Tablet = 170 }, 220)
+	CULL_DISTANCE_SQUARED = CULL_DISTANCE * CULL_DISTANCE
+	NEAR_DISTANCE = Device.pick({ Mobile = 50, Tablet = 70 }, 90)
+	NEAR_DISTANCE_SQUARED = NEAR_DISTANCE * NEAR_DISTANCE
+	--[[ Every fourth frame past the near band rather than every third. A walk
+	     cycle at 15Hz reads fine at fifty studs on a five-inch screen, and this
+	     is the term that scales with the number of bodies rather than with
+	     distance. ]]
+	FAR_STRIDE = Device.pick({ Mobile = 4, Tablet = 4 }, 3)
+end
 
 --[[ Below this a body is standing. Deliberately generous: a zombie being shoved
      around by its own pathfinding drifts at one or two studs a second, and a
@@ -580,7 +607,12 @@ local function watchFolder(folder: Instance)
 	trove:connect(folder.ChildRemoved, untrack)
 end
 
-function InfectedPoseController:init() end
+function InfectedPoseController:init()
+	--[[ In init rather than at module scope, because the camera exists by now and
+	     Device's answer is a measurement rather than its safe floor. ]]
+	adoptDeviceBands()
+	trove:add(Device.changed:connect(adoptDeviceBands))
+end
 
 function InfectedPoseController:start()
 	local existing = Workspace:FindFirstChild("Infected")

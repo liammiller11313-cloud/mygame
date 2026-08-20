@@ -858,6 +858,58 @@ for p, text in sources.items():
         )
 
 
+
+# ── 11. Assigning a top-level local before it is declared ───────────────────
+#
+# In Lua, `FOO = x` inside a function assigns a GLOBAL unless a `local FOO` is
+# already in scope. So a helper written ABOVE the local it means to update
+# silently creates a global, and the real local keeps its initial value forever:
+#
+#     local function adoptDeviceScale()
+#         HOLE_POOL = Device.pick(...)   -- writes a global
+#     end
+#     local HOLE_POOL = 56               -- declared AFTER; stays 56
+#
+# It parses, it runs, and nothing errors — the pool just never changes size. It
+# happened exactly like that, and selene reports it only as an "unused variable"
+# warning on the assignment, which reads like tidiness rather than a bug.
+#
+# Only names this file declares as a top-level local are considered, so a real
+# global from another module is not flagged.
+for p, text in sources.items():
+    lines = text.split("\n")
+    declared: dict = {}
+    for i, line in enumerate(lines):
+        m = re.match(r"^local (?:function )?([A-Za-z_]\w*)", line)
+        if m and m.group(1) not in declared:
+            declared[m.group(1)] = i
+
+    # Brace depth, so a TABLE FIELD is never mistaken for an assignment. Both
+    # look like `    name = value`, and the first pass at this check reported two
+    # of them — `state = { editing = 1, ... }` beside a separate
+    # `local function editing()`. Same spelling, different things, no bug.
+    # `sources` has comments and string literals blanked, so counting is safe.
+    depth = 0
+    for i, line in enumerate(lines):
+        at_line_start = depth
+        depth += line.count("{") - line.count("}")
+
+        if at_line_start > 0:
+            continue
+        # Indented, so inside a function. `name = ...` but not `name.x =`,
+        # `name[i] =`, `==`, or a local declaration of its own.
+        m = re.match(r"^[ \t]+([A-Za-z_]\w*)\s*(=[^=]|[-+*/%]=|\.\.=)", line)
+        if not m:
+            continue
+        name = m.group(1)
+        at = declared.get(name)
+        if at is not None and at > i:
+            problems.append(
+                f"{rel(p)}:{i + 1}  assigns '{name}' but `local {name}` is not declared until "
+                f"line {at + 1} — this writes a GLOBAL and the local keeps its initial value"
+            )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

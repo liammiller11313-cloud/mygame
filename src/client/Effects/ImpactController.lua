@@ -54,12 +54,19 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Device = require(Shared.Util.Device)
 local Enums = require(Shared.Enums)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
+
+--[[ One each, re-read in init and on Device.changed. Multiplied at emit time
+     rather than baked into the MATERIALS table so a class change takes effect on
+     the next shot instead of needing the table rebuilt. ]]
+local sparkScale = 1
+local dustScale = 1
 
 local DAMAGE = Enums.DamageType
 
@@ -92,10 +99,32 @@ local IMPACT_POOL = 24
      because a hole in a wall is not gore. They outlive the fight that made
      them by design — a room you have already fought through should look like
      it. ]]
+--[[ A hole is a translucent cylinder, which is fill rate that cannot batch, and
+     it is resident for the better part of half a minute. Desktop and console
+     keep the full set — see the note above on a fought-through room looking like
+     it. A handheld keeps the read and pays for a third of it.
+
+     Set in init, not here: Device answers its safe floor before the camera
+     exists, and a desktop that asked too early would spend the round with a
+     phone's pool. `holeSlot` creates its slots lazily, so raising this later
+     simply lets the ring buffer grow into it. ]]
 local HOLE_POOL = 56
 local HOLE_LIFETIME = 26
 local HOLE_FADE = 5
 local HOLE_THICKNESS = 0.06
+
+--[[ Measured in init, and again on Device.changed.
+
+     Defined HERE rather than beside sparkScale/dustScale at the top of the file,
+     which is where it was first written: above the `local HOLE_POOL`, the name
+     is not in scope yet, so `HOLE_POOL = ...` silently declared a GLOBAL and the
+     real pool stayed at 56 on every device. selene caught it as an unused
+     definition, which is what that mistake looks like from the outside. ]]
+local function adoptDeviceScale()
+	sparkScale = Device.pick({ Mobile = 0.5, Tablet = 0.7 }, 1)
+	dustScale = Device.pick({ Mobile = 0.35, Tablet = 0.6 }, 1)
+	HOLE_POOL = Device.pick({ Mobile = 18, Tablet = 32 }, 56)
+end
 local HOLE_OFFSET = 0.02 -- lifted off the surface so it cannot z-fight
 
 -- A remote muzzle flash is one frame of light in somebody else's hands. Longer
@@ -626,10 +655,14 @@ function ImpactController:spawnImpact(
 	applyClass(slot, className, class)
 	slot.part.CFrame = faceAlong(position, surface)
 
-	-- Counts scale with the damage; a shotgun's four impact events must add up
-	-- to one blast rather than four separate rifle hits.
-	local sparks = math.max(1, math.floor(class.sparkCount * scale + 0.5))
-	local dust = math.max(1, math.floor(class.dustCount * scale + 0.5))
+	--[[ Counts scale with the damage; a shotgun's four impact events must add up
+	     to one blast rather than four separate rifle hits. And with the DEVICE:
+	     dust is the fill-rate term — a dozen large soft particles overlapping at
+	     the point the player is aiming at — so it takes the deeper cut, while
+	     sparks are small, bright and are what actually says "you hit that".
+	     Both keep a floor of 1, so a hit is never silent. ]]
+	local sparks = math.max(1, math.floor(class.sparkCount * scale * sparkScale + 0.5))
+	local dust = math.max(1, math.floor(class.dustCount * scale * dustScale + 0.5))
 	slot.spark:Emit(sparks)
 	slot.dust:Emit(dust)
 
@@ -836,6 +869,9 @@ function ImpactController:init()
 	trove:connect(Players.PlayerRemoving, function(leaving: Player)
 		muzzles[leaving] = nil
 	end)
+
+	adoptDeviceScale()
+	trove:add(Device.changed:connect(adoptDeviceScale))
 end
 
 function ImpactController:start()
