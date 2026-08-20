@@ -771,16 +771,32 @@ function InfectedService:_stopBurning(record: any, linger: number)
 		self._burnLights = math.max(self._burnLights - 1, 0)
 	end
 
-	for _, key in { "fire", "light" } do
-		local instance = record[key]
-		record[key] = nil
-		if instance then
-			if linger > 0 then
-				Debris:AddItem(instance, linger)
-			else
-				instance:Destroy()
-			end
+	--[[ The FLAME lingers on a corpse; the LIGHT does not.
+
+	     They used to linger together, and that quietly broke the cap above. The
+	     budget slot is released the moment the record lets go — it has to be, or
+	     a long fight ratchets the count until nothing can light again — so a
+	     lingering light is a light nobody is counting. With bodies dying in
+	     clumps that is a steady population of uncounted lights sitting on
+	     corpses, which is exactly the ceiling the cap exists to impose.
+
+	     Nothing is lost visually. The corpse still burns, because the Fire is
+	     what says "this body is on fire", and a dead body that no longer casts
+	     its own glow is not a read anyone was using. ]]
+	local fire = record.fire
+	record.fire = nil
+	if fire then
+		if linger > 0 then
+			Debris:AddItem(fire, linger)
+		else
+			fire:Destroy()
 		end
+	end
+
+	local light = record.light
+	record.light = nil
+	if light then
+		light:Destroy()
 	end
 end
 

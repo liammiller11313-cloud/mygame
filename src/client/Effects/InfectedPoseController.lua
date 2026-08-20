@@ -88,6 +88,12 @@ local NEAR_DISTANCE = 90
 local NEAR_DISTANCE_SQUARED = NEAR_DISTANCE * NEAR_DISTANCE
 local FAR_STRIDE = 3
 
+--[[ Whether to take the dynamic shadow casters off each rig as it appears. See
+     stripShadows. Declared HERE, above the function that assigns it: below it,
+     `dropRigShadows = ...` is not in scope and silently writes a global instead
+     — audit.py check 11 catches that, and caught this. ]]
+local dropRigShadows = false
+
 --[[ Re-read at start and whenever Device revises its answer. Not resolved at
      module scope: Device deliberately answers Mobile before the camera exists,
      and a desktop that asked too early would spend the round posing a 130-stud
@@ -102,6 +108,7 @@ local function adoptDeviceBands()
 	     is the term that scales with the number of bodies rather than with
 	     distance. ]]
 	FAR_STRIDE = Device.pick({ Mobile = 4, Tablet = 4 }, 3)
+	dropRigShadows = Device.isHandheld()
 end
 
 --[[ Below this a body is standing. Deliberately generous: a zombie being shoved
@@ -329,6 +336,38 @@ local function resolveJoints(body: Body)
 	end
 end
 
+--[[
+	Takes the dynamic shadows off a rig, on a handheld only.
+
+	PlaceholderFactory gives every built rig two shadow casters and every adopted
+	one a single chosen part. That is right on a desktop — a horde with no
+	shadows floats — but a dynamic caster is re-rendered into the shadow map
+	every frame it moves, and sixty of them walking is the most expensive thing
+	on screen that nobody is looking directly at.
+
+	Done on the CLIENT, per rig, which is what makes it free of cost to everyone
+	else: CastShadow is written once at build time on the server, so a later
+	client write sticks, and it changes only this client's copy. A desktop player
+	in the same round keeps every shadow.
+
+	Deliberately NOT Lighting.GlobalShadows. Turning that off is a bigger win and
+	a bigger change: it also drives Roblox's indoor/outdoor determination, so
+	every interior would take OutdoorAmbient instead of Ambient and the warehouse
+	and safe rooms would come up roughly twice as bright as they are authored.
+	That is an art decision about how the game looks, not a performance fix, and
+	it is not one to make silently.
+]]
+local function stripShadows(model: Instance)
+	if not dropRigShadows then
+		return
+	end
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant.CastShadow then
+			descendant.CastShadow = false
+		end
+	end
+end
+
 local function track(model: Instance)
 	if not model:IsA("Model") or bodies[model] then
 		return
@@ -336,6 +375,10 @@ local function track(model: Instance)
 	if model:GetAttribute(IA.Kind) == nil then
 		return
 	end
+
+	--[[ Here rather than in the pose loop: this is a one-shot per body, and the
+	     loop is the thing the whole file exists to keep cheap. ]]
+	stripShadows(model)
 
 	local seed = seedFor(model)
 	local random = Random.new(seed)
