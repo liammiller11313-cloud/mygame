@@ -48,6 +48,43 @@ fi
 rm -f "$ERRLOG"
 echo "all files parse cleanly"
 
+# ── selene ──────────────────────────────────────────────────────────────────
+# Parsing proves the file is Luau. It does NOT prove that every name in it
+# resolves, and Lua's answer to an unresolved name is `nil` rather than an
+# error — so a local used above its own declaration, or a service never fetched,
+# compiles, loads, and throws the first time that one line runs.
+#
+# Four of those shipped in a single session before this was wired in: a damage
+# number's RNG deleted with the function it sat next to, a stat height declared
+# 120 lines below its only use, and a weapon-track table read by two functions
+# several hundred lines above it. Every one of them passed stylua and audit.py.
+#
+# roblox.yml is hand-written rather than generated, because
+# `selene generate-roblox-std` needs the network. It declares which GLOBALS
+# exist and lets anything through underneath them, which is exactly enough for
+# the undefined_variable lint and never enough for a false positive about an
+# instance property.
+if command -v selene >/dev/null 2>&1 && [ -f selene.toml ]; then
+  echo
+  selene --config selene.toml --display-style quiet src studio-scripts > /tmp/fl_selene.$$ 2>&1
+  # Warnings are informational and printed; only a denied lint fails the build.
+  if grep -qE "error\[" /tmp/fl_selene.$$; then
+    grep -E "error\[" /tmp/fl_selene.$$ >&2
+    rm -f /tmp/fl_selene.$$
+    exit 1
+  fi
+  WARNED=$(grep -cE "warning\[" /tmp/fl_selene.$$ || true)
+  rm -f /tmp/fl_selene.$$
+  if [ "${WARNED:-0}" -gt 0 ]; then
+    echo "selene: no undefined names ($WARNED unused-name warning(s))"
+  else
+    echo "selene: no undefined names"
+  fi
+else
+  echo
+  echo "selene not found — undefined-name checking SKIPPED (rokit install, or cargo install selene)" >&2
+fi
+
 # Parsing is not the same as resolving. audit.py cross-checks the names that
 # only fail at runtime — remotes, enum keys, attributes, service lookups.
 if command -v python3 >/dev/null 2>&1 && [ -f scripts/audit.py ]; then

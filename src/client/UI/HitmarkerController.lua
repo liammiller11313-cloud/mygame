@@ -70,6 +70,11 @@ local HitmarkerController = {}
 
 local player = Players.LocalPlayer
 local trove = Trove.new()
+--[[ Scatter for the damage numbers, so two that land in the same frame do not
+     sit exactly on top of each other. Lost once already: it lived next to the
+     private playUi this file used to have and went with it, which made every
+     damage number a nil-index error on the first shot that hit. ]]
+local random = Random.new()
 
 local gui: ScreenGui
 --[[ The scaled content layer. A hitmarker is sized in reference pixels like

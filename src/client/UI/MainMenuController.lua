@@ -1333,6 +1333,24 @@ local function buildPlay()
 	local button = Widgets.button(menuLayer, "Play")
 	playButton = button
 
+	--[[
+		A size and a position before layoutColumns has ever run.
+
+		Not belt and braces — load-bearing. layoutColumns owns the real geometry,
+		but it is only reached through refreshScale, which returns early while the
+		camera reports a ViewportSize of zero. That happens for the first frame or
+		two of a fresh client (see ScaleLayer's header), and if nothing resizes the
+		window afterwards it never runs at all.
+
+		A Frame with no Size set is 0x0. So this button was invisible, the mode
+		entries were hidden behind it by setPage("Root"), and the main menu came up
+		as a title and a nav row with nothing to press. buildModes has always set
+		exactly these two lines for exactly this reason; buildPlay was written
+		without them.
+	]]
+	button.Position = UDim2.new(COLUMN_X, 0, 0.52, 0)
+	button.Size = UDim2.new(ENTRY_WIDTH, 0, 0, PLAY_HEIGHT)
+
 	local rule = Widgets.rule(button, "Rule", COLOR.Accent)
 
 	local bar = Widgets.frame(button, "Bar", COLOR.Accent, 0)
@@ -1361,6 +1379,9 @@ local function buildPlay()
 	end)
 
 	backButton = Widgets.button(menuLayer, "Back")
+	-- Same fallback, same reason.
+	backButton.Position = UDim2.new(COLUMN_X, 0, 0.46, 0)
+	backButton.Size = UDim2.new(BACK_WIDTH, 0, 0, BACK_HEIGHT)
 	local backLabel = Widgets.label(backButton, "Label", FONT.Heading, TEXT.Body, COLOR.TextDim)
 	backLabel.Size = UDim2.fromScale(1, 1)
 	backLabel.Text = "‹  BACK"
@@ -2022,7 +2043,18 @@ local function refreshScale()
 		return
 	end
 	local height = camera.ViewportSize.Y
+	--[[ A viewport of zero is a camera that has not resolved yet, which happens
+	     for the first frame or two of a fresh client. Returning was correct —
+	     laying out against zero would be worse — but returning and never coming
+	     back is what left the menu unpositioned when nothing resized the window
+	     afterwards. One deferred retry costs nothing and closes it. ]]
 	if height <= 0 then
+		task.defer(function()
+			local later = Workspace.CurrentCamera
+			if later and later.ViewportSize.Y > 0 then
+				refreshScale()
+			end
+		end)
 		return
 	end
 

@@ -129,6 +129,13 @@ local MELEE_STATS = {
      shorter hides the rest. See refreshStats. ]]
 local STAT_ROWS = math.max(#GUN_STATS, #MELEE_STATS)
 
+--[[ Row height, and the shorter one a cramped column falls back to. Declared
+     here rather than beside layoutDetail, which is where they used to live and
+     120 lines BELOW the buildStatRow call that reads STAT_HEIGHT — a nil that
+     made the whole detail column throw while it was being built. ]]
+local STAT_HEIGHT = 22
+local STAT_HEIGHT_COMPACT = 17
+
 local function isMelee(definition: any): boolean
 	return definition ~= nil and definition.class == "Melee"
 end
@@ -712,8 +719,6 @@ end
 	shrink. The preview never goes below PREVIEW_MIN, because a shop with no
 	picture of the thing is not a shop.
 ]]
-local STAT_HEIGHT = 22
-local STAT_HEIGHT_COMPACT = 17
 local PREVIEW_MIN = 96
 --[[ Below this there is no picture worth drawing, so the row goes entirely
      rather than showing a letterbox. Only reachable in a desktop window

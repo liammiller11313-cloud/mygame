@@ -139,6 +139,19 @@ local worn: { [Player]: { [string]: Worn } } = {}
 --[[ The hold pose, per character rather than per player: the track belongs to
      an Animator that dies with the rig, and keeping it keyed by the model is
      what stops a respawn playing into a corpse. ]]
+--[[
+	The fire / reload / equip tracks, per player.
+
+	Declared up here with the other per-player tables rather than beside the
+	functions that fill it, because `removeAll` and `setHoldPose` — both several
+	hundred lines above where it used to sit — clear it on death and on respawn.
+	A Lua local is only in scope BELOW its declaration, so those two were reading
+	a nil global and throwing on every death. selene caught it; the audit's own
+	checks could not, because they only know Shared module names and Roblox
+	service names.
+]]
+local weaponTracks: { [Player]: { character: Model, tracks: { [string]: AnimationTrack } } } = {}
+
 --[[ `id` is what is CURRENTLY playing, so a weapon swap can tell "already the
      right pose" from "needs a different one" without reloading a track to find
      out. ]]
@@ -687,8 +700,9 @@ end
 
 	The cache is dropped when the character is, which is the only lifetime that
 	matters: a track belongs to an Animator, and an Animator belongs to a rig.
+	The table itself is declared up with the other per-player state — see there
+	for why it cannot live down here.
 ]]
-local weaponTracks: { [Player]: { character: Model, tracks: { [string]: AnimationTrack } } } = {}
 
 --[[
 	Priorities, and all four of them are used.

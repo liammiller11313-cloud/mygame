@@ -1,0 +1,112 @@
+# A hand-written Roblox standard library for selene.
+#
+# `selene generate-roblox-std` fetches an API dump over the network and cannot
+# reach it from this environment. This is deliberately NOT that dump: it declares
+# which GLOBALS a Luau script may legally read and lets every field under them
+# through, which is all the `undefined_variable` lint needs.
+#
+# So it will never verify that an API call is real — that is Studio's job — and
+# it will never produce a false positive about one either.
+#
+# What it does catch, and the reason it exists: `sound.Parent = SoundService` in
+# a file that never called game:GetService("SoundService"). That is a read of a
+# nil global. It compiles, it loads, and it throws the first time the line runs,
+# which for a weapon sound is the first shot fired.
+base: luau
+
+globals:
+  game: { any: true }
+  game.*: { any: true }
+  workspace: { any: true }
+  workspace.*: { any: true }
+  script: { any: true }
+  script.*: { any: true }
+  plugin: { any: true }
+  plugin.*: { any: true }
+  shared: { any: true }
+  shared.*: { any: true }
+  _G: { any: true }
+  _G.*: { any: true }
+  Instance: { any: true }
+  Instance.*: { any: true }
+  Enum: { any: true }
+  Enum.*: { any: true }
+  Random: { any: true }
+  Random.*: { any: true }
+  Vector2: { any: true }
+  Vector2.*: { any: true }
+  Vector2int16: { any: true }
+  Vector2int16.*: { any: true }
+  Vector3: { any: true }
+  Vector3.*: { any: true }
+  Vector3int16: { any: true }
+  Vector3int16.*: { any: true }
+  CFrame: { any: true }
+  CFrame.*: { any: true }
+  UDim: { any: true }
+  UDim.*: { any: true }
+  UDim2: { any: true }
+  UDim2.*: { any: true }
+  Color3: { any: true }
+  Color3.*: { any: true }
+  ColorSequence: { any: true }
+  ColorSequence.*: { any: true }
+  ColorSequenceKeypoint: { any: true }
+  ColorSequenceKeypoint.*: { any: true }
+  NumberSequence: { any: true }
+  NumberSequence.*: { any: true }
+  NumberSequenceKeypoint: { any: true }
+  NumberSequenceKeypoint.*: { any: true }
+  NumberRange: { any: true }
+  NumberRange.*: { any: true }
+  BrickColor: { any: true }
+  BrickColor.*: { any: true }
+  TweenInfo: { any: true }
+  TweenInfo.*: { any: true }
+  Ray: { any: true }
+  Ray.*: { any: true }
+  Rect: { any: true }
+  Rect.*: { any: true }
+  Region3: { any: true }
+  Region3.*: { any: true }
+  Region3int16: { any: true }
+  Region3int16.*: { any: true }
+  Faces: { any: true }
+  Faces.*: { any: true }
+  Axes: { any: true }
+  Axes.*: { any: true }
+  PhysicalProperties: { any: true }
+  PhysicalProperties.*: { any: true }
+  RaycastParams: { any: true }
+  RaycastParams.*: { any: true }
+  OverlapParams: { any: true }
+  OverlapParams.*: { any: true }
+  DateTime: { any: true }
+  DateTime.*: { any: true }
+  Font: { any: true }
+  Font.*: { any: true }
+  Content: { any: true }
+  Content.*: { any: true }
+  PathWaypoint: { any: true }
+  PathWaypoint.*: { any: true }
+  task: { any: true }
+  task.*: { any: true }
+  debug: { any: true }
+  debug.*: { any: true }
+  utf8: { any: true }
+  utf8.*: { any: true }
+  buffer: { any: true }
+  buffer.*: { any: true }
+  os: { any: true }
+  os.*: { any: true }
+  typeof: { args: [{ type: any }] }
+  tick: { args: [] }
+  time: { args: [] }
+  elapsedTime: { args: [] }
+  settings: { args: [] }
+  version: { args: [] }
+  warn: { args: [{ type: '...' }] }
+  spawn: { args: [{ type: any }, { type: '...' }] }
+  delay: { args: [{ type: any }, { type: any }] }
+  wait: { args: [{ type: any, required: false }] }
+  newproxy: { args: [{ type: bool, required: false }] }
