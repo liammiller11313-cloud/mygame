@@ -48,6 +48,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local Device = require(Shared.Util.Device)
 local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
@@ -58,10 +59,28 @@ local PA = Attributes.Player
 local PICKUP = Attributes.Pickup
 local STATE = Enums.SurvivorState
 
---[[ The ceiling on live Highlight instances. Roblox stops rendering them
-     somewhere in the low thirties with no warning, so this stays well under
-     that: four survivors and a room full of pickups never needs more. ]]
+--[[
+	The ceiling on live Highlight instances.
+
+	Roblox stops rendering them somewhere in the low thirties with no warning, so
+	this stays well under that: four survivors and a room full of pickups never
+	needs more.
+
+	A Highlight is a full-screen post pass per instance — the most expensive
+	per-frame render feature this client uses — and this number was the same on
+	every device. The ordering in `sort` already puts teammates and downed
+	survivors above pickups, so a smaller ceiling drops PICKUP outlines first and
+	keeps every person: on a phone you still see who is down and where the team
+	is, and you find the pipe bomb by looking at it rather than through a wall.
+
+	Eight, not four, because four survivors plus one downed marker is five before
+	a single item, and a phone player needs the team read most of all.
+]]
 local MAX_HIGHLIGHTS = 14
+
+local function adoptHighlightCap()
+	MAX_HIGHLIGHTS = Device.pick({ Mobile = 8, Tablet = 11 }, 14)
+end
 
 -- Ten times a second is faster than a player can act on and eight times
 -- cheaper than every frame.
@@ -547,6 +566,9 @@ function OutlineController:init()
 	-- Decoration is not cover. A gib, an effect part or a trigger volume must
 	-- never read as a wall and switch a teammate's fill on behind it.
 	losParams.RespectCanCollide = true
+
+	adoptHighlightCap()
+	trove:add(Device.changed:connect(adoptHighlightCap))
 end
 
 function OutlineController:start()
