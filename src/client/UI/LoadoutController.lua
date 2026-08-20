@@ -474,7 +474,15 @@ local function refreshPickerButtons()
 	for index, entry in pickerButtons do
 		local loadout = if store then store:getLoadout(index) else LoadoutConfig.sanitise(nil, nil)
 		entry.name.Text = weaponName(loadout[Enums.Slot.Primary])
-		entry.sub.Text = weaponName(loadout[Enums.Slot.Secondary])
+		--[[ Both of the other two on one line. The picker is where the choice is
+		     actually made and it was summarising two slots out of three — a card
+		     that does not mention the melee is a card you have to leave to find
+		     out what you are picking. ]]
+		entry.sub.Text = string.format(
+			"%s   ·   %s",
+			weaponName(loadout[Enums.Slot.Secondary]),
+			weaponName(loadout[Enums.Slot.Melee])
+		)
 		local selected = index == active
 		--[[ Two different states on the same row, so they must not look alike.
 		     ACTIVE is the one you spawn with and it FILLS; the keyboard cursor is
@@ -972,6 +980,37 @@ local function menuIsOpen(): boolean
 	return ok and open == true
 end
 
+--[[
+	Whether the picker is behind something.
+
+	Used by BOTH the countdown loop and the arrow keys, which is the point: the
+	loop already hid the card behind the main menu and the loadout panel, and the
+	keyboard did not — so arrows pressed while the pause menu was up still moved a
+	cursor on a card nobody could see.
+
+	The shop, the settings panel and the pause menu all draw above the picker's
+	layer, so anything open there is covering it. Asked by method rather than
+	tracked, because these are four independent screens and a flag mirrored from
+	each of them is four things to keep in sync.
+]]
+local COVERING_SCREENS = { "ShopController", "SettingsController", "PauseController" }
+
+local function pickerObscured(): boolean
+	if state.open or menuIsOpen() then
+		return true
+	end
+	for _, name in COVERING_SCREENS do
+		local controller = Registry.find(name)
+		if controller and typeof(controller.isOpen) == "function" then
+			local ok, open = pcall(controller.isOpen, controller)
+			if ok and open == true then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 -- ── public API ──────────────────────────────────────────────────────────────
 
 function LoadoutController:isOpen(): boolean
@@ -1111,7 +1150,7 @@ function LoadoutController:start()
 				declined to answer — they are doing something else. The card hides
 				and the clock holds until it is back on screen.
 			]]
-			local obscured = state.open or menuIsOpen()
+			local obscured = pickerObscured()
 			pickerRoot.Visible = not obscured
 			if obscured then
 				state.pickerUntil += 0.1
@@ -1152,7 +1191,7 @@ function LoadoutController:start()
 		box is not also a loadout change.
 	]]
 	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
-		if processed or state.pickerUntil <= 0 or state.open or state.pickerLocked then
+		if processed or state.pickerUntil <= 0 or state.pickerLocked or pickerObscured() then
 			return
 		end
 

@@ -51,6 +51,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -190,12 +191,26 @@ end
 	often enough to recognise the waveform — and reading `.id` takes the first
 	sample every time, which is exactly the buzzsaw the variation exists to stop.
 ]]
+--[[
+	The shooter's own gun, reload and melee draw. Pooled, pitch-varied, 2D.
+
+	── PARENTED TO SoundService, NOT TO THE CAMERA ──────────────────────────────
+	Both are 2D — a Sound is only positional under a BasePart or an Attachment,
+	and a Camera is neither — so the audible result is identical. What is not
+	identical is that MainMenuController adopts every Sound under SoundService
+	into the master SoundGroup on DescendantAdded, and that group is what the
+	volume slider actually drives.
+
+	Under the camera these were never adopted, so turning the master volume down
+	silenced the menu, the hitmarker and every sound the SERVER played, and left
+	the player's own weapon at full volume. The setting appeared to half work,
+	which is worse than not having it.
+
+	`Mix.MasterVolume` below is the config's baseline mix, not the player's
+	setting; the two multiply, which is the intent.
+]]
 local function playLocal(definition: any)
 	if not AudioConfig.isConfigured(definition) then
-		return
-	end
-	local camera = Workspace.CurrentCamera
-	if not camera then
 		return
 	end
 
@@ -204,6 +219,7 @@ local function playLocal(definition: any)
 	if not sound or not sound.Parent then
 		sound = Instance.new("Sound")
 		sound.Name = "FL_WeaponSound"
+		sound.Parent = SoundService
 		sounds[soundCursor] = sound
 		trove:add(sound)
 	end
@@ -211,7 +227,6 @@ local function playLocal(definition: any)
 	sound.SoundId = AudioConfig.pickId(definition)
 	sound.Volume = definition.volume * AudioConfig.Mix.MasterVolume
 	sound.PlaybackSpeed = math.random() * (definition.pitchMax - definition.pitchMin) + definition.pitchMin
-	sound.Parent = camera
 	sound:Play()
 end
 

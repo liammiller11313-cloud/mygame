@@ -728,6 +728,15 @@ function InventoryService:setIncapacitated(player: Player, downed: boolean)
 		self:cancelUse(player)
 		record.restoreSlot = record.activeSlot
 
+		--[[ A downed survivor fires a pistol and nothing else.
+
+		     This used to also catch a machete in the secondary slot, which is where
+		     melee lived before it got a slot of its own — that branch is
+		     unreachable now and the check is only "is the slot empty". It is kept
+		     rather than dropped because an empty secondary is still possible: a
+		     loadout that sanitised to nothing, or a weapon whose model failed to
+		     build. On the floor with no gun at all is the one state this must not
+		     leave anybody in. ]]
 		local secondary = record.slots[Enums.Slot.Secondary]
 		local definition = secondary and WeaponConfig.get(secondary.itemId)
 		if not definition or definition.fireMode == "Melee" then

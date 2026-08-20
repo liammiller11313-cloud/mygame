@@ -661,6 +661,56 @@ for p, text in sources.items():
         )
 
 
+# ── 9l. A Roblox service used without GetService ────────────────────────────
+# The bug this exists for: `sound.Parent = SoundService` was written into
+# WeaponController, which had never called game:GetService("SoundService").
+# Same failure as 9k and same reason it slipped past it — 9k only knows the
+# names of modules under src/shared, and a Roblox service is not one of those.
+# In Luau it is a read of a nil global: it compiles, it loads, and it throws the
+# first time that line runs, which for a weapon sound is the first shot fired.
+#
+# `sources` rather than `code`, and getting that backwards is most of this
+# check's history. sources blanks STRING LITERALS, which is exactly what is
+# wanted in both directions:
+#
+#   * the usage half must not see "…at ServerScriptService.Server…" inside a
+#     warning string and call it a nil global, which the code version did, twice;
+#   * the declaration half still works, because `local SoundService` is real code
+#     — only the "SoundService" argument to GetService is blanked, and nothing
+#     needs to read that.
+#
+# The first version matched only `Service.` and `Service:`, so it could not see
+# the bare `sound.Parent = SoundService` that prompted it. It was inert in both
+# directions at once and reported nothing at all.
+ROBLOX_SERVICES = (
+    "Players", "ReplicatedStorage", "ServerStorage", "ServerScriptService",
+    "RunService", "SoundService", "Lighting", "TweenService",
+    "UserInputService", "ContextActionService", "HttpService", "TeleportService",
+    "DataStoreService", "CollectionService", "ContentProvider", "GuiService",
+    "PathfindingService", "PhysicsService", "Debris", "MarketplaceService",
+    "TextChatService", "ChangeHistoryService", "StarterGui", "MessagingService",
+)
+
+for p, text in sources.items():
+    declared = set(re.findall(r"^\s*local (\w+)", text, re.M))
+    declared |= set(re.findall(r"^\s*(\w+)\s*=[^=]", text, re.M))
+    for params in re.findall(r"function\s*[\w.:]*\s*\(([^)]*)\)", text):
+        declared |= {a.strip().split(":")[0].strip() for a in params.split(",") if a.strip()}
+    for name in ROBLOX_SERVICES:
+        if name in declared:
+            continue
+        # A bare identifier, not the same word inside the GetService string that
+        # would have defined it, and not a field of something else.
+        m = re.search(r'(?<![.:\w"\'])' + re.escape(name) + r"(?![\w\"])", text)
+        if not m:
+            continue
+        problems.append(
+            f"{rel(p)}:{lineno(text, m.start())}  uses {name} but never calls "
+            f'game:GetService("{name}") — that is a nil global, and it throws the first '
+            f"time this line actually runs rather than at load"
+        )
+
+
 # ── 9j. An Animation destroyed after it was loaded ──────────────────────────
 # The bug this exists for: animations that loaded "sometimes".
 #

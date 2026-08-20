@@ -6,6 +6,13 @@
 	big panel on the right holding a rotating 3D weapon, its price, and its
 	numbers. Pick a row, look at it, buy it.
 
+	── TWO FAMILIES OF STATS ────────────────────────────────────────────────────
+	A gun is compared against guns and a melee against melee, on different rows.
+	Sharing one set and one normalisation was wrong in both directions: a machete
+	drew MAGAZINE empty and ACCURACY, CONTROL and RELOAD all FULL, while the fire
+	axe's 420 damage set a ceiling that collapsed every gun's damage bar into the
+	bottom fifth of it. See GUN_STATS and MELEE_STATS.
+
 	── WHY THE STATS ARE BARS AND NOT NUMBERS ───────────────────────────────────
 	"28 damage, 750 RPM, 2.5° hip spread" is four facts nobody can compare. The
 	same four as bars against the best in the roster is one picture that answers
@@ -17,11 +24,13 @@
 	a bar that grew as a gun got worse would read backwards.
 
 	── WHY COMING-SOON ENTRIES ARE SHOWN ────────────────────────────────────────
-	Three melee weapons and three specials have no model, no stats and no
-	behaviour. They are drawn anyway, greyed and unbuyable, because a SPECIALS tab
-	that is empty reads as broken while one holding three greyed rockets reads as
-	a plan. It also means a model dropped into the Assets folder later has an
-	obvious place to land.
+	The three specials have no model, no stats and no behaviour. They are drawn
+	anyway, greyed and unbuyable, because a SPECIALS tab that is empty reads as
+	broken while one holding three greyed rockets reads as a plan. It also means a
+	model dropped into the Assets folder later has an obvious place to land.
+
+	The melee placeholders that used to sit beside them are gone: all five melee
+	weapons are real now, with models, stats and a slot of their own.
 
 	── WHAT THIS SCREEN NEVER DOES ──────────────────────────────────────────────
 	It never decides whether a purchase is allowed, never prices anything from
@@ -87,7 +96,7 @@ local PREVIEW_HEIGHT = 0.42
      would fill up as a gun got harder to control, which is exactly backwards
      and is the kind of thing nobody notices until they have bought the wrong
      gun twice. ]]
-local STATS = {
+local GUN_STATS = {
 	{ key = "damage", label = "DAMAGE" },
 	{ key = "rpm", label = "FIRE RATE" },
 	{ key = "magSize", label = "MAGAZINE" },
@@ -95,6 +104,38 @@ local STATS = {
 	{ key = "recoilVertical", label = "CONTROL", invert = true },
 	{ key = "reloadTime", label = "RELOAD", invert = true },
 }
+
+--[[
+	Melee gets its own four, because it does not have the other two.
+
+	A machete has a magazine of 0, a spread of 0, a recoil of 0 and a reload time
+	of 0. Drawn against the gun stats those become MAGAZINE empty and ACCURACY,
+	CONTROL and RELOAD all FULL — every melee reading as the most accurate,
+	most controllable, fastest-reloading thing in the game, which is nonsense
+	dressed as data.
+
+	These four are the numbers the melee roster was actually balanced around, and
+	`penetration` is the one that separates them from each other — MeleeService
+	reads it as how many bodies one arc goes through.
+]]
+local MELEE_STATS = {
+	{ key = "damage", label = "DAMAGE" },
+	{ key = "rpm", label = "SWING RATE" },
+	{ key = "maxRange", label = "REACH" },
+	{ key = "penetration", label = "TARGETS" },
+}
+
+--[[ Rows are built once, for whichever set is longer; a weapon whose set is
+     shorter hides the rest. See refreshStats. ]]
+local STAT_ROWS = math.max(#GUN_STATS, #MELEE_STATS)
+
+local function isMelee(definition: any): boolean
+	return definition ~= nil and definition.class == "Melee"
+end
+
+local function statsFor(definition: any)
+	return if isMelee(definition) then MELEE_STATS else GUN_STATS
+end
 
 -- How long a refusal stays under the buy button before the button comes back.
 local MESSAGE_SECONDS = 3.0
@@ -134,40 +175,56 @@ local state = {
 	firstRow = nil :: TextButton?,
 	--[[ How many stat rows the column is tall enough for. Set by layoutDetail,
 	     read by refreshStats — see both. ]]
-	visibleStats = #STATS,
+	visibleStats = STAT_ROWS,
 }
 
 -- ── the roster's extremes, computed once ────────────────────────────────────
 
 --[[
-	The highest and lowest each stat reaches across every real weapon.
+	The highest and lowest each stat reaches — WITHIN A FAMILY, not across both.
 
-	Computed at require rather than per draw: it is sixteen weapons and six
-	fields, it never changes at runtime, and doing it per selection would be the
-	same arithmetic ninety-six times for every row a player clicks.
+	This was one table over every weapon in the game, and melee getting real
+	weapons broke it outright. A fire axe does 420 damage where the hardest-
+	hitting gun does 88, so the damage bar's ceiling became 420 and every gun
+	collapsed into the bottom fifth of it: the M1A EBR, the best there is, drew
+	an 18% bar. The comparison the whole screen exists for stopped working the
+	day the melee roster landed.
+
+	Two tables now. A gun is compared against guns and a melee against melee,
+	which is also the only comparison a player is ever making — nobody is
+	deciding between a machete and a marksman rifle, they occupy different slots.
+
+	Computed at require rather than per draw: it never changes at runtime, and
+	doing it per selection would be the same arithmetic for every row clicked.
 ]]
-local extremes: { [string]: { min: number, max: number } } = {}
-do
-	for _, stat in STATS do
-		extremes[stat.key] = { min = math.huge, max = -math.huge }
+local function extremesOf(stats: any, wantMelee: boolean): { [string]: { min: number, max: number } }
+	local out: { [string]: { min: number, max: number } } = {}
+	for _, stat in stats do
+		out[stat.key] = { min = math.huge, max = -math.huge }
 	end
 	for _, definition in WeaponConfig.all() do
-		for _, stat in STATS do
-			local value = definition[stat.key]
-			if typeof(value) == "number" then
-				local range = extremes[stat.key]
-				range.min = math.min(range.min, value)
-				range.max = math.max(range.max, value)
+		if isMelee(definition) == wantMelee then
+			for _, stat in stats do
+				local value = definition[stat.key]
+				if typeof(value) == "number" then
+					local range = out[stat.key]
+					range.min = math.min(range.min, value)
+					range.max = math.max(range.max, value)
+				end
 			end
 		end
 	end
+	return out
 end
 
---[[ Where a weapon sits between the roster's worst and best for one stat, 0-1.
-     Inverted stats are flipped so a full bar always means "good". ]]
+local GUN_EXTREMES = extremesOf(GUN_STATS, false)
+local MELEE_EXTREMES = extremesOf(MELEE_STATS, true)
+
+--[[ Where a weapon sits between its own family's worst and best for one stat,
+     0-1. Inverted stats are flipped so a full bar always means "good". ]]
 local function statFraction(definition: any, stat: any): number
 	local value = definition[stat.key]
-	local range = extremes[stat.key]
+	local range = (if isMelee(definition) then MELEE_EXTREMES else GUN_EXTREMES)[stat.key]
 	if typeof(value) ~= "number" or not range or range.max <= range.min then
 		return 0
 	end
@@ -311,15 +368,22 @@ local function refreshBuy()
 end
 
 local function refreshStats(definition: any)
+	local stats = statsFor(definition)
 	for index, row in statRows do
-		local stat = STATS[index]
-		--[[ Two reasons a row is not drawn: this weapon has no such number, or
-		     the column is too short to hold the row at all. See layoutDetail. ]]
-		local has = definition ~= nil
+		local stat = stats[index]
+		--[[ Three reasons a row is not drawn: this family has no such row at all
+		     (melee shows four where a gun shows six), this weapon has no such
+		     number, or the column is too short to hold the row. See layoutDetail. ]]
+		local has = stat ~= nil
+			and definition ~= nil
 			and typeof(definition[stat.key]) == "number"
 			and index <= state.visibleStats
 		row.holder.Visible = has
 		if has then
+			--[[ The label is written here rather than at build, because which stat
+			     row three IS depends on what is selected: MAGAZINE for a gun,
+			     REACH for a machete. ]]
+			row.label.Text = stat.label
 			row.fill.Size = UDim2.new(math.clamp(statFraction(definition, stat), 0.02, 1), 0, 1, 0)
 		end
 	end
@@ -480,14 +544,15 @@ local function buildTab(category: string, index: number, total: number)
 	table.insert(tabs, { category = category, label = label, underline = underline, button = holder })
 end
 
-local function buildStatRow(index: number, stat: any, top: number, height: number)
-	local holder = Widgets.frame(detail, "Stat" .. stat.key, COLOR.Panel, 1)
+local function buildStatRow(index: number, top: number, height: number)
+	local holder = Widgets.frame(detail, "Stat" .. index, COLOR.Panel, 1)
 	holder.Position = UDim2.new(0, 0, 0, top)
 	holder.Size = UDim2.new(1, 0, 0, height)
 
+	--[[ Text left blank: refreshStats writes it, because which stat a row shows
+	     depends on the family of whatever is selected. ]]
 	local label = Widgets.label(holder, "Label", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	label.Size = UDim2.new(0.34, 0, 1, 0)
-	label.Text = stat.label
 
 	local track = Widgets.frame(holder, "Track", COLOR.Border, 0.4)
 	track.AnchorPoint = Vector2.new(1, 0.5)
@@ -497,7 +562,7 @@ local function buildStatRow(index: number, stat: any, top: number, height: numbe
 	local fill = Widgets.frame(track, "Fill", COLOR.Accent, 0)
 	fill.Size = UDim2.new(0, 0, 1, 0)
 
-	statRows[index] = { holder = holder, fill = fill }
+	statRows[index] = { holder = holder, fill = fill, label = label }
 end
 
 local function buildDetail(parent: Frame)
@@ -529,8 +594,8 @@ local function buildDetail(parent: Frame)
 	blurbLabel = Widgets.label(detail, "Blurb", FONT.Body, TEXT.Small, COLOR.TextDim)
 	blurbLabel.Size = UDim2.new(1, 0, 0, TEXT.Body)
 
-	for index, stat in STATS do
-		buildStatRow(index, stat, 0, STAT_HEIGHT)
+	for index = 1, STAT_ROWS do
+		buildStatRow(index, 0, STAT_HEIGHT)
 	end
 
 	buyButton = Widgets.button(detail, "Buy")
@@ -670,24 +735,24 @@ local function layoutDetail()
 	local statHeight = if compact then STAT_HEIGHT_COMPACT else STAT_HEIGHT
 	local buyHeight = if compact then BUY_HEIGHT_COMPACT else BUY_HEIGHT
 	local headBlock = TEXT.Heading + 6 + TEXT.Body + (if compact then 0 else TEXT.Body + 4)
-	local statBlock = #STATS * statHeight
+	local statBlock = STAT_ROWS * statHeight
 	local fixed = headBlock + statBlock + buyHeight + LAYOUT.ElementGap * 3
 
 	local previewHeight = height - fixed
-	local shown = #STATS
+	local shown = STAT_ROWS
 
 	--[[
 		When even the minimum picture does not fit, stat rows come off rather than
 		the column overflowing.
 
 		The picture wins because it is what the player came to look at, and STATS
-		is ordered by how much the answer matters — damage, rate, magazine, then
-		accuracy, control, reload — so the rows that go are the ones nobody
+		is ordered by how much the answer matters — damage, then rate, then the
+		rest — so the rows that go are the ones nobody
 		decides on. Never below two: one bar compares nothing.
 	]]
 	if previewHeight < PREVIEW_MIN then
 		local shortfall = PREVIEW_MIN - previewHeight
-		shown -= math.clamp(math.ceil(shortfall / statHeight), 0, #STATS - 2)
+		shown -= math.clamp(math.ceil(shortfall / statHeight), 0, STAT_ROWS - 2)
 		fixed = headBlock + shown * statHeight + buyHeight + LAYOUT.ElementGap * 3
 		--[[ Whatever is left, and no floor this time. PREVIEW_MIN decided how many
 		     bars to drop; it is not a promise the column can keep at every size,

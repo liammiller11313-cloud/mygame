@@ -117,6 +117,13 @@ local HAND_DROP = 0.5
 local HAND_SLOTS: { [string]: string } = {
 	[Enums.Slot.Primary] = "Weapon",
 	[Enums.Slot.Secondary] = "Weapon",
+	--[[ Melee, which needs saying because this table is the ONLY thing that
+	     decides whether a slot is visible. It was missed when melee got a slot of
+	     its own, and the symptom was the worst kind: drawing a machete emptied
+	     the survivor's hands and stopped the hold pose, because `wantedKeys`
+	     resolves an unlisted slot to "" and `refresh` reads that as "holding
+	     nothing". ]]
+	[Enums.Slot.Melee] = "Weapon",
 	--[[ A selected kit comes OFF the back and INTO the hands. That swap is the
 	     single clearest tell in Left 4 Dead that somebody is about to heal, and
 	     it costs nothing here: it is the same model, mounted somewhere else. ]]
@@ -275,8 +282,12 @@ local function removeAll(player: Player)
 	end
 	worn[player] = nil
 	--[[ Not stopped, dropped. removeAll runs on death, and the rig it would be
-	     writing to is on its way to being a ragdoll or a corpse. ]]
+	     writing to is on its way to being a ragdoll or a corpse. The weapon
+	     tracks go the same way and for the same reason — they belong to that
+	     rig's Animator, and every other teardown path already clears all
+	     three. ]]
 	holding[player] = nil
+	weaponTracks[player] = nil
 end
 
 --[[ Makes a prop safe to wear: no collisions, no ray hits, no weight, and no
