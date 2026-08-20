@@ -206,6 +206,13 @@ export type WeaponAnimationSet = {
 	     Both are absent for melee, which keeps the generic pose. ]]
 	equip: number?,
 	idle: number?,
+	--[[ Working the action AFTER a shot, for a gun that has an action to work.
+	     Only the pump shotgun declares one. It is not part of `fire` because it
+	     does not happen at the shot: the blast comes first and the hand moves a
+	     beat later, and WeaponConfig.PumpPoint is where that beat is — the same
+	     number the viewmodel and the pump sound already use, so what a teammate
+	     sees and what the shooter feels land together. ]]
+	pump: number?,
 }
 
 --[[
@@ -230,23 +237,31 @@ local IDLE_PISTOL = 132900418012706
 local FIRE_SMG = 126130498796830
 local RELOAD_SMG = 105560973486853
 
---[[ The shotgun's pair, and the last two ids in this file Roblox still refuses
-     — see WeaponFallback below. RELOAD_BOXED has no other user now that the
-     rifle and the pistol have their own. ]]
-local FIRE_SHOTGUN = 139751042655361
-local RELOAD_BOXED = 124425827495007
+--[[
+	The shotgun, which is the only gun here with four rather than three.
+
+	Its reload is shell by shell — InventoryService drives it one shell at a time
+	and firing mid-reload keeps whatever went in — so the clip covers the cycle
+	and the per-shell sound carries the count. And it is the only gun with an
+	ACTION to work, which is what `pump` is: not part of the shot, a beat after
+	it. See WeaponConfig.PumpPoint.
+]]
+local FIRE_SHOTGUN = 99806949982450
+local RELOAD_SHOTGUN = 121969592245205
+local IDLE_SHOTGUN = 75535245272034
+local PUMP_SHOTGUN = 126191920793940
 
 --[[
 	The draw, which every gun really does share: a hand goes to the weapon and the
 	weapon comes up, and at the distance a teammate sees it that reads the same
 	whether what came up is an M4 or a Kriss.
 
-	The generic two-handed low-ready beside it is now the fallback rather than the
-	rule. The rifle and the pistol have holds of their own above — a sidearm held
-	out on one arm and a rifle held across the chest are not the same pose, and
-	pretending they were was the compromise that made the pistol look wrong — so
-	this is what the SMG and the shotgun use, being long guns with no hold of
-	their own.
+	The generic two-handed low-ready beside it is the SMG's, and nothing else's.
+	Every other gun has a hold of its own now — a sidearm held out on one arm, a
+	rifle across the chest and a shotgun at the shoulder are three different
+	poses, and one clip for all of them was the compromise that made the pistols
+	look wrong. It stays here rather than being renamed IDLE_SMG because it is
+	also what any gun added without a hold inherits.
 
 	Melee gets neither. It is one-handed, it is drawn differently, and the pose
 	that suits a rifle across the chest is wrong for a machete — it keeps Roblox's
@@ -287,8 +302,9 @@ AnimationConfig.Weapon = table.freeze({
 	     whole sequence; the per-shell sound is what actually carries the count. ]]
 	Shotgun = table.freeze({
 		fire = FIRE_SHOTGUN,
-		reload = RELOAD_BOXED,
-		idle = IDLE_GUN,
+		reload = RELOAD_SHOTGUN,
+		idle = IDLE_SHOTGUN,
+		pump = PUMP_SHOTGUN,
 		equip = EQUIP_GUN,
 	}),
 
@@ -312,22 +328,24 @@ AnimationConfig.Weapon = table.freeze({
 
 	Roblox refuses to play an animation that is not owned by the place's creator
 	or by Roblox itself, and it refuses it SILENTLY — LoadAnimation returns a
-	perfectly ordinary track that never moves anything.
+	perfectly ordinary track that never moves anything. Four ids in this file
+	were in that state at one point, which was four guns out of five with no
+	visible shot and no visible reload in third person, and nothing in the log
+	except one warning per id.
 
-	Two ids are still in that state, and they are both the shotgun's:
+	All of them have since been re-uploaded, so as of now this engages for
+	nothing. It stays because the failure it covers is silent and the ids above
+	are supplied rather than derived: a re-upload under the wrong account, an
+	asset moderated, a new gun given a borrowed id — any of those puts a class
+	right back into that state, and borrowing the SMG's pair is a far better
+	answer than a gun that does not move.
 
-	    139751042655361  shotgun fire
-	    124425827495007  shotgun reload
+	The SMG's are the spares because they are the ids that have never once been
+	refused; a fallback that might itself be refused is not a fallback.
 
-	The rifle's and the pistol's were re-uploaded and now load, which is what
-	this mechanism is for and also proof that it works: nothing here had to
-	change when they did. Re-upload the two above under the account that owns the
-	place and the shotgun goes back to its own clips the same way.
-
-	Until then the shotgun borrows the SMG's pair — chosen over the rifle's
-	because these are the ids the server log has actually confirmed loading, and
-	a fallback that might itself be refused is not a fallback. An SMG shot on a
-	shotgun is wrong; a shotgun that does not move when it fires is worse.
+	Deliberately no `pump` spare. A missing pump is a flourish that does not
+	play. A missing shot is a gun that looks broken, and those are not the same
+	thing to trade for.
 
 	CarryVisualService consults AnimationCache.hasFailed, so this only ever
 	engages for an id Roblox has actually refused.
@@ -420,6 +438,7 @@ function AnimationConfig.allIds(): { number }
 		take(set.reload)
 		take(set.equip)
 		take(set.idle)
+		take(set.pump)
 	end
 	--[[ And the spares. They are the SMG's own ids today, so `take` dedupes them
 	     away — but the moment they are not, an unpreloaded fallback would be a

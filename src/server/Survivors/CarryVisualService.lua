@@ -153,6 +153,8 @@ local worn: { [Player]: { [string]: Worn } } = {}
 	service names.
 ]]
 local weaponTracks: { [Player]: { character: Model, tracks: { [string]: AnimationTrack } } } = {}
+--[[ The shot each player's pending pump belongs to. See playShot. ]]
+local pumpTokens: { [Player]: number } = {}
 
 --[[ `id` is what is CURRENTLY playing, so a weapon swap can tell "already the
      right pose" from "needs a different one" without reloading a track to find
@@ -303,6 +305,10 @@ local function removeAll(player: Player)
 	     three. ]]
 	holding[player] = nil
 	weaponTracks[player] = nil
+	--[[ Cancels a pump this player's last shot had scheduled. The closure checks
+	     this token before it plays, so clearing it is the cancel — and a pump on
+	     a body that is already a ragdoll is exactly what it should stop. ]]
+	pumpTokens[player] = nil
 end
 
 --[[ Makes a prop safe to wear: no collisions, no ray hits, no weight, and no
@@ -725,9 +731,20 @@ end
 	right arm reads as neither of them playing — so "they are different clips" is
 	not enough on its own, they have to be different priorities.
 ]]
+--[[ Used only by a gun that declares a pump but no rpm, which is a config
+     mistake rather than a state — a beat, so the clip still reads as following
+     the shot rather than sharing it. ]]
+local PUMP_FALLBACK_DELAY = 0.2
+
 local WEAPON_PRIORITY: { [string]: Enum.AnimationPriority } = {
 	equip = Enum.AnimationPriority.Action2,
 	fire = Enum.AnimationPriority.Action3,
+	--[[ The same tier as the shot, because that is what it is: the second half of
+	     one event. They never overlap — the pump is scheduled for a point PAST the
+	     shot — and giving it its own tier would only let it outrank a reload the
+	     player started in between, which is a player who has decided they would
+	     rather reload than admire the action. ]]
+	pump = Enum.AnimationPriority.Action3,
 	reload = Enum.AnimationPriority.Action4,
 }
 
@@ -737,6 +754,21 @@ local WEAPON_PRIORITY: { [string]: Enum.AnimationPriority } = {
 	Animator, a class with no clips (melee), an id that will not fetch — because
 	every one of those ends the same way: no animation, and a hold pose that still
 	holds. None of them is worth a warning per shot. ]]
+--[[ The definition of what this player is actually holding, or nil. Two callers
+     need it now — which clip to play, and how long to wait before the pump — and
+     asking InventoryService twice for one shot is one lookup too many. ]]
+local function activeDefinition(player: Player): any
+	local inventory = Registry.find("InventoryService")
+	if not inventory or typeof(inventory.getActiveWeapon) ~= "function" then
+		return nil
+	end
+	local ok, weaponId = pcall(inventory.getActiveWeapon, inventory, player)
+	if not ok or typeof(weaponId) ~= "string" then
+		return nil
+	end
+	return WeaponConfig.get(weaponId)
+end
+
 local function weaponTrack(player: Player, role: string): AnimationTrack?
 	local character = player.Character
 	if not character or not character.Parent then
@@ -749,15 +781,7 @@ local function weaponTrack(player: Player, role: string): AnimationTrack?
 		weaponTracks[player] = nil
 	end
 
-	local inventory = Registry.find("InventoryService")
-	if not inventory or typeof(inventory.getActiveWeapon) ~= "function" then
-		return nil
-	end
-	local ok, weaponId = pcall(inventory.getActiveWeapon, inventory, player)
-	if not ok or typeof(weaponId) ~= "string" then
-		return nil
-	end
-	local definition = WeaponConfig.get(weaponId)
+	local definition = activeDefinition(player)
 	local set = definition and AnimationConfig.forWeaponClass(definition.class)
 	local id = set and set[role]
 	if not id then
@@ -815,16 +839,57 @@ local function weaponTrack(player: Player, role: string): AnimationTrack?
 	return track
 end
 
---[[ A shot. Restarted from zero rather than left to finish, because at any
-     automatic rate of fire the previous one has not: a clip allowed to run its
-     course would play once per burst instead of once per round. ]]
+--[[
+	A shot, and — for a gun with an action to work — the pump that follows it.
+
+	The shot itself is restarted from zero rather than left to finish, because at
+	any automatic rate of fire the previous one has not: a clip allowed to run its
+	course would play once per burst instead of once per round.
+
+	The pump is a SEPARATE clip at a LATER moment, which is the whole reason it is
+	not part of `fire`. It lands at WeaponConfig.PumpPoint through the shot's
+	cycle — the same instant the shooter's own viewmodel kicks and the pump sound
+	plays, so what a teammate sees twenty studs away is in time with what the
+	shooter feels.
+
+	`pumpToken` is what makes a second shot cancel the first shot's pump. Without
+	it, a player who fires again before the beat gets both pumps queued, and the
+	hands work the action twice for one shell — worse than not animating it.
+]]
 local function playShot(player: Player)
 	local track = weaponTrack(player, "fire")
-	if not track then
+	if track then
+		track:Stop(0)
+		track:Play(0.05)
+	end
+
+	local pump = weaponTrack(player, "pump")
+	if not pump then
+		pumpTokens[player] = nil
 		return
 	end
-	track:Stop(0)
-	track:Play(0.05)
+
+	local token = (pumpTokens[player] or 0) + 1
+	pumpTokens[player] = token
+	pump:Stop(0)
+
+	local definition = activeDefinition(player)
+	local rpm = if definition and typeof(definition.rpm) == "number" then definition.rpm else 0
+	local delay = if rpm > 0 then (60 / rpm) * WeaponConfig.PumpPoint else PUMP_FALLBACK_DELAY
+
+	task.delay(delay, function()
+		if pumpTokens[player] ~= token then
+			return -- fired again, or switched to something with no action to work
+		end
+		--[[ Re-resolved rather than captured. Between the shot and the beat the
+		     player can respawn or swap weapons, and the track from the character
+		     they had is attached to an Animator that no longer exists. Asking
+		     again returns nil in exactly those cases. ]]
+		local fresh = weaponTrack(player, "pump")
+		if fresh then
+			fresh:Play(0.05)
+		end
+	end)
 end
 
 --[[
@@ -1036,6 +1101,7 @@ function CarryVisualService:start()
 		worn[player] = nil
 		holding[player] = nil
 		weaponTracks[player] = nil
+		pumpTokens[player] = nil
 	end)
 
 	local survivors = Registry.find("SurvivorService")

@@ -87,10 +87,9 @@ local MAX_PREDICTED_TRACERS = 3
      lower count is believed immediately: the server never gives ammo back. ]]
 local RECONCILE_GRACE = 0.4
 
---[[ How far into the pump's cycle the pump itself happens. Not at the shot and
-     not at the end — a beat after the blast is where the hand actually moves,
-     and it is what makes the pump shotgun feel worked rather than waited on. ]]
-local PUMP_POINT = 0.45
+--[[ When the pump happens, from WeaponConfig so the character animation on the
+     server fires at the same instant this does. See WeaponConfig.PumpPoint. ]]
+local PUMP_POINT = WeaponConfig.PumpPoint
 
 -- An empty trigger held down clicks at a readable rate rather than at the
 -- weapon's rpm. Sixteen dry clicks a second is noise; three is a message.

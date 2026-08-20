@@ -113,6 +113,22 @@ local WeaponConfig = {}
 	module also carries helper functions and mixing the two is how you end up
 	reading `.damage` off a function.
 ]]
+--[[
+	How far into a pump gun's fire cycle the pump itself happens.
+
+	Not at the shot and not at the end — a beat after the blast is where the hand
+	actually moves, and it is what makes a pump shotgun feel worked rather than
+	waited on.
+
+	Shared rather than owned by the client, because THREE things now key off this
+	instant and they have to be the same instant: the shooter's viewmodel kick,
+	the pump sound, and — since the shotgun got a clip of its own — the pump
+	animation on the character, which is what everyone ELSE sees. Two copies of
+	0.45 in two files is two copies until somebody tunes one of them, and then it
+	is a teammate whose hands work the action after the sound.
+]]
+WeaponConfig.PumpPoint = 0.45
+
 WeaponConfig.Definitions = {
 
 	--[[ The sidearm everyone starts with. .45 ACP means two body shots on a
