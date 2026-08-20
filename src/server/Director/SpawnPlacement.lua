@@ -386,7 +386,14 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			if anchor or tooFar == 0 then
 				continue
 			end
-			maxDistanceSquared = strictMaxSquared * RELAX_DISTANCE * RELAX_DISTANCE
+			--[[ BOTH, and that is the point. `maxDistanceSquared` is what the
+			     acceptance test uses and `maxDistance` is what sampleAround
+			     generates inside, so widening only the first would open the ceiling
+			     for the tagged nodes and leave every ring sample drawn from the
+			     original band — a pass that tests new ground for nodes and re-tests
+			     identical ground for everything else. ]]
+			maxDistance *= RELAX_DISTANCE
+			maxDistanceSquared = maxDistance * maxDistance
 			relaxedDistance = true
 		end
 
