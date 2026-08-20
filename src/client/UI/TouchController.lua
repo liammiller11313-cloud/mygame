@@ -99,6 +99,15 @@ local BOTTOM_INSET = LAYOUT.ScreenMargin
 	+ LAYOUT.ElementGap
 	+ LAYOUT.AmmoPanelHeight
 	+ LAYOUT.ElementGap
+	--[[ And the Dollars line, added to that corner after this sum was written.
+	     It happened exactly as the note above predicted: the stack grew, this
+	     was not updated with it, and the pad's bottom row came to rest on the
+	     balance — 20 pixels of overlap, both right-aligned, on the platform with
+	     the least room to spare. Every term here is a real element from
+	     UITheme.Layout so the next addition moves the pad instead of landing
+	     under it. ]]
+	+ LAYOUT.WalletHeight
+	+ LAYOUT.ElementGap
 
 --[[ Verbs whose button only appears when the verb would do something. Interact
      is the only one: a permanent USE button is a permanent hole in the screen
