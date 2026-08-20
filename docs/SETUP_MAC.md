@@ -193,6 +193,41 @@ rojo plugin install
 
 after editing the version in `rokit.toml`.
 
+## When Studio will not connect
+
+```bash
+./scripts/rojo-doctor.sh
+```
+
+It reports three versions that all have to agree, and says which one is wrong.
+
+The third of them is the one that catches people out. Rojo is not two things,
+it is three: the **binary on disk**, the **server process running**, and the
+**Studio plugin**. The middle one is separate from the first because a running
+process keeps executing the file it started with even after that file is
+replaced — so a server started before an update quietly outlives it, and
+nothing looks wrong from the outside.
+
+### `attempt to index number with 'protocolVersion'`
+
+That is this exact situation, between 7.6.1 and 7.7.0 specifically.
+
+The two versions disagree about the wire format: the 7.6.1 plugin decodes
+`/api/rojo` as JSON, the 7.7.0 plugin decodes it as MessagePack. So a 7.7.0
+plugin talking to a 7.6.1 server does not get the friendly "protocol version
+mismatch" message that exists for this — it msgpack-decodes a JSON body, reads
+the opening `{` as the number 123, and dies indexing it.
+
+The fix is to restart the server so it is the new binary:
+
+```bash
+./scripts/autostart.sh uninstall
+./scripts/autostart.sh install
+```
+
+or Ctrl+C the Terminal window running it and `./scripts/dev.sh` again. Then
+confirm with `./scripts/rojo-doctor.sh`.
+
 ## Your models are safe
 
 Rojo only manages what `default.project.json` declares — the `src/` tree plus a few

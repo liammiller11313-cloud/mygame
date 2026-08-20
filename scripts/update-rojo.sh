@@ -168,6 +168,36 @@ if [ "$OS" = "Darwin" ] && launchctl print "gui/$(id -u)/$AGENT_LABEL" >/dev/nul
   sleep 1
 fi
 
+#[[
+#  A `rojo serve` started from a Terminal window is the other way to have one
+#  running, and this script cannot stop it — it belongs to a shell it has no
+#  handle on.
+#
+#  It has to SAY so, loudly, because of how the failure looks. A server keeps
+#  executing the binary it started with even after that file is replaced, so an
+#  old server outlives the update silently. And between 7.6.1 and 7.7.0 the
+#  plugin changed how it decodes /api/rojo, from JSON to MessagePack — so a new
+#  plugin against an old server does not get the "protocol version mismatch"
+#  message that exists for exactly this. It msgpack-decodes JSON, reads `{` as
+#  the number 123, and dies with
+#
+#      attempt to index number with 'protocolVersion'
+#
+#  which names neither Rojo nor versions, and sends you looking anywhere but
+#  here.
+#]]
+STALE_PIDS="$(pgrep -x rojo 2>/dev/null | tr '\n' ' ')"
+if [ -n "${STALE_PIDS// /}" ]; then
+  echo ""
+  echo "!! A Rojo server is already running (pid ${STALE_PIDS%% })."
+  echo "!! It will keep serving the OLD version after this swap, because a running"
+  echo "!! process is not affected by its file being replaced."
+  echo "!! Stop it — Ctrl+C in its Terminal window — and start it again when this"
+  echo "!! finishes. Otherwise Studio will fail to connect in a way that does not"
+  echo "!! mention versions at all."
+  echo ""
+fi
+
 restore_agent() {
   if [ "$AGENT_WAS_UP" -eq 1 ]; then
     echo "restarting the autostart job"
@@ -278,6 +308,11 @@ else
   echo ""
   echo "If that keeps failing, install the plugin from Studio's Toolbox instead"
   echo "(search Rojo) and make sure its version reads $INSTALLED."
+fi
+if [ -n "${STALE_PIDS// /}" ]; then
+  echo ""
+  echo "AND RESTART THE ROJO SERVER — the one that was running (pid ${STALE_PIDS%% })"
+  echo "is still the old version, and Studio will not connect to it."
 fi
 echo ""
 echo "Then commit the pin so anyone else cloning this gets the same version:"
