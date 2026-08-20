@@ -1176,6 +1176,19 @@ local function freezeCorpse(model: Model)
 			descendant.Anchored = true
 		end
 	end
+
+	--[[ And the state machine with it. A Humanoid keeps evaluating its own state
+	     every frame whether or not the body under it can move, and forty-eight of
+	     them is forty-eight state machines running on the server for corpses that
+	     are, by this point, scenery bolted to the floor.
+
+	     `ragdoll` already disabled the states that could stand a body back up and
+	     put it into Physics; this is the evaluation itself, and it is only safe
+	     here — a body still falling needs its state machine to know it landed. ]]
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.EvaluateStateMachine = false
+	end
 end
 
 function GoreService:_sweep(deltaTime: number)

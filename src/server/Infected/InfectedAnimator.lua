@@ -112,6 +112,10 @@ local BASE_WALK_SPEED = 16
 	and 2.4x looks the same on any size of body.
 ]]
 local MIN_RATE = 0.25
+--[[ How far a gait's playback rate has to move before it is worth telling every
+     client about. See setState. A hundredth of a stride is invisible in a walk
+     cycle and comfortably above the frame-to-frame jitter in MoveDirection. ]]
+local RATE_EPSILON = 0.01
 local MAX_RATE = 2.4
 
 --[[ A body's scale, from its kind. Falls back to 1 for a kind with no
@@ -180,6 +184,10 @@ function InfectedAnimator.new(model: Model, kind: string)
 		humanoid = humanoid,
 		tracks = {},
 		current = "",
+		--[[ The playback rate last sent. See setState: this is what stops a
+		     rate-matched gait replicating a new speed to every client on every
+		     frame of every body in the near band. ]]
+		rate = -1,
 		oneShotUntil = 0,
 	}, InfectedAnimator)
 
@@ -334,6 +342,10 @@ function InfectedAnimator.setState(self, role: string, speed: number)
 			track:Play(FADE)
 		end
 		self.current = role
+		--[[ A different track carries its own speed, so the cached rate says
+		     nothing about it. Forgetting this is how a body switching from run to
+		     walk at a matching numeric rate keeps the run's playback speed. ]]
+		self.rate = -1
 	end
 
 	--[[ Only a GAIT is rate-matched. Walking and running are clips whose feet
@@ -349,6 +361,27 @@ function InfectedAnimator.setState(self, role: string, speed: number)
 	elseif IDLE_WEIGHTED[role] then
 		rate = 1 / math.sqrt(self.bodyScale)
 	end
+
+	--[[
+		Only when it has actually moved.
+
+		This runs from the brain tick, and a body inside the near band ticks EVERY
+		FRAME. AdjustSpeed is not a local write: it replicates the track's speed to
+		every client in the server. Calling it unconditionally meant a full horde
+		pushed on the order of a thousand animation-speed updates a second over the
+		wire to say nothing, which costs the server frame time and costs every
+		client the bandwidth and the work of applying them.
+
+		The epsilon is what makes it worth doing. A humanoid's MoveDirection jitters
+		by a fraction of a percent every frame as pathfinding nudges it, so an exact
+		comparison would almost never match and this would be the same code with an
+		extra branch. A hundredth of a stride is far below what an eye can see in a
+		walk cycle and far above the noise.
+	]]
+	if math.abs(rate - self.rate) < RATE_EPSILON then
+		return
+	end
+	self.rate = rate
 	track:AdjustSpeed(rate)
 end
 
@@ -410,6 +443,7 @@ function InfectedAnimator.stopAll(self)
 		end
 	end
 	self.current = ""
+	self.rate = -1
 end
 
 function InfectedAnimator.destroy(self)
