@@ -80,8 +80,12 @@ end
 local ID = table.freeze({
 	PistolShot = "rbxassetid://132539859090895",
 	RevolverShot = "rbxassetid://18267120562",
-	ShotgunBlast = "rbxassetid://132255180302885",
+	ShotgunBlast = "rbxassetid://7244956099",
 	ShotgunPump = "rbxassetid://113837896417526",
+	--[[ The shotgun's own reload. It is the only shell-by-shell weapon in the
+	     game, so ShellInsert below is already exclusively its — if a second one
+	     is ever added, that entry needs splitting rather than sharing. ]]
+	ShotgunShell = "rbxassetid://799917192",
 	SmgFire = "rbxassetid://97897507846837",
 	AkShot = "rbxassetid://1065188024",
 	M4Shot = "rbxassetid://18521643711",
@@ -113,6 +117,10 @@ local ID = table.freeze({
 	WaveClearedSting = "rbxassetid://182750827",
 	HitmarkerTick = "rbxassetid://99102731755541",
 	HeadshotTick = "rbxassetid://130201387574815",
+	--[[ The kill. This was the last cue still borrowing another sample — it was
+	     HitmarkerTick pitched down to 0.74-0.80 to fake a heavier version of the
+	     hit it had to be told apart from. ]]
+	KillThump = "rbxassetid://9119319842",
 
 	MaleGruntPain = "rbxassetid://75074552502663",
 	MaleScream = "rbxassetid://136401198004658",
@@ -218,7 +226,7 @@ AudioConfig.WeaponReload = {
 	MagOut = sound(ID.GunReload, 0.5, 0.98, 1.06, 60, 2),
 	MagIn = sound(ID.GunReload, 0.5, 0.92, 1.0, 60, 2),
 	Bolt = sound(ID.GunReload, 0.45, 1.08, 1.16, 60, 2),
-	ShellInsert = sound(ID.ShotgunPump, 0.45, 1.1, 1.2, 60, 2),
+	ShellInsert = sound(ID.ShotgunShell, 0.55, 0.96, 1.06, 60, 2),
 	Pump = sound(ID.ShotgunPump, 0.7, 0.97, 1.03, 90, 3),
 	DryFire = sound(ID.DryFire, 0.6, 0.98, 1.02, 40, 3),
 } :: { [string]: SoundDefinition }
@@ -352,18 +360,17 @@ AudioConfig.UI = {
 		off the crosshair instead of heard. In a horde, where the crosshair is
 		covered in bodies, that is the same as not being told.
 
-		These are the hit ticks pitched DOWN rather than new assets. That is the
-		honest constraint: this project has no kill-specific upload, and a
-		low-pitched version of a familiar tick is how the genre has always said
-		"heavier" — it reads as related to the hit sound, which is correct, and as
-		bigger, which is the point. A dedicated thump would be better and is worth
-		one upload; the pitch bands here are chosen so it can be dropped in
-		without touching anything else.
+		Both are their own samples now. They began as the hit ticks pitched down —
+		the honest stopgap when this project had no kill-specific upload — with
+		non-overlapping pitch bands doing the work of telling them apart. That is
+		no longer load-bearing and the pitch is back to a natural few percent,
+		because the difference is in the recording where it belongs.
 
-		The three bands never overlap, so a kill can never be mistaken for a hit:
-		hits live at 0.97-1.05, a kill at 0.74-0.80, a boss kill at 0.58-0.62.
+		verify_feel still enforces the underlying rule: two cues that SHARE a
+		sample must not share a pitch band. It applies to nothing here today, and
+		it is what would catch a future cue quietly borrowing one of these.
 	]]
-	KillMarker = sound(ID.HitmarkerTick, 0.46, 0.74, 0.8, 24, 4),
+	KillMarker = sound(ID.KillThump, 0.5, 0.96, 1.04, 26, 4),
 
 	--[[ Drawing the melee. Short, and quiet enough that toggling it twice in a
 	     panic is not louder than the thing that caused the panic. ]]

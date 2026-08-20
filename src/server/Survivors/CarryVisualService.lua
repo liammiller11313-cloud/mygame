@@ -535,6 +535,7 @@ local function setHoldPose(player: Player, wanted: boolean)
 	if entry and entry.character ~= character then
 		entry = nil
 		holding[player] = nil
+		weaponTracks[player] = nil
 	end
 
 	if not wanted then
@@ -603,6 +604,132 @@ local function setHoldPose(player: Player, wanted: boolean)
 	track:Play(0.15)
 
 	holding[player] = { character = character, track = track }
+end
+
+--[[
+	The two clips that play OVER the hold pose: a shot and a reload.
+
+	Same reasoning as the pose itself — loaded on the server so they replicate,
+	because what these are for is the survivor twenty studs ahead of you visibly
+	working a bolt. The player doing it is in first person and will never see
+	their own; ViewmodelController's procedural kick is their half of it.
+
+	── ONE ANIMATOR, TWO CACHES ────────────────────────────────────────────────
+	Tracks are cached per character rather than per play. A rifle at 700rpm fires
+	twelve times a second, and LoadAnimation on every one of those would be twelve
+	AnimationTracks a second per shooter — the exact allocation pattern
+	AnimationCache exists to stop, one level up.
+
+	The cache is dropped when the character is, which is the only lifetime that
+	matters: a track belongs to an Animator, and an Animator belongs to a rig.
+]]
+local weaponTracks: { [Player]: { character: Model, tracks: { [string]: AnimationTrack } } } = {}
+
+--[[ Priorities. The hold pose loops at Action; these sit above it so a clip that
+     keys the same arm actually wins it. Reload beats fire so that a shot fired
+     the frame a reload ends cannot half-override the tail of it — Roblox blends
+     equal priorities by weight, which for two clips on one arm reads as neither
+     of them playing. ]]
+local WEAPON_PRIORITY: { [string]: Enum.AnimationPriority } = {
+	fire = Enum.AnimationPriority.Action2,
+	reload = Enum.AnimationPriority.Action3,
+}
+
+--[[ The track for one role on one player, built once and kept.
+
+	Returns nil for everything that is legitimately absent — no character, no
+	Animator, a class with no clips (melee), an id that will not fetch — because
+	every one of those ends the same way: no animation, and a hold pose that still
+	holds. None of them is worth a warning per shot. ]]
+local function weaponTrack(player: Player, role: string): AnimationTrack?
+	local character = player.Character
+	if not character or not character.Parent then
+		return nil
+	end
+
+	local entry = weaponTracks[player]
+	if entry and entry.character ~= character then
+		entry = nil
+		weaponTracks[player] = nil
+	end
+
+	local inventory = Registry.find("InventoryService")
+	if not inventory or typeof(inventory.getActiveWeapon) ~= "function" then
+		return nil
+	end
+	local ok, weaponId = pcall(inventory.getActiveWeapon, inventory, player)
+	if not ok or typeof(weaponId) ~= "string" then
+		return nil
+	end
+	local definition = WeaponConfig.get(weaponId)
+	local set = definition and AnimationConfig.forWeaponClass(definition.class)
+	local id = set and set[role]
+	if not id then
+		return nil
+	end
+
+	--[[ Keyed by ROLE AND ID, so switching from a rifle to a shotgun mid-fight
+	     gets the shotgun's clip rather than the rifle's cached one. The two share
+	     a reload id today and this costs nothing; it is what stops the sharing
+	     from becoming an assumption. ]]
+	local key = role .. ":" .. tostring(id)
+	if entry and entry.tracks[key] then
+		return entry.tracks[key]
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return nil
+	end
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+
+	local track = AnimationCache.load(animator, id)
+	if not track or AnimationCache.hasFailed(id) then
+		return nil
+	end
+	track.Priority = WEAPON_PRIORITY[role] or Enum.AnimationPriority.Action2
+	track.Looped = false
+
+	if not entry then
+		entry = { character = character, tracks = {} }
+		weaponTracks[player] = entry
+	end
+	entry.tracks[key] = track
+	return track
+end
+
+--[[ A shot. Restarted from zero rather than left to finish, because at any
+     automatic rate of fire the previous one has not: a clip allowed to run its
+     course would play once per burst instead of once per round. ]]
+local function playShot(player: Player)
+	local track = weaponTrack(player, "fire")
+	if not track then
+		return
+	end
+	track:Stop(0)
+	track:Play(0.05)
+end
+
+--[[ A reload, driven by the attribute InventoryService already publishes rather
+     than by a second signal. It is set for the whole sequence — including the
+     shotgun's shell-by-shell one, which is one attribute over several seconds —
+     so the clip runs while it is true and is cut when it goes false, whether that
+     was a finished reload or one the player interrupted by firing. ]]
+local function setReloading(player: Player, reloading: boolean)
+	local track = weaponTrack(player, "reload")
+	if not track then
+		return
+	end
+	if reloading then
+		track:Stop(0)
+		track:Play(0.1)
+	else
+		track:Stop(0.15)
+	end
 end
 
 --[[ One mount, brought in line with what it should be showing. Split out of
@@ -695,6 +822,25 @@ function CarryVisualService:start()
 	end
 
 	--[[
+		The shot animation, off the server's own fire signal rather than off the
+		WeaponFired remote beside it.
+
+		The remote is addressed to everyone EXCEPT the shooter, which is right for
+		a muzzle flash and wrong for this: the animation has to run on the shooter's
+		character, and it is the server that owns that character. Listening to a
+		remote the server sends would also mean this fired for the one client that
+		does not need it and not for the eleven that do.
+	]]
+	local ballistics = Registry.find("BallisticsService")
+	if ballistics and ballistics.fired then
+		serviceTrove:add(ballistics.fired:connect(function(shooter: Player)
+			playShot(shooter)
+		end))
+	else
+		warn("[CarryVisualService] no BallisticsService.fired; nobody will animate a shot")
+	end
+
+	--[[
 		A respawn replaces the character, and the new one arrives bare even though
 		the slots never changed. CharacterAdded rather than a SurvivorService
 		signal on purpose: the thing that invalidates a prop is the character model
@@ -720,6 +866,14 @@ function CarryVisualService:start()
 		--[[ The selected slot is an attribute rather than a signal — it moves far
 		     too often for a remote — so the hands mount follows it directly. This
 		     is the event that fires when somebody presses 1 or 2. ]]
+		--[[ The reload clip follows the attribute InventoryService already
+		     publishes. No new signal for it: the attribute is set for exactly the
+		     span the reload occupies, including an interrupted one, which is
+		     precisely the window the animation should cover. ]]
+		serviceTrove:connect(player:GetAttributeChangedSignal(LA.IsReloading), function()
+			setReloading(player, Attributes.get(player, LA.IsReloading, false) == true)
+		end)
+
 		serviceTrove:connect(player:GetAttributeChangedSignal(LA.ActiveSlot), function()
 			self:refresh(player)
 		end)
@@ -732,6 +886,7 @@ function CarryVisualService:start()
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		worn[player] = nil
 		holding[player] = nil
+		weaponTracks[player] = nil
 	end)
 
 	local survivors = Registry.find("SurvivorService")

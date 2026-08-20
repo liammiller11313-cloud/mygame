@@ -159,6 +159,95 @@ AnimationConfig.SurvivorHold = table.freeze({
 })
 
 --[[
+	Weapon animations, by weapon CLASS rather than by weapon.
+
+	Sixteen guns do not need sixteen reloads. What a reload looks like is decided
+	by the magazine, not by the receiver — every box-fed gun in this roster is the
+	same motion, the shotgun is the one that is not, and a pistol differs mainly
+	in that one hand is doing it. Three sets cover the whole armoury and a new gun
+	inherits the right one by declaring its class, which it already had to do.
+
+	── WHERE THESE PLAY ────────────────────────────────────────────────────────
+	On the CHARACTER, third-person, over the hold pose in SurvivorHold above —
+	which is to say, on what your teammates see. They are not the first-person
+	view: that is ViewmodelController, and it is procedural (springs and impulses,
+	no assets), which is why a shot kicks the gun in your hands whether or not any
+	of these ids resolve.
+
+	That split is deliberate rather than an omission. A viewmodel wants to be
+	frame-tight and weapon-specific and to never desync from the ammo counter; a
+	third-person reload wants to read at twenty studs through smoke. Those are
+	different problems and one clip cannot be good at both.
+
+	── PRIORITY ────────────────────────────────────────────────────────────────
+	The hold pose loops at Action. These layer above it: a shot at Action2, a
+	reload at Action3, so a shot fired the instant a reload finishes cannot
+	half-override the reload that is still playing out. Roblox blends equal
+	priorities by weight, which for two clips both keying the right arm looks like
+	neither of them.
+
+	── NO RIG GATE, ON PURPOSE ─────────────────────────────────────────────────
+	The infected sets above are checked against the rig before they are used,
+	because an R6 clip on an R15 body loads, reports itself playing, and stands
+	the procedural poser down — producing a T-pose. Nothing is standing down here:
+	a weapon clip that addresses the wrong joints simply does not move the arm,
+	and the hold pose underneath it still holds. So these are played and left to
+	AnimationCache to report if an id is unfetchable.
+]]
+export type WeaponAnimationSet = {
+	fire: number?,
+	reload: number?,
+	--[[ Declared and unused. The draw is currently the weapon model appearing in
+	     the hand, and an idle is what SurvivorHold already is. They are named so
+	     that an uploaded pair has an obvious place to land rather than arriving
+	     with an argument about where it goes. ]]
+	equip: number?,
+	idle: number?,
+}
+
+local RELOAD_BOXED = 124425827495007
+local FIRE_RIFLE = 79077703240420
+local FIRE_SHOTGUN = 139751042655361
+local FIRE_PISTOL = 111410151816711
+
+AnimationConfig.Weapon = table.freeze({
+	Rifle = table.freeze({ fire = FIRE_RIFLE, reload = RELOAD_BOXED }),
+
+	--[[ The two marksman rifles take the rifle set. They are rifles — a scoped
+	     Mk18 loads exactly like an unscoped one — and giving them their own row
+	     would be two more places to edit for no visible difference. ]]
+	Marksman = table.freeze({ fire = FIRE_RIFLE, reload = RELOAD_BOXED }),
+
+	--[[ Also the rifle set, for now. The submachine guns are the one class
+	     waiting on its own clips; until those are uploaded the rifle motion is
+	     right in shape and slightly long in the arms, which is a great deal
+	     better than an SMG that reloads by standing still. ]]
+	SMG = table.freeze({ fire = FIRE_RIFLE, reload = RELOAD_BOXED }),
+
+	--[[ The one genuinely different reload in the game — shell by shell, and
+	     InventoryService drives it a shell at a time. The clip here covers the
+	     whole sequence; the per-shell sound is what actually carries the count. ]]
+	Shotgun = table.freeze({ fire = FIRE_SHOTGUN, reload = RELOAD_BOXED }),
+
+	--[[ Covers the revolver as well. A .357 is loaded very differently from an
+	     M1911 in life and identically here, because both are "the off hand comes
+	     across" at the distance anybody sees it from. ]]
+	Pistol = table.freeze({ fire = FIRE_PISTOL, reload = RELOAD_BOXED }),
+
+	--[[ Melee has none and wants none: the swing is MeleeService's arc and the
+	     viewmodel's kick, and a clip keying the right arm would fight both. ]]
+})
+
+--[[ The set for a weapon class, or nil for one with no animations — which is
+     melee, and is not an error. ]]
+function AnimationConfig.forWeaponClass(class: string?): WeaponAnimationSet?
+	if typeof(class) ~= "string" then
+		return nil
+	end
+	return AnimationConfig.Weapon[class]
+end
+
+--[[
 	Keyed by the rig, because that is what actually decides whether a clip can
 	play at all. A kind only needs naming when it should move differently from
 	every other zombie of the same build — and none of them do.
@@ -222,6 +311,16 @@ function AnimationConfig.allIds(): { number }
 	end
 	for _, id in AnimationConfig.SurvivorHold do
 		take(id)
+	end
+	--[[ And the weapon clips, which matter here more than most: a reload is a
+	     two-second animation the player is standing still for, and one that has
+	     not arrived yet is two seconds of a survivor doing nothing visible while
+	     their ammo count refills. ]]
+	for _, set in AnimationConfig.Weapon do
+		take(set.fire)
+		take(set.reload)
+		take(set.equip)
+		take(set.idle)
 	end
 
 	return out

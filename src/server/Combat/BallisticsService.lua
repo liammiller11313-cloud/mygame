@@ -53,6 +53,7 @@ local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
+local Signal = require(Shared.Util.Signal)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
 local ShotPattern = require(Shared.Util.ShotPattern)
@@ -76,6 +77,13 @@ type ShooterState = {
 }
 
 local BallisticsService = {}
+
+--[[ (shooter: Player, weaponId: string, definition) — a shot the server accepted
+     and resolved. Distinct from the WeaponFired remote beside it, which tells
+     OTHER clients to draw a muzzle flash: this is for the server's own listeners,
+     and CarryVisualService uses it to play the third-person shot animation on
+     the character everyone is looking at. ]]
+BallisticsService.fired = Signal.new()
 
 local VALIDATION = GameConfig.HitValidation
 
@@ -495,6 +503,11 @@ function BallisticsService:resolveShot(
 	if audio then
 		audio:playAt(AudioConfig.WeaponFire[weaponId], origin)
 	end
+
+	--[[ After the remote and the sound, before the rays. Everything a listener
+	     does with this is presentation on somebody else's screen, and none of it
+	     should sit in front of the resolution the shot is actually for. ]]
+	BallisticsService.fired:fire(shooter, weaponId, definition)
 
 	-- ── resolution ───────────────────────────────────────────────────────────
 	local damageService = Registry.get("DamageService")
