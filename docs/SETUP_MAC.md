@@ -244,6 +244,25 @@ it stops whichever is running, starts it again, and then checks the version by
 asking THE SERVER rather than the binary. That the file on disk is new was never
 in doubt; whether the thing now listening is, is the whole question.
 
+## Before you press Play
+
+Two scripts, both paste-into-the-command-bar, both read-only:
+
+```
+studio-scripts/Preflight.lua        is the PLACE ready
+studio-scripts/CheckAnimations.lua  do the animation ids actually work
+```
+
+Preflight checks everything the game needs from the place rather than from the
+code — assets in the right folders, the map tagged, the rigs actually rigged,
+API services on. It separates a **PROBLEM** (something is broken) from a
+**warning** (the game works around it, but worse). Every check in it is there
+because that exact thing has caused a real bug here at least once, and each time
+the symptom looked like a code failure rather than a content one.
+
+CheckAnimations is the other half: it needs the network and its own rig tests,
+so it is separate.
+
 ## Your models are safe
 
 Rojo only manages what `default.project.json` declares — the `src/` tree plus a few
