@@ -87,6 +87,12 @@ local RETRY_INTERVAL = 0.6
      the game will not let them help. ]]
 local FLOOR_CONE = math.cos(math.rad(55))
 
+--[[ A ceiling on what the near sweep will look at. Standing in a cluttered room
+     can put a lot of parts inside arm's reach, and this runs on a phone; the
+     nearest handful is all that can plausibly be the answer, and an unbounded
+     query is how a spatial call becomes the thing you are optimising. ]]
+local NEAR_SWEEP_MAX = 24
+
 local PROMPT_WIDTH = 460
 local PROMPT_HEIGHT = 46
 local KEY_BOX = 26
@@ -113,6 +119,9 @@ local progressBar: Frame
 local progressFill: Frame
 
 local rayParams: RaycastParams
+--[[ For the near sweep below. Built once and refiltered with the ray's, since
+     both exclude exactly the same thing — the player's own character. ]]
+local nearParams: OverlapParams
 local filtered: Model? = nil
 local input: any = nil
 
@@ -136,6 +145,8 @@ local state = {
 
 	scanClock = 0,
 	lastRequest = 0,
+	--[[ The verb the in-flight request was made with. See getVerb. ]]
+	requestVerb = "",
 	alpha = 0,
 	shownText = "",
 	interactKey = "E",
@@ -229,6 +240,14 @@ local function build()
 	progressFill.Parent = progressBar
 
 	rayParams = RaycastUtil.excluding({})
+
+	--[[ Exclude, like the ray, and RespectCanCollide so a decoration part or an
+	     effect volume never answers the near sweep. Built once; the filter
+	     contents are refreshed with the ray's whenever the character changes. ]]
+	nearParams = OverlapParams.new()
+	nearParams.FilterType = Enum.RaycastFilterType.Exclude
+	nearParams.RespectCanCollide = true
+	nearParams.MaxParts = NEAR_SWEEP_MAX
 end
 
 local function hex(color: Color3): string
@@ -346,7 +365,9 @@ local function scan()
 		-- Rebuilt only when the character changes: this runs ten times a second
 		-- and the table is the only allocation in the scan.
 		filtered = character
-		rayParams.FilterDescendantsInstances = { character }
+		local exclude = { character }
+		rayParams.FilterDescendantsInstances = exclude
+		nearParams.FilterDescendantsInstances = exclude
 	end
 	local origin = camera.CFrame.Position
 	local look = camera.CFrame.LookVector
@@ -402,6 +423,66 @@ local function scan()
 		end
 	end
 
+	--[[
+		The same courtesy, for things that are not people.
+
+		A downed teammate at your feet has been findable without aiming at them
+		since this was written; a medkit on the floor and an ammo crate you are
+		standing against have not. That gap is a desktop-shaped assumption: a
+		mouse puts the crosshair on a crate without thinking about it, and a thumb
+		dragging to look does not. It is the whole of "I cannot use the ammo crate
+		on my phone".
+
+		Runs ONLY when the ray missed, at the 10Hz this scan already ticks at, so
+		it costs one spatial query a tenth of a second in the case where the
+		player is currently being told they can do nothing. Nothing to reclaim
+		there.
+
+		PICKUP_RANGE rather than INTERACT_RANGE: this is for something within
+		arm's reach, and the wider range would have you resupplying from a crate
+		across the room because it happened to be roughly ahead.
+	]]
+	local nearBest: Instance? = nil
+	local nearVerb, nearSubject, nearHoldable, nearColor = nil, nil, false, nil
+	local nearDistance = PICKUP_RANGE
+
+	for _, part in Workspace:GetPartBoundsInRadius(root.Position, PICKUP_RANGE, nearParams) do
+		local offset = part.Position - root.Position
+		local distance = offset.Magnitude
+		if distance <= 0 or distance > nearDistance then
+			continue
+		end
+		--[[ Same cone as the teammate sweep. Without it you would resupply from a
+		     crate behind you, and a prompt that appears for something you cannot
+		     see reads as the game choosing for you. ]]
+		if offset.Unit:Dot(look) < FLOOR_CONE then
+			continue
+		end
+		--[[ Through classifyInstance, so a target is exactly as legal here as
+		     under the crosshair — the spent-crate rule, the defibrillator rule and
+		     the pickup labels are decided in one place and this cannot drift from
+		     it. Players are skipped: the sweep above already had its say, with a
+		     longer range and its own rules. ]]
+		local target, verb, subject, holdable, color = classifyInstance(part)
+		if target and verb and not Players:GetPlayerFromCharacter(target.Parent) then
+			nearBest = target
+			nearVerb = verb
+			nearSubject = subject
+			nearHoldable = holdable
+			nearColor = color
+			nearDistance = distance
+		end
+	end
+
+	if nearBest and nearVerb then
+		state.target = nearBest
+		state.verb = nearVerb
+		state.subject = nearSubject or ""
+		state.holdable = nearHoldable
+		state.subjectColor = nearColor or COLOR.TextPrimary
+		return
+	end
+
 	clearTarget()
 end
 
@@ -412,10 +493,12 @@ local function beginInteract()
 		return
 	end
 	state.lastRequest = os.clock()
+	state.requestVerb = state.verb
 	Remotes.Event.BeginInteract:FireServer(state.target)
 end
 
 local function cancelInteract()
+	state.requestVerb = ""
 	if state.holding then
 		Remotes.Event.CancelInteract:FireServer()
 	end
@@ -539,8 +622,35 @@ function PromptController:getTarget(): Instance?
 	return state.target
 end
 
+--[[
+	What the player can do right now, or is already doing.
+
+	`serverVerb` while a hold is running, so the answer survives looking away —
+	the server holds the target it was handed and does not care where the camera
+	points afterwards.
+
+	The third case is the one that matters on a phone. Between firing
+	BeginInteract and the server answering there is a round trip in which
+	`holding` is still false, so this fell back to the raycast verb. On a touch
+	screen the thumb that presses USE is the same thumb that aims: pressing it
+	moves the camera off the target, the verb goes empty, TouchController hides
+	the contextual button — and hiding it RELEASES the action, cancelling the
+	revive a tenth of a second after it started. On a desktop the mouse and the
+	key are different hands and the window never opened.
+
+	So an in-flight request keeps answering with the verb it was made with, until
+	the server replies or the grace expires.
+]]
+local REQUEST_GRACE = 0.6
+
 function PromptController:getVerb(): string
-	return if state.holding then state.serverVerb else state.verb
+	if state.holding then
+		return state.serverVerb
+	end
+	if state.requestVerb ~= "" and os.clock() - state.lastRequest < REQUEST_GRACE then
+		return state.requestVerb
+	end
+	return state.verb
 end
 
 function PromptController:setEnabled(value: boolean)
@@ -568,7 +678,10 @@ function PromptController:start()
 		warn("[PromptController] no InputController; interact prompts will display but cannot be started")
 	end
 
+	--[[ The reply ends the grace above, whichever way it went: a hold that
+	     started sets `holding`, and one the server refused must stop pretending. ]]
 	trove:connect(Remotes.Event.InteractPromptChanged.OnClientEvent, function(payload: any)
+		state.requestVerb = ""
 		if typeof(payload) ~= "table" then
 			return
 		end
