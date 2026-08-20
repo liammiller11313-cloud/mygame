@@ -748,7 +748,7 @@ function GoreService:ragdoll(model: Model, impulse: Vector3?): number
 		root = root,
 		expiresAt = os.clock() + lifetime,
 		stillFor = 0,
-		pooled = false,
+		settled = false,
 	})
 	Debris:AddItem(model, lifetime + DEBRIS_GRACE)
 
@@ -1194,32 +1194,44 @@ function GoreService:_sweep(deltaTime: number)
 			continue
 		end
 
-		-- Pooling. A body that has stopped moving starts bleeding into the
-		-- floor, which is what makes a room look fought-in a minute later.
-		if BLOOD.PoolEnabled and not record.pooled then
+		--[[ Settling. Two separate things happen the moment a body stops moving,
+		     and they must not be wired together:
+
+		       * It is ANCHORED, always. This is the budget. MAX_RAGDOLLS is 48
+		         because a settled corpse costs draw calls and nothing else; if
+		         freezing were optional then so is that ceiling, and a room full
+		         of bodies is 48 live simulations instead of scenery.
+
+		       * It bleeds into the floor, IF pools are enabled. That is a
+		         cosmetic setting a player or a low-end preset can turn off, and
+		         turning off a decal must never quietly turn off the physics
+		         budget with it. ]]
+		if not record.settled then
 			local root = record.root
 			if root and root.AssemblyLinearVelocity.Magnitude < SETTLE_SPEED then
 				record.stillFor += deltaTime
 				if record.stillFor >= SETTLE_TIME then
-					record.pooled = true
+					record.settled = true
 					freezeCorpse(model)
-					self:_emit({
-						model = model,
-						level = LEVEL.None,
-						part = nil,
-						position = root.Position,
-						normal = Vector3.yAxis,
-						direction = Vector3.yAxis * -1,
-						force = 0,
-						scale = BLOOD_SCALE_HIT,
-						seed = random:NextInteger(1, 2 ^ 31 - 1),
-						decal = false,
-						pool = true,
-						kill = false,
-						hitStop = 0,
-						timeScale = HITSTOP.TimeScale,
-						attacker = nil,
-					}, PRIORITY_BLOOD)
+					if BLOOD.PoolEnabled then
+						self:_emit({
+							model = model,
+							level = LEVEL.None,
+							part = nil,
+							position = root.Position,
+							normal = Vector3.yAxis,
+							direction = Vector3.yAxis * -1,
+							force = 0,
+							scale = BLOOD_SCALE_HIT,
+							seed = random:NextInteger(1, 2 ^ 31 - 1),
+							decal = false,
+							pool = true,
+							kill = false,
+							hitStop = 0,
+							timeScale = HITSTOP.TimeScale,
+							attacker = nil,
+						}, PRIORITY_BLOOD)
+					end
 				end
 			else
 				record.stillFor = 0

@@ -153,15 +153,25 @@ end
 	Drops a point onto the ground beneath it, returning the surface position and
 	normal. Spawn placement uses this so an infected never appears half-buried in
 	a floor or hovering a stud above it.
+
+	Reuses one params object, on the same reasoning as sightParams above: every
+	spawn attempt in the placement ladder calls this — three relaxation passes
+	times a dozen candidates each — and a fresh RaycastParams per call is garbage
+	generated at exactly the moment a horde is being placed.
 ]]
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+groundParams.IgnoreWater = true
+groundParams.RespectCanCollide = false
+
 function RaycastUtil.groundAt(
 	position: Vector3,
 	searchHeight: number,
 	ignoreList: { Instance }
 ): (Vector3?, Vector3?)
 	local from = position + Vector3.new(0, searchHeight, 0)
-	local result =
-		workspace:Raycast(from, Vector3.new(0, -(searchHeight * 2), 0), RaycastUtil.excluding(ignoreList))
+	groundParams.FilterDescendantsInstances = ignoreList
+	local result = workspace:Raycast(from, Vector3.new(0, -(searchHeight * 2), 0), groundParams)
 	if not result then
 		return nil, nil
 	end

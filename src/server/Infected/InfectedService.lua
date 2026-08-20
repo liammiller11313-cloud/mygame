@@ -67,6 +67,7 @@ local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
+local RaycastUtil = require(Shared.Util.RaycastUtil)
 local RigUtil = require(Shared.Util.RigUtil)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
@@ -88,6 +89,12 @@ InfectedService.spawned = Signal.new()
 --[[ (model: Model, kind: string, ctx: DamageContext?) — fired once, after the
      body is flagged dead and its brain is gone, before GoreService touches it. ]]
 InfectedService.died = Signal.new()
+
+--[[ (position: Vector3, fromSpawn: boolean) — a common was taken off the board
+     because it could not reach anybody. See MAROON_TIME. `fromSpawn` is true
+     when it never closed ANY ground, which means the place it was put was never
+     reachable and the Director should stop offering that cell. ]]
+InfectedService.marooned = Signal.new()
 
 -- ── Update budget (see the header) ──────────────────────────────────────────
 local MAX_COMMON_UPDATES_PER_FRAME = 24
@@ -159,6 +166,45 @@ local CORPSE_FALLBACK_GRACE = 12
 -- per frame per zombie would bury it. After this many it gets despawned.
 local MAX_BRAIN_ERRORS = 5
 
+--[[
+	── MAROONED BODIES ─────────────────────────────────────────────────────────
+	SpawnField lets the Director place a horde anywhere in the map, which is what
+	makes "a horde comes out of the building you are about to reach" possible. It
+	is deliberately not a navmesh — it knows where a body FITS, not where a body
+	can WALK TO — so some of what it offers is a rooftop, a sealed courtyard, or
+	the far side of a fence.
+
+	Nothing used to notice. A body that cannot reach anyone walks into a wall
+	forever, and it is still a live rig: it holds a brain tick, a pathfinding
+	slot, a replicated model, and — worst — a slot against the Director's
+	population target. Enough of them and the Director believes it has delivered
+	a horde while nothing is arriving, which reads as the game being broken and
+	as the server dropping frames, both at once.
+
+	So a body that is far away, out of every survivor's sight, and has not got
+	one stud closer to anyone in this long, is taken off the board. The Director
+	is under target again on its next tick and spawns a replacement somewhere
+	that works. This is what L4D2 does with commons you have left behind, and for
+	the same reason.
+
+	The three gates are all necessary:
+	  * MAROON_DISTANCE — never reap something that could be on screen. A body
+	    pressed against the safe-room door is not making progress either.
+	  * line of sight — a player watching a zombie blink out of existence is a
+	    worse bug than the one this fixes.
+	  * MAROON_PROGRESS measured from where the window OPENED, not from the last
+	    sample, so a body shuffling back and forth on a rooftop cannot keep
+	    resetting its own clock a stud at a time.
+]]
+local MAROON_TIME = 25
+local MAROON_DISTANCE = 90
+local MAROON_PROGRESS = 6
+local SIGHT_IGNORE_REFRESH = 1.0
+
+--[[ Specials and bosses are a scripted beat the Director paid for and the round
+     is pacing around; a Tank that took a wrong turn is a problem to fix rather
+     than a body to silently delete. Commons only. ]]
+
 -- What a gunshot is worth in target selection, and how long it keeps pulling.
 -- Boomer bile passes its own, much larger, weight through reportNoise.
 local GUNSHOT_NOISE_WEIGHT = 0.45
@@ -199,6 +245,11 @@ function InfectedService:init()
 	-- Reused forever. Rebuilding these tables 60 times a second is exactly the
 	-- kind of allocation that turns into a garbage-collection spike mid-horde.
 	self._snapshot = { count = 0, entries = {}, builtAt = 0, updatedAt = 0 }
+
+	--[[ What a line-of-sight test is allowed to pass through. Rebuilt on a timer
+	     rather than per query for the same reason as the snapshot above. ]]
+	self._sightIgnore = {} :: { Instance }
+	self._sightIgnoreAt = -math.huge
 
 	self._trove = Trove.new()
 
@@ -393,6 +444,15 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 		lastUpdate = os.clock(),
 		interval = 0,
 		nearest = math.huge,
+
+		--[[ How far away this body was when its current no-progress window
+		     opened, and how long that window has been running. See MAROON_TIME.
+		     `progressed` stays false for a body that never closed any ground at
+		     all, which is the signature of a spawn point that was never
+		     reachable — that one also condemns the cell it came from. ]]
+		progressFrom = math.huge,
+		maroonedFor = 0,
+		progressed = false,
 
 		unlisted = false,
 		burning = false,
@@ -1024,6 +1084,10 @@ function InfectedService:_tick(record: any, now: number)
 	record.nearest = nearest
 	record.interval = if record.priority then 0 else self:_intervalFor(nearest)
 
+	if self:_trackMaroon(record, nearest, elapsed) then
+		return
+	end
+
 	if record.burning then
 		self:_stepBurn(record, now)
 		-- The burn tick can kill: everything below would be running on a corpse.
@@ -1056,6 +1120,122 @@ function InfectedService:_brainError(record: any, err: any)
 	if record.errors >= MAX_BRAIN_ERRORS then
 		self:despawn(record.model)
 	end
+end
+
+--[[ Bodies, gore and impact debris must not count as cover: a zombie standing
+     behind the rest of its own horde is in plain sight, and treating the horde
+     as a wall would let this reap the one body a player is aiming at. ]]
+function InfectedService:_refreshSightIgnore()
+	local now = os.clock()
+	if now - self._sightIgnoreAt < SIGHT_IGNORE_REFRESH then
+		return
+	end
+	self._sightIgnoreAt = now
+	local ignore = self._sightIgnore
+	table.clear(ignore)
+	for _, name in { "Infected", "FL_Gore", "FL_Impacts" } do
+		local folder = Workspace:FindFirstChild(name)
+		if folder then
+			table.insert(ignore, folder)
+		end
+	end
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(ignore, player.Character)
+		end
+	end
+end
+
+--[[
+	True when nothing solid stands between this body and any live survivor.
+
+	Only ever called from the maroon check, which has already established that
+	the body is far away and has been going nowhere for half a minute — so this
+	is a handful of casts a minute across the whole horde, not a per-tick cost.
+]]
+function InfectedService:_isSeen(position: Vector3): boolean
+	self:_refreshSightIgnore()
+	local snapshot = self._snapshot
+	for index = 1, snapshot.count do
+		local entry = snapshot.entries[index]
+		local root = entry.root
+		if root and root.Parent then
+			if RaycastUtil.hasLineOfSight(root.Position, position, self._sightIgnore) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--[[
+	Takes a body off the board when it has proved it can never reach anyone.
+
+	Returns true if the record was despawned, in which case the caller must stop
+	touching it — everything after this in the tick would be running on a corpse.
+
+	The clock only runs while the body is beyond MAROON_DISTANCE. A horde piled
+	against a safe-room door is not making progress either, and reaping that is
+	the opposite of what anyone wants.
+]]
+function InfectedService:_trackMaroon(record: any, nearest: number, elapsed: number): boolean
+	if record.priority or record.dead then
+		return false
+	end
+	--[[ No survivors alive means every distance is infinite and nothing can make
+	     progress. Wiping the horde on a team wipe is the round's job. ]]
+	if nearest >= math.huge then
+		return false
+	end
+
+	--[[ First tick. The distance it spawned at opens the window; it is not
+	     progress, or every body would clear `math.huge` on its first comparison
+	     and flag itself as having closed ground it never closed. ]]
+	if record.progressFrom >= math.huge then
+		record.progressFrom = nearest
+		return false
+	end
+
+	--[[ Real ground closed since the window opened. Note that progressFrom is
+	     NOT nudged down by smaller gains: a body walking in at four studs a
+	     second improves by about one stud per tick, and letting each of those
+	     move the reference means the threshold is never crossed and a body that
+	     is plainly doing its job gets reaped mid-approach. ]]
+	if nearest < record.progressFrom - MAROON_PROGRESS then
+		record.progressFrom = nearest
+		record.maroonedFor = 0
+		record.progressed = true
+		return false
+	end
+
+	--[[ Close enough to be somebody's problem. A horde piled against a safe-room
+	     door is not making progress either, and reaping that is the opposite of
+	     what anyone wants — and being here at all proves the body could reach
+	     the team from wherever it started. ]]
+	if nearest < MAROON_DISTANCE then
+		record.progressFrom = nearest
+		record.maroonedFor = 0
+		record.progressed = true
+		return false
+	end
+
+	record.maroonedFor += elapsed
+	if record.maroonedFor < MAROON_TIME then
+		return false
+	end
+	--[[ Restart the window whatever happens next, so a body that survives on the
+	     sight check does not re-test it on every tick from here on. ]]
+	record.maroonedFor = 0
+	record.progressFrom = nearest
+
+	local position = record.root.Position
+	if self:_isSeen(position) then
+		return false
+	end
+
+	self.marooned:Fire(position, not record.progressed)
+	self:despawn(record.model)
+	return true
 end
 
 function InfectedService:_intervalFor(distance: number): number

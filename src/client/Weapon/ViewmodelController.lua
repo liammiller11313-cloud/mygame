@@ -1665,25 +1665,97 @@ end
 	BACK mount stays hidden unconditionally: the owner cannot see their own back,
 	and letting it through would only give it a chance to clip the camera.
 ]]
+--[[
+	The parts of the carried mounts, and whether each one belongs to the hands.
+
+	Flattened and cached because the write below has to happen EVERY frame (see
+	`update`), and the obvious version of it — GetChildren on the character, then
+	GetDescendants on each mount — allocates two or three tables per frame plus a
+	class check per descendant, forever, to write two or three properties. That is
+	garbage generated sixty times a second for a loop whose entire job is to be
+	invisible.
+
+	Rebuilt only when the character's shape actually changes, which is a respawn
+	or a weapon swap, not a frame.
+]]
+type CarriedPart = { part: BasePart?, light: Light?, hands: boolean }
+
+local carried: { CarriedPart } = {}
+local carriedFor: Model? = nil
+local carriedDirty = true
+
+local function rebuildCarried(character: Model)
+	table.clear(carried)
+	carriedFor = character
+	carriedDirty = false
+
+	for _, child in character:GetChildren() do
+		if not child:IsA("Model") or string.sub(child.Name, 1, #CARRIED_PREFIX) ~= CARRIED_PREFIX then
+			continue
+		end
+		local hands = child.Name == HANDS_MOUNT
+		for _, descendant in child:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				table.insert(carried, { part = descendant, light = nil, hands = hands })
+			elseif descendant:IsA("Light") then
+				table.insert(carried, { part = nil, light = descendant, hands = hands })
+			end
+		end
+	end
+end
+
+--[[ Anything appearing under or leaving the character invalidates the list. One
+     boolean, set from an event that fires on a respawn or a weapon swap; the
+     rebuild itself happens on the next frame that needs it.
+
+     Its own trove, cleaned at the top of every call, because this is re-armed on
+     each respawn: adding to the module trove instead would leave a live pair of
+     connections per life for the whole session, all setting the same boolean.
+     That is the bug the jump-button Visible guard had. ]]
+local carriedTrove = trove:add(Trove.new())
+
+local function watchCarried(character: Model)
+	carriedTrove:clean()
+	carriedDirty = true
+	carriedTrove:connect(character.DescendantAdded, function()
+		carriedDirty = true
+	end)
+	carriedTrove:connect(character.DescendantRemoving, function()
+		carriedDirty = true
+	end)
+end
+
 local function hideOwnWorldWeapon(hidden: boolean)
 	local character = player.Character
 	if not character then
 		return
 	end
-	for _, child in character:GetChildren() do
-		if child:IsA("Model") and string.sub(child.Name, 1, #CARRIED_PREFIX) == CARRIED_PREFIX then
-			--[[ `current.weaponId` is nil for every held-not-wielded slot, which is
-			     the same condition that decided not to build a viewmodel. Reading
-			     it here rather than inventing a second flag is what keeps the two
-			     from ever disagreeing. ]]
-			local replaced = child.Name ~= HANDS_MOUNT or current.weaponId ~= nil
-			local hideThis = hidden and replaced
-			for _, descendant in child:GetDescendants() do
-				if descendant:IsA("BasePart") then
-					descendant.LocalTransparencyModifier = if hideThis then 1 else 0
-				elseif descendant:IsA("Light") then
-					descendant.Enabled = not hideThis
-				end
+	if carriedDirty or carriedFor ~= character then
+		rebuildCarried(character)
+	end
+	if #carried == 0 then
+		return
+	end
+
+	--[[ `current.weaponId` is nil for every held-not-wielded slot, which is the
+	     same condition that decided not to build a viewmodel. Reading it here
+	     rather than inventing a second flag is what keeps the two from ever
+	     disagreeing — the hands mount is only hidden when something is standing
+	     in for it, and the BACK mount is hidden unconditionally because the owner
+	     cannot see their own back. ]]
+	local handsReplaced = current.weaponId ~= nil
+
+	for _, entry in carried do
+		local hideThis = hidden and (handsReplaced or not entry.hands)
+		local part = entry.part
+		if part then
+			if part.Parent then
+				part.LocalTransparencyModifier = if hideThis then 1 else 0
+			end
+		else
+			local light = entry.light
+			if light and light.Parent then
+				light.Enabled = not hideThis
 			end
 		end
 	end
@@ -1867,7 +1939,12 @@ function ViewmodelController:start()
 	     fires before limbs replicate, and building at that instant would clone
 	     nothing and fall through to the plain fallback hands for the rest of the
 	     life — so this waits for an arm to actually exist first. ]]
+	if player.Character then
+		watchCarried(player.Character)
+	end
+
 	trove:connect(player.CharacterAdded, function(character)
+		watchCarried(character)
 		task.spawn(function()
 			local arm = character:WaitForChild("RightHand", 5) or character:WaitForChild("Right Arm", 5)
 			if not arm then

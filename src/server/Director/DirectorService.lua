@@ -423,6 +423,30 @@ function DirectorService:start()
 		end))
 	end
 
+	--[[
+		The field learns which of its own points were lies.
+
+		SpawnField tests whether a body FITS somewhere, not whether it can walk
+		out — its header is explicit about that being SpawnPlacement's problem,
+		and SpawnPlacement's rules are about distance, flow and sight rather than
+		reachability. So a rooftop or a sealed courtyard is a point the field will
+		happily offer forever.
+
+		InfectedService is the only thing that finds out. When a common it placed
+		has spent half a minute unable to close a single stud on anybody, it says
+		so, and `fromSpawn` distinguishes "never went anywhere at all" — a bad
+		point — from "chased, fell behind, gave up", which is a body the team
+		outran and says nothing about the place it came from.
+	]]
+	local infected = Registry.find("InfectedService")
+	if infected and infected.marooned then
+		self._trove:add(infected.marooned:connect(function(position: Vector3, fromSpawn: boolean)
+			if fromSpawn then
+				SpawnField.condemn(position)
+			end
+		end))
+	end
+
 	local now = os.clock()
 	self._stateEnteredAt = now
 	self._lastSpecialAt = now
