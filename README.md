@@ -48,12 +48,19 @@ Studio's plugin marketplace or with `rojo plugin install`.
 ### 2. Sync into Studio
 
 ```bash
-rojo serve
+./scripts/dev.sh
 ```
 
-Open Roblox Studio, open (or create) a place, click the Rojo plugin button, and
-hit **Connect**. The whole `src/` tree appears under the right services and stays
-live-synced as you edit.
+That starts `rojo serve` and, alongside it, watches `origin/<your branch>` and
+fast-forwards as commits land. Open Roblox Studio, open (or create) a place,
+click the Rojo plugin button, and hit **Connect**. The whole `src/` tree appears
+under the right services and stays live-synced — both as you edit locally and as
+work lands on the branch from elsewhere, with no reconnect either way.
+
+`rojo serve` on its own is still fine if you are the only one changing files.
+The script exists for the case where you are not: Rojo's sync is live, but only
+from the DISK, and the disk only moves when something pulls. See
+`./scripts/dev.sh --help`.
 
 To build a `.rbxl` without Studio in the loop:
 

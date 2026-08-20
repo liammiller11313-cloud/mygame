@@ -57,6 +57,13 @@ Should print `Rojo 7.6.1`.
 
 ```bash
 cd ~/Documents/mygame
+./scripts/dev.sh
+```
+
+That runs Rojo **and** keeps the folder up to date with the branch, which is the
+whole loop in one command. If you would rather run Rojo on its own:
+
+```bash
 ./rojo serve
 ```
 
@@ -79,14 +86,24 @@ Press **Stop** in Terminal with Ctrl+C when you're done.
 
 ## Getting updates
 
-While `rojo serve` is running, in a second Terminal tab:
+`./scripts/dev.sh` already does this — it checks the branch every 20 seconds and
+fast-forwards when there is something new, printing what it pulled. Changes reach
+Studio instantly and no reconnect is needed.
+
+It only ever fast-forwards. If you have edited files, or made commits of your
+own, it says so once and keeps serving rather than merging or discarding
+anything — sort that out yourself and it resumes on the next check.
+
+If you are running `./rojo serve` by hand instead, then it is manual: a second
+Terminal tab, and
 
 ```bash
 cd ~/Documents/mygame
 git pull
 ```
 
-Changes appear in Studio instantly. No reconnect needed.
+each time. Or run `./scripts/dev.sh --pull-only` in that second tab, which is
+the automatic half without starting a second Rojo.
 
 ## Your models are safe
 
