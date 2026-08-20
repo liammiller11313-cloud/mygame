@@ -315,6 +315,9 @@ local function readSlotAmmo(slot: string, definition: any): (number, number)
 		     definition already says which, so we read it from there. ]]
 		return Attributes.get(player, LA.SecondaryAmmo, 0), if definition then definition.reserveMax else 0
 	end
+	--[[ Melee lands here and should: it has no magazine and no reserve, and
+	     there is no MeleeAmmo attribute for the same reason. Zero is the honest
+	     answer rather than a missing case. ]]
 	return 0, 0
 end
 
@@ -324,6 +327,15 @@ local function activeWeaponId(slot: string): string
 	end
 	if slot == Enums.Slot.Secondary then
 		return Attributes.get(player, LA.SecondaryId, "")
+	end
+	--[[ Melee, which this did not know about when melee got a slot of its own —
+	     and the consequence was the whole feature. Falling through to "" left
+	     `state.definition` nil the moment the player drew a machete, so fireOnce
+	     returned on its first line and the swing did nothing, ViewmodelController
+	     was handed no weapon and drew no hands, and the only sign anything was
+	     equipped was the third-person model the SERVER had welded on. ]]
+	if slot == Enums.Slot.Melee then
+		return Attributes.get(player, LA.MeleeId, "")
 	end
 	-- Throwables, medkits and pills are held, not wielded. No weapon in hand.
 	return ""

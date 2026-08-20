@@ -51,12 +51,14 @@
 	handle's own box for one it was given — so this file never has to know what a
 	particular gun looks like. See `ensureGrip` there.
 
-	── KNOWN GAP ────────────────────────────────────────────────────────────────
-	The arm is not posed. Survivors run Roblox's default animations, which swing
-	the arms, and a welded gun swings with them; a real hold pose is a tool
-	animation overlay and is the natural next step. The gun is welded a little
-	forward of the hand so that at rest it reads as low-ready rather than as
-	pointing at the floor, which is most of the difference.
+	── THE ARM IS POSED ─────────────────────────────────────────────────────────
+	This file used to carry a KNOWN GAP saying it was not. It is now: a looped
+	idle at Action priority holds the shoulder against the walk cycle, per weapon
+	class, with a shot and a reload layering over it. See setHoldPose and
+	weaponTrack below, and AnimationConfig.Weapon for what plays.
+
+	The gun is still welded a little forward of the hand so that at rest it reads
+	as low-ready rather than as pointing at the floor.
 ]]
 
 local Players = game:GetService("Players")

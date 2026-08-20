@@ -537,11 +537,31 @@ local function choosePicker(index: number)
 	if state.pickerUntil <= 0 or state.pickerLocked then
 		return
 	end
-	local wanted = LoadoutConfig.clampIndex(index)
+
+	--[[
+		A pick is only confirmed if the server can actually be told about it.
+
+		ProfileController.setActive returns early when the profile has not loaded
+		yet, and this used to lock in and draw LOCKED IN regardless — which was
+		worse than it sounds. refreshPickerButtons puts that badge on whichever
+		card is ACTIVE, and with the change refused the active one had not moved,
+		so the confirmation landed on the card the player did not choose.
+
+		A profile that has not arrived is a real state on a cold server or a slow
+		DataStore, so it says so and stays open rather than pretending.
+	]]
 	local store = profile()
-	if store then
-		store:setActive(wanted)
+	if not store or typeof(store.isReady) ~= "function" or not store:isReady() then
+		if pickerFoot then
+			pickerFoot.Text = "STILL LOADING YOUR LOADOUTS"
+			pickerFoot.TextColor3 = COLOR.Danger
+		end
+		UiSound.play(AudioConfig.UI.MenuBack)
+		return
 	end
+
+	local wanted = LoadoutConfig.clampIndex(index)
+	store:setActive(wanted)
 	state.pickerLocked = true
 	UiSound.play(AudioConfig.UI.MenuConfirm)
 	refreshPickerButtons()
