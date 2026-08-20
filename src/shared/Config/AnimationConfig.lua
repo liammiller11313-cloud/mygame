@@ -75,24 +75,40 @@ export type AnimationSet = {
 	    script; nothing in this game holds a tool and nothing would ever play it.
 ]]
 --[[
-	Roblox's own zombie package for R6 rigs.
+	The R6 set, and the one that matters most: PlaceholderFactory builds the
+	Commons, the Hunter, the Jockey and the Tank as R6, so this is what nearly
+	every body in a round is moving on. Only the Rusher is R15.
 
-	Walk and run are the SAME id. That is how the package ships — the zombie has
-	one gait — and it works here because InfectedAnimator scales playback rate to
-	the body's real speed, so a Common sprinting at 21 plays the same clip faster
-	rather than skating.
+	Idle, walk, jump and fall are this game's own now. The climb is still
+	Roblox's, because nothing has replaced it and a clip that always loads beats
+	an empty role — a zombie on a ladder with no climb falls back to the
+	procedural poser mid-climb, which reads as a body pausing halfway up.
 
-	No attack and no death in this one; the R15 set below has both. An R6 rig
-	therefore still telegraphs its swing with InfectedBrain's C0 pose, which is
-	what that pose has always been for.
+	── WALK AND RUN ARE THE SAME ID, DELIBERATELY ──────────────────────────────
+	One gait, played faster. InfectedAnimator scales playback to the body's real
+	speed, so a Common sprinting at 21 plays this clip fast and the same Common
+	shambling at 9 plays it slow — which is the whole reason a second clip would
+	be redundant rather than better — and why InfectedAnimator divides by the
+	body's own SCALE as well as its speed, so a Tank with legs 2.35x as long
+	takes 2.35x fewer strides to cross the same ground.
+
+	── NO ATTACK, NO DEATH ─────────────────────────────────────────────────────
+	The R15 set below has an attack; this one does not, so an R6 body still
+	telegraphs its swing with InfectedBrain's C0 pose, which is what that pose
+	has always been for. Death is a ragdoll in both — see the R15 note.
 ]]
 local ZOMBIE_R6: AnimationSet = {
 	rig = "R6",
-	idle = { 125750544, 125750618 },
-	walk = { 125749145 },
-	run = { 125749145 },
-	jump = { 125750702 },
-	fall = { 125750759 },
+	--[[ One id where there used to be two. The pair was two of Roblox's package
+	     idles, picked per body at spawn so a crowd did not breathe in unison;
+	     that variety is worth having back the day there is a second idle to
+	     have it with, and InfectedAnimator still picks at random from whatever
+	     is listed. ]]
+	idle = { 88066799384265 },
+	walk = { 107080579371296 },
+	run = { 107080579371296 },
+	jump = { 100214172135324 },
+	fall = { 133938170527213 },
 	climb = { 125750800 },
 }
 

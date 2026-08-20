@@ -25,6 +25,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AnimationCache = require(Shared.Util.AnimationCache)
 local AnimationConfig = require(Shared.Config.AnimationConfig)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
 
 local InfectedAnimator = {}
 InfectedAnimator.__index = InfectedAnimator
@@ -70,17 +71,69 @@ local STATE_ROLE: { [Enum.HumanoidStateType]: string } = {
 local MOVING_EPSILON = 0.1
 local RUN_FRACTION = 0.62
 
---[[ How fast a track's playback is scaled to match the body's actual speed. A
-     zombie moving at 21 studs/sec playing a 16 studs/sec walk cycle is the
-     "moonwalking" look; matching the rate fixes it for free. ]]
+--[[
+	How fast a track's playback is scaled to match the body's actual speed.
+
+	A zombie moving at 21 studs/sec playing a 16 studs/sec walk cycle is the
+	"moonwalking" look; matching the rate fixes it for free.
+
+	── AND BY THE BODY'S SIZE, WHICH IS THE HALF THAT WAS MISSING ──────────────
+	Stride length goes with LEG length. A rig scaled 2.35x covers 2.35x the
+	ground per cycle of the same clip, so the speed it should be measured against
+	is 16 * 2.35, not 16.
+
+	Dividing by the bare 16 was not a small error. The Tank walks at 16 studs —
+	faster than a Common shambling at 9 — so it played its walk at 1.0x while the
+	Common played at 0.56x: the heaviest thing in the game had the briskest gait
+	in it, and its feet slipped 2.35x on every step. Now it plays at 0.43x, which
+	is both slower than any Common and the rate its own legs actually imply.
+
+	Every kind gets this, not just the Tank: the Jockey at 0.82x scale takes
+	quicker steps for the same ground, the Rusher at 1.25x takes longer ones.
+]]
 local BASE_WALK_SPEED = 16
-local MIN_RATE = 0.5
+--[[
+	The floor is a fraction of a body's NATURAL gait, so it scales with the body.
+	A flat 0.5 sat above the Tank's correct 0.43 and would have clamped away the
+	entire fix above.
+
+	0.25 rather than the 0.5 it was, because the job it was written for is now
+	done elsewhere. It was there to stop a STATIONARY body playing at half rate —
+	but a stationary body is in the `idle` role now, which is not rate-matched at
+	all, so the floor never sees one. What it still guards is the band between
+	MOVING_EPSILON and a real walk, where the raw ratio approaches zero and
+	AdjustSpeed(0) would freeze the clip into a statue mid-step.
+
+	At 0.5 it was also clamping a body that genuinely walks slowly: the Witch
+	shambles at 5 studs, wants 0.30x, got 0.50x, and slipped 60% on every step.
+	The floor now sits below her, and above only speeds too small to read.
+
+	The ceiling does not scale. It is about the clip becoming an unreadable blur,
+	and 2.4x looks the same on any size of body.
+]]
+local MIN_RATE = 0.25
 local MAX_RATE = 2.4
+
+--[[ A body's scale, from its kind. Falls back to 1 for a kind with no
+     definition, which is the same thing the old fixed divisor assumed. ]]
+local function bodyScaleOf(kind: string): number
+	local definition = InfectedConfig.get(kind)
+	local scale = definition and definition.scale
+	return if typeof(scale) == "number" and scale > 0 then scale else 1
+end
 
 --[[ The roles whose playback rate follows the body's speed. See setState. ]]
 local RATE_MATCHED: { [string]: boolean } = {
 	walk = true,
 	run = true,
+}
+
+--[[ An idle has no stride to match, so it is not rate-matched — but a big body
+     still should not breathe at a small body's tempo. A pendulum's period goes
+     with the square root of its length, which is why this is sqrt and not the
+     scale itself: a 2.35x Tank idles at 0.65x, not 0.43x. ]]
+local IDLE_WEIGHTED: { [string]: boolean } = {
+	idle = true,
 }
 
 local FADE = 0.18
@@ -120,6 +173,10 @@ function InfectedAnimator.new(model: Model, kind: string)
 	local self = setmetatable({
 		model = model,
 		kind = kind,
+		--[[ Resolved once at spawn rather than looked up per state change: this is
+		     read on every gait switch of every body in the round, and a body's
+		     scale cannot change once it is this kind. ]]
+		bodyScale = bodyScaleOf(kind),
 		humanoid = humanoid,
 		tracks = {},
 		current = "",
@@ -285,11 +342,14 @@ function InfectedAnimator.setState(self, role: string, speed: number)
 	     climb has no stride to match, and they arrive here with a speed of zero —
 	     which the clamp would turn into half-rate playback, so a zombie would
 	     drop off a catwalk in slow motion. ]]
+	local rate = 1
 	if RATE_MATCHED[role] then
-		track:AdjustSpeed(math.clamp(speed / BASE_WALK_SPEED, MIN_RATE, MAX_RATE))
-	else
-		track:AdjustSpeed(1)
+		local stride = BASE_WALK_SPEED * self.bodyScale
+		rate = math.clamp(speed / stride, MIN_RATE / self.bodyScale, MAX_RATE)
+	elseif IDLE_WEIGHTED[role] then
+		rate = 1 / math.sqrt(self.bodyScale)
 	end
+	track:AdjustSpeed(rate)
 end
 
 --[[ Reads the body and picks a state. This is the only thing the brain has to
