@@ -208,24 +208,49 @@ export type WeaponAnimationSet = {
 	idle: number?,
 }
 
-local RELOAD_BOXED = 124425827495007
-local FIRE_RIFLE = 79077703240420
-local FIRE_SHOTGUN = 139751042655361
-local FIRE_PISTOL = 111410151816711
+--[[
+	Long guns. Shoulder-fired, two hands on the weapon, a magazine that goes in
+	from below — which is the same motion whether it is an M4 or a Kriss, and the
+	reason the marksman rifles take this set too.
+]]
+local FIRE_RIFLE = 92973496780914
+local RELOAD_RIFLE = 72025071063219
+local IDLE_RIFLE = 136810265016214
+
+--[[
+	Sidearms, revolver included. The reason these are not the rifle's is the OFF
+	HAND: a pistol is held out in front on one arm with the other supporting, and
+	reloaded by bringing that support hand across. A rifle clip played on a
+	sidearm puts an arm where the gun is not.
+]]
+local FIRE_PISTOL = 111683203514533
+local RELOAD_PISTOL = 113615308493373
+local IDLE_PISTOL = 132900418012706
+
 local FIRE_SMG = 126130498796830
 local RELOAD_SMG = 105560973486853
 
---[[
-	The two clips every gun shares.
+--[[ The shotgun's pair, and the last two ids in this file Roblox still refuses
+     — see WeaponFallback below. RELOAD_BOXED has no other user now that the
+     rifle and the pistol have their own. ]]
+local FIRE_SHOTGUN = 139751042655361
+local RELOAD_BOXED = 124425827495007
 
-	Idle and equip are about the SHOOTER, not the gun: a two-handed low-ready and
-	a draw look the same whether what comes up is an M4 or a Kriss, which is
-	exactly not true of a reload. So they are named once here and referenced by
-	every gun class, rather than repeated five times and gradually diverging.
+--[[
+	The draw, which every gun really does share: a hand goes to the weapon and the
+	weapon comes up, and at the distance a teammate sees it that reads the same
+	whether what came up is an M4 or a Kriss.
+
+	The generic two-handed low-ready beside it is now the fallback rather than the
+	rule. The rifle and the pistol have holds of their own above — a sidearm held
+	out on one arm and a rifle held across the chest are not the same pose, and
+	pretending they were was the compromise that made the pistol look wrong — so
+	this is what the SMG and the shotgun use, being long guns with no hold of
+	their own.
 
 	Melee gets neither. It is one-handed, it is drawn differently, and the pose
-	that suits a rifle held across the chest is wrong for a machete — it keeps
-	Roblox's generic ToolNone from SurvivorHold below.
+	that suits a rifle across the chest is wrong for a machete — it keeps Roblox's
+	generic ToolNone from SurvivorHold above.
 ]]
 local IDLE_GUN = 117670476393944
 local EQUIP_GUN = 125430658600847
@@ -233,8 +258,8 @@ local EQUIP_GUN = 125430658600847
 AnimationConfig.Weapon = table.freeze({
 	Rifle = table.freeze({
 		fire = FIRE_RIFLE,
-		reload = RELOAD_BOXED,
-		idle = IDLE_GUN,
+		reload = RELOAD_RIFLE,
+		idle = IDLE_RIFLE,
 		equip = EQUIP_GUN,
 	}),
 
@@ -243,8 +268,8 @@ AnimationConfig.Weapon = table.freeze({
 	     would be two more places to edit for no visible difference. ]]
 	Marksman = table.freeze({
 		fire = FIRE_RIFLE,
-		reload = RELOAD_BOXED,
-		idle = IDLE_GUN,
+		reload = RELOAD_RIFLE,
+		idle = IDLE_RIFLE,
 		equip = EQUIP_GUN,
 	}),
 
@@ -272,8 +297,8 @@ AnimationConfig.Weapon = table.freeze({
 	     across" at the distance anybody sees it from. ]]
 	Pistol = table.freeze({
 		fire = FIRE_PISTOL,
-		reload = RELOAD_BOXED,
-		idle = IDLE_GUN,
+		reload = RELOAD_PISTOL,
+		idle = IDLE_PISTOL,
 		equip = EQUIP_GUN,
 	}),
 
@@ -287,22 +312,25 @@ AnimationConfig.Weapon = table.freeze({
 
 	Roblox refuses to play an animation that is not owned by the place's creator
 	or by Roblox itself, and it refuses it SILENTLY — LoadAnimation returns a
-	perfectly ordinary track that never moves anything. Four of the ids above are
-	in exactly that state today, which is four guns out of five with no visible
-	shot and no visible reload in third person:
+	perfectly ordinary track that never moves anything.
 
-	    79077703240420   rifle and marksman fire
-	    111410151816711  pistol and revolver fire
+	Two ids are still in that state, and they are both the shotgun's:
+
 	    139751042655361  shotgun fire
-	    124425827495007  the boxed reload, so every gun but the SMG
+	    124425827495007  shotgun reload
 
-	The fix is to re-upload them under the account that owns the place; nothing
-	here can grant permission. But an SMG shot on a shotgun reads far better than
-	a shotgun that does not move, so a class whose clip is KNOWN broken borrows
-	the pair that works. CarryVisualService consults AnimationCache.hasFailed, so
-	this only ever engages for an id Roblox has actually refused — re-upload the
-	four above and every gun goes back to its own clip with nothing to change
-	here.
+	The rifle's and the pistol's were re-uploaded and now load, which is what
+	this mechanism is for and also proof that it works: nothing here had to
+	change when they did. Re-upload the two above under the account that owns the
+	place and the shotgun goes back to its own clips the same way.
+
+	Until then the shotgun borrows the SMG's pair — chosen over the rifle's
+	because these are the ids the server log has actually confirmed loading, and
+	a fallback that might itself be refused is not a fallback. An SMG shot on a
+	shotgun is wrong; a shotgun that does not move when it fires is worse.
+
+	CarryVisualService consults AnimationCache.hasFailed, so this only ever
+	engages for an id Roblox has actually refused.
 ]]
 AnimationConfig.WeaponFallback = table.freeze({
 	fire = FIRE_SMG,

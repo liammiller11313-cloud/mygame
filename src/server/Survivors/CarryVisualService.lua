@@ -588,7 +588,11 @@ local function holdIdleId(player: Player, character: Model?): number?
 		if ok and typeof(weaponId) == "string" then
 			local definition = WeaponConfig.get(weaponId)
 			local set = definition and AnimationConfig.forWeaponClass(definition.class)
-			if set and set.idle then
+			--[[ A hold Roblox has REFUSED is worse than no hold at all: the caller
+			     stops on a failed id, so the arm keeps swinging as if nothing were
+			     in it. Roblox's own ToolNone below always loads, so a refused class
+			     pose falls back to the generic one rather than to nothing. ]]
+			if set and set.idle and not AnimationCache.hasFailed(set.idle) then
 				return set.idle
 			end
 		end
