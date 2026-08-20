@@ -208,6 +208,19 @@ process keeps executing the file it started with even after that file is
 replaced — so a server started before an update quietly outlives it, and
 nothing looks wrong from the outside.
 
+### `rojo serve` versus `./rojo serve`
+
+The `./` is not decoration. `rojo serve` runs whatever your shell finds on PATH;
+`./rojo serve` runs the binary in this folder, which is the one
+`update-rojo.sh` replaces and the one `rokit.toml` pins. If an older Rojo is
+sitting in `/usr/local/bin`, `/opt/homebrew/bin` or a Rokit shim, it wins — so
+the update succeeds, the doctor reports the new version, and `rojo serve` goes
+on starting the old one. `./scripts/rojo-doctor.sh` lists every copy it can find
+and flags the disagreement.
+
+`./scripts/dev.sh` always uses the right one, which is the simplest way not to
+have to think about it.
+
 ### `attempt to index number with 'protocolVersion'`
 
 That is this exact situation, between 7.6.1 and 7.7.0 specifically.

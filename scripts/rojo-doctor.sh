@@ -43,6 +43,43 @@ else
   echo "CLI on disk      NOT FOUND"
 fi
 
+#[[
+#  EVERY rojo this machine can reach, not just the one this script picked.
+#
+#  Because the two are not the same question. This script prefers ./rojo. Your
+#  SHELL does not: typing `rojo serve` runs whatever PATH finds first, and an
+#  older copy left in /usr/local/bin, /opt/homebrew/bin or a Rokit shim wins
+#  over the new one sitting in this folder — which has no ./ in front of it and
+#  is not on PATH at all.
+#
+#  So `./scripts/update-rojo.sh` updates ./rojo, the doctor reports 7.7.0, and
+#  `rojo serve` still starts the old one. Everything looks right and nothing
+#  works, and between 7.6.1 and 7.7.0 the plugin cannot even say why.
+#]]
+#[[ PATH is walked by hand because `command -v -a` is not a thing — bash's
+#   `command` takes no -a, so it silently printed nothing and the check passed
+#   for everyone. `type -a -P` is bash-only. This works in either shell. ]]
+SHADOW_WARN=""
+FOUND_ANY=""
+while IFS= read -r cand; do
+  [ -n "$cand" ] || continue
+  V="$("$cand" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  FOUND_ANY="yes"
+  MARK=""
+  if [ -n "$CLI_VER" ] && [ -n "$V" ] && [ "$V" != "$CLI_VER" ]; then
+    MARK="   <-- DIFFERENT VERSION"
+    SHADOW_WARN="$cand"
+  fi
+  echo "  also on PATH   ${V:-would not run}   ($cand)$MARK"
+done <<EOF
+$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r dir; do
+    [ -n "$dir" ] && [ -x "$dir/rojo" ] && printf '%s\n' "$dir/rojo"
+  done)
+EOF
+if [ -z "$FOUND_ANY" ] && [ "$CLI_PATH" = "./rojo" ]; then
+  echo "  also on PATH   nothing — so 'rojo serve' will not work; use './rojo serve'"
+fi
+
 # ── 2. the process actually serving ─────────────────────────────────────────
 #[[ -x matches the executable's NAME, not the command line. `pgrep -f 'rojo
 #   serve'` looks more precise and is worse: -f matches the full command line of
@@ -102,6 +139,22 @@ if [ -z "$SRV_VER" ] && [ -n "$PIDS" ]; then
   echo "PROBLEM: a rojo serve process is running but nothing answers on port $PORT."
   echo "  It may be serving a different port. Check the window it is running in,"
   echo "  then: ./scripts/rojo-doctor.sh <that port>"
+fi
+
+if [ -n "$SHADOW_WARN" ]; then
+  PROBLEM=1
+  echo "PROBLEM: there is more than one Rojo on this machine, on different versions."
+  echo ""
+  echo "  Typing 'rojo serve' runs $SHADOW_WARN, not the ./rojo in this folder."
+  echo "  The shell searches PATH; ./rojo is not on it. So the update landed on a"
+  echo "  binary your shell never reaches."
+  echo ""
+  echo "  Start the server with the one this project uses — the ./ matters:"
+  echo ""
+  echo "    ./scripts/dev.sh"
+  echo ""
+  echo "  Or update the other copy too, so it stops mattering which you type."
+  echo ""
 fi
 
 if [ -z "$PIDS" ] && [ -z "$SRV_VER" ]; then
