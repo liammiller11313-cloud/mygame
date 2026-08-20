@@ -107,6 +107,24 @@ local MIN_FOG_END = DirectorConfig.Spawning.MaxDistanceFromSurvivor * 2.4
 -- properties can express on screen.
 local EPSILON = 1e-4
 
+--[[
+	ClockTime gets a coarser gate than the rest, and it is the only one that does.
+
+	Every other property here is a shader uniform: writing it costs a uniform
+	upload. ClockTime MOVES THE SUN, which dirties the cached static half of the
+	ShadowMap cascade for every shadow-casting instance in the map. At a 0.1s
+	tick over a seventeen-minute round the clock travels 17.2 -> 22.6 hours, so a
+	tick moves it by about 0.0005 hours — a hundredth of a degree of sun, well
+	under EPSILON's ability to notice it is pointless, and a shadow rebuild every
+	tenth of a second for the whole round.
+
+	A hundredth of an hour is 0.15 degrees, which is far below what anyone can
+	see in a single step and turns the rebuild into roughly one every twenty
+	seconds. The ramp still lands on exactly the same value at the end; it just
+	gets there in visible steps rather than invisible ones.
+]]
+local CLOCK_QUANTUM = 0.01
+
 -- ── flash ───────────────────────────────────────────────────────────────────
 
 local FLASH_MIN_DURATION = 0.04
@@ -772,7 +790,10 @@ local function commit(flash: number, gutter: number, breath: number)
 	local fogEnd = target.fogEnd * (1 + breath * BREATH_FOG_AMOUNT)
 	fogEnd = math.max(fogEnd, MIN_FOG_END, target.fogStart + 1)
 
-	writeNumber(Lighting, "ClockTime", target.clock, "clock")
+	--[[ Quantised, not epsilon-gated: see CLOCK_QUANTUM. Rounded rather than
+	     floored so the ramp cannot drift behind its own schedule. ]]
+	local clock = math.floor(target.clock / CLOCK_QUANTUM + 0.5) * CLOCK_QUANTUM
+	writeNumber(Lighting, "ClockTime", clock, "clock")
 	writeNumber(Lighting, "Brightness", (target.brightness + flash * FLASH_TO_LIGHT) * dim, "brightness")
 	writeNumber(Lighting, "ExposureCompensation", target.exposure, "exposure")
 	writeNumber(Lighting, "FogStart", target.fogStart, "fogStart")

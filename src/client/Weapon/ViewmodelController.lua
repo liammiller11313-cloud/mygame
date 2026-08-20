@@ -59,6 +59,7 @@ local Enums = require(Shared.Enums)
 local AmmoConfig = require(Shared.Config.AmmoConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local Registry = require(Shared.Util.Registry)
+local Device = require(Shared.Util.Device)
 local Spring = require(Shared.Util.Spring)
 local Trove = require(Shared.Util.Trove)
 
@@ -246,6 +247,29 @@ local FLASH_SECONDS = 0.035 -- roughly two frames; any longer reads as a flare
      firework. ]]
 local MUZZLE_SPARKS = 8
 local MUZZLE_SMOKE = 2
+
+--[[
+	Muzzle particles are the most expensive pixels the client draws, and not
+	because there are many of them: they are a foot from the near plane, so a
+	handful of soft alpha quads covers a large fraction of the screen and every
+	one of them is overdraw. On a phone, at a Vector's eleven hundred rounds a
+	minute, that is the fill-rate spike arriving on exactly the frames the player
+	is trying to aim.
+
+	Smoke takes the deeper cut of the two. Sparks are small, bright and brief and
+	are what actually reads as a shot; smoke is the large soft one and is nearly
+	all of the overdraw.
+
+	Floors of 3 and 1 stay below, so a shot on a phone still flashes — the
+	existing math.max is what keeps this from ever silencing a gun.
+]]
+local muzzleSparkScale = 1
+local muzzleSmokeScale = 1
+
+local function adoptMuzzleScale()
+	muzzleSparkScale = Device.pick({ Mobile = 0.55, Tablet = 0.75 }, 1)
+	muzzleSmokeScale = Device.pick({ Mobile = 0.3, Tablet = 0.6 }, 1)
+end
 local FLASH_LIGHT_RANGE = 14
 local FLASH_LIGHT_BRIGHTNESS = 5
 
@@ -1436,10 +1460,10 @@ function ViewmodelController:onFired(definition: any, _seed: number)
 		     the same count as a Vector would read as identical at every calibre. ]]
 		local scale = definition.muzzleFlashSize
 		if flashSparks then
-			flashSparks:Emit(math.max(math.floor(MUZZLE_SPARKS * scale), 3))
+			flashSparks:Emit(math.max(math.floor(MUZZLE_SPARKS * scale * muzzleSparkScale), 3))
 		end
 		if flashSmoke then
-			flashSmoke:Emit(math.max(math.floor(MUZZLE_SMOKE * scale), 1))
+			flashSmoke:Emit(math.max(math.floor(MUZZLE_SMOKE * scale * muzzleSmokeScale), 1))
 		end
 	end
 
@@ -1826,6 +1850,9 @@ function ViewmodelController:init()
 			model.Parent = Workspace.CurrentCamera
 		end
 	end)
+
+	adoptMuzzleScale()
+	trove:add(Device.changed:connect(adoptMuzzleScale))
 end
 
 function ViewmodelController:start()

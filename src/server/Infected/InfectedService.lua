@@ -76,6 +76,11 @@ local InfectedBrain = require(script.Parent.InfectedBrain)
 
 local InfectedService = {}
 
+--[[ How many burning bodies currently carry their own light. See
+     BURN_LIGHT_MAX. Declared here rather than in init so it is never nil on the
+     first ignition — a `nil < 12` comparison would throw out of a molotov. ]]
+InfectedService._burnLights = 0
+
 --[[ (model: Model, kind: string) — fired after the rig is parented and its
      brain and special module are live. ]]
 InfectedService.spawned = Signal.new()
@@ -115,6 +120,25 @@ local FIRE_SIZE = 5.5
 local FIRE_HEAT = 14
 local FIRE_LIGHT_RANGE = 16
 local FIRE_LIGHT_BRIGHTNESS = 2.2
+
+--[[
+	How many burning bodies may carry their own light at once.
+
+	A molotov into a horde ignites everything it touches, and every ignition
+	built its own PointLight with no ceiling anywhere — the only guard was
+	per-body, against re-igniting the same one. Against a sixty-Common cap that
+	is sixty dynamic lights arriving on one frame, replicated to every client,
+	which is the single worst thing this game can do to a phone and it happens on
+	the most spectacular moment in it.
+
+	Twelve, and the FIRE is never capped: every burning body still visibly burns,
+	because the flame is what says "this one is on fire" and it is per-body
+	information. The light is atmosphere — a burning body lighting the corridor —
+	and twelve of them light a corridor exactly as well as sixty do. What is lost
+	past the cap is a body glowing on its own in the dark, which is the least
+	load-bearing thing here and the most expensive.
+]]
+local BURN_LIGHT_MAX = 12
 
 -- ── Misc ────────────────────────────────────────────────────────────────────
 -- A stagger's little hop. Deliberately a fraction of a full shove: MeleeService
@@ -714,16 +738,21 @@ function InfectedService:ignite(model: Model, source: Player?)
 		fire.Parent = host
 		record.fire = fire
 
-		-- A burning zombie in a dark corridor has to light the corridor, or the
-		-- molotov reads as a texture rather than an event.
-		local light = Instance.new("PointLight")
-		light.Name = "FL_BurningLight"
-		light.Color = FIRE_COLOR
-		light.Range = FIRE_LIGHT_RANGE * scale
-		light.Brightness = FIRE_LIGHT_BRIGHTNESS
-		light.Shadows = false
-		light.Parent = host
-		record.light = light
+		--[[ A burning zombie in a dark corridor has to light the corridor, or the
+		     molotov reads as a texture rather than an event. Up to BURN_LIGHT_MAX
+		     of them: past that the body burns without its own light, which is
+		     invisible in a crowd and is the whole cost. ]]
+		if self._burnLights < BURN_LIGHT_MAX then
+			local light = Instance.new("PointLight")
+			light.Name = "FL_BurningLight"
+			light.Color = FIRE_COLOR
+			light.Range = FIRE_LIGHT_RANGE * scale
+			light.Brightness = FIRE_LIGHT_BRIGHTNESS
+			light.Shadows = false
+			light.Parent = host
+			record.light = light
+			self._burnLights += 1
+		end
 	end
 end
 
@@ -733,6 +762,14 @@ function InfectedService:_stopBurning(record: any, linger: number)
 		record.model:SetAttribute(Attributes.Infected.Burning, false)
 	end
 	record.burning = false
+
+	--[[ Released as the record lets go of it, not when the instance is finally
+	     destroyed: with a linger the instance outlives the body by a moment, and
+	     holding the budget for that moment would let a long fight ratchet the
+	     count up until nothing new could ever light again. ]]
+	if record.light then
+		self._burnLights = math.max(self._burnLights - 1, 0)
+	end
 
 	for _, key in { "fire", "light" } do
 		local instance = record[key]

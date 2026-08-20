@@ -2337,7 +2337,16 @@ local function safeRoom(
 		false
 	)
 	light.CanCollide = false
-	pointLight(light, UITheme.Color.Accent, 60, 2.6, true)
+	--[[ 40, not 60, and the shadows stay on.
+
+	     This is one of only three shadow-casting lights in the game and the
+	     shadow-map volume goes with the CUBE of the range, so 60 -> 40 is about
+	     3.4x less of it for a light that never needed to reach that far: the
+	     farthest interior floor corner of a safe room is 37.4 studs away. 38 is
+	     the hard floor — below that the corners of the room go unlit on desktop
+	     too, and a safe room you cannot see the corners of is worse than a
+	     cheaper one. ]]
+	pointLight(light, UITheme.Color.Accent, 40, 2.6, true)
 
 	return model
 end
