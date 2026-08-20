@@ -1,0 +1,123 @@
+--!strict
+--[[
+	SpawnVolume — will a body of this size actually FIT here?
+
+		local size = SpawnVolume.sizeFor(Enums.Infected.Tank)
+		if SpawnVolume.fits(groundPoint, size, ignoreList) then ... end
+
+	── THE PROBLEM THIS EXISTS FOR ──────────────────────────────────────────────
+	SpawnPlacement tested headroom with a single upward ray, three studs long,
+	from the point the body's feet would land on. That answers "is there a
+	ceiling directly overhead" and nothing else. It says nothing about WIDTH, so
+	a point one stud from a wall passed it cleanly and the rig materialised with
+	its torso inside the wall — a zombie that shoves against geometry forever and
+	never reaches anybody.
+
+	It was also one constant for every kind, and a Tank is scaled 2.35: over
+	eleven studs tall and three across. The test that cleared a Common was
+	telling a Tank it fit through the same gap.
+
+	── WHY A BOX AND NOT MORE RAYS ─────────────────────────────────────────────
+	Rays are how you end up with this bug again in a year. Four corner rays miss
+	a pillar in the middle, eight miss a thinner one, and every added ray is
+	another guess about which direction the geometry comes from.
+	GetPartBoundsInBox asks the actual question — is anything solid inside the
+	space this body needs — in one call, and gets it right for shapes nobody
+	thought about.
+
+	── WHAT IT DELIBERATELY DOES NOT DO ────────────────────────────────────────
+	It does not check reachability. A sealed room with a floor is somewhere a
+	body FITS, and this will say yes. Whether the horde can walk out of it is a
+	different question, and it belongs to whatever is choosing candidate points
+	rather than to the test that keeps bodies out of walls.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local DirectorConfig = require(Shared.Config.DirectorConfig)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
+
+local SPAWNING = DirectorConfig.Spawning
+
+local SpawnVolume = {}
+
+--[[ One params object, refiltered per call. Building one per test would be an
+     allocation inside the Director's hottest loop, and this module is asked the
+     question dozens of times for a single spawn. ]]
+local params = OverlapParams.new()
+params.FilterType = Enum.RaycastFilterType.Exclude
+--[[ Decoration is not a wall. A body may stand inside a bush, an effect volume
+     or a trigger part; refusing those would reject most of a dressed map. ]]
+params.RespectCanCollide = true
+params.MaxParts = 1
+
+--[[
+	The box a body of this kind stands in.
+
+	`scale` is the same number RigUtil.scaleRig and PlaceholderFactory's geometry
+	scaling use, so this box tracks whatever size the rig is actually built at
+	rather than restating it.
+]]
+function SpawnVolume.sizeFor(kind: string?): Vector3
+	local base = SPAWNING.SpawnBodySize
+	local definition = if typeof(kind) == "string" then InfectedConfig.get(kind) else nil
+	local scale = if definition and typeof(definition.scale) == "number" then definition.scale else 1
+	return base * math.max(scale, 0.1)
+end
+
+--[[
+	Whether a body of `size` standing with its FEET at `footPosition` is clear of
+	the world.
+
+	The box is lifted by half its height, because the caller has a ground point
+	and a body stands on top of one rather than centred on it. It is then shrunk
+	by SpawnBodyTolerance: GetPartBoundsInBox tests axis-aligned bounding boxes,
+	which for an angled wall are bigger than the wall, and without a little slack
+	no ground next to a diagonal surface would ever pass.
+
+	`ignore` is the caller's list — survivors, existing infected, gore. Passed in
+	rather than rebuilt here because SpawnPlacement already maintains exactly
+	that list for its raycasts and two copies would drift.
+]]
+function SpawnVolume.fits(footPosition: Vector3, size: Vector3, ignore: { Instance }?): boolean
+	local slack = 1 - SPAWNING.SpawnBodyTolerance
+	local box = Vector3.new(size.X * slack, size.Y * slack, size.Z * slack)
+
+	--[[ Half a stud of extra lift on top of the half-height, so a body standing
+	     ON the floor is not reported as intersecting it. The ground point comes
+	     from a raycast that hit that floor, so the two touch by definition. ]]
+	local centre = footPosition + Vector3.new(0, box.Y * 0.5 + 0.5, 0)
+
+	params.FilterDescendantsInstances = ignore or {}
+	local hits = Workspace:GetPartBoundsInBox(CFrame.new(centre), box, params)
+	return #hits == 0
+end
+
+--[[ The same question for a named kind, which is what callers usually have. ]]
+function SpawnVolume.fitsKind(footPosition: Vector3, kind: string?, ignore: { Instance }?): boolean
+	return SpawnVolume.fits(footPosition, SpawnVolume.sizeFor(kind), ignore)
+end
+
+--[[ The tallest body the game can spawn, for a caller that wants one answer
+     good for every kind — a shared walkable map, say, rather than a specific
+     spawn. Computed once: the roster does not change at runtime. ]]
+local widest: Vector3? = nil
+
+function SpawnVolume.largestSize(): Vector3
+	if widest then
+		return widest :: Vector3
+	end
+	local biggest = 1
+	for _, definition in InfectedConfig.all() do
+		local scale = definition.scale
+		if typeof(scale) == "number" and scale > biggest then
+			biggest = scale
+		end
+	end
+	widest = SPAWNING.SpawnBodySize * biggest
+	return widest :: Vector3
+end
+
+return SpawnVolume

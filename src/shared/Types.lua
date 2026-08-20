@@ -73,6 +73,10 @@ export type SpawnOptions = {
 	maxFlowAhead: number?,
 	attempts: number?,
 	anchor: Vector3?, -- search around this point instead of the survivors
+	--[[ What is being spawned, so the clearance test can size the body. A Tank is
+	     scaled 2.35 and needs a genuinely different opening from a Common; nil
+	     falls back to the largest body, which is the safe direction. ]]
+	kind: string?,
 }
 
 --[[ A builder for a DamageContext that fills in the boring fields. Every call

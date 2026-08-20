@@ -32,6 +32,8 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
+local SpawnField = require(script.Parent.SpawnField)
+local SpawnVolume = require(script.Parent.SpawnVolume)
 local RigUtil = require(Shared.Util.RigUtil)
 local Types = require(Shared.Types)
 
@@ -67,6 +69,24 @@ local NODE_CACHE_TIME = 2
      sampling. A map with plenty of nodes should use them, but a map whose nodes
      are all currently in view must still be able to place a spawn. ]]
 local NODE_ATTEMPT_SHARE = 0.75
+
+--[[
+	The share of attempts drawn from the learned field, once nodes have had
+	theirs.
+
+	The field is everywhere in the map a body can stand — see SpawnField — and it
+	is the reason the Director is no longer limited to a designer's tags and the
+	doughnut around the team. It goes AFTER the tagged nodes on purpose: a tag is
+	a human saying "put them here", and that outranks a cell a sweep happened to
+	find.
+
+	It goes BEFORE the ring samples for the opposite reason. A ring sample is a
+	guess at a position that is then tested; a field point is already known to be
+	standable, so the expensive half of the test is behind it. Spending the
+	remaining attempts on guesses when known-good points are available was most
+	of why a badly tagged map starved.
+]]
+local FIELD_ATTEMPT_SHARE = 0.6
 
 --[[
 	How far the ceiling opens when the strict search finds nothing at all.
@@ -324,6 +344,13 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		shuffleNodes()
 	end
 	local nodeBudget = if useNodes then math.max(1, math.floor(attempts * NODE_ATTEMPT_SHARE)) else 0
+	--[[ Whatever the nodes did not take, less the ring's share. An anchored
+	     search skips the field entirely: a bile horde or a panic event is about
+	     one PLACE, and offering it the whole map would make it a horde that
+	     happens to arrive somewhere. ]]
+	local fieldBudget = if anchor
+		then 0
+		else nodeBudget + math.floor((attempts - nodeBudget) * FIELD_ATTEMPT_SHARE)
 
 	local tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
 	local nodeIndex = 0
@@ -366,6 +393,11 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		symptom quiet and the map stay wrong. Spawning nothing at all, which is
 		what happened before, was not cheaper in any sense that matters.
 	]]
+	--[[ Once per search rather than per attempt: the kind cannot change inside a
+	     find, and sizeFor walks the config. Absent kind takes the largest body,
+	     which is the safe direction — a gap that fits a Tank fits everything. ]]
+	local bodySize = if opts.kind then SpawnVolume.sizeFor(opts.kind) else SpawnVolume.largestSize()
+
 	local strictMaxSquared = maxDistanceSquared
 	local relaxedFlow = false
 	local relaxedDistance = false
@@ -409,6 +441,13 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 				if node then
 					candidate = node.Position
 				end
+			end
+			--[[ Then the learned field: somewhere in the map a body is already
+			     known to fit. Everything below still applies — distance, flow,
+			     line of sight — so this widens what gets CONSIDERED without
+			     loosening a single rule about what is acceptable. ]]
+			if not candidate and attempt <= fieldBudget then
+				candidate = SpawnField.sample(random)
 			end
 			if not candidate then
 				local origin = anchor
@@ -480,17 +519,19 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 				end
 			end
 
-			-- ── headroom ────────────────────────────────────────────────────────
-			local clearance = SPAWNING.SpawnGroundClearance
-			local headroom = Workspace:Raycast(
-				ground + Vector3.new(0, 0.1, 0),
-				Vector3.new(0, clearance, 0),
-				RaycastUtil.excluding(ignore)
-			)
-			if headroom then
+			--[[ ── does a body actually FIT here ─────────────────────────────────
+			     This was a single upward ray three studs long, which answers "is
+			     there a ceiling overhead" and nothing else. A point one stud from
+			     a wall passed it and the rig appeared with its torso inside the
+			     wall — a zombie that shoves against geometry forever and never
+			     reaches anyone. SpawnVolume asks about the whole box the body
+			     stands in, sized from the kind's own scale, so a Tank is told the
+			     truth about a gap that fits a Common. ]]
+			if not SpawnVolume.fits(ground, bodySize, ignore) then
 				blocked += 1
 				continue
 			end
+			local clearance = SPAWNING.SpawnGroundClearance
 
 			-- ── the rule that matters ───────────────────────────────────────────
 			-- Tested at body height, not at the floor: a floor point can be hidden
@@ -546,7 +587,7 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		table.insert(parts, string.format("%d on a slope", steep))
 	end
 	if blocked > 0 then
-		table.insert(parts, string.format("%d with no headroom", blocked))
+		table.insert(parts, string.format("%d too tight for the body", blocked))
 	end
 	if #parts == 0 then
 		table.insert(parts, "no candidates generated")
@@ -567,7 +608,11 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			"no spawn point in %d attempts (%s%s%s)",
 			attempts,
 			table.concat(parts, ", "),
-			if useNodes then string.format("; %d tagged nodes", #nodeCache) else "; no tagged nodes",
+			string.format(
+				"%s; %d point(s) learned from the map",
+				if useNodes then string.format("; %d tagged nodes", #nodeCache) else "; no tagged nodes",
+				SpawnField.stats().known
+			),
 			gaveUp
 		)
 end

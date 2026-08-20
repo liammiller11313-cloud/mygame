@@ -101,12 +101,14 @@ local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
+local SpawnField = require(script.Parent.SpawnField)
 local SpawnPlacement = require(script.Parent.SpawnPlacement)
 
 local INTENSITY = DirectorConfig.Intensity
 local PACING = DirectorConfig.Pacing
 local POPULATION = DirectorConfig.Population
 local SPAWNING = DirectorConfig.Spawning
+local FIELD = DirectorConfig.Field
 local SPECIALS = DirectorConfig.Specials
 local BOSSES = DirectorConfig.Bosses
 local PANIC = DirectorConfig.PanicEvent
@@ -410,6 +412,17 @@ function DirectorService:init()
 end
 
 function DirectorService:start()
+	--[[ A new map is a new field. Every point learned about the last one is a
+	     point in empty space now, and offering one would put a horde in the sky.
+	     Hooked here rather than in SpawnField itself so the module stays a pure
+	     data structure with no opinion about rounds. ]]
+	local maps = Registry.find("MapService")
+	if maps and maps.mapChanged then
+		self._trove:add(maps.mapChanged:connect(function()
+			SpawnField.reset()
+		end))
+	end
+
 	local now = os.clock()
 	self._stateEnteredAt = now
 	self._lastSpecialAt = now
@@ -464,8 +477,40 @@ end
 --  Tick
 -- ════════════════════════════════════════════════════════════════════════════
 
+--[[
+	Teaches the field where bodies can stand, a little per tick.
+
+	Two things, and they cost almost nothing together. The sweep explores a
+	bounded handful of grid cells — that is what lets a horde come out of a room
+	nobody has walked into yet, which is most of what "spawn anywhere" means. The
+	breadcrumbs record where survivors ARE, which is free and true by
+	construction: a player is standing there, so a body fits there.
+
+	Breadcrumbs are rate-limited because a standing player would otherwise store
+	the same cell eight times a second and learn nothing from any of it.
+]]
+function DirectorService:_feedField(now: number)
+	SpawnField.step()
+
+	if now - (self._breadcrumbAt or 0) < FIELD.BreadcrumbInterval then
+		return
+	end
+	self._breadcrumbAt = now
+	for _, character in self._characters do
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			--[[ The FEET, not the root. Every other stage of the placement chain
+			     works in ground points, and a root sits about three studs up — a
+			     breadcrumb at root height would be a point in mid-air that the
+			     volume test then rejects for the rest of the round. ]]
+			SpawnField.remember(root.Position - Vector3.new(0, root.Size.Y * 0.5 + 1.5, 0))
+		end
+	end
+end
+
 function DirectorService:_tick(dt: number, now: number)
 	self:_refreshSurvivors()
+	self:_feedField(now)
 	self:_updateIntensity(dt)
 	self:_updatePressure()
 	self:_updatePacing(now)
@@ -1572,6 +1617,10 @@ function DirectorService:_placeFor(request, now: number): (Vector3?, string?)
 	else
 		options = POPULATION_OPTIONS
 	end
+
+	--[[ The clearance test needs to know how big the body is. Set per call on the
+	     reused option tables, exactly as anchor and maxDistance already are. ]]
+	options.kind = request.kind
 
 	local position, failure = SpawnPlacement.find(characters, options)
 	if position then
