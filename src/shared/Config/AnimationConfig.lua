@@ -282,6 +282,33 @@ AnimationConfig.Weapon = table.freeze({
 	     both. It has no idle or equip either — see IDLE_GUN above. ]]
 })
 
+--[[
+	What to play when a class's own clip cannot be fetched.
+
+	Roblox refuses to play an animation that is not owned by the place's creator
+	or by Roblox itself, and it refuses it SILENTLY — LoadAnimation returns a
+	perfectly ordinary track that never moves anything. Four of the ids above are
+	in exactly that state today, which is four guns out of five with no visible
+	shot and no visible reload in third person:
+
+	    79077703240420   rifle and marksman fire
+	    111410151816711  pistol and revolver fire
+	    139751042655361  shotgun fire
+	    124425827495007  the boxed reload, so every gun but the SMG
+
+	The fix is to re-upload them under the account that owns the place; nothing
+	here can grant permission. But an SMG shot on a shotgun reads far better than
+	a shotgun that does not move, so a class whose clip is KNOWN broken borrows
+	the pair that works. CarryVisualService consults AnimationCache.hasFailed, so
+	this only ever engages for an id Roblox has actually refused — re-upload the
+	four above and every gun goes back to its own clip with nothing to change
+	here.
+]]
+AnimationConfig.WeaponFallback = table.freeze({
+	fire = FIRE_SMG,
+	reload = RELOAD_SMG,
+})
+
 --[[ The set for a weapon class, or nil for one with no animations — which is
      melee, and is not an error. ]]
 function AnimationConfig.forWeaponClass(class: string?): WeaponAnimationSet?
@@ -365,6 +392,12 @@ function AnimationConfig.allIds(): { number }
 		take(set.reload)
 		take(set.equip)
 		take(set.idle)
+	end
+	--[[ And the spares. They are the SMG's own ids today, so `take` dedupes them
+	     away — but the moment they are not, an unpreloaded fallback would be a
+	     fallback that also plays nothing. ]]
+	for _, id in AnimationConfig.WeaponFallback do
+		take(id)
 	end
 
 	return out

@@ -760,10 +760,27 @@ local function weaponTrack(player: Player, role: string): AnimationTrack?
 		return nil
 	end
 
+	--[[ A clip Roblox has REFUSED — an id uploaded under a personal account in a
+	     group-owned place — borrows the spare rather than playing nothing, so a
+	     shotgun still moves when it fires. Only ever engages for an id preloading
+	     has actually reported as failed, so the day those ids are re-uploaded this
+	     goes quiet on its own. See AnimationConfig.WeaponFallback. ]]
+	if AnimationCache.hasFailed(id) then
+		local spare = AnimationConfig.WeaponFallback[role]
+		if spare and spare ~= id and not AnimationCache.hasFailed(spare) then
+			id = spare
+		end
+	end
+
 	--[[ Keyed by ROLE AND ID, so switching from a rifle to a shotgun mid-fight
 	     gets the shotgun's clip rather than the rifle's cached one. The two share
 	     a reload id today and this costs nothing; it is what stops the sharing
-	     from becoming an assumption. ]]
+	     from becoming an assumption.
+
+	     It is the RESOLVED id, which matters: preloading answers asynchronously,
+	     so the first track built for a broken id can be built before anything
+	     knows it is broken. Once the failure lands the key changes and the next
+	     ask builds the spare instead of returning the dead one forever. ]]
 	local key = role .. ":" .. tostring(id)
 	if entry and entry.tracks[key] then
 		return entry.tracks[key]
