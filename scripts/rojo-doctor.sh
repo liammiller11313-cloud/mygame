@@ -107,7 +107,24 @@ fi
 if [ -z "$PIDS" ] && [ -z "$SRV_VER" ]; then
   PROBLEM=1
   echo "PROBLEM: no Rojo server is running, so Studio has nothing to connect to."
-  echo "  Start one:  ./scripts/dev.sh"
+  #[[ Which advice is right depends on whether the LaunchAgent exists, and
+  #   getting it wrong is not harmless: telling someone with an agent installed
+  #   to run dev.sh gives them a second server that fights the first for the
+  #   port the next time the agent starts. The mismatch branch above already
+  #   checks this; this one did not, and said dev.sh to everybody. ]]
+  if [ -f "$HOME/Library/LaunchAgents/dev.fadinglight.rojo.plist" ]; then
+    echo "  The autostart job is installed but not running. Start it:"
+    echo ""
+    echo "    ./scripts/autostart.sh install"
+  else
+    echo "  Start one, and have it start itself at every login from now on:"
+    echo ""
+    echo "    ./scripts/autostart.sh install"
+    echo ""
+    echo "  Or just for now, in a window you keep open:"
+    echo ""
+    echo "    ./scripts/dev.sh"
+  fi
 fi
 
 #[[ The plugin cannot be inspected from out here — it lives inside Studio and
