@@ -165,24 +165,6 @@ local function park(category: string, name: string, model: Model, publish: boole
 	return model
 end
 
---[[ The first of `names` the user has supplied in this category, as a Model or
-     as a Folder of variants. Name order is the priority order and beats storage
-     order, so a `modelName` in ServerStorage still wins over an enum id in
-     ReplicatedStorage. ]]
-local function suppliedEntry(category: string, names: { string }): Instance?
-	for _, name in names do
-		for _, root in { ReplicatedStorage, ServerStorage } do
-			local assets = root:FindFirstChild(ASSETS_FOLDER)
-			local folder = assets and assets:FindFirstChild(category)
-			local entry = folder and folder:FindFirstChild(name)
-			if entry and (entry:IsA("Model") or entry:IsA("Folder")) then
-				return entry
-			end
-		end
-	end
-	return nil
-end
-
 --[[ Every Model an entry offers: itself when it is one, its Model children when
      it is a folder of variants. ]]
 local function modelsIn(entry: Instance): { Model }
@@ -196,6 +178,42 @@ local function modelsIn(entry: Instance): { Model }
 		end
 	end
 	return models
+end
+
+--[[
+	The first of `names` the user has supplied in this category, as a Model or as
+	a Folder of variants. Name order is the priority order and beats storage
+	order, so a `modelName` in ServerStorage still wins over an enum id in
+	ReplicatedStorage.
+
+	── AN EMPTY FOLDER IS NOT AN ANSWER ────────────────────────────────────────
+	This used to return the first entry it FOUND rather than the first entry with
+	anything in it, and that was survivable only because a folder nobody had
+	filled generally did not exist.
+
+	ensureAssetFolders changed that. It now guarantees a correctly named folder
+	for every kind in ReplicatedStorage — which is the whole point of it, and
+	which means anyone keeping their rigs in ServerStorage had an empty
+	ReplicatedStorage folder created directly in front of theirs. Found first,
+	returned, no models in it, kind grey-boxed. The feature meant to make
+	supplying a rig easier would have quietly stopped an entire storage location
+	from working.
+
+	So the search keeps going until it finds something it can actually use, and
+	an empty folder is just a folder waiting for a model.
+]]
+local function suppliedEntry(category: string, names: { string }): Instance?
+	for _, name in names do
+		for _, root in { ReplicatedStorage, ServerStorage } do
+			local assets = root:FindFirstChild(ASSETS_FOLDER)
+			local folder = assets and assets:FindFirstChild(category)
+			local entry = folder and folder:FindFirstChild(name)
+			if entry and (entry:IsA("Model") or entry:IsA("Folder")) and #modelsIn(entry) > 0 then
+				return entry
+			end
+		end
+	end
+	return nil
 end
 
 --[[
@@ -2965,11 +2983,22 @@ function PlaceholderFactory:ensureAssets()
 		self:buildViewmodel(weaponId)
 	end
 
+	--[[ Per kind: how many rigs it has, and — for the ones running on a grey box
+	     — WHICH they are. The count alone was fine when supplying a rig meant
+	     making a folder; now that every folder exists from boot, an empty one is
+	     the normal "not filled in yet" state and naming them is the difference
+	     between a summary and a to-do list. ]]
 	local rigs = {}
+	local empty = {}
 	for kind in InfectedConfig.all() do
-		table.insert(rigs, string.format("%s x%d", kind, #variantsFor(kind)))
+		local count = #variantsFor(kind)
+		table.insert(rigs, string.format("%s x%d", kind, count))
+		if not suppliedEntry("Infected", { kind }) then
+			table.insert(empty, kind)
+		end
 	end
 	table.sort(rigs)
+	table.sort(empty)
 
 	for slot, ids in
 		{
@@ -3001,6 +3030,16 @@ function PlaceholderFactory:ensureAssets()
 		)
 	)
 
+	if #empty > 0 then
+		print(
+			string.format(
+				"[PlaceholderFactory] still grey-boxed, no model supplied yet: %s — drop one into "
+					.. "Assets.Infected.<Kind> (several is fine, one is picked per body).",
+				table.concat(empty, ", ")
+			)
+		)
+	end
+
 	self:buildTestMap()
 end
 
@@ -3028,6 +3067,12 @@ function PlaceholderFactory:ensureAssetFolders()
 	local infected = folderIn(assets, "Infected")
 	local made = {}
 	for _, kind in Enums.Infected do
+		--[[ FindFirstChild, not "is there a Folder called this". Supplying a rig
+		     as a bare Model named after the kind — Assets.Infected.Hunter as a
+		     Model rather than a folder holding one — is a supported layout, and
+		     folderIn would happily create a SECOND child with the same name next
+		     to it. Two children called "Hunter" and a FindFirstChild deciding
+		     between them is not a thing anyone should have to debug. ]]
 		if not infected:FindFirstChild(kind) then
 			folderIn(infected, kind)
 			table.insert(made, kind)
