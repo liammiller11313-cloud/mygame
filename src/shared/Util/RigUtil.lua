@@ -108,11 +108,47 @@ function RigUtil.getMotors(model: Model): { Motor6D }
 	return motors
 end
 
+--[[
+	Which end of a Motor6D is the CHILD — the part that hangs off the joint.
+
+	The convention is Part0 = parent, Part1 = child, and the motor lives inside
+	Part0. Enough rigs in the wild are wired the other way round that reading
+	Part1 and trusting it is not safe: a legacy R6 model whose limbs were re-
+	attached by a startup script commonly ends up with
+
+	    Motor6D "Left Shoulder"  Parent = Torso  Part0 = Left Arm  Part1 = Torso
+
+	which is a perfectly functional joint and drives the arm exactly as intended.
+	Reading Part1 there returns the TORSO, so both shoulders register under the
+	same name, one of them is lost outright, and the arms neither ragdoll nor come
+	off — silently, because nothing about the rig is actually broken.
+
+	The motor's own Parent is what settles it: a joint is stored inside one of the
+	two parts it joins, and that part is the anchor, so the other one is the
+	child. Falls back to the convention when the motor lives somewhere else
+	entirely.
+]]
+function RigUtil.motorChild(motor: Motor6D): BasePart?
+	local part0, part1 = motor.Part0, motor.Part1
+	if not part0 or not part1 then
+		return nil
+	end
+	if part1 == motor.Parent then
+		return part0
+	end
+	if part0 == motor.Parent then
+		return part1
+	end
+	return part1
+end
+
 --[[ The Motor6D that attaches a named part to its parent, or nil. Severing a
-     limb is exactly "destroy this motor and let physics take over". ]]
+     limb is exactly "destroy this motor and let physics take over". Resolves the
+     child end rather than reading Part1 — see RigUtil.motorChild. ]]
 function RigUtil.findMotorForPart(model: Model, partName: string): Motor6D?
 	for _, motor in RigUtil.getMotors(model) do
-		if motor.Part1 and motor.Part1.Name == partName then
+		local child = RigUtil.motorChild(motor)
+		if child and child.Name == partName then
 			return motor
 		end
 	end

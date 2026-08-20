@@ -295,11 +295,27 @@ local function validateActor(player: Player, origin: any, direction: any): Actor
 	if (claimed - apex).Magnitude > VALIDATION.PositionTolerance then
 		return nil
 	end
-	if VALIDATION.RequireLineOfSight and not RaycastUtil.hasLineOfSight(apex, claimed, { character }) then
-		-- Inside tolerance but through a wall: the muzzle has been pushed into
-		-- the room next door.
-		return nil
-	end
+
+	--[[
+		── NO LINE-OF-SIGHT TEST HERE, AND THAT IS DELIBERATE ────────────────────
+		BallisticsService runs one, and it is right to: a bullet leaves from the
+		claimed origin, so an origin the head cannot see is a muzzle pushed into
+		the room next door and the shot has to be dropped.
+
+		Melee does not use the claimed origin for anything. Both paths below sweep
+		their cone from `apex` — the character's own head, on the server — and the
+		claim is only ever checked for distance, to reject a swing from across the
+		map. Testing sight to a point that is then thrown away rejects swings that
+		would have been resolved from a position the test never looked at.
+
+		It was not hypothetical. The claim is the CLIENT'S CAMERA, and any screen
+		that releases the mouse pushes the camera several studs behind the
+		survivor — which indoors means through the wall behind them more often
+		than not. Every swing in that state was dropped in silence: no hit, no
+		damage, no reason. Backing into a corner did the same thing on its own.
+
+		The distance tolerance is what actually bounds this, and it survives.
+	]]
 
 	return { character = character, apex = apex, unit = aim.Unit }
 end
@@ -568,11 +584,11 @@ end
 function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3): { Types.HitRecord }
 	local records: { Types.HitRecord } = {}
 
-	-- Cheapest first, and the rate check ahead of validateActor: that function
-	-- ends in a line-of-sight raycast, so a client firing SwingMelee at packet
-	-- rate would otherwise buy one RaycastParams and one cast per packet however
-	-- fast it sent them. Everything above the raycast is table lookups and
-	-- number compares. BallisticsService admits a shot in exactly this order.
+	-- Cheapest first, and the rate check ahead of everything that touches the
+	-- world: a client firing SwingMelee at packet rate would otherwise buy a
+	-- cone gather and a cast per body per packet, however fast it sent them.
+	-- Everything above that is table lookups and number compares.
+	-- BallisticsService admits a shot in exactly this order.
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return records
 	end
@@ -762,10 +778,10 @@ function MeleeService:shove(player: Player, origin: Vector3, direction: Vector3)
 		return 0
 	end
 
-	-- Same order as the swing, for the same reason: validateActor ends in a
-	-- line-of-sight raycast, and the cooldown is the only thing standing between
-	-- a client spamming the Shove remote and an unbounded number of casts. The
-	-- shove is admitted here and pays for itself here, whatever happens next.
+	-- Same order as the swing, for the same reason: the cooldown is the only
+	-- thing standing between a client spamming the Shove remote and an unbounded
+	-- number of cone gathers and casts. The shove is admitted here and pays for
+	-- itself here, whatever happens next.
 	local now = os.clock()
 	local state = stateFor(player)
 	local cooldown = if isFatigued(state, now) then SHOVE.FatigueCooldown else SHOVE.Cooldown

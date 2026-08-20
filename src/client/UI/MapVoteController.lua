@@ -15,6 +15,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -25,20 +26,32 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
+local FreeCursor = require(script.Parent.FreeCursor)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local UiSound = require(script.Parent.UiSound)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
+local PANEL = UITheme.Panel
 local MOTION = UITheme.Motion
 local TEXT = UITheme.TextSize
 
 local player = Players.LocalPlayer
 
-local CARD_WIDTH = 300
-local CARD_HEIGHT = 128
-local CARD_GAP = 14
+--[[ The vote is a full-screen menu now rather than a strip along the bottom, so
+     the cards are the screen's main event and are sized like it: big enough that
+     a map is a thing you choose rather than a row you skim past, and readable
+     from a phone held at arm's length. ]]
+local CARD_WIDTH = 320
+local CARD_HEIGHT = 210
+local CARD_GAP = 18
+
+--[[ The panel the cards sit inside. Wide enough for four across at the sizes
+     above plus its own padding, which is the whole roster. ]]
+local PANEL_PADDING = 34
+local HEADER_HEIGHT = 96
+local FOOTER_HEIGHT = 44
 local BAR_HEIGHT = 4
 local BAR_CHASE = 1 / MOTION.Normal
 
@@ -56,6 +69,17 @@ local root: Frame
 local titleLabel: TextLabel
 local clockLabel: TextLabel
 local cardsHolder: Frame
+local footLabel: TextLabel
+
+--[[ Owned here and written by FreeCursor. Its own table rather than a shared
+     one, because the vote can open over the main menu — which has already taken
+     the cursor — and a shared slot would have whichever closed first hand back
+     the other's camera. ]]
+local restore = {}
+
+local function isTouch(): boolean
+	return UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+end
 local cards: { any } = {}
 
 local state = {
@@ -115,6 +139,33 @@ local function castVote(mapId: string)
 	UiSound.play(AudioConfig.UI.MenuConfirm)
 	Remotes.Event.CastMapVote:FireServer(mapId)
 	MapVoteController:_refresh()
+end
+
+--[[ Fits the panel to the roster and to the screen. Four maps at full size is
+     wider than a phone, so the cards shrink together rather than the panel
+     hanging off both edges — the same rule the loadout picker follows. ]]
+local function layoutPanel(total: number)
+	if not root or not cardsHolder then
+		return
+	end
+	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+	local available = if camera and factor > 0 then camera.ViewportSize.X / factor else CARD_WIDTH * total
+
+	local wanted = CARD_WIDTH * total + CARD_GAP * (total - 1)
+	local room = math.max(available - PANEL_PADDING * 2, 240)
+	local shrink = math.min(room / math.max(wanted, 1), 1)
+	local cardWidth = math.floor(CARD_WIDTH * shrink)
+	local cardHeight = math.floor(CARD_HEIGHT * shrink)
+	local gap = math.floor(CARD_GAP * shrink)
+	local width = cardWidth * total + gap * (total - 1)
+
+	cardsHolder.Size = UDim2.fromOffset(width, cardHeight)
+	root.Size = UDim2.fromOffset(math.max(width, 420), HEADER_HEIGHT + cardHeight + FOOTER_HEIGHT)
+	for index, card in cards do
+		card.frame.Size = UDim2.fromOffset(cardWidth, cardHeight)
+		card.frame.Position = UDim2.fromOffset((index - 1) * (cardWidth + gap), 0)
+	end
 end
 
 local function buildCard(option: any, index: number, total: number)
@@ -252,8 +303,20 @@ local function setVisible(visible: boolean)
 		pcall(menu.setVoteOpen, menu, visible)
 	end
 
+	--[[ A full-screen menu with things to click has to hand the mouse back, the
+	     same way the main menu and the pause menu do. It did not need to as a
+	     strip along the bottom of a first-person screen — the number keys were
+	     the whole interface — and a desktop player looking at four cards they
+	     cannot click is the trapped-cursor bug in a new place. ]]
+	if visible then
+		FreeCursor.take(restore)
+	else
+		FreeCursor.giveBack(restore)
+	end
+
 	if visible then
 		state.shownClock = -1
+		footLabel.Text = if isTouch() then "TAP A MAP" else "1 – 4  or  CLICK TO VOTE"
 		GamepadFocus.capture(cards[1] and cards[1].button)
 	else
 		GamepadFocus.release(cards[1] and cards[1].button)
@@ -279,7 +342,7 @@ local function onVoteStarted(payload: any)
 		buildCard(option, index, total)
 	end
 
-	cardsHolder.Size = UDim2.fromOffset(total * CARD_WIDTH + (total - 1) * CARD_GAP, CARD_HEIGHT)
+	layoutPanel(total)
 	titleLabel.Text = "VOTE FOR THE NEXT MAP"
 
 	MapVoteController:_refresh()
@@ -396,31 +459,69 @@ local function build()
 	screen.Parent = player:WaitForChild("PlayerGui")
 	trove:add(screen)
 
-	root = newFrame(ScaleLayer.new(screen, "Scaled"), "Root", COLOR.Background, 1)
-	root.AnchorPoint = Vector2.new(0.5, 1)
-	root.Position = UDim2.new(0.5, 0, 1, -LAYOUT.ScreenMargin * 2)
-	root.Size = UDim2.fromOffset(760, CARD_HEIGHT + 56)
+	local layer = ScaleLayer.new(screen, "Scaled")
 
-	titleLabel = newLabel(root, "Title", FONT.Display, TEXT.Large, COLOR.TextPrimary)
-	titleLabel.Position = UDim2.fromOffset(0, 0)
-	titleLabel.Size = UDim2.new(1, -70, 0, TEXT.Large + 4)
+	--[[
+		A full-screen ground rather than a strip along the bottom.
+
+		This vote decides the map you are about to spend seventeen minutes in, and
+		as a bar under the HUD it read as a notification — something happening to
+		you rather than something you were doing. It is a menu now, and it covers
+		the screen like one.
+
+		Nearly opaque rather than fully: a hair of the world through it is what
+		keeps this reading as a screen laid OVER the game instead of the game
+		having been replaced, which is the same rule every other modal here
+		follows. It is also a full-size button, so a click that misses a card
+		lands on the scrim and does nothing rather than reaching the world behind.
+	]]
+	local scrim = Instance.new("TextButton")
+	scrim.Name = "Scrim"
+	scrim.AutoButtonColor = false
+	scrim.Text = ""
+	scrim.BackgroundColor3 = COLOR.Background
+	scrim.BackgroundTransparency = PANEL.Scrim * 0.2
+	scrim.BorderSizePixel = 0
+	scrim.Size = UDim2.fromScale(1, 1)
+	scrim.ZIndex = 0
+	scrim.Parent = layer
+
+	root = newFrame(layer, "Root", COLOR.Background, 1)
+	root.AnchorPoint = Vector2.new(0.5, 0.5)
+	root.Position = UDim2.fromScale(0.5, 0.5)
+	root.Size = UDim2.fromOffset(760, HEADER_HEIGHT + CARD_HEIGHT + FOOTER_HEIGHT)
+	root.ZIndex = 2
+
+	titleLabel = newLabel(root, "Title", FONT.Display, TEXT.Display, COLOR.TextPrimary)
+	titleLabel.AnchorPoint = Vector2.new(0.5, 0)
+	titleLabel.Position = UDim2.new(0.5, 0, 0, 0)
+	titleLabel.Size = UDim2.new(1, 0, 0, TEXT.Display + 6)
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Center
 	titleLabel.Text = "VOTE FOR THE NEXT MAP"
 
 	clockLabel = newLabel(root, "Clock", FONT.Stencil, TEXT.Heading, COLOR.TextSecondary)
-	clockLabel.AnchorPoint = Vector2.new(1, 0)
-	clockLabel.Position = UDim2.new(1, 0, 0, -4)
-	clockLabel.Size = UDim2.fromOffset(64, TEXT.Heading + 6)
-	clockLabel.TextXAlignment = Enum.TextXAlignment.Right
+	clockLabel.AnchorPoint = Vector2.new(0.5, 0)
+	clockLabel.Position = UDim2.new(0.5, 0, 0, TEXT.Display + 10)
+	clockLabel.Size = UDim2.new(1, 0, 0, TEXT.Heading + 4)
+	clockLabel.TextXAlignment = Enum.TextXAlignment.Center
 	clockLabel.Text = ""
 
-	local rule = newFrame(root, "Rule", COLOR.Border)
-	rule.Position = UDim2.fromOffset(0, TEXT.Large + 10)
-	rule.Size = UDim2.new(1, 0, 0, 1)
+	local rule = newFrame(root, "Rule", COLOR.BorderBright)
+	rule.AnchorPoint = Vector2.new(0.5, 0)
+	rule.Position = UDim2.new(0.5, 0, 0, HEADER_HEIGHT - 12)
+	rule.Size = UDim2.fromOffset(96, 2)
 
 	cardsHolder = newFrame(root, "Cards", COLOR.Background, 1)
 	cardsHolder.AnchorPoint = Vector2.new(0.5, 0)
-	cardsHolder.Position = UDim2.new(0.5, 0, 0, TEXT.Large + 24)
+	cardsHolder.Position = UDim2.new(0.5, 0, 0, HEADER_HEIGHT)
 	cardsHolder.Size = UDim2.fromOffset(CARD_WIDTH * 2 + CARD_GAP, CARD_HEIGHT)
+
+	footLabel = newLabel(root, "Foot", FONT.Body, TEXT.Small, COLOR.TextDim)
+	footLabel.AnchorPoint = Vector2.new(0.5, 1)
+	footLabel.Position = UDim2.new(0.5, 0, 1, 0)
+	footLabel.Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT)
+	footLabel.TextXAlignment = Enum.TextXAlignment.Center
+	footLabel.Text = ""
 end
 
 function MapVoteController:isOpen(): boolean
@@ -440,7 +541,7 @@ function MapVoteController:start()
 	-- Number keys mirror the cards, because a mouse is a long way to travel for
 	-- a twenty-second decision.
 	local keys = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four }
-	trove:connect(game:GetService("UserInputService").InputBegan, function(input, processed)
+	trove:connect(UserInputService.InputBegan, function(input, processed)
 		if processed or not state.visible or state.resolved then
 			return
 		end

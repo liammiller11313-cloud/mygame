@@ -191,6 +191,29 @@ local BLOOD_SCALE_GIB = 2.6
 local SETTLE_SPEED = 2.0
 local SETTLE_TIME = 0.6
 
+--[[
+	The floor on how long a corpse gets to be a corpse before it becomes scenery.
+
+	Freezing is measured from motion, and motion is not reliable at the instant
+	of death. A Humanoid handing over to PlatformStand + Physics takes a frame or
+	two to actually let go, and an assembly Roblox has put to sleep reports a
+	velocity of exactly zero — so a body can read "still" while it is still
+	standing up. Against a 5Hz sweep and a 0.6s window, three of those samples in
+	a row is all it takes, and the body locks upright in its death pose.
+
+	That is the whole of "they don't ragdoll on the ground". No amount of tuning
+	SETTLE_SPEED fixes it, because the reading is not noisy — it is zero.
+]]
+local RAGDOLL_MIN_FALL = 1.2
+
+--[[ How many of a rig's parts the settle test watches. Disabling the motors
+     makes every limb its own assembly, so the root's velocity is not the body's:
+     the torso is the heaviest and most constrained piece and comes to rest
+     first, while the arms and legs are still swinging. Watching only the root
+     froze bodies mid-collapse. Sampled rather than exhaustive because this runs
+     per corpse per sweep and a dozen parts times a full graveyard is not free. ]]
+local SETTLE_SAMPLE = 6
+
 -- Slack past a managed lifetime before Debris takes over. The sweep normally
 -- gets there first; this only matters if this service is ever torn down or
 -- throws mid-round, and a severed arm that outlives the server is a haunting.
@@ -294,6 +317,19 @@ local function randomSpin(magnitude: number): Vector3
 	return unitOr(raw, Vector3.yAxis) * magnitude
 end
 
+--[[ One line per problem per kind, not one per corpse. A rig that cannot ragdoll
+     produces a body every few seconds for the whole round, and a warning that
+     repeats that often is a warning nobody reads. ]]
+local warned: { [string]: boolean } = {}
+
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn("[GoreService] " .. message)
+end
+
 --[[ Walks a rig ONCE and returns its parts and its motors keyed by the part they
      hold on. Every path in this file that needs both would otherwise pay for two
      or three separate GetDescendants passes on every single death. ]]
@@ -306,9 +342,13 @@ local function collectRig(model: Model): ({ BasePart }, { [string]: Motor6D })
 				table.insert(parts, descendant)
 			end
 		elseif descendant:IsA("Motor6D") then
-			local part1 = descendant.Part1
-			if part1 then
-				motors[part1.Name] = descendant
+			--[[ Not Part1 directly. See RigUtil.motorChild: a rig wired backwards
+			     puts the TORSO on Part1 for every limb, so both shoulders would
+			     land on the same key and one would be dropped — arms that never
+			     ragdoll and never come off, on a rig where nothing is wrong. ]]
+			local child = RigUtil.motorChild(descendant)
+			if child then
+				motors[child.Name] = descendant
 			end
 		end
 	end
@@ -678,6 +718,31 @@ function GoreService:ragdoll(model: Model, impulse: Vector3?): number
 	end
 	self._joints[model] = joints
 
+	--[[ A rig that yielded no constraints cannot ragdoll — there is nothing to
+	     bend. The body still goes limp-ish because the Humanoid is on
+	     PlatformStand, but it stays one rigid slab and tips over as a statue,
+	     which is exactly what "they don't ragdoll" looks like.
+
+	     This used to fail in complete silence. PlaceholderFactory audits every
+	     rig's joints when it prepares the template and says so loudly, but that
+	     check runs once per KIND at boot, and it does not fire for a rig whose
+	     joints exist under names GoreConfig does not list — that rig has motors,
+	     passes the audit's severable test, and still lands here with none it is
+	     allowed to replace. Warned once per kind, because the alternative is one
+	     line per corpse for the rest of the round. ]]
+	if next(joints) == nil then
+		local rigKind = tostring(model:GetAttribute(Attributes.Infected.Kind) or model.Name)
+		warnOnce(
+			"noragdoll:" .. rigKind,
+			string.format(
+				"%s produced no ragdoll joints, so its corpses stay rigid. Every Motor6D on the "
+					.. "rig was either absent, missing a Part0/Part1, or named as a root joint. "
+					.. "Check the rig has Motor6Ds joining its limbs to the torso.",
+				rigKind
+			)
+		)
+	end
+
 	-- Contract call: corpses must never block a doorway, answer a raycast meant
 	-- for a live target, or shove a survivor off a ledge.
 	RigUtil.makeDebris(model)
@@ -743,10 +808,33 @@ function GoreService:ragdoll(model: Model, impulse: Vector3?): number
 		end
 	end
 
+	--[[ A spread across the rig rather than the first few, so the sample reaches
+	     the extremities. `parts` comes off GetDescendants in tree order — torso
+	     and root first, hands and feet last — and taking the head of that list
+	     would watch exactly the pieces that stop moving first. ]]
+	local watch: { BasePart } = {}
+	if root then
+		table.insert(watch, root)
+	end
+	local stride = math.max(math.floor(#parts / SETTLE_SAMPLE), 1)
+	for i = 1, #parts, stride do
+		local part = parts[i]
+		if part ~= root then
+			table.insert(watch, part)
+		end
+		if #watch >= SETTLE_SAMPLE then
+			break
+		end
+	end
+
+	local now = os.clock()
 	table.insert(self._ragdolls, {
 		model = model,
 		root = root,
-		expiresAt = os.clock() + lifetime,
+		watch = watch,
+		expiresAt = now + lifetime,
+		-- Not before this. See RAGDOLL_MIN_FALL.
+		settleFrom = now + RAGDOLL_MIN_FALL,
 		stillFor = 0,
 		settled = false,
 	})
@@ -763,6 +851,9 @@ function GoreService:_replaceMotor(motor: Motor6D): BallSocketConstraint?
 	if not part0 or not part1 then
 		return nil
 	end
+	--[[ Which end the limb is on, for the socket's parent below. The constraint
+	     itself is symmetric and works either way; where it LIVES is not. ]]
+	local child = RigUtil.motorChild(motor) or part1
 
 	local a0 = Instance.new("Attachment")
 	a0.Name = "FL_RagdollA0"
@@ -786,7 +877,9 @@ function GoreService:_replaceMotor(motor: Motor6D): BallSocketConstraint?
 	socket.TwistUpperAngle = limit.twistHigh
 	-- Parented to the CHILD part so that severing that part takes its joint with
 	-- it, and so a limb reparented out of the body carries its own constraints.
-	socket.Parent = part1
+	-- On a backwards-wired rig that is Part0, not Part1 — leaving the socket on
+	-- the torso is a constraint that outlives the limb it was holding.
+	socket.Parent = child
 
 	motor.Enabled = false
 	return socket
@@ -1219,14 +1312,21 @@ function GoreService:_sweep(deltaTime: number)
 		         cosmetic setting a player or a low-end preset can turn off, and
 		         turning off a decal must never quietly turn off the physics
 		         budget with it. ]]
-		if not record.settled then
-			local root = record.root
-			if root and root.AssemblyLinearVelocity.Magnitude < SETTLE_SPEED then
+		if not record.settled and now >= record.settleFrom then
+			local moving = false
+			for _, part in record.watch do
+				if part.Parent and part.AssemblyLinearVelocity.Magnitude >= SETTLE_SPEED then
+					moving = true
+					break
+				end
+			end
+			if not moving then
 				record.stillFor += deltaTime
 				if record.stillFor >= SETTLE_TIME then
 					record.settled = true
 					freezeCorpse(model)
-					if BLOOD.PoolEnabled then
+					local root = record.root
+					if BLOOD.PoolEnabled and root and root.Parent then
 						self:_emit({
 							model = model,
 							level = LEVEL.None,

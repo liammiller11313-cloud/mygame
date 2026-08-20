@@ -139,18 +139,25 @@ MapConfig.Vote = table.freeze({
 		Whether a vote also runs while the lobby is counting down toward the first
 		round of a fresh server.
 
-		Off, because on this server "the lobby is counting down" is not a signal
-		that anybody decided anything. MatchmakingService counts a player who has
-		picked nothing as a vote for the default mode, so the countdown begins
-		within a second of the first join — which means the whole of it is time
-		the player is sitting on the main menu reading the mode list, and a vote
-		thrown over that is a vote thrown over the menu.
+		This was off, and the reason was real: "the lobby is counting down" used
+		not to be a signal that anybody had decided anything. MatchmakingService
+		counts a player who has picked nothing as a vote for the default mode, so
+		the countdown began within a second of the first join — the whole of it
+		was time the player was sitting on the main menu reading the mode list,
+		and a vote thrown over that is a vote thrown over the menu.
 
-		With it off the first round of a server uses DefaultMap, and the vote is
-		purely an end-of-round thing: it appears over the scoreboard, where there
-		is something to decide and nothing it can obscure.
+		That is no longer true. The lobby now waits for somebody to actually
+		choose a mode before it claims anything or starts a clock, so a running
+		countdown IS a commitment to going in — which makes it exactly the right
+		moment to ask which map. MapVoteService already gated the idle vote on a
+		live countdown for this reason; the gate now means what it says.
+
+		So the first round of a server is voted for like every other round. The
+		vote covers the screen while it runs (see UI/MapVoteController) because
+		choosing where you are about to spend seventeen minutes deserves more
+		than a strip along the bottom of the HUD.
 	]]
-	OnFreshServer = false,
+	OnFreshServer = true,
 
 	-- With one map in the roster there is nothing to decide; with two, a tie is
 	-- broken by whichever was NOT just played, so the game never repeats a map

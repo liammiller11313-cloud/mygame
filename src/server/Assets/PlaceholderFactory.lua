@@ -441,9 +441,10 @@ end
 --  Infected rigs
 --
 --  The joint names below are load-bearing for the GREY-BOX rigs. GoreService
---  looks a limb up by the name of the Motor6D's Part1 and reads its per-joint
+--  looks a limb up by the name of the Motor6D's CHILD part and reads its
 --  ragdoll limits from the Motor6D's own name; GoreConfig.Dismemberment.
---  Severable lists the part names it is allowed to take off. All three tables
+--  per-joint ragdoll limits from the Motor6D's own name; GoreConfig.
+--  Dismemberment.Severable lists the part names it may take off. All three
 --  have to agree, so every rig — grey-box or supplied — is verified against
 --  GoreConfig once, when its template is prepared.
 -- ════════════════════════════════════════════════════════════════════════════
@@ -650,8 +651,15 @@ local SHAPES = {
 local function verifySeverable(key: string, model: Model)
 	local motors: { [string]: boolean } = {}
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("Motor6D") and descendant.Part1 then
-			motors[descendant.Part1.Name] = true
+		if descendant:IsA("Motor6D") then
+			--[[ The child end, not Part1: a legacy R6 rig re-jointed by a startup
+			     script commonly ends up with the torso on Part1 for every limb,
+			     and reading Part1 would file both shoulders under "Torso" and then
+			     report the arms as missing joints they plainly have. ]]
+			local child = RigUtil.motorChild(descendant)
+			if child then
+				motors[child.Name] = true
+			end
 		end
 	end
 
@@ -697,11 +705,14 @@ local function verifySeverable(key: string, model: Model)
 			warnOnce(
 				"nojoints:" .. key,
 				string.format(
-					"the %s rig has NO Motor6D joints at all. Nothing can animate it — animation "
-						.. "tracks drive Motor6Ds and so does the procedural fallback — and nothing "
-						.. "can dismember it. It will slide around rigid until the model is rigged. "
-						.. "Open it in Studio and check its limbs are joined to the torso with Motor6D "
-						.. "rather than welded.",
+					"the %s rig template has NO Motor6D joints. If the model is welded rather "
+						.. "than rigged then nothing can animate or dismember it and it will slide "
+						.. "around rigid — open it in Studio and check its limbs are joined to the "
+						.. "torso with Motor6D. If it is a legacy R6 model, this may be a false "
+						.. "alarm: Roblox builds those joints when the body is parented into "
+						.. "Workspace, which has not happened yet here. GoreService re-checks the "
+						.. "real body on its first corpse and warns then if it is genuinely "
+						.. "jointless.",
 					key
 				)
 			)
