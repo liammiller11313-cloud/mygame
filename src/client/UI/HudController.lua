@@ -742,6 +742,15 @@ local function activeWeapon(): (string, number, number)
 		return Attributes.get(player, LA.PrimaryId, ""),
 			Attributes.get(player, LA.PrimaryAmmo, 0),
 			Attributes.get(player, LA.PrimaryReserve, 0)
+	elseif slot == SLOT.Melee then
+		--[[ No magazine and no reserve, which the caller draws as a dash. Missing
+		     this case did not blank the panel — it did something quieter and
+		     worse: an unresolved id falls through to the "an item slot is up"
+		     branch below, which knows Throwable, Health and Pills and not this,
+		     so drawing a machete showed an empty corner. The magSize <= 0 branch
+		     written for exactly this was unreachable the moment melee stopped
+		     living in the secondary slot. ]]
+		return Attributes.get(player, LA.MeleeId, ""), 0, 0
 	end
 	return "", 0, 0
 end
