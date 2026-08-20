@@ -70,7 +70,8 @@ To update Rojo later, `./scripts/update-rojo.sh` replaces the CLI, repins
 `rokit.toml`, and installs the matching Studio plugin — the CLI and the plugin
 speak a versioned protocol, so updating one without the other is what produces
 "protocol version mismatch". `./scripts/rojo-doctor.sh` checks the CLI, the
-running server and the plugin against each other when Studio will not connect.
+running server and the plugin against each other when Studio will not connect,
+and `./scripts/restart-rojo.sh` restarts the server however it is running.
 
 To build a `.rbxl` without Studio in the loop:
 

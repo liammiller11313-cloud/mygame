@@ -221,12 +221,15 @@ the opening `{` as the number 123, and dies indexing it.
 The fix is to restart the server so it is the new binary:
 
 ```bash
-./scripts/autostart.sh uninstall
-./scripts/autostart.sh install
+./scripts/restart-rojo.sh
 ```
 
-or Ctrl+C the Terminal window running it and `./scripts/dev.sh` again. Then
-confirm with `./scripts/rojo-doctor.sh`.
+There are two ways a server can be running here — the autostart LaunchAgent, or
+`./scripts/dev.sh` in a Terminal window — and which you have decides how to
+restart it. That is a silly thing to have to know, so that script works it out:
+it stops whichever is running, starts it again, and then checks the version by
+asking THE SERVER rather than the binary. That the file on disk is new was never
+in doubt; whether the thing now listening is, is the whole question.
 
 ## Your models are safe
 

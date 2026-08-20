@@ -64,7 +64,7 @@ fi
 # Read whatever it answers and pull a version out of it. Deliberately format
 # agnostic: 7.6.1 answers JSON and 7.7.0 answers MessagePack, and the version
 # string sits in the bytes as readable text either way.
-BODY="$(curl -fsS -m 5 "http://localhost:$PORT/api/rojo" 2>/dev/null | tr -c '[:print:]' '\n')"
+BODY="$(curl -fsS --noproxy '*' -m 5 "http://localhost:$PORT/api/rojo" 2>/dev/null | tr -c '[:print:]' '\n')"
 SRV_VER=""
 if [ -n "$BODY" ]; then
   SRV_VER="$(printf '%s' "$BODY" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
