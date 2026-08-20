@@ -19,6 +19,25 @@
 	allocated per frame anywhere in the loop. Every property written in `update`
 	is a number.
 
+	── WHAT IS DELIBERATELY NOT IN THIS FILE ───────────────────────────────────
+	The title flicker (UI/TitleFlicker) and the victory confetti (UI/Confetti)
+	are both driven from `update` here but live in their own modules, and that
+	split is load-bearing rather than tidiness.
+
+	Luau allows 200 locals per FUNCTION SCOPE and a module's top level is one
+	scope. This file once carried both subsystems' tuning constants alongside its
+	own, reached 205, and stopped compiling — the main menu simply never appeared
+	and the error was one line in the client's require log:
+
+	    MainMenuController:1930: Out of local registers when trying to allocate
+	    layoutColumns: exceeded limit 200
+
+	It is invisible to stylua and selene because the source is entirely valid; it
+	just cannot be turned into bytecode. `scripts/audit.py` now counts top-level
+	locals and fails well before 200, so the next screen this grows says so in
+	CI rather than at the player. If this file needs a new subsystem, give it a
+	module — do not shave two constants to fit.
+
 	── WHAT DRIVES IT ──────────────────────────────────────────────────────────
 	  * `LobbyStateChanged`  mode, players, countdown, whether a round is running
 	                         and how far in. `endsAt` is an absolute server-time
@@ -79,6 +98,8 @@ local UITheme = require(Shared.Config.UITheme)
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local Widgets = require(script.Parent.Widgets)
 local UiSound = require(script.Parent.UiSound)
+local Confetti = require(script.Parent.Confetti)
+local TitleFlicker = require(script.Parent.TitleFlicker)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -109,34 +130,6 @@ local MENU_ORDER = UITheme.DisplayOrder.Menu
      menu that replaced it. ]]
 local MENU_SCRIM = 0.04
 local RESULTS_SCRIM = 0.02
-
---[[
-	Victory confetti. Fired from the two bottom corners like a pair of cannons
-	rather than dropped from the top: a burst reads as celebration, a drizzle
-	reads as snow, and this screen only ever appears when a team survived all
-	seventeen minutes.
-
-	Kept on the palette — orange, white and gold, the same three the survivor
-	outlines use — so the one genuinely joyful moment in the game still looks
-	like it belongs to it.
-
-	Everything is pooled and driven off the single RenderStepped this controller
-	already owns. The pieces are plain Frames with a UIStroke-free fill, because
-	a hundred ImageLabels would cost real frame time on a phone for something the
-	player looks at for four seconds.
-]]
-local CONFETTI_COUNT = 108
-local CONFETTI_GRAVITY = 1.05 -- screen heights per second squared
-local CONFETTI_SPEED_MIN = 0.95
-local CONFETTI_SPEED_MAX = 1.65
-local CONFETTI_SPREAD = 0.42 -- radians either side of straight up
-local CONFETTI_DRAG = 0.72
-local CONFETTI_SWAY = 0.22 -- horizontal flutter amplitude
-local CONFETTI_SWAY_RATE = 3.4
-local CONFETTI_LIFETIME = 4.2
-local CONFETTI_FADE_AT = 0.65 -- fraction of life before it starts fading
-local CONFETTI_WIDTH = 7
-local CONFETTI_HEIGHT = 11
 
 local BLUR_SIZE = 26
 -- UITheme's durations, expressed as the chase rates the frame loop wants.
@@ -176,21 +169,6 @@ local ENTRY_TEXT_INSET = 20
 
 local HOVER_SPEED = 1 / MOTION.FastOut
 local HOVER_EPSILON = 0.004
-
---[[ A failing tube holds, drops for a fraction of a second, and holds again. It
-     does not strobe. Long gaps and short dips are the whole trick, and the slow
-     breath underneath keeps the word from ever sitting perfectly still. ]]
-local FLICKER_BASE = 0.02
-local FLICKER_BREATH = 0.06
-local FLICKER_BREATH_SPEED = 0.7
-local FLICKER_BUZZ_SPEED = 47
-local FLICKER_MIN_GAP = 2.6
-local FLICKER_GAP_RANGE = 6.0
-local FLICKER_MIN_DURATION = 0.05
-local FLICKER_DURATION_RANGE = 0.22
-local FLICKER_MIN_DEPTH = 0.28
-local FLICKER_DEPTH_RANGE = 0.5
-local FLICKER_MAX = 0.86
 
 --[[ How long the menu waits for the server to answer a mode request before it
      stops saying SEARCHING. The only slow path is a MemoryStore browse plus a
@@ -257,9 +235,13 @@ local menuRoot: Frame
 local menuLayer: Frame
 local resultsRoot: Frame
 local resultsLayer: Frame
-local confettiLayer: Frame
-local confetti: { any } = {}
-local confettiActive = 0
+--[[ The victory burst, built with the results screen. See UI/Confetti.
+
+     Non-nil from `build()` in init() onward, and the frame loop that steps it is
+     only connected in start() — Registry runs every init() before any start(),
+     so there is no window where `update` can reach this before it exists. Move
+     the RenderStepped connection into init() and that stops being true. ]]
+local confetti
 local teleportRoot: Frame
 local teleportLayer: Frame
 
@@ -351,11 +333,7 @@ local lobby = {
 	joinable = true,
 }
 
-local flicker = {
-	endsAt = 0,
-	nextAt = 0,
-	depth = 0,
-}
+local flicker = TitleFlicker.new()
 
 --[[ What this client can honestly say about itself. Reset when a round starts so
      a second round never inherits the first one's tally. ]]
@@ -886,115 +864,6 @@ local function fillRows(scores: any)
 	end
 end
 
---[[ Builds the pool once. Pieces live hidden until a burst claims them. ]]
-local function buildConfetti()
-	local palette = UITheme.SurvivorColors
-	for index = 1, CONFETTI_COUNT do
-		local piece = Widgets.frame(confettiLayer, "Piece" .. index, palette[((index - 1) % #palette) + 1], 0)
-		piece.AnchorPoint = Vector2.new(0.5, 0.5)
-		piece.Size = UDim2.fromOffset(CONFETTI_WIDTH, CONFETTI_HEIGHT)
-		piece.Visible = false
-		piece.ZIndex = 3
-		confetti[index] = {
-			frame = piece,
-			x = 0,
-			y = 0,
-			vx = 0,
-			vy = 0,
-			age = 0,
-			phase = 0,
-			spin = 0,
-			alive = false,
-		}
-	end
-end
-
---[[ Claims the whole pool and throws it from both bottom corners. ]]
-local function burstConfetti()
-	confettiActive = 0
-	for index, piece in confetti do
-		-- Alternate cannons so both corners fill at the same rate.
-		local fromLeft = index % 2 == 1
-		local angle = (if fromLeft then -math.pi / 2 else -math.pi / 2)
-			+ (if fromLeft then 1 else -1) * (CONFETTI_SPREAD * (0.35 + math.random() * 0.65))
-		local speed = CONFETTI_SPEED_MIN + math.random() * (CONFETTI_SPEED_MAX - CONFETTI_SPEED_MIN)
-
-		piece.x = if fromLeft then -0.02 else 1.02
-		piece.y = 1.02
-		-- cos(angle) already carries the correct sign for both cannons: the left
-		-- one opens clockwise from straight up and the right one anticlockwise,
-		-- so each is thrown inward. Negating one sent half the pool off-screen.
-		piece.vx = math.cos(angle) * speed * 1.6
-		piece.vy = math.sin(angle) * speed
-		piece.age = -(index % 9) * 0.035 -- stagger, so it reads as a burst not a wall
-		piece.phase = math.random() * math.pi * 2
-		piece.spin = (math.random() * 2 - 1) * 420
-		piece.alive = true
-		confettiActive += 1
-
-		piece.frame.Visible = false
-		piece.frame.BackgroundTransparency = 0
-	end
-end
-
-local function clearConfetti()
-	for _, piece in confetti do
-		piece.alive = false
-		piece.frame.Visible = false
-	end
-	confettiActive = 0
-end
-
---[[ One integration step for the whole pool. Returns early once everything has
-     landed, so the result screen costs nothing to leave open. ]]
-local function updateConfetti(dt: number)
-	if confettiActive <= 0 then
-		return
-	end
-
-	for _, piece in confetti do
-		if not piece.alive then
-			continue
-		end
-
-		piece.age += dt
-		if piece.age < 0 then
-			continue -- still waiting its turn in the stagger
-		end
-
-		if piece.age >= CONFETTI_LIFETIME then
-			piece.alive = false
-			piece.frame.Visible = false
-			confettiActive -= 1
-			continue
-		end
-
-		piece.vy += CONFETTI_GRAVITY * dt
-		piece.vx -= piece.vx * CONFETTI_DRAG * dt
-		piece.x += (piece.vx + math.sin(piece.age * CONFETTI_SWAY_RATE + piece.phase) * CONFETTI_SWAY) * dt
-		piece.y += piece.vy * dt
-
-		-- A piece that has fallen well clear of the screen is done early.
-		if piece.y > 1.15 and piece.vy > 0 then
-			piece.alive = false
-			piece.frame.Visible = false
-			confettiActive -= 1
-			continue
-		end
-
-		local life = piece.age / CONFETTI_LIFETIME
-		local fade = if life <= CONFETTI_FADE_AT
-			then 0
-			else (life - CONFETTI_FADE_AT) / (1 - CONFETTI_FADE_AT)
-
-		local frame = piece.frame
-		frame.Visible = true
-		frame.Position = UDim2.fromScale(piece.x, piece.y)
-		frame.Rotation = piece.age * piece.spin
-		frame.BackgroundTransparency = fade
-	end
-end
-
 --[[ The result screen. SURVIVED is white and quiet; WIPED OUT is the one place
      on this screen red belongs, and it gets the poster voice — the team did not
      lose a match, the light went out on them. ]]
@@ -1072,9 +941,9 @@ local function showResults(payload: any)
 	-- Confetti is the one flourish this game gets, and it is earned: surviving
 	-- all seven waves is meant to be uncommon.
 	if survived then
-		burstConfetti()
+		confetti:burst()
 	else
-		clearConfetti()
+		confetti:clear()
 	end
 
 	state.results = true
@@ -1117,7 +986,7 @@ function MainMenuController:close()
 	end
 	if state.results then
 		state.results = false
-		clearConfetti()
+		confetti:clear()
 	end
 	state.open = false
 	refreshVisibility()
@@ -1149,7 +1018,7 @@ local function dismissResults()
 		return
 	end
 	state.results = false
-	clearConfetti()
+	confetti:clear()
 	UiSound.play(AudioConfig.UI.MenuBack)
 	MainMenuController:open()
 end
@@ -1196,18 +1065,7 @@ local function applyEntryVisual(entry: any)
 end
 
 local function updateFlicker(now: number)
-	if now >= flicker.nextAt then
-		flicker.endsAt = now + FLICKER_MIN_DURATION + math.random() * FLICKER_DURATION_RANGE
-		flicker.depth = FLICKER_MIN_DEPTH + math.random() * FLICKER_DEPTH_RANGE
-		flicker.nextAt = flicker.endsAt + FLICKER_MIN_GAP + math.random() * FLICKER_GAP_RANGE
-	end
-
-	local alpha = FLICKER_BASE + FLICKER_BREATH * (0.5 + 0.5 * math.sin(now * FLICKER_BREATH_SPEED))
-	if now < flicker.endsAt then
-		alpha += flicker.depth * (0.5 + 0.5 * math.sin(now * FLICKER_BUZZ_SPEED))
-	end
-	alpha = math.clamp(alpha, 0, FLICKER_MAX)
-
+	local alpha = flicker:alphaAt(now)
 	titleLight.TextTransparency = alpha
 	titleRule.BackgroundTransparency = alpha
 end
@@ -1280,7 +1138,7 @@ local function update(dt: number)
 	end
 
 	-- Result screen: the clock back to the menu, and any confetti still in the air.
-	updateConfetti(dt)
+	confetti:update(dt)
 
 	local remaining = math.max(math.ceil(state.returnAt - now), 0)
 	if remaining ~= state.returnShown then
@@ -1784,11 +1642,7 @@ local function buildResults()
 	--[[ Confetti sits in its own unscaled layer directly on the results root, not
 	     inside the scaled poster layout: a burst should fill the actual screen at
 	     any resolution rather than being shrunk along with the type. ]]
-	confettiLayer = Widgets.frame(resultsRoot, "Confetti", COLOR.Background, 1)
-	confettiLayer.Size = UDim2.fromScale(1, 1)
-	confettiLayer.ClipsDescendants = true
-	confettiLayer.ZIndex = 3
-	buildConfetti()
+	confetti = Confetti.new(resultsRoot)
 
 	resultOutcome = Widgets.label(resultsLayer, "Outcome", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
 	resultOutcome.Position = UDim2.new(COLUMN_X, 0, 0.14, 0)

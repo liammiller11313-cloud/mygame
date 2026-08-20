@@ -797,6 +797,67 @@ for name, sites in sorted(declared.items()):
         )
 
 
+
+# ── 10. Luau's 200-locals-per-scope limit ───────────────────────────────────
+#
+# This one is invisible to every other tool in this script. Luau allocates one
+# register per live local and allows 200 per FUNCTION SCOPE — and a module's top
+# level is a single function scope. Go over it and the module does not compile:
+#
+#   MainMenuController:1930: Out of local registers when trying to allocate
+#   layoutColumns: exceeded limit 200
+#
+# stylua parsed it, selene linted it, and every check above passed, because the
+# file is perfectly valid source. It just cannot be turned into bytecode. The
+# controller had 205 and the main menu simply never appeared, with the failure
+# buried in the client's require log.
+#
+# Only column-0 `local` counts: anything declared inside a function body or a
+# `do` block gets its registers back when that scope ends.
+LOCAL_LIMIT = 200
+LOCAL_FAIL = 185   # leaves room for the compiler's own temporaries
+LOCAL_WARN = 165
+
+def _names_declared(line: str) -> int:
+    """How many registers this one declaration burns. `local function f` is 1;
+    `local a, b, c = ...` is 3. Type annotations can themselves contain commas
+    (`local t: {[string]: number}, n`), so split at bracket depth zero."""
+    decl = line[len("local "):]
+    if decl.lstrip().startswith("function"):
+        return 1
+    decl = decl.split("=", 1)[0]
+    depth, count, seen = 0, 0, False
+    for ch in decl:
+        if ch in "({[<":
+            depth += 1
+        elif ch in ")}]>":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            count += 1
+            seen = False
+            continue
+        elif not ch.isspace():
+            seen = True
+    return count + (1 if seen else 0)
+
+for p, text in sources.items():
+    total = 0
+    for line in text.split("\n"):
+        if line.startswith("local "):
+            total += _names_declared(line)
+    if total >= LOCAL_FAIL:
+        problems.append(
+            f"{rel(p)}  {total} top-level locals — Luau's hard limit is {LOCAL_LIMIT} per scope "
+            f"and a module's top level is one scope. Move a self-contained subsystem into its "
+            f"own module; shaving one or two locals just breaks again on the next addition."
+        )
+    elif total >= LOCAL_WARN:
+        notes.append(
+            f"{rel(p)}  {total} top-level locals, heading for Luau's {LOCAL_LIMIT}-per-scope limit "
+            f"— worth splitting before it stops compiling"
+        )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")
