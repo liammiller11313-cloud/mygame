@@ -39,13 +39,33 @@
 	body is animated by neither the clip nor the fallback. The result is a
 	T-pose that looks exactly like the bug all of this exists to fix.
 
-	It is detected rather than declared: each clip is played onto a throwaway R6
-	rig and a throwaway R15 rig, stepped by hand, and the Motor6Ds are read to
-	see which ones actually moved. That is the ground truth — the `rig` field in
+	It is detected rather than declared. The clip's own KeyframeSequence is
+	fetched and its Pose objects are read: a Pose is NAMED for the part it
+	drives, so a clip with a "Left Arm" pose is R6 and one with "LeftUpperArm"
+	is R15, with no interpretation involved. Where that fetch is refused — it
+	can be, for an asset this account does not own — it falls back to playing
+	the clip onto a throwaway rig of each build and reading which Motor6Ds
+	actually moved. Either way it is ground truth; the `rig` field in
 	AnimationConfig is a claim, and this is the check on it.
+
+	── WHAT "MY GUN ANIMATIONS DO NOT SHOW UP" USUALLY MEANS ───────────────────
+	Usually, that they are working.
+
+	Weapon clips play on the CHARACTER, in third person. They are what your
+	TEAMMATES see. You never see your own, and not by accident: the camera is
+	CameraMode.LockFirstPerson, ViewmodelController hides your own body with
+	LocalTransparencyModifier, and the first-person arms it puts there instead
+	are anchored parts with every joint stripped out — they cannot play an
+	animation at all, by construction. What kicks the gun in your own hands is
+	procedural, and uses no assets.
+
+	So to see them: Test > Clients and Servers > 2 players, and watch the OTHER
+	window. If the clip still does nothing there, the rig column below is the
+	thing to read.
 ]]
 
 local ContentProvider = game:GetService("ContentProvider")
+local KeyframeSequenceProvider = game:GetService("KeyframeSequenceProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -267,6 +287,70 @@ local function movesRig(animator: Animator, model: Model, animation: Animation):
 	return moved, length
 end
 
+--[[
+	The parts that belong to exactly one build. Names common to both — Head,
+	HumanoidRootPart — are deliberately absent: a clip that keys only those says
+	nothing about which rig it is for, and counting them would let a head-turn
+	animation claim to be both.
+]]
+local R6_ONLY = {
+	Torso = true,
+	["Left Arm"] = true,
+	["Right Arm"] = true,
+	["Left Leg"] = true,
+	["Right Leg"] = true,
+}
+local R15_ONLY = {
+	UpperTorso = true,
+	LowerTorso = true,
+	LeftUpperArm = true,
+	LeftLowerArm = true,
+	LeftHand = true,
+	RightUpperArm = true,
+	RightLowerArm = true,
+	RightHand = true,
+	LeftUpperLeg = true,
+	LeftLowerLeg = true,
+	LeftFoot = true,
+	RightUpperLeg = true,
+	RightLowerLeg = true,
+	RightFoot = true,
+}
+
+--[[ The clip's own keyframes, which name the parts they drive. This is the
+     answer rather than an estimate of it — but the fetch can be refused for an
+     asset this account does not own, so it reports "no answer" separately from
+     "neither build" and lets the caller fall back. ]]
+local function rigFromKeyframes(id: number): string?
+	local ok, sequence = pcall(function()
+		return KeyframeSequenceProvider:GetKeyframeSequenceAsync("rbxassetid://" .. string.format("%d", id))
+	end)
+	if not ok or not sequence then
+		return nil
+	end
+
+	local sawR6, sawR15 = false, false
+	for _, descendant in sequence:GetDescendants() do
+		if descendant:IsA("Pose") then
+			if R6_ONLY[descendant.Name] then
+				sawR6 = true
+			elseif R15_ONLY[descendant.Name] then
+				sawR15 = true
+			end
+		end
+	end
+	sequence:Destroy()
+
+	if sawR6 and sawR15 then
+		return "both"
+	elseif sawR6 then
+		return "R6"
+	elseif sawR15 then
+		return "R15"
+	end
+	return nil
+end
+
 local lengths: { [number]: number } = {}
 local rigs: { [number]: string } = {}
 for _, id in order do
@@ -275,7 +359,15 @@ for _, id in order do
 	local onR15, lengthR15 = movesRig(r15Animator, r15Model, animation)
 
 	lengths[id] = math.max(lengthR6, lengthR15)
-	if onR6 and onR15 then
+
+	--[[ The keyframes first, because they are the clip itself. The play test is
+	     the fallback: StepAnimations is the only way to advance a track in edit
+	     mode and it is the part of this most likely to be the thing that broke,
+	     whereas a Pose named "Left Arm" cannot mean anything else. ]]
+	local declared = rigFromKeyframes(id)
+	if declared then
+		rigs[id] = declared
+	elseif onR6 and onR15 then
 		rigs[id] = "both"
 	elseif onR6 then
 		rigs[id] = "R6"
@@ -325,6 +417,25 @@ for _, set in AnimationConfig.Infected do
 end
 for rig, id in AnimationConfig.SurvivorHold do
 	expected[id] = rig
+end
+
+--[[
+	Weapon clips play on the SURVIVOR, so the rig they have to match is whatever
+	your players spawn as — R15 unless Game Settings > Avatar > Rig Type says
+	otherwise, since that is Roblox's default and this place does not override it.
+
+	AnimationConfig.Weapon declares no rig on purpose: a weapon clip addressing
+	the wrong joints does not stand the procedural poser down the way an infected
+	one does, so nothing is gated on it at runtime. Which makes it exactly the
+	case worth checking HERE, because nothing else ever will.
+]]
+local SURVIVOR_RIG = "R15"
+for _, set in AnimationConfig.Weapon do
+	for _, id in set do
+		if typeof(id) == "number" then
+			expected[id] = SURVIVOR_RIG
+		end
+	end
 end
 
 local broken, empty, mismatched, unknown, good = {}, {}, {}, {}, 0
@@ -399,6 +510,10 @@ else
 		warn("    poser stands down for any body with a track playing, so what you")
 		warn("    get is a T-pose. Move the id to the other set in AnimationConfig,")
 		warn("    or re-record it on a rig of the right build.")
+		warn("    Weapon clips are expected to be " .. SURVIVOR_RIG .. ", because that is what")
+		warn("    survivors spawn as. If yours were recorded on the same dummy as the")
+		warn("    zombie clips, they are R6 — and that is exactly why the zombies")
+		warn("    animate and the guns do not.")
 	end
 	if #unknown > 0 then
 		warn(string.format("[CheckAnimations] %d id(s) moved neither test rig:", #unknown))
