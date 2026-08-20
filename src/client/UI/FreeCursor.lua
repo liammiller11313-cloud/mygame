@@ -37,7 +37,11 @@
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Registry = require(Shared.Util.Registry)
 
 local player = Players.LocalPlayer
 
@@ -75,19 +79,42 @@ function FreeCursor.take(restore: Restore)
 	UserInputService.MouseIconEnabled = true
 end
 
+--[[
+	── WHY THIS ASKS RATHER THAN REPLAYS ───────────────────────────────────────
+	The saved values are a snapshot of what was true when the screen OPENED, and
+	the answer can change while it is open. The main menu is the case that bit:
+	it opens over the lobby, where the player has no body and CameraController
+	has set Classic with a zoom of 128 so they can watch; the round then starts,
+	CameraController puts them in first person, and the menu closes and restores
+	its snapshot over the top. A live survivor, parked four studs behind
+	themselves with a free mouse, for the whole round — a giant weapon across the
+	middle of the screen, no crosshair worth aiming, and a cursor floating over
+	a game that is trying to be a shooter.
+
+	CameraController owns those three properties. It is asked to re-assert them
+	and the snapshot is only replayed when it is not there to ask, which is a
+	load-order failure rather than a normal frame.
+]]
 function FreeCursor.giveBack(restore: Restore)
-	if restore.cameraMinZoom ~= nil and restore.cameraZoom ~= nil then
-		-- Min first on the way back, the mirror of the reason above: the max being
-		-- restored is the smaller of the two.
-		player.CameraMinZoomDistance = restore.cameraMinZoom
-		player.CameraMaxZoomDistance = restore.cameraZoom
-	end
-	if restore.cameraMode ~= nil then
-		player.CameraMode = restore.cameraMode
-	end
 	if restore.mouseIcon ~= nil then
 		UserInputService.MouseIconEnabled = restore.mouseIcon
 	end
+
+	local camera = Registry.find("CameraController")
+	if camera and typeof(camera.refreshCameraMode) == "function" then
+		camera:refreshCameraMode()
+	else
+		if restore.cameraMinZoom ~= nil and restore.cameraZoom ~= nil then
+			-- Min first on the way back, the mirror of the reason above: the max
+			-- being restored is the smaller of the two.
+			player.CameraMinZoomDistance = restore.cameraMinZoom
+			player.CameraMaxZoomDistance = restore.cameraZoom
+		end
+		if restore.cameraMode ~= nil then
+			player.CameraMode = restore.cameraMode
+		end
+	end
+
 	restore.cameraMode = nil
 	restore.cameraZoom = nil
 	restore.cameraMinZoom = nil

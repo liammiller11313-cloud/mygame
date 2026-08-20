@@ -558,6 +558,25 @@ local function refreshState()
 	applyCameraMode()
 end
 
+--[[
+	Re-asserts the camera mode this controller believes in.
+
+	Public because it is not the only thing that writes those three properties:
+	FreeCursor pushes the camera out and unpins the zoom so a screen with buttons
+	on it can be clicked, and has to give the camera back afterwards. Replaying
+	the values it captured is not good enough — they are a snapshot of whatever
+	was true when the screen OPENED, and the answer can have changed underneath
+	it. The main menu closing at round start is exactly that: it captured the
+	lobby's spectator camera, the round then put the player in a body, and
+	handing back the snapshot parked a live survivor in third person with a free
+	mouse for the whole round.
+
+	So FreeCursor asks instead of replaying, and this stays the one authority.
+]]
+function CameraController:refreshCameraMode()
+	applyCameraMode()
+end
+
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function CameraController:init()

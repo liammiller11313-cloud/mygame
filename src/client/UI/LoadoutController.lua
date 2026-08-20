@@ -31,6 +31,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -73,6 +74,12 @@ local CARD_WIDTH = 0.32
 local CARD_HEIGHT = 96
 local CARD_GAP = 10
 
+--[[ The ACTIVE badge's width. A constant because the card title has to reserve
+     it: the title is left-aligned and the badge is right-aligned inside the same
+     card, and a title sized as though the badge were 18px wide draws straight
+     through it — which is how card one read "LOADOUTACTIVE". ]]
+local BADGE_WIDTH = 46
+
 local SLOT_HEIGHT = 52
 local PICK_ROW_HEIGHT = 38
 local PICK_ROW_HEIGHT_TOUCH = 50
@@ -103,10 +110,17 @@ local PREVIEW_HEIGHT = 0.38
 	and a modal that traps them there would be the wrong trade for a convenience.
 ]]
 local PICKER_SECONDS = 14
+-- One line, as wide as it likes. GetTextSize wraps at the bound it is given.
+local MEASURE_BOUND = Vector2.new(9999, 100)
+
 local PICKER_WIDTH = 720
 local PICKER_HEIGHT = 168
 local PICKER_HEADER = 30
 local PICKER_FOOTER = 26
+--[[ The gap the two footer labels keep between them, and the narrowest the left
+     one may be squeezed to before the right one is dropped instead. ]]
+local FOOTER_GAP = 16
+local FOOTER_MIN_FOOT = 150
 --[[ The depleting bar across the top. A number counting down tells you the time
      left; a bar tells you without being read, which is the whole difference
      between a deadline you notice and one that expires on you. ]]
@@ -583,6 +597,12 @@ local function setPickerVisible(visible: boolean)
 	end
 	pickerGui.Enabled = visible
 	if visible then
+		--[[ No relayout here, deliberately. The footer is measured against the
+		     LONGEST phrasing its text can take rather than its current one, so
+		     the layout does not move when the wording changes from "KEEPING X IF
+		     YOU DO NOT CHOOSE" to "X LOCKED IN" — and nothing else about opening
+		     the picker changes what fits. Only the viewport does, and
+		     refreshPickerSize is wired to that. ]]
 		state.pickerLocked = false
 		state.pickerCursor = 0
 		state.pickerWindow = PICKER_SECONDS
@@ -616,15 +636,20 @@ local function buildCard(index: number, parent: Frame)
 	button.BackgroundTransparency = PANEL.RaisedFill
 	local stroke = Widgets.stroke(button, COLOR.Border)
 
+	--[[ Reserves the badge beside it, for the reason the picker card does: both
+	     are a left-aligned title and a right-aligned ACTIVE inside one row, and a
+	     title sized to the full width draws through the badge on any row narrow
+	     enough for the two to meet. ]]
 	local title = Widgets.label(button, "Title", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
 	title.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 4)
-	title.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Large)
+	title.Size = UDim2.new(1, -(LAYOUT.PanelPadding * 2 + BADGE_WIDTH + CARD_GAP), 0, TEXT.Large)
+	title.TextTruncate = Enum.TextTruncate.AtEnd
 	title.Text = LoadoutConfig.defaultName(index)
 
 	local badge = Widgets.label(button, "Badge", FONT.Body, TEXT.Tiny, COLOR.Accent)
 	badge.AnchorPoint = Vector2.new(1, 0)
 	badge.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 6)
-	badge.Size = UDim2.fromOffset(60, TEXT.Body)
+	badge.Size = UDim2.fromOffset(BADGE_WIDTH, TEXT.Body)
 	badge.TextXAlignment = Enum.TextXAlignment.Right
 	badge.Text = "ACTIVE"
 	badge.Visible = false
@@ -875,7 +900,13 @@ local function buildPicker()
 
 		local label = Widgets.label(button, "Title", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
 		label.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 4)
-		label.Size = UDim2.new(1, -(LAYOUT.PanelPadding * 2 + 18), 0, TEXT.Body)
+		--[[ BADGE_WIDTH, not a guess. This reserved 18px against a badge that is
+		     46 wide, so on a card narrow enough for the two to meet the title drew
+		     straight through it and the card read "LOADOUTACTIVE". Truncated as
+		     well, because reserving the space only helps until the title itself is
+		     longer than what is left. ]]
+		label.Size = UDim2.new(1, -(LAYOUT.PanelPadding * 2 + BADGE_WIDTH + CARD_GAP), 0, TEXT.Body)
+		label.TextTruncate = Enum.TextTruncate.AtEnd
 		label.Text = LoadoutConfig.defaultName(index)
 
 		--[[ The ACTIVE badge, on whichever card the player spawns with. It is the
@@ -884,7 +915,7 @@ local function buildPicker()
 		local key = Widgets.label(button, "Badge", FONT.Body, TEXT.Tiny, COLOR.Accent)
 		key.AnchorPoint = Vector2.new(1, 0)
 		key.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 4)
-		key.Size = UDim2.fromOffset(46, TEXT.Body)
+		key.Size = UDim2.fromOffset(BADGE_WIDTH, TEXT.Body)
 		key.TextXAlignment = Enum.TextXAlignment.Right
 		key.Text = "ACTIVE"
 		key.Visible = false
@@ -926,22 +957,53 @@ local function buildPicker()
 		end)
 	end
 
+	--[[ The two halves of the footer. Both are sized in refreshPickerSize from
+	     what their text actually measures rather than from a fixed fraction of
+	     the panel — see there. Truncation is the backstop for the case where
+	     even the short hint does not fit. ]]
 	pickerFoot = Widgets.label(root, "Foot", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	pickerFoot.AnchorPoint = Vector2.new(0, 1)
 	pickerFoot.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, 0)
 	pickerFoot.Size = UDim2.new(0.62, -LAYOUT.PanelPadding, 0, PICKER_FOOTER)
+	pickerFoot.TextTruncate = Enum.TextTruncate.AtEnd
 
 	pickerHint = Widgets.label(root, "Hint", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	pickerHint.AnchorPoint = Vector2.new(1, 1)
 	pickerHint.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, 0)
 	pickerHint.Size = UDim2.new(0.38, -LAYOUT.PanelPadding, 0, PICKER_FOOTER)
 	pickerHint.TextXAlignment = Enum.TextXAlignment.Right
+	pickerHint.TextTruncate = Enum.TextTruncate.AtEnd
 end
 
 --[[ Fits the picker to the screen, and hides the number keys on a scheme that
      has none. Same width problem as every other panel here: the layer's width in
      reference pixels moves with the aspect ratio, and 720 hangs off both edges
      of a phone held upright. ]]
+--[[
+	How wide a string draws, in reference pixels.
+
+	Everything in this panel lives inside a ScaleLayer, so a label's TextSize is
+	already in reference space and this measures in the same space the layout is
+	written in — no factor to apply.
+
+	Needed because the picker's footer is two labels, one pinned left and one
+	pinned right, and the strings are near the limit of the space at full width.
+	The panel narrows to fit a phone; the strings do not. Guessing at a fraction
+	was what put "IF YOU DO NOT CHOOSE" through "ENTER CONFIRM".
+]]
+local function textWidth(text: string, font: Enum.Font, size: number): number
+	local ok, bounds = pcall(function()
+		return TextService:GetTextSize(text, size, font, MEASURE_BOUND)
+	end)
+	if ok and typeof(bounds) == "Vector2" then
+		return bounds.X
+	end
+	--[[ A conservative estimate if the service refuses. RobotoCondensed and
+	     Oswald both run under 0.6em per glyph, so this over-estimates, and
+	     over-estimating only costs a shorter hint. ]]
+	return #text * size * 0.6
+end
+
 local function refreshPickerSize()
 	if not pickerRoot then
 		return
@@ -964,12 +1026,54 @@ local function refreshPickerSize()
 		entry.button.Size = UDim2.fromOffset(cardWidth, cardHeight)
 	end
 
-	--[[ The key hint, only where those keys exist. A phone is told to tap and a
-	     pad is told nothing, because a pad player is already moving a highlight
-	     they can see. ]]
+	--[[
+		The key hint, only where those keys exist. A phone is told to tap and a
+		pad is told nothing, because a pad player is already moving a highlight
+		they can see.
+
+		Then the footer is divided by what the two strings MEASURE rather than by
+		a fixed 0.62/0.38 split. The split was fine at the full 720 and wrong
+		everywhere else: the panel shrinks to fit the screen and the strings do
+		not, so the left label ran under the right one and the picker read
+		"...IF YOU DO NOT CHOOSDOSE  ENTER CONFIRM".
+
+		The hint gets what it needs and the foot gets the rest, because the hint
+		is the shorter of the two and is the one that tells you which key to
+		press. If even the short hint cannot fit beside a foot worth reading, the
+		hint goes — the foot states what happens if you do nothing, which is the
+		half a player who is out of room most needs.
+	]]
 	if pickerHint then
-		pickerHint.Text = if isTouch() then "TAP TO CHOOSE" else "◄ ►  CHOOSE      ENTER  CONFIRM"
-		pickerHint.Visible = scheme() ~= "Gamepad"
+		local wanted = if isTouch() then "TAP TO CHOOSE" else "◄ ►  CHOOSE      ENTER  CONFIRM"
+		local room = width - LAYOUT.PanelPadding * 2
+		local hintWidth = textWidth(wanted, FONT.Body, TEXT.Tiny)
+
+		--[[ The foot's longest phrasing, not its current one: the text changes
+		     between "KEEPING X IF YOU DO NOT CHOOSE" and "X LOCKED IN" while the
+		     picker is open, and a layout measured from the short one would start
+		     overlapping the moment it grew back. ]]
+		local footWidth = textWidth(
+			"KEEPING "
+				.. string.upper(LoadoutConfig.defaultName(LoadoutConfig.MaxLoadouts))
+				.. " IF YOU DO NOT CHOOSE",
+			FONT.Body,
+			TEXT.Tiny
+		)
+
+		if hintWidth + footWidth + FOOTER_GAP > room and not isTouch() then
+			wanted = "ENTER  CONFIRM"
+			hintWidth = textWidth(wanted, FONT.Body, TEXT.Tiny)
+		end
+
+		local fits = hintWidth + FOOTER_MIN_FOOT + FOOTER_GAP <= room
+		pickerHint.Text = wanted
+		pickerHint.Visible = scheme() ~= "Gamepad" and fits
+		pickerHint.Size = UDim2.fromOffset(hintWidth, PICKER_FOOTER)
+
+		if pickerFoot then
+			local taken = if pickerHint.Visible then hintWidth + FOOTER_GAP else 0
+			pickerFoot.Size = UDim2.fromOffset(math.max(room - taken, 0), PICKER_FOOTER)
+		end
 	end
 end
 
@@ -1138,11 +1242,34 @@ function LoadoutController:start()
 		setPickerVisible(true)
 	end
 
-	trove:connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), function()
+	--[[
+		Both panels size themselves from the viewport, so both have to hear about
+		it changing — and a camera swap is NOT that event. CurrentCamera changes
+		on a respawn or a spectate; ViewportSize changes when the window is
+		resized or a phone is turned, which is the case that actually moves the
+		layout. Watching only the first meant a resized window kept a layout
+		measured against the old one until the player next died.
+
+		The viewport connection is re-pointed on each camera rather than added
+		to, for the reason ScaleLayer gives: a camera is replaced often enough
+		that one connection per camera is a leak.
+	]]
+	local viewportTrove = trove:add(Trove.new())
+	local function watchViewport()
+		viewportTrove:clean()
 		refreshPanelSize()
 		refreshPickerSize()
-	end)
-	refreshPickerSize()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			viewportTrove:connect(camera:GetPropertyChangedSignal("ViewportSize"), function()
+				refreshPanelSize()
+				refreshPickerSize()
+			end)
+		end
+	end
+
+	trove:connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), watchViewport)
+	watchViewport()
 
 	--[[ The number-key hints appear and disappear with the keyboard. A player who
 	     picks up a controller mid-round should not be looking at a "2" they

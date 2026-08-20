@@ -1575,6 +1575,30 @@ function ViewmodelController:isVisible(): boolean
 	return not current.hidden and model ~= nil
 end
 
+--[[
+	Whether the camera has left first person — whatever put it there.
+
+	Two things do. A player who is dead or spectating gets Classic and an unpinned
+	zoom from CameraController so they can pull back and watch the team. And ANY
+	screen with something to click calls FreeCursor.take, which sets Classic, a
+	max zoom of 12 and a MIN zoom of 4 — Roblox forces first person below about a
+	stud, so releasing the cursor means pushing the camera out, and there is no
+	version of that which leaves the player looking down their own sights.
+
+	The comment this replaces claimed the first was the only case. It was wrong
+	about the second and the cost was on screen: opening the round-start loadout
+	picker, the pause menu, the shop or the settings panel popped the camera to
+	four studs behind the survivor and left the VIEWMODEL parented to it — a pair
+	of arms and a gun the size of a car floating across the middle of the screen,
+	because a viewmodel is built to be inches from a lens that is no longer there.
+
+	Read off the camera rather than off a copy of either state list, so a third
+	reason to leave first person is handled the day it is added.
+]]
+local function cameraIsThirdPerson(): boolean
+	return player.CameraMode == Enum.CameraMode.Classic and player.CameraMaxZoomDistance > 1
+end
+
 -- ── the frame ───────────────────────────────────────────────────────────────
 
 local function setHidden(hidden: boolean)
@@ -1595,8 +1619,19 @@ local function setHidden(hidden: boolean)
 	end
 end
 
+--[[ Whether the player's STATE says to hide it — dead, spectating, and the rest
+     of HIDDEN_STATES. Kept apart from the camera's reason because they change on
+     completely different signals: this one on an attribute, the camera's on any
+     screen opening, and either alone is enough to hide. ]]
+local hiddenByState = false
+
+local function applyHidden()
+	setHidden(hiddenByState or cameraIsThirdPerson())
+end
+
 local function refreshHidden()
-	setHidden(HIDDEN_STATES[Attributes.get(player, PA.State, STATE.Spectating)] == true)
+	hiddenByState = HIDDEN_STATES[Attributes.get(player, PA.State, STATE.Spectating)] == true
+	applyHidden()
 end
 
 --[[
@@ -1634,19 +1669,6 @@ local CARRIED_PREFIX = "FL_Carried"
      on a character are exactly these. The hands one is the only one the owner
      could ever see. ]]
 local HANDS_MOUNT = CARRIED_PREFIX .. "Hands"
-
---[[
-	Whether this player can currently see their own body.
-
-	Exactly one situation puts them there: dead or spectating, where
-	CameraController drops to Classic AND unpins the zoom so they can pull back
-	and watch the team. Read off the camera rather than off a second copy of that
-	state list — a menu opening also drops CameraMode to Classic, and the zoom is
-	the half of the pair that only moves when the body does.
-]]
-local function cameraIsThirdPerson(): boolean
-	return player.CameraMode == Enum.CameraMode.Classic and player.CameraMaxZoomDistance > 1
-end
 
 --[[
 	── WHY THIS IS PER-MOUNT AND NOT ONE BOOLEAN ────────────────────────────────
@@ -1781,10 +1803,24 @@ local function update(deltaTime: number)
 	stepShells(now)
 	stepMagazine(now)
 
+	--[[
+		The camera can leave first person without anything telling this module:
+		FreeCursor is called by five different screens and reports to none of
+		them. Polling the pair of properties is two reads, and both the writes
+		below early-out when nothing changed.
+
+		Order matters between these two. `applyHidden` reparents the viewmodel out
+		of the camera, and hideOwnWorldWeapon is what puts the real gun back in
+		the player's hands as it goes — running them the other way round leaves a
+		frame with neither.
+	]]
+	local thirdPerson = cameraIsThirdPerson()
+
 	--[[ Every frame, because Roblox's TransparencyController writes the same
 	     property on the same parts and whoever writes last wins. Two or three
 	     parts on one model; the cost is noise next to the pose below. ]]
-	hideOwnWorldWeapon(not cameraIsThirdPerson())
+	hideOwnWorldWeapon(not thirdPerson)
+	applyHidden()
 
 	if not model or current.hidden then
 		return
