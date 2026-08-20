@@ -132,7 +132,10 @@ local worn: { [Player]: { [string]: Worn } } = {}
 --[[ The hold pose, per character rather than per player: the track belongs to
      an Animator that dies with the rig, and keeping it keyed by the model is
      what stops a respawn playing into a corpse. ]]
-local holding: { [Player]: { character: Model, track: AnimationTrack? } } = {}
+--[[ `id` is what is CURRENTLY playing, so a weapon swap can tell "already the
+     right pose" from "needs a different one" without reloading a track to find
+     out. ]]
+local holding: { [Player]: { character: Model, track: AnimationTrack?, id: number? } } = {}
 
 --[[ Anything that would make the prop behave like a scripted object rather than
      like a decal you can see from across a room. Mirrors PlaceholderFactory's
@@ -514,12 +517,71 @@ local function attach(player: Player, mount: string, kind: string, itemId: strin
 end
 
 --[[
+	The Animator for a character, created if the rig arrived without one.
+
+	Roblox normally puts one under a player's Humanoid when the character loads,
+	but "normally" is not "always" — a rig assembled by something other than the
+	default character pipeline may arrive bare, and the answer used to be to
+	silently not pose the arm. That is indistinguishable from the animation
+	failing to load, which is the bug this whole path was chased for.
+]]
+local function animatorFor(character: Model?): Animator?
+	if not character or not character.Parent then
+		return nil
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return nil
+	end
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+	return animator
+end
+
+--[[
+	Which idle pose a survivor should be in, given what is in their hands.
+
+	A gun class that declares an `idle` gets it — a two-handed low-ready authored
+	for this game. Everything else falls back to SurvivorHold, Roblox's generic
+	ToolNone, which is the right answer for a machete and would look wrong on a
+	rifle.
+
+	Returns nil for empty hands, which is how the caller knows to stop.
+]]
+local function holdIdleId(player: Player, character: Model?): number?
+	if not character then
+		return nil
+	end
+
+	local inventory = Registry.find("InventoryService")
+	if inventory and typeof(inventory.getActiveWeapon) == "function" then
+		local ok, weaponId = pcall(inventory.getActiveWeapon, inventory, player)
+		if ok and typeof(weaponId) == "string" then
+			local definition = WeaponConfig.get(weaponId)
+			local set = definition and AnimationConfig.forWeaponClass(definition.class)
+			if set and set.idle then
+				return set.idle
+			end
+		end
+	end
+
+	return AnimationConfig.SurvivorHold[AnimationConfig.rigOf(character)]
+end
+
+--[[
 	The arm pose for a survivor holding something.
 
 	Loaded on the server so it replicates to every client, which is the whole
-	point: the swing this fixes is the one OTHER players see. Roblox's own
-	ToolNone clip, which keys the right arm at Action priority and leaves the
-	gait alone — see AnimationConfig.SurvivorHold.
+	point: the swing this fixes is the one OTHER players see.
+
+	The pose is now per weapon class rather than one clip for everything, so
+	swapping a rifle for a machete swaps the pose with it. That is what `id` on
+	the entry is for: a pose that is already the right one is left alone, and a
+	pose that is not is crossfaded rather than stacked — two looped clips on one
+	arm at the same priority reads as neither of them.
 
 	Everything here is best-effort. A rig with no Animator, an id that will not
 	load, a clip authored for the other build: all of them end with no pose and a
@@ -538,46 +600,37 @@ local function setHoldPose(player: Player, wanted: boolean)
 		weaponTracks[player] = nil
 	end
 
+	--[[ Stopped, not dropped. The entry stays so that picking the same weapon back
+	     up replays the track it already has: LoadAnimation returns a NEW track on
+	     every call, and clearing here would allocate one per empty-handed moment
+	     for the rest of the round. ]]
 	if not wanted then
 		if entry and entry.track then
 			entry.track:Stop(0.15)
 		end
 		return
 	end
-	if not character or not character.Parent then
+
+	local id = holdIdleId(player, character)
+	if not id then
 		return
 	end
 
 	if entry and entry.track then
-		if not entry.track.IsPlaying then
-			entry.track:Play(0.15)
+		if entry.id == id then
+			if not entry.track.IsPlaying then
+				entry.track:Play(0.15)
+			end
+			return
 		end
-		return
+		--[[ The weapon changed to something that poses differently. The old clip
+		     goes first: crossfading two loops that both key the right arm leaves
+		     the arm somewhere between them for as long as both are playing. ]]
+		entry.track:Stop(0.1)
 	end
 
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
-		return
-	end
-
-	--[[
-		Created if it is missing, rather than giving up.
-
-		Roblox normally puts an Animator under a player's Humanoid when the
-		character loads, but "normally" is not "always" — a rig assembled by
-		something other than the default character pipeline may arrive without
-		one, and this file's answer used to be to silently not pose the arm. That
-		is indistinguishable from the animation failing to load, which is the bug
-		this whole path has been chased for.
-	]]
-	local animator = humanoid:FindFirstChildOfClass("Animator")
+	local animator = animatorFor(character)
 	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = humanoid
-	end
-
-	local id = AnimationConfig.SurvivorHold[AnimationConfig.rigOf(character)]
-	if not id then
 		return
 	end
 
@@ -596,14 +649,15 @@ local function setHoldPose(player: Player, wanted: boolean)
 		     it is worth not pretending the pose is on. ]]
 		return
 	end
-	--[[ Stated rather than inherited. The clip ships at Action priority and that
-	     is what makes it win the shoulder against the walk cycle, but a reupload
-	     or a swapped id could arrive at Idle and silently do nothing. ]]
+	--[[ Stated rather than inherited. Roblox's ToolNone ships at Action priority
+	     and that is what makes it win the shoulder against the walk cycle, but an
+	     idle authored in Studio defaults to Idle priority and would silently do
+	     nothing under it. ]]
 	track.Priority = Enum.AnimationPriority.Action
 	track.Looped = true
 	track:Play(0.15)
 
-	holding[player] = { character = character, track = track }
+	holding[player] = { character = character, track = track, id = id }
 end
 
 --[[
@@ -625,14 +679,25 @@ end
 ]]
 local weaponTracks: { [Player]: { character: Model, tracks: { [string]: AnimationTrack } } } = {}
 
---[[ Priorities. The hold pose loops at Action; these sit above it so a clip that
-     keys the same arm actually wins it. Reload beats fire so that a shot fired
-     the frame a reload ends cannot half-override the tail of it — Roblox blends
-     equal priorities by weight, which for two clips on one arm reads as neither
-     of them playing. ]]
+--[[
+	Priorities, and all four of them are used.
+
+	The hold pose loops at Action, so everything one-shot sits above it or would
+	be blended against a clip that never stops. Above that the order is what
+	should win when two land together:
+
+	    equip   Action2   the draw
+	    fire    Action3   a shot the frame after a draw shows the shot
+	    reload  Action4   a shot the frame a reload ends does not cut the reload
+
+	Roblox blends equal priorities BY WEIGHT, which for two clips both keying the
+	right arm reads as neither of them playing — so "they are different clips" is
+	not enough on its own, they have to be different priorities.
+]]
 local WEAPON_PRIORITY: { [string]: Enum.AnimationPriority } = {
-	fire = Enum.AnimationPriority.Action2,
-	reload = Enum.AnimationPriority.Action3,
+	equip = Enum.AnimationPriority.Action2,
+	fire = Enum.AnimationPriority.Action3,
+	reload = Enum.AnimationPriority.Action4,
 }
 
 --[[ The track for one role on one player, built once and kept.
@@ -712,6 +777,28 @@ local function playShot(player: Player)
 	end
 	track:Stop(0)
 	track:Play(0.05)
+end
+
+--[[
+	The draw, when the weapon in hand changes.
+
+	Fired from applyMount rather than from a slot-change signal, because what this
+	animates is the model APPEARING in the hand — and a slot change that failed to
+	build a model should not produce an arm bringing nothing up. Same rule the
+	hold pose follows.
+
+	Not played on the first mount of a life, which is a survivor spawning already
+	holding their loadout rather than drawing it. Doing so is a draw animation
+	every player watches at the start of every round, which is a cost with no
+	information in it.
+]]
+local function playEquip(player: Player)
+	local track = weaponTrack(player, "equip")
+	if not track then
+		return
+	end
+	track:Stop(0)
+	track:Play(0.08)
 end
 
 --[[ A reload, driven by the attribute InventoryService already publishes rather
@@ -797,13 +884,27 @@ function CarryVisualService:refresh(player: Player)
 		worn[player] = entry
 	end
 
+	local heldBefore = entry[MOUNT.Hands]
+
 	applyMount(player, entry, MOUNT.Back, backKey)
 	applyMount(player, entry, MOUNT.Hands, handsKey)
 
 	--[[ Keyed off what was actually MOUNTED rather than off what was wanted: a
 	     weapon whose model failed to build leaves the hands empty, and posing an
 	     empty arm as though it were holding a rifle is worse than not posing it. ]]
-	setHoldPose(player, entry[MOUNT.Hands] ~= nil)
+	local heldAfter = entry[MOUNT.Hands]
+	setHoldPose(player, heldAfter ~= nil)
+
+	--[[ A draw, but only for a SWAP — something was in the hands and now something
+	     else is. Not for the first mount of a life: that is a survivor spawning
+	     already holding their loadout, and animating it is a draw every player
+	     watches at the start of every round for no information.
+
+	     The pose is set first so the draw layers over the right idle rather than
+	     over the one being replaced. ]]
+	if heldBefore and heldAfter and heldBefore.key ~= heldAfter.key then
+		playEquip(player)
+	end
 end
 
 function CarryVisualService:init() end

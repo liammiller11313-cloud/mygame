@@ -141,6 +141,9 @@ local ZOMBIE_R15: AnimationSet = {
 	`toolnone` overlay it plays only for a real Tool — and this game's inventory
 	is not built on Tools.
 
+	The FALLBACK pose, for anything with no idle of its own in AnimationConfig
+	.Weapon above — which today means melee, and anything added without a clip.
+
 	These are Roblox's own ToolNone clips, one per rig build. Two properties make
 	them the right answer rather than a hack:
 
@@ -197,10 +200,10 @@ AnimationConfig.SurvivorHold = table.freeze({
 export type WeaponAnimationSet = {
 	fire: number?,
 	reload: number?,
-	--[[ Declared and unused. The draw is currently the weapon model appearing in
-	     the hand, and an idle is what SurvivorHold already is. They are named so
-	     that an uploaded pair has an obvious place to land rather than arriving
-	     with an argument about where it goes. ]]
+	--[[ `idle` REPLACES SurvivorHold for anything that declares one — it is the
+	     same job done better, by a clip authored for this game's guns rather than
+	     Roblox's generic ToolNone. `equip` plays once when the weapon changes.
+	     Both are absent for melee, which keeps the generic pose. ]]
 	equip: number?,
 	idle: number?,
 }
@@ -209,33 +212,74 @@ local RELOAD_BOXED = 124425827495007
 local FIRE_RIFLE = 79077703240420
 local FIRE_SHOTGUN = 139751042655361
 local FIRE_PISTOL = 111410151816711
+local FIRE_SMG = 126130498796830
+local RELOAD_SMG = 105560973486853
+
+--[[
+	The two clips every gun shares.
+
+	Idle and equip are about the SHOOTER, not the gun: a two-handed low-ready and
+	a draw look the same whether what comes up is an M4 or a Kriss, which is
+	exactly not true of a reload. So they are named once here and referenced by
+	every gun class, rather than repeated five times and gradually diverging.
+
+	Melee gets neither. It is one-handed, it is drawn differently, and the pose
+	that suits a rifle held across the chest is wrong for a machete — it keeps
+	Roblox's generic ToolNone from SurvivorHold below.
+]]
+local IDLE_GUN = 117670476393944
+local EQUIP_GUN = 125430658600847
 
 AnimationConfig.Weapon = table.freeze({
-	Rifle = table.freeze({ fire = FIRE_RIFLE, reload = RELOAD_BOXED }),
+	Rifle = table.freeze({
+		fire = FIRE_RIFLE,
+		reload = RELOAD_BOXED,
+		idle = IDLE_GUN,
+		equip = EQUIP_GUN,
+	}),
 
 	--[[ The two marksman rifles take the rifle set. They are rifles — a scoped
 	     Mk18 loads exactly like an unscoped one — and giving them their own row
 	     would be two more places to edit for no visible difference. ]]
-	Marksman = table.freeze({ fire = FIRE_RIFLE, reload = RELOAD_BOXED }),
+	Marksman = table.freeze({
+		fire = FIRE_RIFLE,
+		reload = RELOAD_BOXED,
+		idle = IDLE_GUN,
+		equip = EQUIP_GUN,
+	}),
 
-	--[[ Also the rifle set, for now. The submachine guns are the one class
-	     waiting on its own clips; until those are uploaded the rifle motion is
-	     right in shape and slightly long in the arms, which is a great deal
-	     better than an SMG that reloads by standing still. ]]
-	SMG = table.freeze({ fire = FIRE_RIFLE, reload = RELOAD_BOXED }),
+	--[[ The submachine guns have their own pair now. They spent one commit on the
+	     rifle's, which was right in shape and long in the arms. ]]
+	SMG = table.freeze({
+		fire = FIRE_SMG,
+		reload = RELOAD_SMG,
+		idle = IDLE_GUN,
+		equip = EQUIP_GUN,
+	}),
 
 	--[[ The one genuinely different reload in the game — shell by shell, and
 	     InventoryService drives it a shell at a time. The clip here covers the
 	     whole sequence; the per-shell sound is what actually carries the count. ]]
-	Shotgun = table.freeze({ fire = FIRE_SHOTGUN, reload = RELOAD_BOXED }),
+	Shotgun = table.freeze({
+		fire = FIRE_SHOTGUN,
+		reload = RELOAD_BOXED,
+		idle = IDLE_GUN,
+		equip = EQUIP_GUN,
+	}),
 
 	--[[ Covers the revolver as well. A .357 is loaded very differently from an
 	     M1911 in life and identically here, because both are "the off hand comes
 	     across" at the distance anybody sees it from. ]]
-	Pistol = table.freeze({ fire = FIRE_PISTOL, reload = RELOAD_BOXED }),
+	Pistol = table.freeze({
+		fire = FIRE_PISTOL,
+		reload = RELOAD_BOXED,
+		idle = IDLE_GUN,
+		equip = EQUIP_GUN,
+	}),
 
-	--[[ Melee has none and wants none: the swing is MeleeService's arc and the
-	     viewmodel's kick, and a clip keying the right arm would fight both. ]]
+	--[[ Melee has no fire or reload and wants none: the swing is MeleeService's
+	     arc and the viewmodel's kick, and a clip keying the right arm would fight
+	     both. It has no idle or equip either — see IDLE_GUN above. ]]
 })
 
 --[[ The set for a weapon class, or nil for one with no animations — which is
