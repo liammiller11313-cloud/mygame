@@ -56,28 +56,49 @@ fi
 #  `rojo serve` still starts the old one. Everything looks right and nothing
 #  works, and between 7.6.1 and 7.7.0 the plugin cannot even say why.
 #]]
-#[[ PATH is walked by hand because `command -v -a` is not a thing — bash's
-#   `command` takes no -a, so it silently printed nothing and the check passed
-#   for everyone. `type -a -P` is bash-only. This works in either shell. ]]
+#[[
+#  PATH is walked by hand because `command -v -a` is not a thing — bash's
+#  `command` takes no -a, so it silently printed nothing and the check passed
+#  for everyone. `type -a -P` is bold but bash-only. This works in either shell.
+#
+#  And it searches MORE than this shell's PATH, because the process that matters
+#  may not have had this shell's PATH. The LaunchAgent's plist sets its own —
+#  $HOME/.rokit/bin and both Homebrew prefixes — since a launchd job never runs
+#  your profile. That is not a hypothetical: a Rokit shim in ~/.rokit/bin served
+#  7.6.1 under launchd while the interactive shell had no rojo on PATH at all,
+#  so this reported "nothing on PATH" about a machine that was running one.
+#]]
 SHADOW_WARN=""
+SHADOW_VER=""
+SHADOW_ON_PATH=""
 FOUND_ANY=""
 while IFS= read -r cand; do
   [ -n "$cand" ] || continue
   V="$("$cand" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
   FOUND_ANY="yes"
+  # On this shell's PATH, or only somewhere launchd looks? Different problem,
+  # different sentence — see the warning below.
+  ON_PATH=no
+  case ":$PATH:" in *":$(dirname "$cand"):"*) ON_PATH=yes ;; esac
+
   MARK=""
   if [ -n "$CLI_VER" ] && [ -n "$V" ] && [ "$V" != "$CLI_VER" ]; then
     MARK="   <-- DIFFERENT VERSION"
     SHADOW_WARN="$cand"
+    SHADOW_VER="$V"
+    SHADOW_ON_PATH="$ON_PATH"
   fi
-  echo "  also on PATH   ${V:-would not run}   ($cand)$MARK"
+  echo "  elsewhere      ${V:-would not run}   ($cand)$MARK"
 done <<EOF
-$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r dir; do
-    [ -n "$dir" ] && [ -x "$dir/rojo" ] && printf '%s\n' "$dir/rojo"
-  done)
+$(printf '%s\n' "$HOME/.rokit/bin" /opt/homebrew/bin /usr/local/bin \
+    $(printf '%s' "$PATH" | tr ':' '\n') \
+  | awk 'NF && !seen[$0]++' \
+  | while IFS= read -r dir; do
+      [ -x "$dir/rojo" ] && printf '%s\n' "$dir/rojo"
+    done)
 EOF
 if [ -z "$FOUND_ANY" ] && [ "$CLI_PATH" = "./rojo" ]; then
-  echo "  also on PATH   nothing — so 'rojo serve' will not work; use './rojo serve'"
+  echo "  elsewhere      none — so 'rojo serve' will not work; use './rojo serve'"
 fi
 
 # ── 2. the process actually serving ─────────────────────────────────────────
@@ -145,15 +166,26 @@ if [ -n "$SHADOW_WARN" ]; then
   PROBLEM=1
   echo "PROBLEM: there is more than one Rojo on this machine, on different versions."
   echo ""
-  echo "  Typing 'rojo serve' runs $SHADOW_WARN, not the ./rojo in this folder."
-  echo "  The shell searches PATH; ./rojo is not on it. So the update landed on a"
-  echo "  binary your shell never reaches."
+  echo "    this folder   $CLI_VER   ./rojo"
+  echo "    other         $SHADOW_VER   $SHADOW_WARN"
   echo ""
-  echo "  Start the server with the one this project uses — the ./ matters:"
+  if [ "$SHADOW_ON_PATH" = "yes" ]; then
+    echo "  That one is on your PATH, so typing 'rojo serve' runs IT, not the ./rojo"
+    echo "  this project maintains. ./rojo is not on PATH at all."
+  else
+    echo "  That one is NOT on your shell's PATH, so it is not what you get by typing"
+    echo "  'rojo serve' — but the autostart job has its own PATH which DOES include"
+    echo "  it, because a launchd job never runs your shell profile. If a server is"
+    echo "  running on the old version, that is where it came from."
+  fi
   echo ""
-  echo "    ./scripts/dev.sh"
+  echo "  Start the server with the one this project uses:"
   echo ""
-  echo "  Or update the other copy too, so it stops mattering which you type."
+  echo "    ./scripts/restart-rojo.sh"
+  echo ""
+  echo "  And to stop the two disagreeing at all, bring the other copy up too:"
+  echo ""
+  echo "    rokit install"
   echo ""
 fi
 

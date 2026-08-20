@@ -41,12 +41,23 @@ done
 # never going to execute would turn that into a setup problem it is not.
 ROJO=""
 if [ "$SERVE" -eq 1 ]; then
-  # Rokit puts tools on the PATH; a hand-unzipped binary sits in the repo root.
-  # Both are normal ways to have Rojo here, so try both before giving up.
-  if command -v rojo >/dev/null 2>&1; then
-    ROJO=rojo
-  elif [ -x ./rojo ]; then
+  #[[
+  #  ./rojo FIRST, and the order is the whole point.
+  #
+  #  This used to ask PATH first, and every other script here asks ./rojo first.
+  #  That disagreement was a real bug with a very quiet presentation: the
+  #  LaunchAgent's plist puts $HOME/.rokit/bin on PATH, so under launchd this
+  #  found a Rokit shim and served whatever rokit.toml pinned — 7.6.1 — while
+  #  update-rojo.sh had put 7.7.0 in ./rojo and every diagnostic agreed the
+  #  update had worked. The interactive shell had no rojo on PATH at all, so the
+  #  two contexts did not even see the same binaries.
+  #
+  #  ./rojo is what update-rojo.sh maintains, so ./rojo is what runs.
+  #]]
+  if [ -x ./rojo ]; then
     ROJO=./rojo
+  elif command -v rojo >/dev/null 2>&1; then
+    ROJO=rojo
   else
     echo "Rojo not found. Install it with 'rokit install', or see docs/SETUP_MAC.md." >&2
     echo "If Rojo is already serving in another window, use: ./scripts/dev.sh --pull-only" >&2
