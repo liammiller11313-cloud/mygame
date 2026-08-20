@@ -77,6 +77,11 @@ local footLabel: TextLabel
      the other's camera. ]]
 local restore = {}
 
+--[[ How to cast a vote on this device, as a string _refresh can append the
+     turnout to. Set when the screen opens, because the scheme can change while
+     it is shut. ]]
+local footHint = ""
+
 local function isTouch(): boolean
 	return UserInputService.TouchEnabled and not UserInputService.MouseEnabled
 end
@@ -185,7 +190,16 @@ local function buildCard(option: any, index: number, total: number)
 
 	local blurb = newLabel(frame, "Blurb", FONT.Body, TEXT.Small, COLOR.TextSecondary)
 	blurb.Position = UDim2.fromOffset(LAYOUT.PanelPadding, LAYOUT.PanelPadding + TEXT.Heading + 6)
-	blurb.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Body * 2)
+	--[[ Fills the space between the title and the tally instead of a fixed two
+	     lines. The cards are two-thirds taller than the strip they replaced, and
+	     a blurb that ignored that left a band of dead panel across the middle of
+	     every one of them. ]]
+	blurb.Size = UDim2.new(
+		1,
+		-LAYOUT.PanelPadding * 2,
+		1,
+		-(LAYOUT.PanelPadding + TEXT.Heading + 6 + TEXT.Large + BAR_HEIGHT + 20)
+	)
 	blurb.TextWrapped = true
 	blurb.TextYAlignment = Enum.TextYAlignment.Top
 	blurb.Text = option.blurb
@@ -204,8 +218,15 @@ local function buildCard(option: any, index: number, total: number)
 	count.TextXAlignment = Enum.TextXAlignment.Right
 	count.Text = "0"
 
+	--[[ Anchored to the card's bottom edge rather than measured down from
+	     CARD_HEIGHT. The cards are resized to fit the roster and the screen — see
+	     layoutPanel — so an absolute offset from the constant is correct only at
+	     one card size, and every other size drew this through the share bar or
+	     out of the card entirely. Everything else here is already scale-anchored;
+	     this was the one that was not. ]]
 	local yours = newLabel(frame, "Yours", FONT.Body, TEXT.Tiny, COLOR.Accent)
-	yours.Position = UDim2.fromOffset(LAYOUT.PanelPadding, CARD_HEIGHT - BAR_HEIGHT - 22)
+	yours.AnchorPoint = Vector2.new(0, 1)
+	yours.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, -(BAR_HEIGHT + 8))
 	yours.Size = UDim2.fromOffset(120, TEXT.Body)
 	yours.Text = ""
 
@@ -282,7 +303,33 @@ function MapVoteController:_refresh()
 		card.stroke.Thickness = if mine or winning then LAYOUT.BorderThickness + 1 else LAYOUT.BorderThickness
 		card.name.TextColor3 = if winning then COLOR.AccentBright else COLOR.TextPrimary
 		card.count.TextColor3 = if mine or winning then COLOR.Accent else COLOR.TextSecondary
-		card.frame.BackgroundTransparency = if state.resolved and not winning then 0.55 else 0.12
+
+		--[[ Three states with three different weights, because at full-screen size
+		     a one-pixel border change is not enough to answer "which one did I
+		     press" at a glance. The card you chose LIFTS — brighter panel, thicker
+		     edge — the winner lifts further, and everything else recedes once the
+		     vote is decided so the result reads without having to find the number. ]]
+		card.stroke.Thickness = if winning
+			then LAYOUT.BorderThickness + 2
+			elseif mine then LAYOUT.BorderThickness + 1
+			else LAYOUT.BorderThickness
+		card.frame.BackgroundTransparency = if state.resolved and not winning
+			then 0.6
+			elseif winning then 0.02
+			elseif mine then 0.04
+			else 0.12
+	end
+
+	--[[ How much of the room has actually voted. Without it the numbers are
+	     unreadable — two votes for one map means nothing until you know whether
+	     that is two players out of two or two out of eight — and it is the line
+	     that tells a player whether waiting will change anything. ]]
+	if footLabel then
+		local voters = math.max(state.voters, total)
+		footLabel.Text = if state.resolved
+			then string.format("%d VOTE%s CAST", total, if total == 1 then "" else "S")
+			elseif voters > 0 then string.format("%d OF %d VOTED  ·  %s", total, voters, footHint)
+			else footHint
 	end
 end
 
@@ -316,7 +363,8 @@ local function setVisible(visible: boolean)
 
 	if visible then
 		state.shownClock = -1
-		footLabel.Text = if isTouch() then "TAP A MAP" else "1 – 4  or  CLICK TO VOTE"
+		footHint = if isTouch() then "TAP A MAP" else "1 – 4  OR  CLICK TO VOTE"
+		footLabel.Text = footHint
 		GamepadFocus.capture(cards[1] and cards[1].button)
 	else
 		GamepadFocus.release(cards[1] and cards[1].button)

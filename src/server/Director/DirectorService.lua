@@ -516,6 +516,24 @@ end
 function DirectorService:_feedField(now: number)
 	SpawnField.step()
 
+	--[[ And one reachability check per tick, against a real survivor.
+
+	     The sweep only produces CANDIDATES now — a downward ray lands on the roof
+	     of a shed as happily as it lands on a street, and both look like flat
+	     ground with clear headroom. A candidate becomes a spawn point when
+	     PathfindingService says a body could walk from it to the team, which is
+	     the question that was never being asked and the reason bodies were
+	     appearing somewhere they could never leave.
+
+	     Passing the survivor rather than letting SpawnField find one keeps the
+	     module free of Players entirely, and this is the tick that already knows
+	     who is alive. ]]
+	local anchor = self._characters[1]
+	local anchorRoot = anchor and anchor:FindFirstChild("HumanoidRootPart")
+	if anchorRoot and anchorRoot:IsA("BasePart") then
+		SpawnField.validate(anchorRoot.Position)
+	end
+
 	if now - (self._breadcrumbAt or 0) < FIELD.BreadcrumbInterval then
 		return
 	end
