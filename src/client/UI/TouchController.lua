@@ -446,12 +446,28 @@ local function suppressRobloxJump()
 		return
 	end
 
+	--[[ One guard at a time. Roblox rebuilds the TouchGui on every respawn, and
+	     a fresh connection per rebuild would leave the trove holding one dead
+	     connection per death for the length of the round. Bounded rather than
+	     large, but there is no reason to hold any: only the CURRENT button can
+	     be shown, so only the current one needs watching. ]]
+	local guard: RBXScriptConnection? = nil
+	trove:add(function()
+		if guard then
+			guard:Disconnect()
+			guard = nil
+		end
+	end)
+
 	local function hide(button: Instance)
 		if not button:IsA("GuiObject") then
 			return
 		end
+		if guard then
+			guard:Disconnect()
+		end
 		button.Visible = false
-		trove:connect(button:GetPropertyChangedSignal("Visible"), function()
+		guard = button:GetPropertyChangedSignal("Visible"):Connect(function()
 			if button.Visible then
 				button.Visible = false
 			end
