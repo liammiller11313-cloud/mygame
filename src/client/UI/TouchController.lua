@@ -50,6 +50,13 @@ local TEXT = UITheme.TextSize
 local BUTTON = 64
 local BIG = 86 -- Fire only
 
+--[[ Jump sits between the two. It is not a combat verb, so it does not get the
+     trigger's size, but it was invisible at 64 among six identical grey circles
+     — and it is the one button a player hunts for when a Hunter has them cornered
+     against a crate. 76 reads as "different" at a glance without competing with
+     the trigger for the corner. ]]
+local JUMP_SIZE = 76
+
 --[[ The ring is the whole of a circular button's edge, so it carries more of the
      read than a square one's border does and is drawn a little heavier. ]]
 local RING_IDLE = 2
@@ -69,7 +76,7 @@ local RING_HELD = 3
 	came out 310 tall: half the screen, on the side the player is trying to see
 	down.
 ]]
-local PAD_LAYOUT: { [string]: { x: number, y: number, size: number } } = {
+local PAD_LAYOUT: { [string]: { x: number, y: number, size: number, prominent: boolean? } } = {
 	Fire = { x = 0, y = 0, size = BIG },
 	Reload = { x = 94, y = 0, size = BUTTON },
 	Aim = { x = 166, y = 0, size = BUTTON },
@@ -80,12 +87,23 @@ local PAD_LAYOUT: { [string]: { x: number, y: number, size: number } } = {
 	--[[ A third column, further from the corner than the rest. Jump and crouch
 	     are movement rather than combat: wanted often enough to earn a button,
 	     rarely enough that they should not sit where a thumb rests. Putting them
-	     at the far edge of the arc is also what keeps them off the trigger. ]]
-	Jump = { x = 238, y = 0, size = BUTTON },
+	     at the far edge of the arc is also what keeps them off the trigger.
+
+	     Jump is the larger of the two and sits on the BOTTOM row, where the thumb
+	     already travels, with crouch above it. They used to be the same size in
+	     the same column and the wrong one was easier to hit: crouching by
+	     accident while trying to clear a rail is a death, and jumping by accident
+	     is nothing. ]]
+	Jump = { x = 232, y = 0, size = JUMP_SIZE, prominent = true },
 	Crouch = { x = 238, y = 94, size = BUTTON },
 }
 
-local PAD_WIDTH = 302
+--[[ The pad is as wide as its leftmost button reaches. Jump is 76 at x=232, so
+     308 — six wider than when both columns were 64. Written out rather than
+     typed as a literal, because the last three times a button moved this number
+     did not, and a pad narrower than its contents clips the far column on the
+     platform least able to spare it. ]]
+local PAD_WIDTH = 232 + JUMP_SIZE
 local PAD_HEIGHT = 158
 
 --[[ The pad clears the ammo counter, which sits above the hotbar in the same
@@ -148,14 +166,30 @@ local state = {
 --[[ A pressed button fills and brightens rather than moving. A control that
      shifts under the thumb holding it is a control the thumb then has to chase,
      and on a touchscreen there is no cursor to re-find it with. ]]
+--[[
+	Every button already wears an orange ring — UITheme's BorderBright IS the
+	accent — so "make it accent coloured" was not available as a way to pick one
+	out. Jump is distinguished by FILL instead: a dark accent wash behind it at
+	roughly half the transparency of the others, which reads as a different
+	KIND of control at a glance rather than the same control shouting.
+
+	It does not compete with the trigger. Fire is bigger and it is in the corner,
+	and a corner is an identity no amount of colour takes away.
+]]
 local function paint(entry, held: boolean)
-	entry.frame.BackgroundTransparency = if held then 0.1 else 0.45
+	local prominent = entry.prominent == true
+	if held then
+		entry.frame.BackgroundTransparency = 0.1
+	else
+		entry.frame.BackgroundTransparency = if prominent then 0.22 else 0.45
+	end
+	entry.frame.BackgroundColor3 = if prominent and not held then COLOR.AccentDim else COLOR.Panel
 	entry.stroke.Color = if held then COLOR.AccentBright else COLOR.BorderBright
-	entry.stroke.Thickness = if held then RING_HELD else RING_IDLE
+	entry.stroke.Thickness = if held or prominent then RING_HELD else RING_IDLE
 	entry.label.TextColor3 = if held then COLOR.AccentBright else COLOR.TextPrimary
 end
 
-local function newButton(action: string, label: string, size: number): any
+local function newButton(action: string, label: string, size: number, prominent: boolean?): any
 	local frame = Instance.new("TextButton")
 	frame.Name = action
 	frame.AutoButtonColor = false
@@ -206,7 +240,14 @@ local function newButton(action: string, label: string, size: number): any
 	padding.PaddingLeft, padding.PaddingRight = inset, inset
 	padding.Parent = text
 
-	local entry = { frame = frame, stroke = stroke, label = text, action = action, contextual = false }
+	local entry = {
+		frame = frame,
+		stroke = stroke,
+		label = text,
+		action = action,
+		contextual = false,
+		prominent = prominent == true,
+	}
 	paint(entry, false)
 
 	--[[ InputBegan/Ended on the button rather than Activated. Activated only
@@ -274,7 +315,7 @@ local function build()
 	for _, binding in input:getBindings() do
 		local place = binding.touch and PAD_LAYOUT[binding.action]
 		if place then
-			local entry = newButton(binding.action, binding.touch, place.size)
+			local entry = newButton(binding.action, binding.touch, place.size, place.prominent)
 			entry.frame.AnchorPoint = Vector2.new(1, 1)
 			entry.frame.Position = UDim2.new(1, -place.x, 1, -place.y)
 			entry.contextual = CONTEXTUAL[binding.action] == true
@@ -365,6 +406,80 @@ function TouchController:setCinematic(value: boolean)
 	refresh()
 end
 
+--[[
+	Takes Roblox's own jump button off the screen.
+
+	The thumbstick is deliberately LEFT ALONE: Roblox's handles multitouch and
+	dead zones better than a reimplementation would, and it lives bottom-left
+	where nothing here goes.
+
+	The jump button is a different story. Roblox draws it in the bottom-RIGHT,
+	which is exactly where this pad anchors — AnchorPoint (1, 1) against the
+	bottom-right corner — so the player got two jump affordances, one of them
+	sitting on the trigger. Two comments in this codebase used to describe this,
+	in two files, saying OPPOSITE things: InputController claimed "TouchController
+	hides Roblox's", and this function claimed the pad "is careful to stay out of"
+	that corner. Neither was true. The pad is in that corner and nothing hid
+	anything.
+
+	── WHY IT IS NOT A SINGLE Visible = false ──────────────────────────────────
+	Three things fight it, and all three are normal:
+
+	  * the TouchGui does not exist yet when this runs on a fresh join;
+	  * Roblox rebuilds it when the character respawns;
+	  * its own TouchJump module sets Visible back to true whenever the humanoid
+	    becomes able to jump, which is every landing.
+
+	So it is a sweep, a watch for it being added, and a guard on the property
+	itself. The guard costs nothing when nobody is writing to it — it fires only
+	on a change, and the only writer is a module that touches it on state
+	transitions.
+
+	Every lookup is FindFirstChild against names that belong to Roblox rather
+	than to us. If they ever rename these, this quietly does nothing, which is
+	the correct failure: a duplicate jump button is a blemish, and an error
+	thrown from start() would take the whole touch HUD down with it.
+]]
+local function suppressRobloxJump()
+	local playerGui = player:FindFirstChildOfClass("PlayerGui")
+	if not playerGui then
+		return
+	end
+
+	local function hide(button: Instance)
+		if not button:IsA("GuiObject") then
+			return
+		end
+		button.Visible = false
+		trove:connect(button:GetPropertyChangedSignal("Visible"), function()
+			if button.Visible then
+				button.Visible = false
+			end
+		end)
+	end
+
+	local function consider(instance: Instance)
+		if instance.Name ~= "JumpButton" then
+			return
+		end
+		--[[ Scoped to Roblox's TouchGui rather than hiding anything anywhere
+		     called JumpButton, so a button of ours by that name is never eaten. ]]
+		local ancestor = instance.Parent
+		while ancestor and ancestor ~= playerGui do
+			if ancestor.Name == "TouchGui" then
+				hide(instance)
+				return
+			end
+			ancestor = ancestor.Parent
+		end
+	end
+
+	for _, descendant in playerGui:GetDescendants() do
+		consider(descendant)
+	end
+	trove:connect(playerGui.DescendantAdded, consider)
+end
+
 function TouchController:isShowing(): boolean
 	return gui ~= nil and gui.Enabled
 end
@@ -379,10 +494,7 @@ function TouchController:start()
 		trove:add(input.schemeChanged:connect(refresh))
 	end
 
-	--[[ Roblox's own thumbstick and jump button are deliberately left alone. The
-	     stick because Roblox's handles multitouch and dead zones better than a
-	     reimplementation would, and jump because it is already in the corner this
-	     pad is careful to stay out of. ]]
+	suppressRobloxJump()
 
 	trove:connect(RunService.RenderStepped, refreshContextual)
 

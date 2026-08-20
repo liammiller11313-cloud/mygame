@@ -147,10 +147,11 @@ local BINDINGS: { Binding } = {
 	--[[ Passed through: Roblox's own control script owns the jump itself, and
 	     sinking Space would break jumping to fix nothing. We only want to know.
 
-	     It still earns a touch button. Roblox draws its own jump button on a
-	     phone, but in the bottom-RIGHT corner — underneath the fire button this
-	     pad puts there — so the two fight for the same thumb. Ours sits in the
-	     pad where it belongs, and TouchController hides Roblox's. ]]
+	     It still earns a touch button. Roblox draws its own on a phone, in the
+	     bottom-RIGHT corner — which is exactly where the pad anchors, so the two
+	     fought for the same thumb. TouchController.suppressRobloxJump now
+	     actually removes Roblox's; for a long time this comment said it did
+	     while nothing anywhere was doing it. ]]
 	{
 		action = Action.Jump,
 		keys = { Enum.KeyCode.Space, Enum.KeyCode.ButtonA },
