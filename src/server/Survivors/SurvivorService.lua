@@ -269,6 +269,34 @@ function SurvivorService:_hasAdrenaline(record): boolean
 	return os.clock() < record.adrenalineUntil
 end
 
+--[[
+	Whether anybody on the team can still turn this around.
+
+	Upright is the obvious half. PINNED is the subtle one, and it is why this is
+	not simply "is anyone standing": a pinned survivor is not down, they are
+	held — and a teammate who is only INCAPACITATED can still shoot the thing
+	holding them, because a downed survivor keeps a pistol. Free them and the
+	team has somebody on their feet again.
+
+	Everything else needs somebody upright to get out of, and requestInteraction
+	enforces exactly that: incapacitated needs a revive, ledge-hanging needs a
+	pull-up, dead needs a defibrillator, and all three are interactions only an
+	upright survivor may begin.
+
+	So a team with nobody upright and nobody pinned has not almost lost. It HAS
+	lost, and what remains is a hundred and fifty seconds of bleed-out with four
+	people on the floor watching. RoundService reads this to end the round there
+	instead.
+]]
+function SurvivorService:canTeamRecover(): boolean
+	for _, record in records do
+		if self:_isUpright(record) or record.state == STATE.Pinned then
+			return true
+		end
+	end
+	return false
+end
+
 -- ─── attribute publishing ────────────────────────────────────────────────────
 
 --[[

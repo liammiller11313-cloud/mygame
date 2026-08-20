@@ -156,8 +156,22 @@ GameModeConfig.Classic = table.freeze({
 
 	-- Reaching the end of wave 7 alive is a win, even at one survivor left.
 	VictoryRequiresAllAlive = false,
-	-- Every survivor dead ends the round immediately rather than running the clock.
+	--[[
+		A team that cannot recover ends the round, rather than running the clock.
+
+		"Cannot recover" is not "everybody dead" — see SurvivorService
+		.canTeamRecover. A reviving, a pull-up and a defibrillator are all
+		interactions that only an UPRIGHT survivor may begin, so the moment the
+		last one goes down the outcome is already decided. Waiting for four
+		incapacitated survivors to bleed out is a hundred and fifty seconds of a
+		result that has happened, spent looking at the floor.
+	]]
 	EndOnTeamWipe = true,
+	--[[ How long the team stays down before it counts. Not a chance to recover —
+		 there is none — but the last survivor going down is a moment, and ending
+		 the round on the same frame reads as the game cutting away from it. Long
+		 enough to see the screen go grey and hear it land. ]]
+	TeamWipeGrace = 3.0,
 
 	-- Between waves the map restocks and downed players get a second chance.
 	BreatherHealsIncapped = false,

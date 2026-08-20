@@ -128,6 +128,10 @@ local generation = 0 -- invalidates every delayed callback from an older round
 local bootComplete = false
 
 local sawLivingSurvivor = false
+--[[ When the team stopped being able to recover, or 0 while it still can. The
+     wipe is declared CLASSIC.TeamWipeGrace after this rather than on the frame
+     it happens — see _checkWipe. ]]
+local downSince = 0
 local warnedFinal = false
 local accumulator = 0
 
@@ -649,6 +653,7 @@ function RoundService:startRound(requestedMode: string?)
 	startedAt = serverNow()
 	roundEndsAt = startedAt + CLASSIC.TotalDuration
 	sawLivingSurvivor = false
+	downSince = 0
 	warnedFinal = false
 
 	--[[
@@ -917,10 +922,30 @@ end
 --  The tick
 -- ════════════════════════════════════════════════════════════════════════════
 
---[[ Nobody left standing ends the round immediately. Read from survivor STATE
-     rather than from whether a character exists: a character is briefly nil
-     across every respawn, and a wipe declared in that gap would end a round the
-     team was still winning. ]]
+--[[
+	A team that cannot recover ends the round.
+
+	Read from survivor STATE rather than from whether a character exists: a
+	character is briefly nil across every respawn, and a wipe declared in that
+	gap would end a round the team was still winning.
+
+	── WHY THIS IS NOT "EVERYBODY DEAD" ────────────────────────────────────────
+	It used to be. getAliveSurvivors counts anyone who is not Dead and not
+	Spectating, which includes every INCAPACITATED survivor — so four people on
+	the floor calling for help was not a wipe, and the round ran until the last
+	of them bled out. At IncapBleedPerSecond against IncapHealth that is a
+	hundred and fifty seconds each, with nobody able to do anything about it:
+	a revive, a pull-up and a defibrillator are interactions only an UPRIGHT
+	survivor may begin, and there were none.
+
+	So the question is not "is anyone alive" but "can anyone still change the
+	outcome", which SurvivorService.canTeamRecover answers — and which
+	deliberately still counts a PINNED survivor, because a downed teammate can
+	shoot the thing holding them.
+
+	`sawLivingSurvivor` still guards the start: every survivor is Spectating for
+	the moment before the first spawn, and that must not read as a wipe.
+]]
 function RoundService:_checkWipe(): boolean
 	if not CLASSIC.EndOnTeamWipe then
 		return false
@@ -932,9 +957,27 @@ function RoundService:_checkWipe(): boolean
 
 	if #survivors:getAliveSurvivors() > 0 then
 		sawLivingSurvivor = true
-		return false
 	end
 	if not sawLivingSurvivor or #Players:GetPlayers() == 0 then
+		downSince = 0
+		return false
+	end
+
+	if survivors:canTeamRecover() then
+		downSince = 0
+		return false
+	end
+
+	--[[ Held for a beat. There is nothing to recover from — the check above
+	     already said so — but the last survivor going down is a moment, and
+	     cutting to a scoreboard on the same frame reads as the game looking
+	     away from it. ]]
+	local now = os.clock()
+	if downSince == 0 then
+		downSince = now
+		return false
+	end
+	if now - downSince < CLASSIC.TeamWipeGrace then
 		return false
 	end
 
