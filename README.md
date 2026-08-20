@@ -62,6 +62,10 @@ The script exists for the case where you are not: Rojo's sync is live, but only
 from the DISK, and the disk only moves when something pulls. See
 `./scripts/dev.sh --help`.
 
+On macOS, `./scripts/autostart.sh install` makes that happen at login through a
+launchd LaunchAgent, so there is no command to run at all. `docs/SETUP_MAC.md`
+covers it.
+
 To build a `.rbxl` without Studio in the loop:
 
 ```bash

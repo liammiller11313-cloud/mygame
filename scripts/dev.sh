@@ -24,6 +24,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+
 INTERVAL=20
 SERVE=1
 while [ $# -gt 0 ]; do
@@ -92,14 +93,29 @@ fi
 
 WARNED_DIVERGED=0
 WARNED_DIRTY=0
+FETCH_FAILS=0
 
 while true; do
   sleep "$INTERVAL" &
   wait $! 2>/dev/null || cleanup
 
   if ! git fetch --quiet origin "$BRANCH" 2>/dev/null; then
-    continue # offline, or a transient failure; try again next tick
+    # Offline, or a transient failure — retrying is right. But a fetch that
+    # fails FOREVER is usually credentials, and when this runs unattended into a
+    # log file, silence is the difference between "nothing has changed" and
+    # "nothing has worked since Tuesday". So it says so, once, after a few.
+    FETCH_FAILS=$((FETCH_FAILS + 1))
+    if [ "$FETCH_FAILS" -eq 3 ] ; then
+      echo "[dev] cannot reach origin (3 tries). Still trying every ${INTERVAL}s."
+      echo "[dev] If this persists, run 'git fetch' by hand here — it will show why."
+      echo "[dev] For a private repo the usual cause is credentials this process cannot reach."
+    fi
+    continue
   fi
+  if [ "$FETCH_FAILS" -ge 3 ]; then
+    echo "[dev] origin is reachable again."
+  fi
+  FETCH_FAILS=0
 
   LOCAL=$(git rev-parse HEAD 2>/dev/null)
   REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null)

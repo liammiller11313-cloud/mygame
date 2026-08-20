@@ -53,15 +53,41 @@ xattr -d com.apple.quarantine rojo
 
 Should print `Rojo 7.6.1`.
 
-## Every time you want to work on the game
+## Fully automatic — set it up once, never think about it again
+
+```bash
+cd ~/Documents/mygame
+./scripts/autostart.sh install
+```
+
+That installs a launchd LaunchAgent, which is macOS's own "run this for me"
+mechanism. From then on, every time you log in: Rojo starts serving this folder,
+and the branch fast-forwards itself as commits land. No Terminal window, nothing
+to remember, and it restarts itself if it ever dies.
+
+```bash
+./scripts/autostart.sh status
+./scripts/autostart.sh log
+./scripts/autostart.sh uninstall
+```
+
+`status` says whether it is running, `log` follows what it is doing (Ctrl+C
+stops watching, not the job), and `uninstall` removes it completely.
+
+**The one thing that cannot be automatic** is Studio's end. Click **Rojo** →
+**Connect** once per Studio session. A plugin button cannot be pressed from
+outside Studio. Check the Rojo plugin's own settings for a reconnect option — if
+your version has one, that closes the last gap.
+
+## Or run it by hand
 
 ```bash
 cd ~/Documents/mygame
 ./scripts/dev.sh
 ```
 
-That runs Rojo **and** keeps the folder up to date with the branch, which is the
-whole loop in one command. If you would rather run Rojo on its own:
+Same thing, in a Terminal window you can watch, stopping when you close it. Rojo
+on its own, without the auto-pull:
 
 ```bash
 ./rojo serve
