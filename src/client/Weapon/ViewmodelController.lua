@@ -1606,6 +1606,10 @@ end
 	every teammate's view of it alone.
 ]]
 local CARRIED_PREFIX = "FL_Carried"
+--[[ CarryVisualService names its mounts CARRY_NAME .. mount, so the two models
+     on a character are exactly these. The hands one is the only one the owner
+     could ever see. ]]
+local HANDS_MOUNT = CARRIED_PREFIX .. "Hands"
 
 --[[
 	Whether this player can currently see their own body.
@@ -1620,6 +1624,23 @@ local function cameraIsThirdPerson(): boolean
 	return player.CameraMode == Enum.CameraMode.Classic and player.CameraMaxZoomDistance > 1
 end
 
+--[[
+	── WHY THIS IS PER-MOUNT AND NOT ONE BOOLEAN ────────────────────────────────
+	Hiding the world weapon is right because the VIEWMODEL replaces it. That is
+	the entire justification, and it only holds when there is a viewmodel.
+
+	A medkit is held, not wielded: WeaponController.activeWeaponId returns "" for
+	the Health slot, so setWeapon(nil) destroys the viewmodel and builds nothing.
+	The kit still goes into the hands mount as FL_CarriedHands — and this
+	function, matching on the prefix alone, blanked it every frame. The player
+	took a kit off the map, selected it, and saw an empty screen; their teammates
+	saw it in their hands the whole time, because LocalTransparencyModifier is
+	client-local. That is the whole of the reported "I can't see it".
+
+	So the hands mount is hidden only when something is standing in for it. The
+	BACK mount stays hidden unconditionally: the owner cannot see their own back,
+	and letting it through would only give it a chance to clip the camera.
+]]
 local function hideOwnWorldWeapon(hidden: boolean)
 	local character = player.Character
 	if not character then
@@ -1627,11 +1648,17 @@ local function hideOwnWorldWeapon(hidden: boolean)
 	end
 	for _, child in character:GetChildren() do
 		if child:IsA("Model") and string.sub(child.Name, 1, #CARRIED_PREFIX) == CARRIED_PREFIX then
+			--[[ `current.weaponId` is nil for every held-not-wielded slot, which is
+			     the same condition that decided not to build a viewmodel. Reading
+			     it here rather than inventing a second flag is what keeps the two
+			     from ever disagreeing. ]]
+			local replaced = child.Name ~= HANDS_MOUNT or current.weaponId ~= nil
+			local hideThis = hidden and replaced
 			for _, descendant in child:GetDescendants() do
 				if descendant:IsA("BasePart") then
-					descendant.LocalTransparencyModifier = if hidden then 1 else 0
+					descendant.LocalTransparencyModifier = if hideThis then 1 else 0
 				elseif descendant:IsA("Light") then
-					descendant.Enabled = not hidden
+					descendant.Enabled = not hideThis
 				end
 			end
 		end

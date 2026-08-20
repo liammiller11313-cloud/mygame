@@ -538,7 +538,13 @@ local function forward(action: string)
 	end
 
 	if action == Action.UseItem then
-		Remotes.Event.UseItem:FireServer(activeSlot())
+		--[[ selectedSlot, not activeSlot. LA.ActiveSlot only moves once SwitchSlot
+		     has been to the server and back, so "4 then H" quickly enough — which
+		     is how anyone actually heals — sent the slot the player was on BEFORE
+		     they selected the kit, and the server used that instead. The memory
+		     right above exists for precisely this race and every other consumable
+		     path already reads it; this one was reading past it. ]]
+		Remotes.Event.UseItem:FireServer(selectedSlot())
 	elseif action == Action.Throw then
 		local origin, direction = cameraRay()
 		Remotes.Event.ThrowItem:FireServer({ origin = origin, direction = direction, power = 1 })
