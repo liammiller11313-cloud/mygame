@@ -171,6 +171,21 @@ GoreConfig.Blood = table.freeze({
 	DecalSizeMax = 4.5,
 	DecalLifetime = 45,
 	DecalFadeTime = 6,
+
+	--[[
+		How long a mark takes to go from fresh to dried.
+
+		Blood does this in life — bright red oxidises to near-black within a
+		couple of minutes — and it is worth having because it puts AGE on the
+		floor. A room you fought through five seconds ago and a room you fought
+		through a minute ago used to look identical until the decals began to
+		fade out entirely; now the fresh ones are bright and the old ones are
+		dark, so the trail behind a team reads as a trail.
+
+		Twelve seconds rather than a literal two minutes: a decal only lives 45,
+		and drying that outlasted the mark would never be seen finishing.
+	]]
+	DecalDryTime = 12,
 	DecalChanceOnHit = 0.55,
 	DecalChanceOnKill = 1.0,
 
@@ -189,6 +204,28 @@ GoreConfig.ScreenBlood = table.freeze({
 	MaxDroplets = 14,
 	FadeTime = 4.0,
 	BoomerBileFadeTime = 12.0,
+
+	--[[
+		Blood on the lens from a kill you made, not one made on you.
+
+		This layer only ever fired when the PLAYER was hit, which left the most
+		violent thing in the game — putting a shotgun through a Common's chest at
+		contact range — entirely off the camera. Standing inside the spray and
+		catching none of it is the one moment the gore system was not selling.
+
+		Only for a body coming APART (gib or dismember), and only within
+		SplashDistance. Every hit would be a permanently red screen, and a kill
+		across the room is not something you would wear.
+
+		SplashCooldown exists because a horde dies in clumps. Three bodies gibbed
+		in the same tenth of a second is one event to the eye and should be one
+		splash; without the gate it is three, and three lands as a wash that
+		hides the next Common.
+	]]
+	SplashOnKill = true,
+	SplashDistance = 9,
+	SplashDroplets = 2,
+	SplashCooldown = 0.35,
 })
 
 --[[ Hit-stop: the single cheapest trick in the satisfaction toolbox. Freezing

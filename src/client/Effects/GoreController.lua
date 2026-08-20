@@ -300,6 +300,8 @@ type DecalSlot = {
 	growUntil: number, -- 0 unless this is a pool that is still spreading
 	targetSize: number,
 	normal: Vector3,
+	dryUntil: number, -- 0 once the mark has finished darkening
+	dryTime: number,
 }
 
 local sprays: { SpraySlot } = table.create(SPRAY_POOL)
@@ -543,6 +545,12 @@ local function decalSlot(): DecalSlot
 			growUntil = 0,
 			targetSize = 0,
 			normal = Vector3.yAxis,
+			--[[ When this mark stops darkening, and over how long. Zero means it
+			     is done and the colour is left alone — which is most of them most
+			     of the time, and is why drying costs nothing past the first few
+			     seconds of a mark's life. ]]
+			dryUntil = 0,
+			dryTime = BLOOD.DecalDryTime,
 		}
 		decals[decalCursor] = slot
 	end
@@ -563,7 +571,15 @@ local function placeDisc(slot: DecalSlot, position: Vector3, normal: Vector3, di
 	part.CFrame = faceAlong(position + normal * DECAL_OFFSET, normal)
 		* CFrame.Angles(0, math.pi * 0.5, 0)
 		* CFrame.Angles(random:NextNumber(0, math.pi * 2), 0, 0)
-	part.Color = if random:NextNumber() < 0.5 then BLOOD.Color else BLOOD.DarkColor
+	--[[ Always fresh, and it dries from here — which replaces the coin flip
+	     between fresh and dark this used to do. That coin flip WAS the variety
+	     mechanism, so the variety has to come from somewhere: it comes from age
+	     now, which is better, because a bright mark next to a dark one means
+	     something instead of being noise. Each one dries on its own slightly
+	     different clock so two laid in the same instant do not move in lockstep. ]]
+	part.Color = BLOOD.Color
+	slot.dryTime = BLOOD.DecalDryTime * random:NextNumber(0.75, 1.35)
+	slot.dryUntil = os.clock() + slot.dryTime
 	slot.transparency = random:NextNumber(0.04, 0.2)
 	part.Transparency = slot.transparency
 	slot.normal = normal
@@ -650,6 +666,20 @@ local function updateDecals(now: number)
 			local diameter = BLOOD.DecalSizeMin + (slot.targetSize - BLOOD.DecalSizeMin) * alpha
 			local size = slot.part.Size
 			slot.part.Size = Vector3.new(size.X, diameter, diameter)
+		end
+
+		--[[ Fresh blood is bright and old blood is nearly black. Only while it is
+		     still drying: past that the colour is final and writing it every
+		     frame would be a property write per decal forever for no change. ]]
+		if slot.dryUntil > 0 then
+			local left = slot.dryUntil - now
+			if left <= 0 then
+				slot.dryUntil = 0
+				slot.part.Color = BLOOD.DarkColor
+			else
+				local dried = 1 - left / math.max(slot.dryTime, 0.01)
+				slot.part.Color = BLOOD.Color:Lerp(BLOOD.DarkColor, math.clamp(dried, 0, 1))
+			end
 		end
 
 		local remaining = slot.expiresAt - now
@@ -891,6 +921,57 @@ end
 
 -- ── the event ───────────────────────────────────────────────────────────────
 
+--[[
+	Blood on the lens from a kill YOU made.
+
+	This layer only ever fired when the player was hit, which left the most
+	violent thing in the game — a shotgun through a Common's chest at contact
+	range — entirely off the camera. Standing inside the spray and catching none
+	of it was the one moment the gore system was not selling.
+
+	Only a body coming APART, and only close. Every hit would be a permanently
+	red screen, and a kill across the room is not something you would wear.
+
+	── THE COOLDOWN IS NOT POLISH ──────────────────────────────────────────────
+	A horde dies in clumps. Three bodies gibbed inside the same tenth of a second
+	are ONE event to the eye and should be one splash; ungated they are three,
+	and three lands as a wash that hides the next Common walking through it. The
+	gate is what keeps this a punctuation mark rather than a screen effect.
+]]
+local lastSplashAt = 0
+
+local function splashLens(position: Vector3, level: string?)
+	if not SCREEN.SplashOnKill then
+		return
+	end
+	--[[ Incinerate is deliberately absent as well as everything below Dismember:
+	     a burning body throws embers and smoke, and red on the lens from one
+	     would read as a wound the player does not have. ]]
+	if level ~= LEVEL.Gib and level ~= LEVEL.Dismember then
+		return
+	end
+
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local delta = position - camera.CFrame.Position
+	if delta:Dot(delta) > SCREEN.SplashDistance * SCREEN.SplashDistance then
+		return
+	end
+
+	local now = os.clock()
+	if now - lastSplashAt < SCREEN.SplashCooldown then
+		return
+	end
+	lastSplashAt = now
+
+	--[[ Through the public method rather than straight to spawnDroplets, because
+	     that is where the gore-off check and the OverlayController hand-off live,
+	     and a player who turned gore off did not ask for a red screen. ]]
+	GoreController:screenBlood(SCREEN.SplashDroplets)
+end
+
 local function onGoreEvent(payload: any)
 	if not enabled or typeof(payload) ~= "table" then
 		return
@@ -930,6 +1011,8 @@ local function onGoreEvent(payload: any)
 		local seed = if typeof(payload.seed) == "number" then payload.seed else 0
 		spawnGibs(position, direction, seed, payload.count)
 	end
+
+	splashLens(position, level)
 end
 
 -- ── public API ──────────────────────────────────────────────────────────────
