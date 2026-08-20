@@ -140,6 +140,12 @@ local SPRAY_POOL = 20
 
 -- Expiry, fades and pool growth all run on human timescales. Sweeping at 20Hz
 -- instead of 60 is the same behaviour for a third of the cost.
+--[[ When a loose chunk stops counting as a physics body. See updateGibs. Both
+     are generous: a gib nudged along the floor by a passing Common is still
+     moving, and anchoring it mid-slide is the one way this could be seen. ]]
+local GIB_SETTLE_SPEED = 1.5
+local GIB_SETTLE_TIME = 0.5
+
 local SWEEP_HZ = 20
 local SWEEP_INTERVAL = 1 / SWEEP_HZ
 
@@ -293,7 +299,14 @@ type SpraySlot = {
 	mist: ParticleEmitter,
 	style: string?,
 }
-type GibSlot = { part: BasePart, expiresAt: number, trail: ParticleEmitter, trailUntil: number }
+type GibSlot = {
+	part: BasePart,
+	expiresAt: number,
+	trail: ParticleEmitter,
+	trailUntil: number,
+	-- When this chunk stops being a physics body. 0 while it is still moving.
+	settleAt: number,
+}
 type DecalSlot = {
 	part: BasePart,
 	expiresAt: number,
@@ -758,7 +771,7 @@ local function gibSlot(): GibSlot
 		trail.LightEmission = 0
 		trail.Parent = part
 
-		slot = { part = part, expiresAt = 0, trail = trail, trailUntil = 0 }
+		slot = { part = part, expiresAt = 0, trail = trail, trailUntil = 0, settleAt = 0 }
 		gibs[gibCursor] = slot
 	end
 	return slot
@@ -816,6 +829,10 @@ local function spawnGibs(position: Vector3, direction: Vector3, seed: number, co
 		)
 		local now = os.clock()
 		slot.expiresAt = now + GIBS.Lifetime
+		--[[ A recycled slot can still be carrying the settle deadline of the
+		     chunk before it, and a stale one already in the past would anchor
+		     this chunk on the first frame its velocity dipped — mid-flight. ]]
+		slot.settleAt = 0
 		--[[ Only while it is actually travelling. Long enough to draw the arc,
 		     short enough that a chunk which has landed is not still bleeding. ]]
 		slot.trailUntil = now + GIB_TRAIL_SECONDS
@@ -826,6 +843,7 @@ end
 local function retireGib(slot: GibSlot)
 	slot.expiresAt = 0
 	slot.trailUntil = 0
+	slot.settleAt = 0
 	slot.trail.Enabled = false
 	local part = slot.part
 	part.Anchored = true
@@ -845,6 +863,34 @@ local function updateGibs(now: number)
 		end
 		if slot.expiresAt > 0 and now >= slot.expiresAt then
 			retireGib(slot)
+			continue
+		end
+
+		--[[
+			A chunk that has come to rest stops being a physics body.
+
+			Same trade GoreService makes for corpses, and for the same reason: a
+			gib is airborne for well under a second and then lies on the floor for
+			eleven more, and for those eleven the solver is still integrating it,
+			resolving its contacts and waking it whenever something brushes past.
+			Ninety of those is a constant physics load on the client for chunks
+			that are, visibly, not going anywhere.
+
+			Anchoring is invisible at the moment it happens because it only
+			happens after the chunk has been under GIB_SETTLE_SPEED for
+			GIB_SETTLE_TIME. Roblox's own sleeping does some of this, but a body
+			resting on another body it can collide with is woken constantly during
+			a horde, which is exactly when this needs to hold.
+		]]
+		if slot.expiresAt > 0 and not slot.part.Anchored then
+			if slot.part.AssemblyLinearVelocity.Magnitude >= GIB_SETTLE_SPEED then
+				slot.settleAt = 0
+			elseif slot.settleAt == 0 then
+				slot.settleAt = now + GIB_SETTLE_TIME
+			elseif now >= slot.settleAt then
+				slot.settleAt = 0
+				slot.part.Anchored = true
+			end
 		end
 	end
 end

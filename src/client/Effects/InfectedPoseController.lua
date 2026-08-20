@@ -458,6 +458,17 @@ local function clearPose(body: Body)
 	end
 end
 
+--[[ Blends one WALK/RUN tuning value for a body's current gait.
+
+     At module scope rather than as a closure inside poseBody, which is where it
+     used to live: this loop runs over every live body every frame, and a closure
+     declared inside it is one table allocation per body per frame — several
+     thousand a second at the roster's ceiling, in the hottest loop the client
+     owns, for a function that captures nothing it could not be handed. ]]
+local function mixed(field: string, run: number, move: number): number
+	return (WALK[field] + (RUN[field] - WALK[field]) * run) * move
+end
+
 local function poseBody(body: Body, dt: number)
 	local root = body.root
 	local humanoid = body.humanoid
@@ -495,29 +506,26 @@ local function poseBody(body: Body, dt: number)
 
 	local move = body.moveBlend
 	local run = body.runBlend
-	local function mix(field: string): number
-		return (WALK[field] + (RUN[field] - WALK[field]) * run) * move
-	end
 
 	local swing = math.sin(body.stride + body.phase)
 	local counter = math.sin(body.stride + body.phase + math.pi)
 	-- Twice the stride rate: the body rolls once per STEP, not once per cycle.
 	local lurch = math.sin((body.stride + body.phase) * 2)
 
-	local legSwing = mix("LegSwing")
-	local armSwing = mix("ArmSwing")
-	local armHang = mix("ArmHang")
-	local elbow = mix("ElbowBend")
-	local knee = mix("KneeBend")
-	local lean = mix("TorsoLean") * body.lean
-	local roll = mix("TorsoRoll")
+	local legSwing = mixed("LegSwing", run, move)
+	local armSwing = mixed("ArmSwing", run, move)
+	local armHang = mixed("ArmHang", run, move)
+	local elbow = mixed("ElbowBend", run, move)
+	local knee = mixed("KneeBend", run, move)
+	local lean = mixed("TorsoLean", run, move) * body.lean
+	local roll = mixed("TorsoRoll", run, move)
 
 	-- Idle motion, faded in as the movement fades out.
 	local still = 1 - move
 	local breath = math.sin(clock * IDLE.BreathRate + body.phase) * IDLE.BreathAmount * still
 	local sway = math.sin(clock * IDLE.SwaySpeed + body.phase) * IDLE.SwayAmount * still
-	local headLoll = body.tilt * (IDLE.HeadLoll * still + mix("HeadLoll"))
-	local headBob = math.sin((body.stride + body.phase) * 2) * mix("HeadBob")
+	local headLoll = body.tilt * (IDLE.HeadLoll * still + mixed("HeadLoll", run, move))
+	local headBob = math.sin((body.stride + body.phase) * 2) * mixed("HeadBob", run, move)
 
 	for _, joint in body.joints do
 		local motor = joint.motor
