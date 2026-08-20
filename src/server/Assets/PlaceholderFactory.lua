@@ -667,18 +667,13 @@ local SHAPES = {
      quietly lacks a joint name would show up much later as "dismemberment
      stopped working on Chargers", which is a miserable thing to debug. ]]
 local function verifySeverable(key: string, model: Model)
+	--[[ One walk of the rig, resolving which end of each joint is the limb. Not
+	     Part1: real models disagree about that in three different ways and
+	     RigUtil.mapMotorChildren spells them out. Reading Part1 here reported a
+	     rig's head joint missing when the neck was simply stored on the head. ]]
 	local motors: { [string]: boolean } = {}
-	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("Motor6D") then
-			--[[ The child end, not Part1: a legacy R6 rig re-jointed by a startup
-			     script commonly ends up with the torso on Part1 for every limb,
-			     and reading Part1 would file both shoulders under "Torso" and then
-			     report the arms as missing joints they plainly have. ]]
-			local child = RigUtil.motorChild(descendant)
-			if child then
-				motors[child.Name] = true
-			end
-		end
+	for _, child in RigUtil.mapMotorChildren(model) do
+		motors[child.Name] = true
 	end
 
 	-- GoreConfig's Severable list carries both namings. A rig only has to satisfy

@@ -448,6 +448,31 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 	model:PivotTo(base + Vector3.new(0, lift, 0))
 	model.Parent = self._folder
 
+	--[[
+		A rig with no joints is a pile of loose parts, and it has to be caught HERE
+		rather than at the template.
+
+		PlaceholderFactory audits every template at boot, but a legacy R6 model
+		genuinely has no Motor6Ds at that point — Roblox builds them when the body
+		is parented into Workspace, which is the line directly above this one. So
+		the template audit cannot tell "welded, will never work" apart from "R6,
+		not built yet", and it says so.
+
+		This is the first moment the answer is real, and the failure it catches is
+		spectacular: the parts are unanchored and unjoined, so the Humanoid holds
+		the HumanoidRootPart up at HipHeight while everything else falls or hangs
+		where it was placed. A zombie floating in pieces — and worse, one whose
+		ROOT is still being driven at the team by a brain that neither knows nor
+		cares that the visible body is somewhere else. That is damage arriving
+		from a zombie that is not where it looks like it is.
+
+		Welding is not a fix for the model, and it is not meant to be. It is the
+		difference between a body that comes apart in mid-air and one that walks
+		up to you as a rigid slab: still wrong, still worth fixing in Studio, but
+		playable and honest about where the hitbox is.
+	]]
+	self:_boltTogether(model, kind)
+
 	local record = {
 		model = model,
 		kind = kind,
@@ -653,6 +678,50 @@ function InfectedService:damage(model: Model, amount: number, ctx: any): any
 		severedPart = nil,
 		remainingHealth = remaining,
 	}
+end
+
+--[[
+	Holds an unrigged body together, and says so once per variant.
+
+	Only ever runs for a rig that came out of Workspace with no Motor6Ds at all.
+	A rig with SOME joints is left completely alone: a partially rigged model is a
+	model whose author made choices, and welding over those would freeze the limbs
+	that do work.
+]]
+function InfectedService:_boltTogether(model: Model, kind: string)
+	if #RigUtil.getMotors(model) > 0 then
+		return
+	end
+
+	local root = RigUtil.getRoot(model)
+	if not root then
+		return
+	end
+
+	local welded = 0
+	for _, part in RigUtil.getBodyParts(model) do
+		if part ~= root and #part:GetJoints() == 0 then
+			local weld = Instance.new("WeldConstraint")
+			weld.Name = "FL_RigBolt"
+			weld.Part0 = root
+			weld.Part1 = part
+			weld.Parent = root
+			welded += 1
+		end
+	end
+
+	warnOnce(
+		"unrigged:" .. tostring(model:GetAttribute("FL_Variant") or kind),
+		string.format(
+			"%s variant %q has NO Motor6D joints in the world, so its limbs were welded to the "
+				.. "root to stop the body coming apart in mid-air (%d part(s)). It cannot animate "
+				.. "or be dismembered and it will slide around rigid. Open the model in Studio and "
+				.. "join its limbs to the torso with Motor6D.",
+			kind,
+			tostring(model:GetAttribute("FL_Variant") or model.Name),
+			welded
+		)
+	)
 end
 
 --[[ One death, exactly once. The body is left standing for GoreService. ]]

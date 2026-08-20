@@ -109,46 +109,110 @@ function RigUtil.getMotors(model: Model): { Motor6D }
 end
 
 --[[
-	Which end of a Motor6D is the CHILD — the part that hangs off the joint.
+	Which end of every Motor6D in a rig is the CHILD, resolved by walking the rig.
 
 	The convention is Part0 = parent, Part1 = child, and the motor lives inside
-	Part0. Enough rigs in the wild are wired the other way round that reading
-	Part1 and trusting it is not safe: a legacy R6 model whose limbs were re-
-	attached by a startup script commonly ends up with
+	Part0. Real rigs break that in at least three ways, and a heuristic that
+	handles one of them gets another wrong:
 
-	    Motor6D "Left Shoulder"  Parent = Torso  Part0 = Left Arm  Part1 = Torso
+	    A  conventional          Parent=Torso  Part0=Torso  Part1=Left Arm
+	    B  reversed endpoints    Parent=Torso  Part0=Left Arm  Part1=Torso
+	    C  motor stored on the   Parent=Head   Part0=UpperTorso  Part1=Head
+	       child part
 
-	which is a perfectly functional joint and drives the arm exactly as intended.
-	Reading Part1 there returns the TORSO, so both shoulders register under the
-	same name, one of them is lost outright, and the arms neither ragdoll nor come
-	off — silently, because nothing about the rig is actually broken.
+	Reading Part1 gets B wrong. "The endpoint that is not the motor's Parent"
+	gets A and B right and C exactly backwards — it names UpperTorso as the child
+	of the neck, which is why a rig with a perfectly good head reported its head
+	joint missing and refused to decapitate.
 
-	The motor's own Parent is what settles it: a joint is stored inside one of the
-	two parts it joins, and that part is the anchor, so the other one is the
-	child. Falls back to the convention when the motor lives somewhere else
-	entirely.
+	None of that is guessable from one motor in isolation, so this does not
+	guess. It walks the joint graph outward from the HumanoidRootPart: whichever
+	endpoint is reached FIRST is the parent and the other is the child, because
+	that is what parent and child mean. Every wiring above falls out of it
+	correctly, including ones nobody has thought of.
+
+	Returns a map so the walk is paid for once per rig rather than once per
+	joint — every caller here wants the whole rig anyway.
 ]]
+function RigUtil.mapMotorChildren(model: Model): { [Motor6D]: BasePart }
+	local motors = RigUtil.getMotors(model)
+	local children: { [Motor6D]: BasePart } = {}
+	if #motors == 0 then
+		return children
+	end
+
+	--[[ Every motor touching a given part, so the walk can step outward without
+	     rescanning the list at each node. ]]
+	local touching: { [BasePart]: { Motor6D } } = {}
+	for _, motor in motors do
+		local part0, part1 = motor.Part0, motor.Part1
+		if part0 and part1 and part0 ~= part1 then
+			touching[part0] = touching[part0] or {}
+			touching[part1] = touching[part1] or {}
+			table.insert(touching[part0], motor)
+			table.insert(touching[part1], motor)
+		end
+	end
+
+	local root = RigUtil.getRoot(model)
+	if not root then
+		return children
+	end
+
+	local seen: { [BasePart]: boolean } = { [root] = true }
+	local queue: { BasePart } = { root }
+	local head = 1
+	while head <= #queue do
+		local part = queue[head]
+		head += 1
+		for _, motor in touching[part] or {} do
+			if children[motor] then
+				continue
+			end
+			--[[ We arrived at `part`, so `part` is this joint's parent end and
+			     whatever is on the other side of it is the child. ]]
+			local other = if motor.Part0 == part then motor.Part1 else motor.Part0
+			if other and not seen[other] then
+				seen[other] = true
+				children[motor] = other
+				table.insert(queue, other)
+			end
+		end
+	end
+
+	--[[ Anything the walk never reached is a joint on a limb that is not
+	     connected to the root at all. It still has to resolve to SOMETHING or it
+	     silently disappears from every lookup, so it falls back to the
+	     convention — and a rig in that state has bigger problems, which
+	     PlaceholderFactory's audit is what reports. ]]
+	for _, motor in motors do
+		if not children[motor] and motor.Part1 then
+			children[motor] = motor.Part1
+		end
+	end
+
+	return children
+end
+
+--[[ The child end of ONE motor, for a caller that has a motor and not a rig.
+     Prefer mapMotorChildren when you are about to ask about several. ]]
 function RigUtil.motorChild(motor: Motor6D): BasePart?
-	local part0, part1 = motor.Part0, motor.Part1
-	if not part0 or not part1 then
-		return nil
+	local model = motor:FindFirstAncestorOfClass("Model")
+	if model then
+		local resolved = RigUtil.mapMotorChildren(model)[motor]
+		if resolved then
+			return resolved
+		end
 	end
-	if part1 == motor.Parent then
-		return part0
-	end
-	if part0 == motor.Parent then
-		return part1
-	end
-	return part1
+	return motor.Part1
 end
 
 --[[ The Motor6D that attaches a named part to its parent, or nil. Severing a
      limb is exactly "destroy this motor and let physics take over". Resolves the
      child end rather than reading Part1 — see RigUtil.motorChild. ]]
 function RigUtil.findMotorForPart(model: Model, partName: string): Motor6D?
-	for _, motor in RigUtil.getMotors(model) do
-		local child = RigUtil.motorChild(motor)
-		if child and child.Name == partName then
+	for motor, child in RigUtil.mapMotorChildren(model) do
+		if child.Name == partName then
 			return motor
 		end
 	end

@@ -44,13 +44,27 @@ local player = Players.LocalPlayer
      a map is a thing you choose rather than a row you skim past, and readable
      from a phone held at arm's length. ]]
 local CARD_WIDTH = 320
-local CARD_HEIGHT = 210
+--[[ Sized to its contents. 210 was chosen to make the cards feel like the
+     screen's main event and instead gave every one of them a hand's width of
+     empty panel between a one-line blurb and the tally — which reads as a card
+     that failed to load rather than as a card with room to breathe. ]]
+local CARD_HEIGHT = 146
 local CARD_GAP = 18
 
 --[[ The panel the cards sit inside. Wide enough for four across at the sizes
      above plus its own padding, which is the whole roster. ]]
+local KEY_CAP = 26
 local PANEL_PADDING = 34
-local HEADER_HEIGHT = 96
+
+--[[ The header, as three stacked rows rather than a total everything has to be
+     squeezed under. HEADER_HEIGHT is their sum, so moving one row cannot put it
+     through another — which is exactly what happened when the clock and the rule
+     were both positioned against the total independently. ]]
+local TITLE_ROW = TEXT.Display + 8
+local RULE_ROW = 18
+local CLOCK_ROW = TEXT.Heading + 6
+local HEADER_HEIGHT = TITLE_ROW + RULE_ROW + CLOCK_ROW
+
 local FOOTER_HEIGHT = 44
 local BAR_HEIGHT = 4
 local BAR_CHASE = 1 / MOTION.Normal
@@ -204,12 +218,30 @@ local function buildCard(option: any, index: number, total: number)
 	blurb.TextYAlignment = Enum.TextYAlignment.Top
 	blurb.Text = option.blurb
 
-	local key = newLabel(frame, "Key", FONT.Stencil, TEXT.Small, COLOR.TextDim)
-	key.AnchorPoint = Vector2.new(1, 0)
-	key.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, LAYOUT.PanelPadding)
-	key.Size = UDim2.fromOffset(20, TEXT.Heading)
-	key.TextXAlignment = Enum.TextXAlignment.Right
+	--[[
+		The number key that votes for this card, drawn as a KEY CAP.
+
+		It used to be a bare digit in the top-right corner, directly diagonal from
+		the tally in the bottom-right — two numbers on one card, one of which is
+		how many people chose this map and the other of which is which button to
+		press. On a two-map vote the caps read "1" and "2" and looked exactly like
+		a score of one against two. A boxed, dim, bracket-less cap with a border
+		is a keyboard key; a number on its own is a quantity.
+	]]
+	local keyCap = newFrame(frame, "KeyCap", COLOR.Background, 0.35)
+	keyCap.AnchorPoint = Vector2.new(1, 0)
+	keyCap.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, LAYOUT.PanelPadding + 2)
+	keyCap.Size = UDim2.fromOffset(KEY_CAP, KEY_CAP)
+	local keyStroke = Instance.new("UIStroke")
+	keyStroke.Color = COLOR.Border
+	keyStroke.Thickness = LAYOUT.BorderThickness
+	keyStroke.Parent = keyCap
+
+	local key = newLabel(keyCap, "Key", FONT.Body, TEXT.Small, COLOR.TextDim)
+	key.Size = UDim2.fromScale(1, 1)
+	key.TextXAlignment = Enum.TextXAlignment.Center
 	key.Text = tostring(index)
+	keyCap.Visible = not isTouch()
 
 	local count = newLabel(frame, "Count", FONT.Numeric, TEXT.Large, COLOR.TextSecondary)
 	count.AnchorPoint = Vector2.new(1, 1)
@@ -224,6 +256,15 @@ local function buildCard(option: any, index: number, total: number)
 	     one card size, and every other size drew this through the share bar or
 	     out of the card entirely. Everything else here is already scale-anchored;
 	     this was the one that was not. ]]
+	--[[ And the tally says what it is. One labelled number and one boxed key is
+	     readable; two unlabelled numbers on the same card are not. ]]
+	local countCaption = newLabel(frame, "CountCaption", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	countCaption.AnchorPoint = Vector2.new(1, 1)
+	countCaption.Position = UDim2.new(1, -(LAYOUT.PanelPadding + 46), 1, -(BAR_HEIGHT + 10))
+	countCaption.Size = UDim2.fromOffset(52, TEXT.Body)
+	countCaption.TextXAlignment = Enum.TextXAlignment.Right
+	countCaption.Text = "VOTES"
+
 	local yours = newLabel(frame, "Yours", FONT.Body, TEXT.Tiny, COLOR.Accent)
 	yours.AnchorPoint = Vector2.new(0, 1)
 	yours.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, -(BAR_HEIGHT + 8))
@@ -363,7 +404,13 @@ local function setVisible(visible: boolean)
 
 	if visible then
 		state.shownClock = -1
-		footHint = if isTouch() then "TAP A MAP" else "1 – 4  OR  CLICK TO VOTE"
+		--[[ The real number of options, not the roster's ceiling. "1 – 4" over a
+		     two-map vote tells a player two keys that do nothing. ]]
+		local count = #cards
+		footHint = if isTouch()
+			then "TAP A MAP"
+			elseif count > 1 then string.format("1 – %d  OR  CLICK TO VOTE", count)
+			else "CLICK TO VOTE"
 		footLabel.Text = footHint
 		GamepadFocus.capture(cards[1] and cards[1].button)
 	else
@@ -549,14 +596,19 @@ local function build()
 
 	clockLabel = newLabel(root, "Clock", FONT.Stencil, TEXT.Heading, COLOR.TextSecondary)
 	clockLabel.AnchorPoint = Vector2.new(0.5, 0)
-	clockLabel.Position = UDim2.new(0.5, 0, 0, TEXT.Display + 10)
-	clockLabel.Size = UDim2.new(1, 0, 0, TEXT.Heading + 4)
+	--[[ Below the rule, not across it. The clock used to start at Display + 10
+	     and run 34 tall, and the rule sat at HEADER_HEIGHT - 12 — which is inside
+	     that span, so the orange line struck straight through the number. The
+	     three header rows are laid out in order now and HEADER_HEIGHT is their
+	     sum rather than a round number they have to fit inside. ]]
+	clockLabel.Position = UDim2.new(0.5, 0, 0, TITLE_ROW + RULE_ROW)
+	clockLabel.Size = UDim2.new(1, 0, 0, CLOCK_ROW)
 	clockLabel.TextXAlignment = Enum.TextXAlignment.Center
 	clockLabel.Text = ""
 
 	local rule = newFrame(root, "Rule", COLOR.BorderBright)
 	rule.AnchorPoint = Vector2.new(0.5, 0)
-	rule.Position = UDim2.new(0.5, 0, 0, HEADER_HEIGHT - 12)
+	rule.Position = UDim2.new(0.5, 0, 0, TITLE_ROW + (RULE_ROW - 2) * 0.5)
 	rule.Size = UDim2.fromOffset(96, 2)
 
 	cardsHolder = newFrame(root, "Cards", COLOR.Background, 1)

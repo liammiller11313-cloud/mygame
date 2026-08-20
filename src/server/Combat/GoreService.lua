@@ -338,21 +338,20 @@ local function collectRig(model: Model): ({ BasePart }, { [string]: Motor6D })
 	local parts: { BasePart } = {}
 	local motors: { [string]: Motor6D } = {}
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("BasePart") then
-			if not descendant:FindFirstAncestorWhichIsA("Accessory") then
-				table.insert(parts, descendant)
-			end
-		elseif descendant:IsA("Motor6D") then
-			--[[ Not Part1 directly. See RigUtil.motorChild: a rig wired backwards
-			     puts the TORSO on Part1 for every limb, so both shoulders would
-			     land on the same key and one would be dropped — arms that never
-			     ragdoll and never come off, on a rig where nothing is wrong. ]]
-			local child = RigUtil.motorChild(descendant)
-			if child then
-				motors[child.Name] = descendant
-			end
+		if descendant:IsA("BasePart") and not descendant:FindFirstAncestorWhichIsA("Accessory") then
+			table.insert(parts, descendant)
 		end
 	end
+
+	--[[ Which end of each joint is the limb, resolved by walking the rig outward
+	     from the root rather than by trusting Part1 — see RigUtil.mapMotorChildren
+	     for the three wirings that appear in real models and disagree. Reading
+	     Part1 filed both shoulders of a backwards rig under "Torso" and dropped
+	     one of them outright: arms that never ragdolled and never came off. ]]
+	for motor, child in RigUtil.mapMotorChildren(model) do
+		motors[child.Name] = motor
+	end
+
 	return parts, motors
 end
 
@@ -882,6 +881,13 @@ end
 --[[ One Motor6D becomes one BallSocketConstraint at exactly the same place. The
      attachments are built from C0/C1 so the joint sits where the rig's author
      put it, whatever the rig type or scale. ]]
+--[[ The limb end of one motor, during a ragdoll. The rig has already been
+     walked by collectRig at this point, so this asks the same question the same
+     way rather than a second, differently-wrong way. ]]
+local function childOf(motor: Motor6D): BasePart?
+	return RigUtil.motorChild(motor)
+end
+
 function GoreService:_replaceMotor(motor: Motor6D): BallSocketConstraint?
 	local part0, part1 = motor.Part0, motor.Part1
 	if not part0 or not part1 then
@@ -889,7 +895,7 @@ function GoreService:_replaceMotor(motor: Motor6D): BallSocketConstraint?
 	end
 	--[[ Which end the limb is on, for the socket's parent below. The constraint
 	     itself is symmetric and works either way; where it LIVES is not. ]]
-	local child = RigUtil.motorChild(motor) or part1
+	local child = childOf(motor) or part1
 
 	local a0 = Instance.new("Attachment")
 	a0.Name = "FL_RagdollA0"

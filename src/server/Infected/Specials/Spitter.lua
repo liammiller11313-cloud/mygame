@@ -67,6 +67,11 @@ local ACID_DPS_MAX = 22
 local ACID_RAMP = 3.0
 local ACID_TICK = 0.4
 
+--[[ How far above and below the pool's own surface a body still counts as
+     standing in it. Asymmetric on purpose — see the test in sweepPools. ]]
+local ACID_BELOW = -1.5
+local ACID_ABOVE = 6.5
+
 --[[ How many pools may exist at once, across every Spitter on the server. Two
      Spitters and a corridor is a corridor nobody crosses, and that is a wipe
      rather than pressure. ]]
@@ -207,11 +212,20 @@ local function sweepPools(now: number)
 			if not character or not root then
 				continue
 			end
-			--[[ Flat distance. A survivor on a catwalk directly above a pool is
-			     not standing in it, so the vertical component is tested
-			     separately and tightly. ]]
+			--[[
+				Flat distance, and only from ABOVE.
+
+				A survivor on a catwalk over a pool is not standing in it, and
+				neither is one in the room below it. The old test was a symmetric
+				six studs, which is more than a floor is thick — so acid on the
+				ground floor burned anyone directly above it through the boards,
+				and that is damage arriving from nothing the player can see.
+
+				The band is the height of a body standing on the surface: a little
+				below to allow for a pool on a slope, and one body's worth above.
+			]]
 			local delta = root.Position - centre
-			if math.abs(delta.Y) > 6 then
+			if delta.Y < ACID_BELOW or delta.Y > ACID_ABOVE then
 				continue
 			end
 			if Vector3.new(delta.X, 0, delta.Z).Magnitude > POOL_RADIUS then
