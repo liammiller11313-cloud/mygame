@@ -92,6 +92,7 @@ local GIBS = GoreConfig.Gibs
 local BLOOD = GoreConfig.Blood
 local HITSTOP = GoreConfig.HitStop
 local BUDGET = GoreConfig.Budget
+local DEATH_ANIM = GoreConfig.DeathAnimation
 local REGION = Enums.HitRegion
 local LEVEL = Enums.GoreLevel
 
@@ -608,7 +609,42 @@ function GoreService:processKill(model: Model, ctx, result)
 		return
 	end
 
-	local applied = self:ragdoll(model, direction * knockback)
+	--[[
+		The death clip gets the body first, and the ragdoll waits for it.
+
+		InfectedService starts the clip in _retire, which runs off Humanoid.Died
+		and therefore BEFORE this — and writes how long it runs. Ragdolling now
+		would disable every Motor6D the clip is driving and the animation would
+		be replaced by a sack falling over on the frame it started.
+
+		Only for a tidy death. A body coming apart at the shoulder, bursting, or
+		burning does not first perform a clean collapse, so those ragdoll on the
+		same frame they always did.
+
+		Capped, and the cap is the point: a clip that is long, mis-authored, or
+		reporting a nonsense length must never leave a body standing there. Past
+		the cap the ragdoll happens whatever the animation thinks.
+	]]
+	local hold = 0
+	if level == LEVEL.None and DEATH_ANIM.Enabled then
+		hold = math.clamp(
+			tonumber(model:GetAttribute(Attributes.Infected.DeathHold)) or 0,
+			0,
+			DEATH_ANIM.MaxHold
+		)
+	end
+
+	if hold > 0 then
+		--[[ No impulse on a held ragdoll. The knockback is the body's REACTION to
+		     being shot, and the clip is already performing one — applying it a
+		     second later would jerk a corpse that had finished falling. ]]
+		task.delay(hold, function()
+			if model.Parent then
+				self:ragdoll(model, nil)
+			end
+		end)
+	end
+	local applied = if hold > 0 then 0 else self:ragdoll(model, direction * knockback)
 
 	if level == LEVEL.Dismember then
 		severed = severed or self:_pickSeverablePart(model, ctx)

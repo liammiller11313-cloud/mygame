@@ -143,7 +143,7 @@ local WALK = table.freeze({
 })
 
 --[[ The run. Not "the walk, faster" — a sprinting infected is falling forward
-     with its arms up, which is a different shape, and the Hunter and the Rusher
+     with its arms up, which is a different shape, and the Hunter and the Charger
      both cross into it at speed. ]]
 local RUN = table.freeze({
 	LegSwing = 0.95,

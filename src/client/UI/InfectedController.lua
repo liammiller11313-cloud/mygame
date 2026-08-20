@@ -50,9 +50,19 @@ local player = Players.LocalPlayer
 local BLURB = {
 	[Enums.Infected.Hunter] = "POUNCE FROM ABOVE · PINS ONE SURVIVOR",
 	[Enums.Infected.Jockey] = "RIDE A SURVIVOR · STEER THEM AWAY",
-	[Enums.Infected.Rusher] = "CHARGE IN A LINE · CARRY THEM INTO A WALL",
+	[Enums.Infected.Charger] = "CHARGE IN A LINE · CARRY THEM INTO A WALL",
+	[Enums.Infected.Tongue] = "DRAG ONE OUT FROM RANGE · BREAK THE LINE TO ESCAPE",
+	[Enums.Infected.Boomer] = "BURST ON DEATH · BLIND THEM AND CALL THE HORDE",
+	[Enums.Infected.Spitter] = "ACID ON THE GROUND · MAKE A CORNER COST SOMETHING",
 	[Enums.Infected.Tank] = "FOUR THOUSAND HEALTH · THROW THE WORLD AT THEM",
 }
+
+--[[ The blurbs above cover every special, playable or not. Only the rows in
+     GameModeConfig.InfectedPlayableKinds are drawn — Tongue, Boomer and Spitter
+     are AI-only for now, because being one is a different job from fighting one
+     and their modules do not yet take a player's input. Their lines are here
+     ready for the day they do, and because the kill feed reads from the same
+     table. ]]
 
 local ROW_HEIGHT = 58
 local ROW_GAP = LAYOUT.ElementGap
@@ -141,7 +151,7 @@ local function buildRows()
 	local playable = {
 		Enums.Infected.Hunter,
 		Enums.Infected.Jockey,
-		Enums.Infected.Rusher,
+		Enums.Infected.Charger,
 		Enums.Infected.Tank,
 	}
 

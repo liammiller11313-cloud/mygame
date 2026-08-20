@@ -895,6 +895,47 @@ end
 	hoarding the kit. It also wipes the incap ledger, which is the only way back
 	from black and white.
 ]]
+--[[
+	Covers a survivor in bile for `seconds`.
+
+	Deals no damage and never will. The threat a Boomer poses is that you cannot
+	see and the horde is walking at you; a health bar ticking down alongside that
+	reads as the real danger when it is not, and a player who takes damage from
+	bile learns to fear the wrong half of it.
+
+	Stacking EXTENDS rather than adds. Two Boomers bursting on the same survivor
+	is already the worst thing that can happen to them, and summing the timers
+	would take a bad moment and turn it into thirty seconds of nothing to do.
+
+	The stamp is absolute server time so the client can render a smooth fade off
+	one value, the same way the wave clock works.
+]]
+function SurvivorService:applyBile(player: Player, seconds: number): boolean
+	if typeof(player) ~= "Instance" or not player:IsA("Player") or not player.Parent then
+		return false
+	end
+	if typeof(seconds) ~= "number" or seconds <= 0 then
+		return false
+	end
+	-- A dead or spectating survivor cannot be biled: there is no screen to cover.
+	local state = self:getState(player)
+	if state == STATE.Dead or state == STATE.Spectating then
+		return false
+	end
+
+	local now = workspace:GetServerTimeNow()
+	local current = tonumber(Attributes.get(player, PA.BiledUntil, 0)) or 0
+	Attributes.set(player, PA.BiledUntil, math.max(current, now + seconds))
+	return true
+end
+
+--[[ True while a survivor is still covered. For anything that wants to know
+     rather than to change it — the Director reads it as a team in trouble. ]]
+function SurvivorService:isBiled(player: Player): boolean
+	local until_ = tonumber(Attributes.get(player, PA.BiledUntil, 0)) or 0
+	return until_ > workspace:GetServerTimeNow()
+end
+
 function SurvivorService:applyMedkitHeal(player: Player): boolean
 	local record = records[player]
 	if not record or not self:_isUpright(record) then

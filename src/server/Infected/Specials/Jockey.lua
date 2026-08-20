@@ -43,7 +43,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
@@ -52,6 +51,8 @@ local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
 local Types = require(Shared.Types)
+
+local Support = require(script.Parent.Support)
 
 local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Jockey]
 local ATTACK = DEFINITION.attack
@@ -202,85 +203,6 @@ local function ensure(model: Model): State
 	return state
 end
 
--- The brain is InfectedService's object and arrives here as an opaque handle.
--- Every call into it is guarded so that a special still behaves like an ordinary
--- infected if a hook it expects is not there.
-local function pauseBrain(brain: any)
-	if not brain then
-		return
-	end
-	if typeof(brain.pause) == "function" then
-		brain:pause()
-	end
-	-- pause() stands the common AI down but does not cancel a Humanoid:MoveTo it
-	-- already issued, and a stale walk order keeps steering the body for several
-	-- seconds. stop() is the brain's own way to drop it.
-	if typeof(brain.stop) == "function" then
-		brain:stop()
-	end
-end
-
-local function resumeBrain(brain: any)
-	if brain and typeof(brain.resume) == "function" then
-		brain:resume()
-	end
-end
-
-local function setBrainTarget(brain: any, target: Model?)
-	if brain and typeof(brain.setTarget) == "function" then
-		brain:setTarget(target)
-	end
-end
-
---[[ A shove has to answer a special the way it answers a Common: whatever it was
-     doing stops. InfectedService:stagger freezes the body through the brain but
-     cannot interrupt a scripted phase from outside, so the phase has to ask. ]]
-local function isStaggered(brain: any): boolean
-	return brain ~= nil and typeof(brain.isStaggered) == "function" and brain:isStaggered() == true
-end
-
---[[ Yaw toward a point at the definition's turnSpeed. The brain owns rotation —
-     including Humanoid.AutoRotate, which manual facing has to switch off — so
-     this defers to it and only snaps if that hook is missing. ]]
-local function faceTowards(brain: any, root: BasePart, position: Vector3, dt: number)
-	if brain and typeof(brain.faceTowards) == "function" then
-		brain:faceTowards(position, dt)
-		return
-	end
-	local flat = Vector3.new(position.X - root.Position.X, 0, position.Z - root.Position.Z)
-	if flat.Magnitude > 0.05 then
-		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-	end
-end
-
-local function playSound(key: string, part: BasePart)
-	local audio: any = Registry.find("AudioService")
-	if audio then
-		audio:play("Infected", key, part)
-	end
-end
-
-local function rootOf(player: Player?): (Model?, BasePart?)
-	if not player then
-		return nil, nil
-	end
-	local character = player.Character
-	if not character or not character.Parent then
-		return nil, nil
-	end
-	return character, RigUtil.getRoot(character)
-end
-
---[[ True while SurvivorService still names this model as the pin's owner. The
-     shove clears a pin through SurvivorService rather than through us, so polling
-     is how the Jockey learns it has been answered. ]]
-local function stillPinnedBy(survivors: any, player: Player, model: Model): boolean
-	if typeof(survivors.getPinnedBy) == "function" then
-		return survivors:getPinnedBy(player) == model
-	end
-	return Attributes.get(player, Attributes.Player.PinnedBy, "") ~= ""
-end
-
 local function isRideable(survivors: any, player: Player): boolean
 	local state = survivors:getState(player)
 	return state == Enums.SurvivorState.Healthy or state == Enums.SurvivorState.Hurt
@@ -360,7 +282,7 @@ local function awayFromTeam(victim: Player, position: Vector3): Vector3
 		if player == victim then
 			continue
 		end
-		local _, otherRoot = rootOf(player)
+		local _, otherRoot = Support.rootOf(player)
 		if not otherRoot then
 			continue
 		end
@@ -500,7 +422,7 @@ local function backToStalk(model: Model, brain: any, state: State, delay: number
 			humanoid.WalkSpeed = DEFINITION.runSpeed
 		end
 	end
-	resumeBrain(brain)
+	Support.resumeBrain(brain)
 end
 
 --[[
@@ -521,7 +443,7 @@ local function releaseVictim(model: Model, brain: any, state: State, delay: numb
 	if victim then
 		local survivors: any = Registry.find("SurvivorService")
 		if survivors then
-			if stillPinnedBy(survivors, victim, model) then
+			if Support.stillPinnedBy(survivors, victim, model) then
 				survivors:setPinned(victim, nil)
 			end
 			if not isRideable(survivors, victim) then
@@ -552,7 +474,7 @@ local function pickTarget(root: BasePart): (Player?, Player?)
 	local nearestDistance = math.huge
 
 	for _, player in survivors:getAliveSurvivors() do
-		local _, victimRoot = rootOf(player)
+		local _, victimRoot = Support.rootOf(player)
 		if not victimRoot then
 			continue
 		end
@@ -577,17 +499,6 @@ local function pickTarget(root: BasePart): (Player?, Player?)
 	return best, nearest
 end
 
---[[ Range band, sightline, and enough headroom to clear the ground on the way
-     out: straight up out of the gather, then across to the target's chest. ]]
-local function hasClearArc(state: State, from: Vector3, to: Vector3, targetCharacter: Model): boolean
-	state.ignore[2] = targetCharacter
-	local raised = from + Vector3.new(0, ARC_CLEARANCE, 0)
-	local clear = RaycastUtil.hasLineOfSight(from, raised, state.ignore)
-		and RaycastUtil.hasLineOfSight(raised, to, state.ignore)
-	state.ignore[2] = nil
-	return clear
-end
-
 local function beginGather(
 	model: Model,
 	brain: any,
@@ -596,7 +507,7 @@ local function beginGather(
 	targetRoot: BasePart,
 	dt: number
 )
-	pauseBrain(brain)
+	Support.pauseBrain(brain)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -605,8 +516,8 @@ local function beginGather(
 		humanoid.WalkSpeed = 0
 	end
 
-	faceTowards(brain, root, targetRoot.Position, dt)
-	playSound("JockeyIdle", root)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
+	Support.playSound("JockeyIdle", root)
 
 	state.phase = PHASE.Gather
 	state.phaseTime = 0
@@ -629,14 +540,14 @@ local function launch(
 	local speed = math.min(flat.Magnitude / flight, LEAP_MAX_SPEED)
 	local heading = if flat.Magnitude > 0.05 then flat.Unit else root.CFrame.LookVector
 
-	faceTowards(brain, root, targetRoot.Position, dt)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
 	root.AssemblyLinearVelocity = heading * speed + Vector3.new(0, DEFINITION.jumpPower, 0)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 	end
-	playSound("JockeyRide", root)
+	Support.playSound("JockeyRide", root)
 
 	state.phase = PHASE.Leap
 	state.phaseTime = 0
@@ -645,7 +556,7 @@ end
 
 local function mount(model: Model, brain: any, state: State, root: BasePart, player: Player)
 	local survivors: any = Registry.find("SurvivorService")
-	local character, victimRoot = rootOf(player)
+	local character, victimRoot = Support.rootOf(player)
 	if not survivors or not character or not victimRoot then
 		backToStalk(model, brain, state, MISS_RECOVERY)
 		return
@@ -675,7 +586,7 @@ local function mount(model: Model, brain: any, state: State, root: BasePart, pla
 	attachMover(state, victimRoot)
 	applyHeading(state)
 	Remotes.Event.CameraImpulse:FireClient(player, MOUNT_CAMERA_IMPULSE)
-	playSound("JockeyRide", root)
+	Support.playSound("JockeyRide", root)
 end
 
 local function stepStalk(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
@@ -685,11 +596,11 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 		state.target = rideable
 		state.chase = rideable or nearest
 		local chase = state.chase
-		setBrainTarget(brain, if chase then chase.Character else nil)
+		Support.setBrainTarget(brain, if chase then chase.Character else nil)
 	end
 
 	local target = state.target
-	local _, targetRoot = rootOf(target)
+	local _, targetRoot = Support.rootOf(target)
 	if not target or not targetRoot then
 		return
 	end
@@ -700,7 +611,7 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 	-- Jockey working its way around the team is audible before it commits.
 	if now >= state.nextCackle and distance <= DEFINITION.sightRange then
 		state.nextCackle = now + CACKLE_INTERVAL
-		playSound("JockeyIdle", root)
+		Support.playSound("JockeyIdle", root)
 	end
 
 	if now < state.readyAt then
@@ -718,7 +629,10 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 	state.ignore[2] = character
 	local visible = RaycastUtil.hasLineOfSight(root.Position, targetRoot.Position, state.ignore)
 	state.ignore[2] = nil
-	if not visible or not hasClearArc(state, root.Position, targetRoot.Position, character) then
+	if
+		not visible
+		or not Support.hasClearArc(state.ignore, root.Position, targetRoot.Position, character, ARC_CLEARANCE)
+	then
 		return
 	end
 
@@ -726,7 +640,7 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 end
 
 local function stepGather(model: Model, brain: any, state: State, root: BasePart, dt: number)
-	local _, targetRoot = rootOf(state.target)
+	local _, targetRoot = Support.rootOf(state.target)
 	if not targetRoot then
 		backToStalk(model, brain, state, 0.4)
 		return
@@ -735,7 +649,7 @@ local function stepGather(model: Model, brain: any, state: State, root: BasePart
 	-- Tracking during the gather is what makes stepping aside a real answer: the
 	-- Jockey may turn, turnSpeed decides how much of the dodge it keeps up with,
 	-- and the leap itself commits to whatever it is facing when it goes.
-	faceTowards(brain, root, targetRoot.Position, dt)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
 
 	if state.phaseTime >= GATHER_TIME then
 		launch(model, brain, state, root, targetRoot, dt)
@@ -755,7 +669,7 @@ local function stepLeap(model: Model, brain: any, state: State, root: BasePart, 
 			if not isRideable(survivors, player) then
 				continue
 			end
-			local _, victimRoot = rootOf(player)
+			local _, victimRoot = Support.rootOf(player)
 			if victimRoot and (victimRoot.Position - position).Magnitude <= CONTACT_RADIUS then
 				mount(model, brain, state, root, player)
 				return
@@ -784,8 +698,8 @@ local function stepRide(model: Model, brain: any, state: State, root: BasePart, 
 		return
 	end
 
-	local character, victimRoot = rootOf(victim)
-	if not character or not victimRoot or not stillPinnedBy(survivors, victim, model) then
+	local character, victimRoot = Support.rootOf(victim)
+	if not character or not victimRoot or not Support.stillPinnedBy(survivors, victim, model) then
 		-- Shoved off, shot off, or the victim went down. All three are answers,
 		-- and all three end here.
 		releaseVictim(model, brain, state, RELEASE_RECOVERY)
@@ -820,7 +734,7 @@ local function stepRide(model: Model, brain: any, state: State, root: BasePart, 
 
 	if now >= state.nextCackle then
 		state.nextCackle = now + RIDE_CACKLE_INTERVAL
-		playSound("JockeyRide", root)
+		Support.playSound("JockeyRide", root)
 	end
 
 	if now >= state.nextClaw then
@@ -844,12 +758,12 @@ function Jockey.onSpawn(model: Model, brain: any)
 
 	local root = RigUtil.getRoot(model)
 	if root then
-		playSound("JockeyIdle", root)
+		Support.playSound("JockeyIdle", root)
 		-- The spawn cackle counts as this Jockey's first; without this the
 		-- approach clock fires again on the very next frame.
 		state.nextCackle = os.clock() + CACKLE_INTERVAL
 	end
-	setBrainTarget(brain, nil)
+	Support.setBrainTarget(brain, nil)
 end
 
 function Jockey.onUpdate(model: Model, brain: any, dt: number)
@@ -862,7 +776,7 @@ function Jockey.onUpdate(model: Model, brain: any, dt: number)
 	local now = os.clock()
 	state.phaseTime += dt
 
-	if state.phase ~= PHASE.Stalk and isStaggered(brain) then
+	if state.phase ~= PHASE.Stalk and Support.isStaggered(brain) then
 		releaseVictim(model, brain, state, RELEASE_RECOVERY, true)
 		return
 	end

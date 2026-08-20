@@ -1,20 +1,20 @@
 --!strict
 --[[
-	Rusher — winds up, commits, and cannot change its mind.
+	Charger — winds up, commits, and cannot change its mind.
 
 	The charge is a contract with the player: you get a bellow and a visible
-	wind-up, the Rusher turns at 95 degrees a second while it winds up and NOT AT
+	wind-up, the Charger turns at 95 degrees a second while it winds up and NOT AT
 	ALL once it launches, and from that moment it is a 44 stud/second object
 	travelling in a straight line. Dodging it is one of the best things a survivor
 	does in this game, and every rule below exists to protect that moment.
 
-	  * The tell comes first. RusherCharge plays at the START of the wind-up, not
+	  * The tell comes first. ChargerCharge plays at the START of the wind-up, not
 	    at the launch — a warning that arrives with the attack is not a warning.
 	  * The heading is sampled once, at launch, and then frozen. There is no
-	    mid-charge correction anywhere in this file. A Rusher that homes is a
-	    Rusher nobody can dodge, and it would quietly delete the whole mechanic.
+	    mid-charge correction anywhere in this file. A Charger that homes is a
+	    Charger nobody can dodge, and it would quietly delete the whole mechanic.
 	  * A miss is punished. The charge overshoots to the end of its lane and the
-	    Rusher then stands there, stopped and doing nothing, for MISS_RECOVERY.
+	    Charger then stands there, stopped and doing nothing, for MISS_RECOVERY.
 	    That window is the reward for reading the tell.
 
 	The first survivor in the lane is carried; everyone else is thrown clear
@@ -24,26 +24,26 @@
 	somebody answers it.
 
 	The pin runs through SurvivorService like every other pin, so a teammate's
-	shove frees the victim and staggers the Rusher — stumbleResistance 0.7 makes
-	that stagger short, which is the Rusher's compensation for being so easy to
+	shove frees the victim and staggers the Charger — stumbleResistance 0.7 makes
+	that stagger short, which is the Charger's compensation for being so easy to
 	sidestep. This module polls the pin's owner every tick and lets go the instant
-	it stops being the owner: the counter never depends on the Rusher agreeing.
+	it stops being the owner: the counter never depends on the Charger agreeing.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
-local Types = require(Shared.Types)
 
-local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Rusher]
+local Support = require(script.Parent.Support)
+
+local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Charger]
 local ATTACK = DEFINITION.attack
 
 local PHASE = table.freeze({
@@ -95,7 +95,7 @@ local SLAM_MULTIPLIER = 2.0
 
 -- Wall detection. The forward probe covers the ground about to be crossed plus a
 -- margin, and the stall check catches the walls a ray slides along instead of
--- hitting: a Rusher grinding a corner has stopped charging either way.
+-- hitting: a Charger grinding a corner has stopped charging either way.
 local WALL_PROBE_MARGIN = 3.5
 local STALL_SPEED = DEFINITION.runSpeed * 0.35
 local STALL_TIME = 0.35
@@ -145,14 +145,14 @@ type State = {
 	probe: RaycastParams,
 }
 
--- Weak keys: a Rusher despawned rather than killed never reaches onDeath, and a
+-- Weak keys: a Charger despawned rather than killed never reaches onDeath, and a
 -- strong table here would hold its model alive forever.
 local states = (setmetatable({}, { __mode = "k" }) :: any) :: { [Model]: State }
 
 local function ensure(model: Model): State
 	local state = states[model]
 	if not state then
-		-- The ignore list and its RaycastParams are built once per Rusher and
+		-- The ignore list and its RaycastParams are built once per Charger and
 		-- then reused for every cast it ever makes: the wall probe runs every
 		-- frame of every charge, and a params object per frame is exactly the
 		-- allocation the horde cannot afford.
@@ -188,113 +188,9 @@ local function refreshProbe(state: State)
 	state.probe.FilterDescendantsInstances = state.ignore
 end
 
--- The brain is InfectedService's object and arrives here as an opaque handle.
--- Every call into it is guarded so that a special still behaves like an ordinary
--- infected if a hook it expects is not there.
-local function pauseBrain(brain: any)
-	if not brain then
-		return
-	end
-	if typeof(brain.pause) == "function" then
-		brain:pause()
-	end
-	-- pause() stands the common AI down but does not cancel a Humanoid:MoveTo it
-	-- already issued, and a stale walk order keeps steering the body for several
-	-- seconds. stop() is the brain's own way to drop it.
-	if typeof(brain.stop) == "function" then
-		brain:stop()
-	end
-end
-
-local function resumeBrain(brain: any)
-	if brain and typeof(brain.resume) == "function" then
-		brain:resume()
-	end
-end
-
-local function setBrainTarget(brain: any, target: Model?)
-	if brain and typeof(brain.setTarget) == "function" then
-		brain:setTarget(target)
-	end
-end
-
---[[ A shove has to answer a special the way it answers a Common: whatever it was
-     doing stops. InfectedService:stagger freezes the body through the brain but
-     cannot interrupt a scripted phase from outside, so the phase has to ask. ]]
-local function isStaggered(brain: any): boolean
-	return brain ~= nil and typeof(brain.isStaggered) == "function" and brain:isStaggered() == true
-end
-
---[[ Yaw toward a point at the definition's turnSpeed. This is the field that
-     makes the Rusher dodgeable — 95 degrees a second is deliberately clumsy — so
-     it is always deferred to the brain, which applies it honestly. ]]
-local function faceTowards(brain: any, root: BasePart, position: Vector3, dt: number)
-	if brain and typeof(brain.faceTowards) == "function" then
-		brain:faceTowards(position, dt)
-		return
-	end
-	local flat = Vector3.new(position.X - root.Position.X, 0, position.Z - root.Position.Z)
-	if flat.Magnitude > 0.05 then
-		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-	end
-end
-
-local function playSound(key: string, part: BasePart)
-	local audio: any = Registry.find("AudioService")
-	if audio then
-		audio:play("Infected", key, part)
-	end
-end
-
-local function rootOf(player: Player?): (Model?, BasePart?)
-	if not player then
-		return nil, nil
-	end
-	local character = player.Character
-	if not character or not character.Parent then
-		return nil, nil
-	end
-	return character, RigUtil.getRoot(character)
-end
-
---[[ True while SurvivorService still names this model as the pin's owner. The
-     shove clears a pin through SurvivorService rather than through us, so polling
-     is how the Rusher learns it has been answered. ]]
-local function stillPinnedBy(survivors: any, player: Player, model: Model): boolean
-	if typeof(survivors.getPinnedBy) == "function" then
-		return survivors:getPinnedBy(player) == model
-	end
-	return Attributes.get(player, Attributes.Player.PinnedBy, "") ~= ""
-end
-
 local function isCarriable(survivors: any, player: Player): boolean
 	local state = survivors:getState(player)
 	return state == Enums.SurvivorState.Healthy or state == Enums.SurvivorState.Hurt
-end
-
-local function damage(model: Model, character: Model, victimRoot: BasePart, origin: Vector3, amount: number)
-	local damageService: any = Registry.find("DamageService")
-	if not damageService then
-		return
-	end
-
-	local delta = victimRoot.Position - origin
-	local distance = delta.Magnitude
-	local direction = if distance > 0.05 then delta.Unit else Vector3.yAxis
-
-	damageService:applyDamage(
-		character,
-		amount,
-		Types.newDamageContext({
-			attackerModel = model,
-			damageType = Enums.DamageType.Special,
-			region = Enums.HitRegion.Torso,
-			hitPosition = victimRoot.Position,
-			hitNormal = -direction,
-			direction = direction,
-			distance = distance,
-		})
-	)
 end
 
 -- ─── ownership ───────────────────────────────────────────────────────────────
@@ -330,7 +226,7 @@ end
 	Two things besides ownership have to change or the carry fights itself. The
 	victim goes into the Debris collision group, which collides with the level and
 	with nothing else, because a body held one arm's length in front of a charging
-	Rusher is otherwise a body the Rusher is walking into — it would brake against
+	Charger is otherwise a body the Charger is walking into — it would brake against
 	its own victim and the stall check would read that as a wall. And PlatformStand
 	stands their Humanoid down, so its balance controller stops arguing with a
 	CFrame that moves 44 studs a second.
@@ -401,7 +297,7 @@ local function backToStalk(model: Model, brain: any, state: State, delay: number
 			humanoid.WalkSpeed = DEFINITION.runSpeed
 		end
 	end
-	resumeBrain(brain)
+	Support.resumeBrain(brain)
 end
 
 --[[ Drops whoever is being held or pummelled and unwinds everything that was
@@ -414,7 +310,7 @@ local function releaseVictim(model: Model, state: State)
 	local victim = state.victim
 	if victim then
 		local survivors: any = Registry.find("SurvivorService")
-		if survivors and stillPinnedBy(survivors, victim, model) then
+		if survivors and Support.stillPinnedBy(survivors, victim, model) then
 			survivors:setPinned(victim, nil)
 		end
 	end
@@ -464,7 +360,7 @@ local function pickTarget(root: BasePart): (Player?, Player?)
 	local nearestDistance = math.huge
 
 	for _, player in survivors:getAliveSurvivors() do
-		local _, victimRoot = rootOf(player)
+		local _, victimRoot = Support.rootOf(player)
 		if not victimRoot then
 			continue
 		end
@@ -499,19 +395,19 @@ local function beginWindUp(
 	targetRoot: BasePart,
 	dt: number
 )
-	pauseBrain(brain)
+	Support.pauseBrain(brain)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		-- Rooted for the whole tell. A Rusher that keeps closing while it winds
-		-- up is a Rusher that arrives before the warning has finished playing.
+		-- Rooted for the whole tell. A Charger that keeps closing while it winds
+		-- up is a Charger that arrives before the warning has finished playing.
 		humanoid.WalkSpeed = 0
 	end
 
-	faceTowards(brain, root, targetRoot.Position, dt)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
 	-- The dodge cue. Priority 8 and a 400-stud rolloff in AudioConfig: this is
 	-- meant to cut through a firefight two rooms away.
-	playSound("RusherCharge", root)
+	Support.playSound("ChargerCharge", root)
 
 	state.phase = PHASE.WindUp
 	state.phaseTime = 0
@@ -519,7 +415,7 @@ end
 
 local function launch(model: Model, brain: any, state: State, root: BasePart)
 	-- The heading is taken HERE and never again. Everything about the dodge
-	-- depends on this line being the last decision the Rusher makes.
+	-- depends on this line being the last decision the Charger makes.
 	local facing = root.CFrame.LookVector
 	local flat = Vector3.new(facing.X, 0, facing.Z)
 	state.heading = if flat.Magnitude > 0.05 then flat.Unit else Vector3.zAxis
@@ -555,7 +451,7 @@ local function sweepLane(model: Model, state: State, root: BasePart)
 			continue
 		end
 
-		local character, victimRoot = rootOf(player)
+		local character, victimRoot = Support.rootOf(player)
 		if not character or not victimRoot then
 			continue
 		end
@@ -571,7 +467,7 @@ local function sweepLane(model: Model, state: State, root: BasePart)
 		-- setPinned refusing is not a failure: it means they were already down,
 		-- and a pin on somebody who is already crawling has no answer.
 		if not state.carrying and isCarriable(survivors, player) then
-			if survivors:setPinned(player, model, Enums.Infected.Rusher) == true then
+			if survivors:setPinned(player, model, Enums.Infected.Charger) == true then
 				state.victim = player
 				-- The wall probe must not stop on the body it is carrying.
 				state.ignore[2] = character
@@ -588,7 +484,7 @@ local function sweepLane(model: Model, state: State, root: BasePart)
 		-- up beside the charge rather than punted along it — somebody directly in
 		-- front, with no lateral offset to use, goes over whichever shoulder the
 		-- lane's perpendicular points at.
-		damage(model, character, victimRoot, origin, ATTACK.damage)
+		Support.damage(model, character, victimRoot, origin, ATTACK.damage)
 		local flatDelta = Vector3.new(delta.X, 0, delta.Z)
 		local lateral = flatDelta - state.heading * flatDelta:Dot(state.heading)
 		local push = if lateral.Magnitude > 0.5 then lateral.Unit else state.heading:Cross(Vector3.yAxis).Unit
@@ -611,12 +507,12 @@ local function hitWall(state: State, root: BasePart, travel: number): boolean
 end
 
 --[[ The end of a carry: the victim goes into the wall and then onto the floor,
-     and the Rusher settles in to pummel. This is where a collected survivor
+     and the Charger settles in to pummel. This is where a collected survivor
      actually loses health, so it is loud, it is a camera event, and it is
      survivable from full. ]]
 local function slam(model: Model, brain: any, state: State, root: BasePart)
 	local victim = state.victim
-	local character, victimRoot = rootOf(victim)
+	local character, victimRoot = Support.rootOf(victim)
 	if not victim or not character or not victimRoot then
 		state.carrying = false
 		return
@@ -632,7 +528,7 @@ local function slam(model: Model, brain: any, state: State, root: BasePart)
 		brain:stop()
 	end
 
-	-- Put them on the ground at the Rusher's feet before ownership goes back, so
+	-- Put them on the ground at the Charger's feet before ownership goes back, so
 	-- the position their own client wakes up with is the one the server chose.
 	local landing = root.CFrame * CFrame.new(0, -1.0, -3.0)
 	victimRoot.CFrame = CFrame.new(landing.Position)
@@ -642,9 +538,9 @@ local function slam(model: Model, brain: any, state: State, root: BasePart)
 	-- there for the pummel.
 	endCarry(state)
 
-	damage(model, character, victimRoot, root.Position, ATTACK.damage * SLAM_MULTIPLIER)
+	Support.damage(model, character, victimRoot, root.Position, ATTACK.damage * SLAM_MULTIPLIER)
 	Remotes.Event.CameraImpulse:FireClient(victim, SLAM_CAMERA_IMPULSE)
-	playSound("RusherCharge", root)
+	Support.playSound("ChargerCharge", root)
 
 	state.carrying = false
 	state.phase = PHASE.Pummel
@@ -660,11 +556,11 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 		local chargeable, nearest = pickTarget(root)
 		state.target = chargeable
 		local chase = chargeable or nearest
-		setBrainTarget(brain, if chase then chase.Character else nil)
+		Support.setBrainTarget(brain, if chase then chase.Character else nil)
 	end
 
 	local target = state.target
-	local _, targetRoot = rootOf(target)
+	local _, targetRoot = Support.rootOf(target)
 	if not target or not targetRoot then
 		return
 	end
@@ -672,7 +568,7 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 	local distance = (targetRoot.Position - root.Position).Magnitude
 	if now >= state.nextBellow and distance <= DEFINITION.sightRange then
 		state.nextBellow = now + BELLOW_INTERVAL
-		playSound("RusherIdle", root)
+		Support.playSound("ChargerIdle", root)
 	end
 
 	if now < state.readyAt then
@@ -700,7 +596,7 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 end
 
 local function stepWindUp(model: Model, brain: any, state: State, root: BasePart, dt: number)
-	local _, targetRoot = rootOf(state.target)
+	local _, targetRoot = Support.rootOf(state.target)
 	if not targetRoot then
 		backToStalk(model, brain, state, 0.5)
 		return
@@ -709,7 +605,7 @@ local function stepWindUp(model: Model, brain: any, state: State, root: BasePart
 	-- The only tracking a charge ever gets, and it is deliberately bad. A player
 	-- who strafes during the wind-up is aimed at where they used to be, which is
 	-- exactly the dodge the 95 deg/s turnSpeed exists to sell.
-	faceTowards(brain, root, targetRoot.Position, dt)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
 
 	if state.phaseTime >= WINDUP_TIME then
 		launch(model, brain, state, root)
@@ -737,10 +633,15 @@ local function stepCharge(model: Model, brain: any, state: State, root: BasePart
 	if state.carrying then
 		local victim = state.victim
 		local survivors: any = Registry.find("SurvivorService")
-		local _, victimRoot = rootOf(victim)
-		if not victim or not victimRoot or not survivors or not stillPinnedBy(survivors, victim, model) then
+		local _, victimRoot = Support.rootOf(victim)
+		if
+			not victim
+			or not victimRoot
+			or not survivors
+			or not Support.stillPinnedBy(survivors, victim, model)
+		then
 			-- Shoved out of its arms mid-charge. The charge itself continues:
-			-- the Rusher has committed, and that is the whole point of it.
+			-- the Charger has committed, and that is the whole point of it.
 			releaseVictim(model, state)
 		else
 			victimRoot.CFrame = root.CFrame * CARRY_OFFSET
@@ -784,8 +685,8 @@ local function stepPummel(model: Model, brain: any, state: State, root: BasePart
 		return
 	end
 
-	local character, victimRoot = rootOf(victim)
-	if not character or not victimRoot or not stillPinnedBy(survivors, victim, model) then
+	local character, victimRoot = Support.rootOf(victim)
+	if not character or not victimRoot or not Support.stillPinnedBy(survivors, victim, model) then
 		-- Shoved off, shot off, or the survivor went down. All three are answers,
 		-- and all three end here.
 		beginRecover(model, brain, state, SLAM_RECOVERY)
@@ -799,7 +700,7 @@ local function stepPummel(model: Model, brain: any, state: State, root: BasePart
 
 	if now >= state.nextPummel then
 		state.nextPummel = now + ATTACK.cooldown
-		damage(model, character, victimRoot, root.Position, ATTACK.damage)
+		Support.damage(model, character, victimRoot, root.Position, ATTACK.damage)
 		Remotes.Event.CameraImpulse:FireClient(victim, IMPACT_CAMERA_IMPULSE)
 	end
 end
@@ -819,9 +720,9 @@ end
 
 -- ─── module surface ──────────────────────────────────────────────────────────
 
-local Rusher = {}
+local Charger = {}
 
-function Rusher.onSpawn(model: Model, brain: any)
+function Charger.onSpawn(model: Model, brain: any)
 	local state = ensure(model)
 	state.ignore[1] = model
 	refreshProbe(state)
@@ -833,15 +734,15 @@ function Rusher.onSpawn(model: Model, brain: any)
 
 	local root = RigUtil.getRoot(model)
 	if root then
-		playSound("RusherIdle", root)
-		-- The spawn bellow counts as this Rusher's first; without this the
+		Support.playSound("ChargerIdle", root)
+		-- The spawn bellow counts as this Charger's first; without this the
 		-- approach clock fires again on the very next frame.
 		state.nextBellow = os.clock() + BELLOW_INTERVAL
 	end
-	setBrainTarget(brain, nil)
+	Support.setBrainTarget(brain, nil)
 end
 
-function Rusher.onUpdate(model: Model, brain: any, dt: number)
+function Charger.onUpdate(model: Model, brain: any, dt: number)
 	local state = states[model] or ensure(model)
 	local root = RigUtil.getRoot(model)
 	if not root then
@@ -854,7 +755,7 @@ function Rusher.onUpdate(model: Model, brain: any, dt: number)
 	-- A shove during a wind-up cancels the charge outright, which is the cheapest
 	-- answer in the game to the most expensive attack in it. stumbleResistance
 	-- 0.7 is what stops that being a hard counter: the stagger is brief.
-	if state.phase ~= PHASE.Stalk and isStaggered(brain) then
+	if state.phase ~= PHASE.Stalk and Support.isStaggered(brain) then
 		releaseVictim(model, state)
 		backToStalk(model, brain, state, MISS_RECOVERY, true)
 		return
@@ -873,7 +774,7 @@ function Rusher.onUpdate(model: Model, brain: any, dt: number)
 	end
 end
 
-function Rusher.onDeath(model: Model, brain: any, _ctx: any)
+function Charger.onDeath(model: Model, brain: any, _ctx: any)
 	local state = states[model]
 	if not state then
 		return
@@ -882,8 +783,8 @@ function Rusher.onDeath(model: Model, brain: any, _ctx: any)
 	-- server-simulated because the thing carrying them died would stay that way
 	-- for the rest of the round.
 	releaseVictim(model, state)
-	resumeBrain(brain)
+	Support.resumeBrain(brain)
 	states[model] = nil
 end
 
-return Rusher
+return Charger

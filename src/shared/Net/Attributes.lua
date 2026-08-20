@@ -28,6 +28,11 @@ Attributes.Player = table.freeze({
 	IsBlackAndWhite = "FL_BlackAndWhite", -- boolean, one more down = death
 	ReviveProgress = "FL_ReviveProgress", -- number 0-1, drives the teammate ring
 	PinnedBy = "FL_PinnedBy", -- string, Enums.Infected or "" when free
+	--[[ number, an absolute GetServerTimeNow stamp the bile clears at, or 0.
+	     Absolute rather than a countdown for the same reason the wave clock is:
+	     the client renders a smooth fade from a value that only changes when the
+	     bile does, instead of one ticked over the wire sixty times a second. ]]
+	BiledUntil = "FL_BiledUntil",
 	FlowDistance = "FL_Flow", -- number, studs along the level spline
 	IsReady = "FL_Ready", -- boolean, lobby readiness
 	IsCrouching = "FL_IsCrouching", -- boolean; the server owns it, the client asks
@@ -74,6 +79,16 @@ Attributes.Infected = table.freeze({
 	Seed = "FL_Seed", -- number, per-body gait variation; see InfectedPoseController
 	SpawnFlow = "FL_SpawnFlow", -- number, flow distance it spawned at
 	Burning = "FL_Burning", -- boolean, on fire (molotov / gas can)
+	--[[ string, InfectedConfig.CommonTiers id, or absent for a regular. Written
+	     only on Commons whose model name lands in a tier band, so anything that
+	     needs to tell a riot body from a shambler — a kill feed, a future
+	     outline colour, a Studio inspection wondering why this one took three
+	     shots — has one field to read rather than a name to parse. ]]
+	Tier = "FL_Tier",
+	--[[ number, seconds. Written by InfectedService when a death clip starts,
+	     read by GoreService as how long to hold the ragdoll so the collapse is
+	     animated rather than replaced. Absent means ragdoll now. ]]
+	DeathHold = "FL_DeathHold",
 })
 
 -- Written on a dropped pickup Model so the interact prompt can label it.

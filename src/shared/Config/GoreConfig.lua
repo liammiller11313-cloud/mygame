@@ -243,6 +243,28 @@ GoreConfig.HitStop = table.freeze({
 --[[ Performance ceilings. Gore is the first thing to blow a frame budget, and a
      zombie game that stutters during a horde has failed at the one moment it
      needed to hold up. These caps are not optional. ]]
+--[[
+	The death animation, and the one rule that keeps it from breaking anything.
+
+	A death clip and a ragdoll both want the same Motor6Ds, and the ragdoll wins
+	by disabling them — so the clip goes first and the ragdoll is held for its
+	length. MaxHold is the safety: a clip that is long, mis-authored, or
+	reporting a nonsense length can never leave a body standing upright waiting
+	on an animation that is not coming. Past MaxHold the body ragdolls whatever
+	the clip thinks it is doing.
+
+	Only ever applies to a clean kill. Dismemberment, gibbing and incineration
+	ragdoll on the frame they always did: a body coming apart at the shoulder
+	does not first perform a tidy collapse.
+
+	Enabled = false restores exactly the old behaviour — every death ragdolls
+	immediately — and is the one switch to reach for if a clip misbehaves.
+]]
+GoreConfig.DeathAnimation = table.freeze({
+	Enabled = true,
+	MaxHold = 1.1,
+})
+
 GoreConfig.Budget = table.freeze({
 	MaxActiveGibs = 90,
 	MaxActiveLimbs = 40,

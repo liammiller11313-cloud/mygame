@@ -375,8 +375,27 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 	-- Scale first: HipHeight and part sizes below are read after it.
 	RigUtil.scaleRig(model, definition.scale)
 
-	humanoid.MaxHealth = definition.health
-	humanoid.Health = definition.health
+	--[[
+		The tier the model itself carries. See InfectedConfig.CommonTiers: the
+		horde is one archetype with many models, and the visibly armoured ones
+		are actually armoured rather than wearing the art of it. Nil for every
+		special and for any Common whose model name has no number on the end,
+		which is the safe default — a new model dropped into the folder is a
+		regular until somebody numbers it into a band.
+
+		Applied here, before the Humanoid is given its health, so a riot body is
+		never briefly a shambler; the matching damage scale rides on the brain,
+		which is built further down.
+	]]
+	local tier = InfectedConfig.tierForVariant(kind, model:GetAttribute("FL_Variant") :: string?)
+	local health = definition.health
+	if tier then
+		health = math.floor(definition.health * tier.health + 0.5)
+		model:SetAttribute(Attributes.Infected.Tier, tier.id)
+	end
+
+	humanoid.MaxHealth = health
+	humanoid.Health = health
 	humanoid.WalkSpeed = definition.walkSpeed
 	humanoid.UseJumpPower = true
 	humanoid.JumpPower = definition.jumpPower
@@ -468,6 +487,15 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 	}
 
 	record.brain = InfectedBrain.new(model, definition)
+
+	--[[ The other half of the tier. Health went on the Humanoid in _configure;
+	     this is the claw, and it lives on the brain because the brain is what
+	     swings it. Read back off the model rather than threaded through, so the
+	     two halves cannot disagree about which body this is. ]]
+	local tier = InfectedConfig.tierForVariant(kind, model:GetAttribute("FL_Variant") :: string?)
+	if tier then
+		record.brain.attackDamage = definition.attack.damage * tier.damage
+	end
 
 	-- Anything that kills this humanoid without going through damage() — a fall
 	-- out of the world, a stray Humanoid:TakeDamage — still has to retire the
@@ -654,6 +682,26 @@ function InfectedService:_retire(record: any, ctx: any)
 		local ok, err = pcall(record.special.onDeath, model, record.brain, ctx)
 		if not ok then
 			warnOnce("onDeath:" .. kind, string.format("%s.onDeath failed: %s", kind, tostring(err)))
+		end
+	end
+
+	--[[
+		The death clip, before the brain that owns the animator is torn down.
+
+		This is the only window it fits in. GoreService is about to disable every
+		Motor6D in the rig, and a keyframe has nothing left to drive after that —
+		so the clip has to start first, and the ragdoll has to wait for it. The
+		length is written where GoreService can read it rather than passed,
+		because the two are reached by different paths from applyDamage and
+		neither calls the other.
+
+		Zero, or no brain at all, means ragdoll immediately: exactly the old
+		behaviour, which is what a body with no death clip should still get.
+	]]
+	if record.brain and model.Parent then
+		local seconds = record.brain:playDeath()
+		if seconds > 0 then
+			model:SetAttribute(Attributes.Infected.DeathHold, seconds)
 		end
 	end
 
@@ -998,6 +1046,56 @@ end
 	Pulls every common within `radius` to a point and makes them ignore
 	survivors until they arrive. A pipe bomb is exactly this call.
 ]]
+--[[
+	The same idea as lure, with a ceiling and Commons only.
+
+	The Boomer's burst is what needs it, and the two differences from lure are
+	both the burst's. A CAP, because "every Common within a hundred and seventy
+	studs" is a wipe rather than a punishment and would spend the Director's
+	whole population on one death — where the Witch's summon is SUPPOSED to be
+	everything nearby, because she is a boss and that is the fight.
+
+	And Commons only rather than everything-but-a-boss: a special has its own
+	reason for being where it is, and a Charger that could be whistled across
+	the map by a dying Boomer is a Charger whose approach nobody can read.
+
+	Sends them to a PLACE, not at a player — the horde converges on where the
+	noise was, so a team that moves after being covered survives and a team that
+	stands still does not. That is the whole lesson a Boomer teaches, and
+	targeting the victim directly would delete it.
+
+	Returns how many actually heard it.
+]]
+function InfectedService:lureCapped(
+	position: Vector3,
+	radius: number,
+	duration: number,
+	limit: number
+): number
+	if typeof(position) ~= "Vector3" then
+		return 0
+	end
+	local budget = math.max(math.floor(limit or 0), 0)
+	local radiusSquared = radius * radius
+	local called = 0
+
+	for _, record in self._alive do
+		if called >= budget then
+			break
+		end
+		if record.dead or record.definition.isSpecial then
+			continue
+		end
+		local root = record.root
+		if root and root.Parent and (root.Position - position).Magnitude ^ 2 <= radiusSquared then
+			record.brain:lureTo(position, duration)
+			called += 1
+		end
+	end
+
+	return called
+end
+
 function InfectedService:lure(position: Vector3, radius: number, duration: number)
 	local radiusSquared = radius * radius
 	for _, record in self._alive do

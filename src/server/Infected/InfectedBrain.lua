@@ -200,6 +200,12 @@ function InfectedBrain.new(model: Model, definition: any)
 	local self = setmetatable({
 		model = model,
 		definition = definition,
+		--[[ Per BODY, not per archetype. A Common's claw is scaled by the tier of
+		     the model it happens to be wearing — see InfectedConfig.CommonTiers —
+		     so a riot body hits harder than the shambler beside it despite the
+		     two sharing every other number. InfectedService writes it after
+		     construction; this is the archetype's value until it does. ]]
+		attackDamage = definition.attack.damage,
 		humanoid = humanoid,
 		root = root,
 		trove = trove,
@@ -469,6 +475,23 @@ function InfectedBrain:distanceTo(model: Model): number
 	end
 	local delta = other.Position - root.Position
 	return delta.Magnitude + math.abs(delta.Y) * (VERTICAL_PENALTY - 1)
+end
+
+--[[
+	Plays the body's death clip and reports how long it runs, or 0 for none.
+
+	Called from InfectedService:_retire BEFORE destroy(), which is the only
+	window it fits in: the animator goes down with the brain, and death is the
+	thing that takes the brain down. GoreService holds the ragdoll for the
+	returned time so the collapse is animated rather than replaced.
+]]
+function InfectedBrain:playDeath(): number
+	local animator = self.animator
+	if not animator or typeof(animator.playDeath) ~= "function" then
+		return 0
+	end
+	local ok, seconds = pcall(animator.playDeath, animator)
+	return if ok and typeof(seconds) == "number" then seconds else 0
 end
 
 function InfectedBrain:destroy()
@@ -774,7 +797,7 @@ function InfectedBrain:_landSwing(target: Model, targetRoot: BasePart, now: numb
 	-- server owns the number; nothing here pre-multiplies anything.
 	Registry.get("DamageService"):applyDamage(
 		target,
-		self.definition.attack.damage,
+		self.attackDamage,
 		Types.newDamageContext({
 			attackerModel = self.model,
 			damageType = Enums.DamageType.Special,

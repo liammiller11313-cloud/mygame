@@ -312,8 +312,21 @@ AudioConfig.Infected = {
 	JockeyIdle = sound(ID.InsaneLaugh, 0.7, 0.97, 1.05, 300, 6),
 	JockeyRide = sound(ID.InsaneLaugh, 0.85, 1.06, 1.14, 260, 7),
 
-	RusherIdle = sound(ID.MonsterBellow, 0.6, 1.08, 1.16, 280, 5),
-	RusherCharge = sound(ID.MonsterBellow, 1.0, 0.94, 1.0, 400, 8),
+	ChargerIdle = sound(ID.MonsterBellow, 0.6, 1.08, 1.16, 280, 5),
+	ChargerCharge = sound(ID.MonsterBellow, 1.0, 0.94, 1.0, 400, 8),
+
+	--[[ The three "you are standing in the wrong place" specials. Every one of
+	     them is a warning first and a threat second, so the idle carries further
+	     than the creature can act: a Tongue you cannot hear is a Tongue nobody
+	     can answer, and hearing it IS the counter. ]]
+	TongueIdle = sound(ID.CreatureGrowl, 0.7, 0.82, 0.9, 420, 6),
+	TongueGrab = sound(ID.CreatureGrowl, 0.95, 0.74, 0.82, 460, 8),
+
+	BoomerIdle = sound(ID.ZombieGroan, 0.75, 0.7, 0.78, 300, 6),
+	BoomerBurst = sound(ID.MonsterBellow, 1.0, 1.3, 1.42, 420, 9),
+
+	SpitterIdle = sound(ID.CreatureGrowl, 0.7, 1.24, 1.34, 320, 6),
+	SpitterSpit = sound(ID.CreatureGrowl, 0.9, 1.36, 1.48, 380, 7),
 
 	WitchCry = sound(ID.WomanCrying, 0.8, 0.99, 1.01, 460, 7),
 	WitchSummon = sound(ID.ZombieHorde, 0.95, 0.86, 0.94, 520, 8),

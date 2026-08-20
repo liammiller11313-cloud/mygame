@@ -196,9 +196,9 @@ InfectedConfig.Definitions = {
 	     off their feet, scattering everyone else in the lane. Deliberately clumsy
 	     to turn, so a charge CAN be dodged — the wind-up bellow is the tell, and
 	     making that dodge is the most satisfying thing a survivor does. ]]
-	[Enums.Infected.Rusher] = {
-		id = Enums.Infected.Rusher,
-		displayName = "Rusher",
+	[Enums.Infected.Charger] = {
+		id = Enums.Infected.Charger,
+		displayName = "Charger",
 		health = 450,
 		isBoss = false,
 		isSpecial = true,
@@ -231,6 +231,163 @@ InfectedConfig.Definitions = {
 		gibThreshold = 260,
 		dismemberable = true,
 		corpseLifetime = 36,
+	},
+
+	--[[
+		Tongue — the Smoker, renamed because Roblox's filter eats the word.
+
+		It never comes to you. It finds a sightline from sixty studs away, drags
+		one survivor out of the group, and the only counter is a teammate: the
+		victim cannot free themselves and everyone knows it. That is the whole
+		design, and the numbers protect it — low health because it must die the
+		moment it is found, and a sight range far beyond its pull so it can pick
+		its spot before anyone can answer.
+
+		Slow on the ground. A Tongue that can also chase is a Tongue with no
+		weakness, and the tell is that you have time to find it.
+	]]
+	[Enums.Infected.Tongue] = {
+		id = Enums.Infected.Tongue,
+		displayName = "Tongue",
+		health = 250,
+		isBoss = false,
+		isSpecial = true,
+
+		walkSpeed = 11,
+		runSpeed = 15,
+		sprintChance = 0.2,
+		turnSpeed = 200,
+		jumpPower = 32,
+
+		headshotAlwaysKills = false,
+		damageResistance = 1.0,
+		stumbleResistance = 0.15,
+		burnDamagePerSecond = 34,
+
+		-- The constrict, once a victim is reeled in. Low and relentless rather
+		-- than spiky: the threat is the isolation, not the damage.
+		attack = { damage = 5, range = 6, cooldown = 0.8, windup = 0.15 },
+
+		sightRange = 420,
+		hearingRange = 300,
+		loseInterestTime = 14,
+
+		spawnCost = 26,
+		maxAlive = 2,
+
+		bodyColor = Color3.fromRGB(84, 104, 62),
+		accentColor = Color3.fromRGB(56, 70, 42),
+		scale = 1.1,
+		outlineColor = Color3.fromRGB(150, 196, 84),
+
+		gibThreshold = 170,
+		dismemberable = true,
+		corpseLifetime = 32,
+	},
+
+	--[[
+		Boomer — deals almost no damage and decides more fights than anything
+		except the Tank.
+
+		What it does is take away your VISION and hand your position to the
+		horde, and it does it by dying. That inversion is the joke and the whole
+		of the design: killing a Boomer badly is worse than not killing it, so
+		the correct answer is to back up first and shoot it second, which is
+		exactly the discipline a co-op zombie game wants to teach.
+
+		Fat, slow, and fragile. It only has to get close once.
+	]]
+	[Enums.Infected.Boomer] = {
+		id = Enums.Infected.Boomer,
+		displayName = "Boomer",
+		health = 125,
+		isBoss = false,
+		isSpecial = true,
+
+		walkSpeed = 9,
+		runSpeed = 13,
+		sprintChance = 0.1,
+		turnSpeed = 150,
+		jumpPower = 20,
+
+		headshotAlwaysKills = false,
+		damageResistance = 1.0,
+		stumbleResistance = 0.0, -- shoves off trivially; that IS the counter
+		burnDamagePerSecond = 40,
+
+		-- The vomit itself does no damage. This is the slap it throws if you let
+		-- it reach you, which should sting and never kill.
+		attack = { damage = 3, range = 6, cooldown = 1.0, windup = 0.25 },
+
+		sightRange = 240,
+		hearingRange = 260,
+		loseInterestTime = 10,
+
+		spawnCost = 22,
+		maxAlive = 2,
+
+		bodyColor = Color3.fromRGB(126, 122, 74),
+		accentColor = Color3.fromRGB(88, 86, 50),
+		scale = 1.35,
+		outlineColor = Color3.fromRGB(198, 202, 96),
+
+		--[[ Comes apart at the slightest provocation, and dismemberable is false
+		     on purpose: a Boomer is one balloon, and taking an arm off it instead
+		     of bursting it is the wrong read every time. ]]
+		gibThreshold = 40,
+		dismemberable = false,
+		corpseLifetime = 20,
+	},
+
+	--[[
+		Spitter — the only infected that attacks the FLOOR.
+
+		Everything else in this game threatens a body. The Spitter threatens a
+		place, which is what makes it the answer to a team that has found a
+		corner and stopped moving: the acid does not care how good your aim is,
+		it cares that you are standing still.
+
+		The lowest health in the roster after the Boomer, and the longest range
+		of anything that is not the Tongue. It is meant to spit and retreat, and
+		to be punished the moment somebody turns around.
+	]]
+	[Enums.Infected.Spitter] = {
+		id = Enums.Infected.Spitter,
+		displayName = "Spitter",
+		health = 110,
+		isBoss = false,
+		isSpecial = true,
+
+		walkSpeed = 14,
+		runSpeed = 26, -- runs AWAY well; that is what the speed is for
+		sprintChance = 0.7,
+		turnSpeed = 220,
+		jumpPower = 34,
+
+		headshotAlwaysKills = false,
+		damageResistance = 1.0,
+		stumbleResistance = 0.0,
+		burnDamagePerSecond = 34,
+
+		-- Its melee is an afterthought. The acid is the weapon and it lives in
+		-- the Spitter module, not here, because a pool is not an attack on a body.
+		attack = { damage = 4, range = 6, cooldown = 0.9, windup = 0.2 },
+
+		sightRange = 380,
+		hearingRange = 280,
+		loseInterestTime = 12,
+
+		spawnCost = 24,
+		maxAlive = 2,
+
+		bodyColor = Color3.fromRGB(96, 116, 66),
+		accentColor = Color3.fromRGB(140, 168, 58),
+		scale = 1.05,
+		outlineColor = Color3.fromRGB(176, 214, 72),
+
+		gibThreshold = 60,
+		dismemberable = true,
+		corpseLifetime = 26,
 	},
 
 	--[[ Not the Left 4 Dead witch. She sits and cries until something disturbs
@@ -318,6 +475,95 @@ InfectedConfig.Definitions = {
 		corpseLifetime = 60,
 	},
 } :: { [string]: InfectedDefinition }
+
+--[[
+	── COMMON TIERS ────────────────────────────────────────────────────────────
+	Not every Common is the same Common.
+
+	The horde is one archetype with many MODELS, picked at random per body so a
+	wave reads as a crowd rather than a clone army. Some of those models are
+	obviously tougher than the rest — riot gear, body armour, a helmet — and a
+	player who shoots one and watches it die like a shirtless shambler learns
+	that the art is decoration. Making the armoured ones actually harder is what
+	turns a variant list into information.
+
+	Tiers are keyed by the TRAILING NUMBER in the model's name, because that is
+	the one thing a folder of variants reliably has: "24", "Common24",
+	"Common 24" and "Infected_24" all resolve to 24. A model whose name has no
+	number in it is a regular, which is the safe default — a new model dropped in
+	is never accidentally a mini-boss.
+
+	The bands and what they mean:
+	  *  1–23  regular. The baseline the whole game is tuned against.
+	  * 28–34  reinforced. Noticeably harder than a regular, clearly softer than
+	           police. These are the ones that make you stop spraying.
+	  * 24–27  police. The hardest thing in the horde that is not a special:
+	           three shots rather than one, and a hit that actually hurts.
+
+	Scales rather than absolute numbers, so retuning the Common retunes all
+	three and they can never drift apart. Damage is applied to `attack.damage`
+	per body by InfectedService, health to MaxHealth.
+]]
+export type CommonTier = {
+	id: string,
+	displayName: string,
+	from: number,
+	to: number,
+	health: number, -- multiplier on Common health
+	damage: number, -- multiplier on Common attack damage
+	outlineColor: Color3,
+}
+
+InfectedConfig.CommonTiers = table.freeze({
+	table.freeze({
+		id = "Reinforced",
+		displayName = "Reinforced Infected",
+		from = 28,
+		to = 34,
+		health = 2.0, -- 100 hp
+		damage = 1.4, -- 5.6
+		outlineColor = Color3.fromRGB(214, 176, 96),
+	}),
+	table.freeze({
+		id = "Police",
+		displayName = "Riot Infected",
+		from = 24,
+		to = 27,
+		health = 3.2, -- 160 hp
+		damage = 1.85, -- 7.4
+		outlineColor = Color3.fromRGB(120, 168, 226),
+	}),
+}) :: { CommonTier }
+
+--[[ The number at the end of a variant's model name, or nil. Anchored to the
+     END so "Common 24" reads 24 rather than finding some other digit earlier in
+     the name — a folder called "Zombie2" full of models is not a folder of
+     tier-2 bodies. ]]
+local function variantNumber(name: string): number?
+	local digits = string.match(name, "(%d+)%s*$")
+	return if digits then tonumber(digits) else nil
+end
+
+--[[ The tier a Common variant belongs to, or nil for a regular.
+
+     Only ever consulted for Commons. A special has one model and no tiers, and
+     a special whose model happened to be called "Hunter24" must not quietly
+     become a riot Hunter. ]]
+function InfectedConfig.tierForVariant(kind: string, variantName: string?): CommonTier?
+	if kind ~= Enums.Infected.Common or typeof(variantName) ~= "string" then
+		return nil
+	end
+	local number = variantNumber(variantName)
+	if not number then
+		return nil
+	end
+	for _, tier in InfectedConfig.CommonTiers do
+		if number >= tier.from and number <= tier.to then
+			return tier
+		end
+	end
+	return nil
+end
 
 --[[ Looks up an archetype, nil for an unknown id (ids arrive from attributes). ]]
 function InfectedConfig.get(kind: string): InfectedDefinition?

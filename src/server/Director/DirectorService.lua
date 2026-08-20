@@ -1143,7 +1143,7 @@ end
 
 --[[
 	Picks a special, weighted by the inverse of its spawnCost: the config already
-	says what each one is worth, so a Rusher at 28 turns up less often than a
+	says what each one is worth, so a Charger at 28 turns up less often than a
 	Jockey at 22 without a second table of weights to keep in agreement with the
 	first.
 ]]

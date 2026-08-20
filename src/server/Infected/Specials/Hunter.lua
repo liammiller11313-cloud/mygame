@@ -26,7 +26,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
@@ -34,6 +33,8 @@ local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
 local Types = require(Shared.Types)
+
+local Support = require(script.Parent.Support)
 
 local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Hunter]
 local ATTACK = DEFINITION.attack
@@ -144,79 +145,6 @@ local function ensure(model: Model): State
 	return state
 end
 
--- The brain is InfectedService's object and arrives here as an opaque handle.
--- Every call into it is guarded so that a special still behaves like an ordinary
--- infected if a hook it expects is not there.
-local function pauseBrain(brain: any)
-	if not brain then
-		return
-	end
-	if typeof(brain.pause) == "function" then
-		brain:pause()
-	end
-	-- pause() stands the common AI down but does not cancel a Humanoid:MoveTo it
-	-- already issued, and a stale walk order keeps steering the body for several
-	-- seconds. stop() is the brain's own way to drop it.
-	if typeof(brain.stop) == "function" then
-		brain:stop()
-	end
-end
-
-local function resumeBrain(brain: any)
-	if brain and typeof(brain.resume) == "function" then
-		brain:resume()
-	end
-end
-
-local function setBrainTarget(brain: any, target: Model?)
-	if brain and typeof(brain.setTarget) == "function" then
-		brain:setTarget(target)
-	end
-end
-
---[[ A shove has to answer a special exactly the way it answers a Common: whatever
-     it was doing stops. InfectedService:stagger scales the duration by
-     stumbleResistance and hands it to the brain, which freezes the body — but it
-     cannot interrupt a scripted phase from the outside, so the phase has to ask.
-     Nothing on this path restores WalkSpeed: the stumble owns it, and the brain
-     puts it back when the stumble ends. ]]
-local function isStaggered(brain: any): boolean
-	return brain ~= nil and typeof(brain.isStaggered) == "function" and brain:isStaggered() == true
-end
-
---[[ Yaw toward a point at the definition's turnSpeed. The brain owns rotation —
-     including Humanoid.AutoRotate, which manual facing has to switch off — so
-     this defers to it and only snaps if that hook is missing. ]]
-local function faceTowards(brain: any, root: BasePart, position: Vector3, dt: number)
-	if brain and typeof(brain.faceTowards) == "function" then
-		brain:faceTowards(position, dt)
-		return
-	end
-	local flat = Vector3.new(position.X - root.Position.X, 0, position.Z - root.Position.Z)
-	if flat.Magnitude > 0.05 then
-		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-	end
-end
-
-local function playSound(key: string, part: BasePart)
-	local audio: any = Registry.find("AudioService")
-	if audio then
-		audio:play("Infected", key, part)
-	end
-end
-
---[[ True while SurvivorService still names this model as the pin's owner. The
-     shove clears a pin through SurvivorService, not through us, so polling is
-     how the Hunter learns it has been answered. getPinnedBy is not in the
-     architecture's public list for SurvivorService, so the replicated attribute
-     is the fallback. ]]
-local function stillPinnedBy(survivors: any, player: Player, model: Model): boolean
-	if typeof(survivors.getPinnedBy) == "function" then
-		return survivors:getPinnedBy(player) == model
-	end
-	return Attributes.get(player, Attributes.Player.PinnedBy, "") ~= ""
-end
-
 local function isPinnable(survivors: any, player: Player): boolean
 	local state = survivors:getState(player)
 	return state == Enums.SurvivorState.Healthy or state == Enums.SurvivorState.Hurt
@@ -303,18 +231,6 @@ local function targetRootOf(player: Player?): BasePart?
 	return RigUtil.getRoot(character)
 end
 
---[[ Range band, sightline, and enough headroom to clear the ground on the way
-     out. The arc test is two rays: straight up out of the crouch, then across
-     from the raised point to the target's chest. ]]
-local function hasClearArc(state: State, from: Vector3, to: Vector3, targetCharacter: Model): boolean
-	state.ignore[2] = targetCharacter
-	local raised = from + Vector3.new(0, ARC_CLEARANCE, 0)
-	local clear = RaycastUtil.hasLineOfSight(from, raised, state.ignore)
-		and RaycastUtil.hasLineOfSight(raised, to, state.ignore)
-	state.ignore[2] = nil
-	return clear
-end
-
 --[[ Hands the Hunter back to the brain. Every exit from a scripted phase goes
      through here so there is exactly one place that can forget to resume. ]]
 local function backToStalk(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
@@ -330,14 +246,14 @@ local function backToStalk(model: Model, brain: any, state: State, delay: number
 			humanoid.WalkSpeed = DEFINITION.runSpeed
 		end
 	end
-	resumeBrain(brain)
+	Support.resumeBrain(brain)
 end
 
 local function releaseVictim(model: Model, brain: any, state: State, delay: number, keepSpeed: boolean?)
 	local victim = state.victim
 	if victim then
 		local survivors: any = Registry.find("SurvivorService")
-		if survivors and stillPinnedBy(survivors, victim, model) then
+		if survivors and Support.stillPinnedBy(survivors, victim, model) then
 			survivors:setPinned(victim, nil)
 		end
 	end
@@ -391,7 +307,7 @@ local function beginCrouch(
 	targetRoot: BasePart,
 	dt: number
 )
-	pauseBrain(brain)
+	Support.pauseBrain(brain)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -400,8 +316,8 @@ local function beginCrouch(
 		humanoid.WalkSpeed = 0
 	end
 
-	faceTowards(brain, root, targetRoot.Position, dt)
-	playSound("HunterIdle", root)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
+	Support.playSound("HunterIdle", root)
 
 	state.phase = PHASE.Crouch
 	state.phaseTime = 0
@@ -425,14 +341,14 @@ local function launch(
 	local speed = math.min(flat.Magnitude / flight, POUNCE_MAX_SPEED)
 	local heading = if flat.Magnitude > 0.05 then flat.Unit else root.CFrame.LookVector
 
-	faceTowards(brain, root, targetRoot.Position, dt)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
 	root.AssemblyLinearVelocity = heading * speed + Vector3.new(0, DEFINITION.jumpPower, 0)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 	end
-	playSound("HunterPounce", root)
+	Support.playSound("HunterPounce", root)
 
 	state.phase = PHASE.Pounce
 	state.phaseTime = 0
@@ -477,7 +393,7 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 		state.target = pounceable
 		state.chase = pounceable or nearest
 		local chase = state.chase
-		setBrainTarget(brain, if chase then chase.Character else nil)
+		Support.setBrainTarget(brain, if chase then chase.Character else nil)
 	end
 
 	local target = state.target
@@ -492,7 +408,7 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 	-- so a Hunter circling the team is audible before it ever commits.
 	if now >= state.nextGrowl and distance <= DEFINITION.sightRange then
 		state.nextGrowl = now + GROWL_INTERVAL
-		playSound("HunterIdle", root)
+		Support.playSound("HunterIdle", root)
 	end
 
 	if now < state.readyAt then
@@ -513,7 +429,9 @@ local function stepStalk(model: Model, brain: any, state: State, root: BasePart,
 	if not visible then
 		return
 	end
-	if not hasClearArc(state, root.Position, targetRoot.Position, character) then
+	if
+		not Support.hasClearArc(state.ignore, root.Position, targetRoot.Position, character, ARC_CLEARANCE)
+	then
 		return
 	end
 
@@ -530,7 +448,7 @@ local function stepCrouch(model: Model, brain: any, state: State, root: BasePart
 	-- Tracking during the crouch is what makes strafing away a real answer: the
 	-- Hunter can turn, but turnSpeed decides how much of the dodge it keeps up
 	-- with, and the leap itself commits to whatever it is facing.
-	faceTowards(brain, root, targetRoot.Position, dt)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
 
 	if state.phaseTime >= CROUCH_TIME then
 		launch(model, brain, state, root, targetRoot, dt)
@@ -575,7 +493,7 @@ local function stepPin(model: Model, brain: any, state: State, root: BasePart, n
 
 	local character = victim.Character
 	local victimRoot = targetRootOf(victim)
-	if not character or not victimRoot or not stillPinnedBy(survivors, victim, model) then
+	if not character or not victimRoot or not Support.stillPinnedBy(survivors, victim, model) then
 		-- Shoved off, shot off, or the survivor went down. All three are
 		-- answers, and all three end here.
 		releaseVictim(model, brain, state, RELEASE_RECOVERY)
@@ -612,12 +530,12 @@ function Hunter.onSpawn(model: Model, brain: any)
 
 	local root = RigUtil.getRoot(model)
 	if root then
-		playSound("HunterIdle", root)
+		Support.playSound("HunterIdle", root)
 		-- The spawn growl counts as this Hunter's first one; without this the
 		-- approach clock fires again on the very next frame.
 		state.nextGrowl = os.clock() + GROWL_INTERVAL
 	end
-	setBrainTarget(brain, nil)
+	Support.setBrainTarget(brain, nil)
 end
 
 function Hunter.onUpdate(model: Model, brain: any, dt: number)
@@ -630,7 +548,7 @@ function Hunter.onUpdate(model: Model, brain: any, dt: number)
 	local now = os.clock()
 	state.phaseTime += dt
 
-	if state.phase ~= PHASE.Stalk and isStaggered(brain) then
+	if state.phase ~= PHASE.Stalk and Support.isStaggered(brain) then
 		releaseVictim(model, brain, state, RELEASE_RECOVERY, true)
 		return
 	end

@@ -43,6 +43,8 @@ local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
 local Types = require(Shared.Types)
 
+local Support = require(script.Parent.Support)
+
 local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Tank]
 local ATTACK = DEFINITION.attack
 
@@ -160,67 +162,6 @@ local function ensure(model: Model): State
 	return state
 end
 
--- The brain is InfectedService's object and arrives as an opaque handle; every
--- call into it is guarded so a missing hook degrades to ordinary behaviour.
-local function pauseBrain(brain: any)
-	if not brain then
-		return
-	end
-	if typeof(brain.pause) == "function" then
-		brain:pause()
-	end
-	-- pause() stands the common AI down but does not cancel a Humanoid:MoveTo it
-	-- already issued, and a stale walk order keeps steering the body for several
-	-- seconds. stop() is the brain's own way to drop it.
-	if typeof(brain.stop) == "function" then
-		brain:stop()
-	end
-end
-
-local function resumeBrain(brain: any)
-	if brain and typeof(brain.resume) == "function" then
-		brain:resume()
-	end
-end
-
-local function setBrainTarget(brain: any, target: Model?)
-	if brain and typeof(brain.setTarget) == "function" then
-		brain:setTarget(target)
-	end
-end
-
---[[ Yaw toward a point at the definition's turnSpeed. The brain owns rotation —
-     including Humanoid.AutoRotate, which manual facing has to switch off — so
-     this defers to it and only snaps if that hook is missing. ]]
-local function faceTowards(brain: any, root: BasePart, position: Vector3, dt: number)
-	if brain and typeof(brain.faceTowards) == "function" then
-		brain:faceTowards(position, dt)
-		return
-	end
-	local flat = Vector3.new(position.X - root.Position.X, 0, position.Z - root.Position.Z)
-	if flat.Magnitude > 0.05 then
-		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-	end
-end
-
-local function playSound(key: string, where: any)
-	local audio: any = Registry.find("AudioService")
-	if audio then
-		audio:play("Infected", key, where)
-	end
-end
-
-local function rootOf(player: Player?): (Model?, BasePart?)
-	if not player then
-		return nil, nil
-	end
-	local character = player.Character
-	if not character or not character.Parent then
-		return nil, nil
-	end
-	return character, RigUtil.getRoot(character)
-end
-
 local function nearestSurvivor(root: BasePart): (Player?, BasePart?)
 	local survivors: any = Registry.find("SurvivorService")
 	if not survivors then
@@ -233,7 +174,7 @@ local function nearestSurvivor(root: BasePart): (Player?, BasePart?)
 	local bestDistance = math.huge
 
 	for _, player in survivors:getAliveSurvivors() do
-		local _, victimRoot = rootOf(player)
+		local _, victimRoot = Support.rootOf(player)
 		if victimRoot then
 			local distance = (victimRoot.Position - origin).Magnitude
 			if distance < bestDistance and distance <= DEFINITION.sightRange then
@@ -245,31 +186,6 @@ local function nearestSurvivor(root: BasePart): (Player?, BasePart?)
 	end
 
 	return best, bestRoot
-end
-
-local function damage(model: Model, character: Model, victimRoot: BasePart, origin: Vector3, amount: number)
-	local damageService: any = Registry.find("DamageService")
-	if not damageService then
-		return
-	end
-
-	local delta = victimRoot.Position - origin
-	local distance = delta.Magnitude
-	local direction = if distance > 0.05 then delta.Unit else Vector3.yAxis
-
-	damageService:applyDamage(
-		character,
-		amount,
-		Types.newDamageContext({
-			attackerModel = model,
-			damageType = Enums.DamageType.Special,
-			region = Enums.HitRegion.Torso,
-			hitPosition = victimRoot.Position,
-			hitNormal = -direction,
-			direction = direction,
-			distance = distance,
-		})
-	)
 end
 
 --[[ Throws a survivor. Ownership has to move to the server for the velocity to
@@ -420,13 +336,13 @@ local function backToPursue(model: Model, brain: any, state: State)
 	if humanoid then
 		humanoid.WalkSpeed = DEFINITION.runSpeed
 	end
-	resumeBrain(brain)
+	Support.resumeBrain(brain)
 end
 
 local function stepPursue(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
 	if now >= state.nextRoar then
 		state.nextRoar = now + ROAR_INTERVAL
-		playSound("TankRoar", root)
+		Support.playSound("TankRoar", root)
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
@@ -434,18 +350,18 @@ local function stepPursue(model: Model, brain: any, state: State, root: BasePart
 		-- Footsteps are how a Tank is located through a wall. They are on the
 		-- movement state rather than on a timer so a stationary Tank is silent.
 		state.nextFootstep = now + FOOTSTEP_INTERVAL
-		playSound("TankFootstep", root)
+		Support.playSound("TankFootstep", root)
 	end
 
 	if now >= state.nextScan then
 		state.nextScan = now + SCAN_INTERVAL
 		local target = nearestSurvivor(root)
 		state.target = target
-		setBrainTarget(brain, if target then target.Character else nil)
+		Support.setBrainTarget(brain, if target then target.Character else nil)
 	end
 
 	local target = state.target
-	local character, targetRoot = rootOf(target)
+	local character, targetRoot = Support.rootOf(target)
 	if not target or not character or not targetRoot then
 		return
 	end
@@ -466,20 +382,20 @@ local function stepPursue(model: Model, brain: any, state: State, root: BasePart
 
 		if state.stuckSamples >= STUCK_SAMPLES_TO_GIVE_UP then
 			state.stuckSamples = 0
-			pauseBrain(brain)
+			Support.pauseBrain(brain)
 			if humanoid then
 				humanoid.WalkSpeed = DEFINITION.runSpeed
 				humanoid.AutoRotate = true
 			end
 			state.phase = PHASE.Direct
 			state.phaseTime = 0
-			playSound("TankRoar", root)
+			Support.playSound("TankRoar", root)
 			return
 		end
 	end
 
 	if distance <= SWING_REACH and now >= state.nextSwing then
-		pauseBrain(brain)
+		Support.pauseBrain(brain)
 		if humanoid then
 			humanoid.WalkSpeed = 0
 		end
@@ -494,12 +410,12 @@ local function stepPursue(model: Model, brain: any, state: State, root: BasePart
 		local visible = RaycastUtil.hasLineOfSight(root.Position, targetRoot.Position, state.ignore)
 		state.ignore[2] = nil
 		if visible and not state.rock then
-			pauseBrain(brain)
+			Support.pauseBrain(brain)
 			if humanoid then
 				humanoid.WalkSpeed = 0
 			end
 			tearRock(model, root, state)
-			playSound("TankRoar", root)
+			Support.playSound("TankRoar", root)
 			state.phase = PHASE.Tear
 			state.phaseTime = 0
 		end
@@ -507,12 +423,12 @@ local function stepPursue(model: Model, brain: any, state: State, root: BasePart
 end
 
 local function stepSwing(model: Model, brain: any, state: State, root: BasePart, dt: number)
-	local _, targetRoot = rootOf(state.target)
+	local _, targetRoot = Support.rootOf(state.target)
 	if targetRoot and state.phaseTime < ATTACK.windup then
 		-- Tracking during the wind-up, at turnSpeed. 150 degrees a second is fast
 		-- enough that standing still is fatal and slow enough that running past
 		-- its shoulder is not.
-		faceTowards(brain, root, targetRoot.Position, dt)
+		Support.faceTowards(brain, root, targetRoot.Position, dt)
 	end
 
 	if state.phaseTime < ATTACK.windup then
@@ -528,7 +444,7 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 			local origin = root.Position
 			local facing = root.CFrame.LookVector
 			for _, player in survivors:getAliveSurvivors() do
-				local character, victimRoot = rootOf(player)
+				local character, victimRoot = Support.rootOf(player)
 				if not character or not victimRoot then
 					continue
 				end
@@ -542,7 +458,7 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 					continue
 				end
 
-				damage(model, character, victimRoot, origin, ATTACK.damage)
+				Support.damage(model, character, victimRoot, origin, ATTACK.damage)
 				local away = Vector3.new(delta.X, 0, delta.Z)
 				local heading = if away.Magnitude > 0.05 then away.Unit else facing
 				launch(victimRoot, heading * LAUNCH_SPEED + Vector3.new(0, LAUNCH_LIFT, 0))
@@ -558,7 +474,7 @@ end
 
 local function stepTear(model: Model, brain: any, state: State, root: BasePart, dt: number)
 	local rock = state.rock
-	local _, targetRoot = rootOf(state.target)
+	local _, targetRoot = Support.rootOf(state.target)
 
 	if not rock or not targetRoot then
 		destroyRock(state)
@@ -567,7 +483,7 @@ local function stepTear(model: Model, brain: any, state: State, root: BasePart, 
 		return
 	end
 
-	faceTowards(brain, root, targetRoot.Position, dt)
+	Support.faceTowards(brain, root, targetRoot.Position, dt)
 	local facing = root.CFrame.LookVector
 
 	-- Held overhead through the whole tell. The rock being visible in its hands
@@ -587,7 +503,7 @@ end
      to jump. A Tank standing still against a crate is the single worst outcome in
      this encounter — worse than one that arrives too early. ]]
 local function stepDirect(model: Model, brain: any, state: State, root: BasePart, now: number)
-	local _, targetRoot = rootOf(state.target)
+	local _, targetRoot = Support.rootOf(state.target)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not targetRoot or not humanoid then
 		backToPursue(model, brain, state)
@@ -617,7 +533,7 @@ local function stepDirect(model: Model, brain: any, state: State, root: BasePart
 
 	if humanoid.MoveDirection.Magnitude > 0.1 and now >= state.nextFootstep then
 		state.nextFootstep = now + FOOTSTEP_INTERVAL
-		playSound("TankFootstep", root)
+		Support.playSound("TankFootstep", root)
 	end
 
 	if flat.Magnitude <= SWING_REACH or state.phaseTime >= DIRECT_TIME then
@@ -646,10 +562,10 @@ function Tank.onSpawn(model: Model, brain: any)
 
 	local root = RigUtil.getRoot(model)
 	if root then
-		playSound("TankRoar", root)
+		Support.playSound("TankRoar", root)
 		state.nextRoar = os.clock() + ROAR_INTERVAL
 	end
-	setBrainTarget(brain, nil)
+	Support.setBrainTarget(brain, nil)
 end
 
 function Tank.onUpdate(model: Model, brain: any, dt: number)
@@ -683,7 +599,7 @@ function Tank.onDeath(model: Model, brain: any, _ctx: any)
 		-- A rock still in the air when the Tank dies goes with it: a detonation
 		-- from a corpse's projectile reads as a bug even when it is fair.
 		destroyRock(state)
-		resumeBrain(brain)
+		Support.resumeBrain(brain)
 		states[model] = nil
 	end
 
@@ -704,7 +620,7 @@ function Tank.onDeath(model: Model, brain: any, _ctx: any)
 
 	local root = RigUtil.getRoot(model)
 	if root then
-		playSound("TankRoar", root)
+		Support.playSound("TankRoar", root)
 	end
 end
 

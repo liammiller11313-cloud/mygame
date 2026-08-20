@@ -203,7 +203,7 @@ GameModeConfig.Versus = table.freeze({
 	InfectedPlayableKinds = {
 		Enums.Infected.Hunter,
 		Enums.Infected.Jockey,
-		Enums.Infected.Rusher,
+		Enums.Infected.Charger,
 		Enums.Infected.Tank,
 	},
 	-- The Witch is a hazard, not a class. Nobody plays her; the Director places her.

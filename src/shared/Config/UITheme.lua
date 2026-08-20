@@ -276,7 +276,15 @@ UITheme.KillFeedback = table.freeze({
 		Common = 0,
 		Jockey = 0.4,
 		Hunter = 0.45,
-		Rusher = 0.5,
+		Charger = 0.5,
+		--[[ Lighter than the pinning specials, and deliberately so. These three
+		     are fragile and are meant to die fast; a full special-weight thump
+		     every time somebody clips a Spitter would flatten the difference
+		     between "I killed the thing that had my teammate" and "I shot the
+		     one that was going to spit at me". ]]
+		Tongue = 0.4,
+		Spitter = 0.3,
+		Boomer = 0.35,
 		Witch = 1,
 		Tank = 1,
 	}),

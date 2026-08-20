@@ -66,10 +66,10 @@ export type AnimationSet = {
 	    has one gait — and it is fine here because InfectedAnimator scales
 	    playback rate to the body's real speed, so a Common sprinting at 21 plays
 	    the same clip faster rather than skating.
-	  * There is no attack and no death. The attack telegraph is already a pose
-	    change on the server (InfectedBrain:_setSwingPose), and death is a
-	    ragdoll — GoreService replaces the Motor6Ds outright, so an animation
-	    there would have nothing left to drive.
+	  * There is no attack in this package. The telegraph is already a pose change
+	    on the server (InfectedBrain:_setSwingPose), which is what that pose has
+	    always been for. Death IS here, supplied separately — see the note on the
+	    R15 set for how it and the ragdoll share one body.
 	  * The package's "toolnone" is deliberately absent. It is the idle arm pose
 	    for a character holding no tool, an overlay from Roblox's own Animate
 	    script; nothing in this game holds a tool and nothing would ever play it.
@@ -77,7 +77,7 @@ export type AnimationSet = {
 --[[
 	The R6 set, and the one that matters most: PlaceholderFactory builds the
 	Commons, the Hunter, the Jockey and the Tank as R6, so this is what nearly
-	every body in a round is moving on. Only the Rusher is R15.
+	every body in a round is moving on. Only the Charger is R15.
 
 	Idle, walk, jump and fall are this game's own now. The climb is still
 	Roblox's, because nothing has replaced it and a clip that always loads beats
@@ -92,10 +92,13 @@ export type AnimationSet = {
 	body's own SCALE as well as its speed, so a Tank with legs 2.35x as long
 	takes 2.35x fewer strides to cross the same ground.
 
-	── NO ATTACK, NO DEATH ─────────────────────────────────────────────────────
+	── NO ATTACK ───────────────────────────────────────────────────────────────
 	The R15 set below has an attack; this one does not, so an R6 body still
 	telegraphs its swing with InfectedBrain's C0 pose, which is what that pose
-	has always been for. Death is a ragdoll in both — see the R15 note.
+	has always been for.
+
+	Both sets DO have a death clip, and the note on the R15 set explains how it
+	and the ragdoll take turns on the same body.
 ]]
 local ZOMBIE_R6: AnimationSet = {
 	rig = "R6",
@@ -110,6 +113,9 @@ local ZOMBIE_R6: AnimationSet = {
 	jump = { 100214172135324 },
 	fall = { 133938170527213 },
 	climb = { 125750800 },
+	--[[ See the R15 note on death: the clip plays, and the ragdoll waits for it
+	     rather than replacing it. ]]
+	death = { 85609984089861 },
 }
 
 --[[
@@ -121,24 +127,25 @@ local ZOMBIE_R6: AnimationSet = {
 	it twice would have meant every body rolling between two identical clips and
 	the variation being a lie.
 
-	── THE DEATH CLIP IS DELIBERATELY ABSENT ───────────────────────────────────
-	Id 3716468774, if it is ever wanted.
+	── THE DEATH CLIP AND THE RAGDOLL ──────────────────────────────────────────
+	These two want the same body and only one of them can have it. Ragdolling
+	DISABLES every Motor6D in the rig and puts the Humanoid into Physics state,
+	so there is nothing left for a keyframe to drive — a death clip that plays
+	after the ragdoll plays into a void.
 
-	It cannot play while gore is on, and gore is on. Every infected death goes
-	through GoreService:ragdoll, which DISABLES every Motor6D in the rig and puts
-	the Humanoid into Physics state — there is nothing left for a keyframe to
-	drive, and the ragdoll is the death animation at that point. Loading it anyway
-	would be a LoadAnimation per zombie at spawn for a track that can never be
-	seen.
+	This used to be the reason there was no death clip at all. The answer is not
+	to pick one: it is to order them. The clip plays first and the ragdoll WAITS
+	for it, capped at GoreConfig.DeathAnimation.MaxHold so a long or broken clip
+	can never leave a body standing. What the player sees is a body that dies and
+	then falls, rather than one that is deleted upright and replaced with a sack.
 
-	It becomes the right answer the moment GoreConfig.Enabled is false: no
-	ragdoll, and today the corpse simply stands there until Debris takes it. If
-	that switch is ever flipped, add `death = { 3716468774 }` here and a
-	playOnce("death") in InfectedService's kill path, ahead of the brain being
-	destroyed — the animator goes down with it.
+	The wait is skipped entirely for a death that was never going to be tidy — a
+	dismemberment, a gib, an incineration. A body coming apart at the shoulder
+	does not first perform a clean collapse.
 ]]
 local ZOMBIE_R15: AnimationSet = {
 	rig = "R15",
+	death = { 85609984089861 },
 	idle = { 3489171152 },
 	walk = { 3489174223 },
 	run = { 3489173414 },

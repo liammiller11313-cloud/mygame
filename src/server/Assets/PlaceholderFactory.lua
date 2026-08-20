@@ -42,20 +42,20 @@
 	rig and win.
 
 	── THE RIGS ARE MIXED R6 AND R15 ───────────────────────────────────────────
-	Commons, Hunter, Jockey and Tank are R6; the Rusher is R15 MeshParts. Two
+	Commons, Hunter, Jockey and Tank are R6; the Charger is R15 MeshParts. Two
 	consequences run through everything below:
-	  * a Humanoid is NEVER looked up by name — the Rusher's is called "Zombie"
+	  * a Humanoid is NEVER looked up by name — the Charger's is called "Zombie"
 	    — always FindFirstChildOfClass;
 	  * part names are never assumed. GameConfig.PartRegions and
 	    GoreConfig.Dismemberment.Severable both carry the R6 and the R15 naming,
 	    and a rig that satisfies neither is reported by name at build time rather
-	    than discovered later as "dismemberment stopped working on Rushers".
+	    than discovered later as "dismemberment stopped working on Chargers".
 
 	── SILHOUETTE (the grey-box half) ──────────────────────────────────────────
 	In a horde the silhouette is all a player gets: at twelve metres, in fog, you
 	cannot read a texture and you certainly cannot read a health bar. So each
 	archetype is shaped, not just tinted — the Tank is enormous and hunched, the
-	Rusher drags one absurd arm, the Jockey is small and folded, the Hunter is
+	Charger drags one absurd arm, the Jockey is small and folded, the Hunter is
 	compact and crouched, the Witch is slight and pale. Those proportions are
 	also what the real models are expected to honour.
 
@@ -574,7 +574,7 @@ local SHAPES = {
 	-- charge reads as a threat before you can see what it is. The asymmetry is
 	-- the tell and it survives being seen for a quarter of a second down a
 	-- corridor.
-	[Enums.Infected.Rusher] = {
+	[Enums.Infected.Charger] = {
 		head = V(0.72, 0.62, 0.72),
 		neck = 0.0,
 		upperTorso = V(2.30, 1.60, 1.20),
@@ -647,7 +647,7 @@ local SHAPES = {
 --[[ Verifies once, per rig template, that every part GoreConfig is allowed to
      sever actually exists on this rig with a Motor6D behind it. A rig that
      quietly lacks a joint name would show up much later as "dismemberment
-     stopped working on Rushers", which is a miserable thing to debug. ]]
+     stopped working on Chargers", which is a miserable thing to debug. ]]
 local function verifySeverable(key: string, model: Model)
 	local motors: { [string]: boolean } = {}
 	for _, descendant in model:GetDescendants() do
@@ -914,7 +914,7 @@ local function buildRig(kind: string): Model?
 	socket("Waist", V(0, waistY, 0))
 	socket("Neck", V(0, shoulderTopY, 0))
 
-	-- ── arms, per side, with the Rusher's asymmetry baked in ────────────────
+	-- ── arms, per side, with the Charger's asymmetry baked in ────────────────
 	for _, side in { -1, 1 } do
 		local prefix = if side < 0 then "Left" else "Right"
 		local thickness = if side < 0 then (shape.leftArmScale or 1) else (shape.rightArmScale or 1)
@@ -1112,7 +1112,7 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		)
 	end
 
-	-- NEVER by name. The Rusher's Humanoid is called "Zombie".
+	-- NEVER by name. The Charger's Humanoid is called "Zombie".
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
 		warnOnce(
@@ -3004,7 +3004,54 @@ function PlaceholderFactory:ensureAssets()
 	self:buildTestMap()
 end
 
+--[[
+	Creates an empty, correctly named folder for every kind the game knows about.
+
+	Supplying a rig is "put a model in ReplicatedStorage.Assets.Infected.<Kind>",
+	and every word of that has to be spelled the way Enums.Infected spells it —
+	which means the single most common way to supply a rig and have nothing
+	happen is a folder called "Boomers", or "Spitter " with a trailing space, or
+	one that was never made because the kind is new and nobody knew it existed.
+	None of those produce an error. They produce a grey box and a line in the
+	boot summary that reads exactly like a kind nobody has got to yet.
+
+	So the game makes them. Every folder is there, named right, on the first
+	boot after a kind is added, and supplying a rig is drag-and-drop into a
+	folder that already exists. An empty one is free — variantsFor greybox-es a
+	kind whether the folder is missing or merely empty, so this changes nothing
+	about behaviour and everything about discoverability.
+
+	Only ever creates. A folder with models in it is left exactly alone.
+]]
+function PlaceholderFactory:ensureAssetFolders()
+	local assets = folderIn(ReplicatedStorage, ASSETS_FOLDER)
+	local infected = folderIn(assets, "Infected")
+	local made = {}
+	for _, kind in Enums.Infected do
+		if not infected:FindFirstChild(kind) then
+			folderIn(infected, kind)
+			table.insert(made, kind)
+		end
+	end
+	if #made > 0 then
+		table.sort(made)
+		print(
+			string.format(
+				"[PlaceholderFactory] made empty rig folders for: %s — drop a model (or several, "
+					.. "they are picked from at random) into Assets.Infected.<Kind> and it is used "
+					.. "on the next run.",
+				table.concat(made, ", ")
+			)
+		)
+	end
+end
+
 function PlaceholderFactory:init()
+	--[[ Folders first: they are where a user PUTS things, so they have to exist
+	     before anything goes looking, and a kind added in code is a folder
+	     waiting for a model on the very next boot. ]]
+	self:ensureAssetFolders()
+
 	-- Assets exist before any other service's start() runs, which is what lets
 	-- LevelService index the map's tags in its own start() without waiting.
 	self:ensureAssets()

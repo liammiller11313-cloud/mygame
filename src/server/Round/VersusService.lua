@@ -38,7 +38,7 @@
 	an AI one; the player steers the ghost and sees through it.
 
 	── THE ABILITY IS THEIRS, THE ABILITY CODE IS NOT ──────────────────────────
-	Specials/Hunter, Jockey, Rusher and Tank already contain the pounce, the
+	Specials/Hunter, Jockey, Charger and Tank already contain the pounce, the
 	ride, the charge and the swing, tuned and tested. Reimplementing any of that
 	here would give the mode a second, worse Hunter. Instead the module is taken
 	off InfectedService's record while the player is walking around — no module,

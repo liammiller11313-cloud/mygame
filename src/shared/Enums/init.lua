@@ -89,9 +89,23 @@ Enums.PillItem = table.freeze({
 -- under ReplicatedStorage.Assets.Infected exactly.
 Enums.Infected = table.freeze({
 	Common = "Common",
+
+	--[[ The specials, in the order they earn their place. Hunter and Jockey take
+	     ONE survivor out of the fight; Charger takes one and scatters the rest;
+	     Tongue takes one from across the map; Boomer and Spitter take nobody and
+	     are still the two that decide most fights, because they change where the
+	     team is allowed to stand.
+
+	     Tongue is the Smoker. The name is not a stylistic choice — Roblox's text
+	     filter eats "Smoker" in chat and on any UI string that goes through it,
+	     so a special nobody can name is a special nobody can call out. ]]
 	Hunter = "Hunter",
 	Jockey = "Jockey",
-	Rusher = "Rusher",
+	Charger = "Charger",
+	Tongue = "Tongue",
+	Boomer = "Boomer",
+	Spitter = "Spitter",
+
 	Witch = "Witch",
 	Tank = "Tank",
 })

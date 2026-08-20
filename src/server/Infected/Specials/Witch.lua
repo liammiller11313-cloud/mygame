@@ -43,6 +43,8 @@ local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
 
+local Support = require(script.Parent.Support)
+
 local DEFINITION = InfectedConfig.Definitions[Enums.Infected.Witch]
 
 local PHASE = table.freeze({
@@ -137,67 +139,6 @@ local function ensure(model: Model): State
 	return state
 end
 
--- The brain is InfectedService's object and arrives as an opaque handle; every
--- call into it is guarded so a missing hook degrades to ordinary behaviour.
-local function pauseBrain(brain: any)
-	if not brain then
-		return
-	end
-	if typeof(brain.pause) == "function" then
-		brain:pause()
-	end
-	-- pause() stands the common AI down but does not cancel a Humanoid:MoveTo it
-	-- already issued, and a stale walk order keeps steering the body for several
-	-- seconds. stop() is the brain's own way to drop it.
-	if typeof(brain.stop) == "function" then
-		brain:stop()
-	end
-end
-
-local function resumeBrain(brain: any)
-	if brain and typeof(brain.resume) == "function" then
-		brain:resume()
-	end
-end
-
-local function setBrainTarget(brain: any, target: Model?)
-	if brain and typeof(brain.setTarget) == "function" then
-		brain:setTarget(target)
-	end
-end
-
---[[ Yaw toward a point at the definition's turnSpeed. The brain owns rotation —
-     including Humanoid.AutoRotate, which manual facing has to switch off — so
-     this defers to it and only snaps if that hook is missing. ]]
-local function faceTowards(brain: any, root: BasePart, position: Vector3, dt: number)
-	if brain and typeof(brain.faceTowards) == "function" then
-		brain:faceTowards(position, dt)
-		return
-	end
-	local flat = Vector3.new(position.X - root.Position.X, 0, position.Z - root.Position.Z)
-	if flat.Magnitude > 0.05 then
-		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-	end
-end
-
-local function playSound(key: string, part: BasePart)
-	local audio: any = Registry.find("AudioService")
-	if audio then
-		audio:play("Infected", key, part)
-	end
-end
-
-local function rootOf(player: Player?): (Model?, BasePart?)
-	if not player then
-		return nil, nil
-	end
-	local character = player.Character
-	if not character or not character.Parent then
-		return nil, nil
-	end
-	return character, RigUtil.getRoot(character)
-end
-
 -- ─── the call ────────────────────────────────────────────────────────────────
 
 --[[ Where the horde is being sent: the middle of the team, falling back to her
@@ -211,7 +152,7 @@ local function hordeAnchor(root: BasePart): Vector3
 	local sum = Vector3.zero
 	local count = 0
 	for _, player in survivors:getAliveSurvivors() do
-		local _, victimRoot = rootOf(player)
+		local _, victimRoot = Support.rootOf(player)
 		if victimRoot then
 			sum += victimRoot.Position
 			count += 1
@@ -259,7 +200,7 @@ end
 local function summon(root: BasePart, state: State, now: number)
 	state.nextSummon = now + SUMMON_INTERVAL
 
-	playSound("WitchSummon", root)
+	Support.playSound("WitchSummon", root)
 
 	local anchor = hordeAnchor(root)
 
@@ -314,7 +255,7 @@ local function checkDisturbance(model: Model, root: BasePart, state: State): Pla
 	local blamedDistance = math.huge
 
 	for _, player in survivors:getAliveSurvivors() do
-		local character, victimRoot = rootOf(player)
+		local character, victimRoot = Support.rootOf(player)
 		if not character or not victimRoot then
 			continue
 		end
@@ -359,7 +300,7 @@ local function wake(brain: any, state: State, root: BasePart, by: Player, dt: nu
 	state.victim = by
 	state.lostTime = 0
 
-	playSound("WitchStartle", root)
+	Support.playSound("WitchStartle", root)
 	Remotes.Event.CameraImpulse:FireClient(by, STARTLE_CAMERA_IMPULSE)
 
 	-- The horde is called on the same frame she stands up, not when she reaches
@@ -367,17 +308,17 @@ local function wake(brain: any, state: State, root: BasePart, by: Player, dt: nu
 	-- is whether the team fights her before it lands.
 	summon(root, state, now)
 
-	local _, victimRoot = rootOf(by)
+	local _, victimRoot = Support.rootOf(by)
 	if victimRoot then
-		faceTowards(brain, root, victimRoot.Position, dt)
+		Support.faceTowards(brain, root, victimRoot.Position, dt)
 	end
 end
 
 --[[ Back to the floor, wherever she happens to be standing. The brain goes back
      to sleep with her; the Commons she called do not. ]]
 local function sitDown(model: Model, brain: any, state: State)
-	pauseBrain(brain)
-	setBrainTarget(brain, nil)
+	Support.pauseBrain(brain)
+	Support.setBrainTarget(brain, nil)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -405,7 +346,7 @@ local function stepMourn(model: Model, brain: any, state: State, root: BasePart,
 
 	if now >= state.nextCry then
 		state.nextCry = now + CRY_INTERVAL
-		playSound("WitchCry", root)
+		Support.playSound("WitchCry", root)
 	end
 
 	-- The sight tests are the only cost a sitting Witch has, so they run on their
@@ -424,9 +365,9 @@ local function stepMourn(model: Model, brain: any, state: State, root: BasePart,
 end
 
 local function stepWake(model: Model, brain: any, state: State, root: BasePart, dt: number)
-	local _, victimRoot = rootOf(state.victim)
+	local _, victimRoot = Support.rootOf(state.victim)
 	if victimRoot then
-		faceTowards(brain, root, victimRoot.Position, dt)
+		Support.faceTowards(brain, root, victimRoot.Position, dt)
 	end
 
 	if state.phaseTime < WAKE_TIME then
@@ -442,10 +383,10 @@ local function stepWake(model: Model, brain: any, state: State, root: BasePart, 
 	if humanoid then
 		humanoid.WalkSpeed = DEFINITION.runSpeed
 	end
-	resumeBrain(brain)
+	Support.resumeBrain(brain)
 
 	local victim = state.victim
-	setBrainTarget(brain, if victim then victim.Character else nil)
+	Support.setBrainTarget(brain, if victim then victim.Character else nil)
 
 	state.phase = PHASE.Hunt
 	state.phaseTime = 0
@@ -472,7 +413,7 @@ local function stepHunt(model: Model, brain: any, state: State, root: BasePart, 
 	local nearestDistance = math.huge
 
 	for _, player in survivors:getAliveSurvivors() do
-		local _, victimRoot = rootOf(player)
+		local _, victimRoot = Support.rootOf(player)
 		if not victimRoot then
 			continue
 		end
@@ -493,7 +434,7 @@ local function stepHunt(model: Model, brain: any, state: State, root: BasePart, 
 		victim = nearest
 	end
 
-	setBrainTarget(brain, if victim then victim.Character else nil)
+	Support.setBrainTarget(brain, if victim then victim.Character else nil)
 
 	if nearestDistance <= DEFINITION.sightRange then
 		state.lostTime = 0
@@ -516,8 +457,8 @@ function Witch.onSpawn(model: Model, brain: any)
 
 	-- Paused from the first frame. Until something disturbs her she is not an AI
 	-- with a target list; she is a piece of level geometry that cries.
-	pauseBrain(brain)
-	setBrainTarget(brain, nil)
+	Support.pauseBrain(brain)
+	Support.setBrainTarget(brain, nil)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -527,7 +468,7 @@ function Witch.onSpawn(model: Model, brain: any)
 
 	local root = RigUtil.getRoot(model)
 	if root then
-		playSound("WitchCry", root)
+		Support.playSound("WitchCry", root)
 		state.nextCry = os.clock() + CRY_INTERVAL
 	end
 end
@@ -563,7 +504,7 @@ function Witch.onUpdate(model: Model, brain: any, dt: number)
 	-- rolloff it is the loudest thing on the map that is not a Tank.
 	if state.phase ~= PHASE.Mourn and now >= state.nextCry then
 		state.nextCry = now + CRY_INTERVAL
-		playSound("WitchCry", root)
+		Support.playSound("WitchCry", root)
 	end
 end
 
@@ -572,7 +513,7 @@ function Witch.onDeath(model: Model, brain: any, _ctx: any)
 	-- 1.0, and she is already on top of somebody by the time most teams commit to
 	-- it. Nothing to unwind but the brain — the horde she called is not hers to
 	-- take back, and that is the point of her.
-	resumeBrain(brain)
+	Support.resumeBrain(brain)
 	states[model] = nil
 end
 

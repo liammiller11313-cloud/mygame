@@ -89,7 +89,7 @@ local RUN_FRACTION = 0.62
 	is both slower than any Common and the rate its own legs actually imply.
 
 	Every kind gets this, not just the Tank: the Jockey at 0.82x scale takes
-	quicker steps for the same ground, the Rusher at 1.25x takes longer ones.
+	quicker steps for the same ground, the Charger at 1.25x takes longer ones.
 ]]
 local BASE_WALK_SPEED = 16
 --[[
@@ -116,6 +116,11 @@ local MIN_RATE = 0.25
      client about. See setState. A hundredth of a stride is invisible in a walk
      cycle and comfortably above the frame-to-frame jitter in MoveDirection. ]]
 local RATE_EPSILON = 0.01
+
+--[[ What playDeath reports when the clip's own Length is not available yet. Long
+     enough to read as a collapse, short enough that a body whose animation never
+     loaded is not left standing while the game waits on it. ]]
+local DEATH_FALLBACK_LENGTH = 0.8
 local MAX_RATE = 2.4
 
 --[[ A body's scale, from its kind. Falls back to 1 for a kind with no
@@ -188,6 +193,8 @@ function InfectedAnimator.new(model: Model, kind: string)
 		     rate-matched gait replicating a new speed to every client on every
 		     frame of every body in the near band. ]]
 		rate = -1,
+		-- Set once, by playDeath, and never cleared: a body only dies once.
+		dying = false,
 		oneShotUntil = 0,
 	}, InfectedAnimator)
 
@@ -418,6 +425,45 @@ function InfectedAnimator.update(self, runSpeed: number)
 	end
 end
 
+--[[
+	The death clip, and how long the body needs before it can be a ragdoll.
+
+	Returns the clip's length in seconds, or 0 when there is no clip to play —
+	which is the caller's signal to ragdoll immediately rather than wait. Nothing
+	here knows about the ragdoll; it just answers "how long am I busy for", and
+	GoreService decides what to do with that.
+
+	`dying` is what keeps the clip alive through teardown. InfectedBrain destroys
+	its animator moments after this, and destroy() stops every track it owns — so
+	without the flag the death animation would be cancelled on the frame it
+	started by the very cleanup that death triggers.
+]]
+function InfectedAnimator.playDeath(self): number
+	local track = self.tracks.death
+	if not track then
+		return 0
+	end
+
+	self.dying = true
+	-- The loops go first and go instantly. A body cannot be mid-stride and
+	-- collapsing at the same time, and a crossfade here reads as a stumble.
+	for name, other in self.tracks do
+		if name ~= "death" and other.IsPlaying then
+			other:Stop(0)
+		end
+	end
+
+	track.Priority = Enum.AnimationPriority.Action4
+	track.Looped = false
+	track:Play(0.05)
+	self.oneShotUntil = os.clock() + track.Length
+
+	--[[ Length can be zero for a clip whose asset has not finished loading. Zero
+	     would tell the caller to ragdoll on the same frame, which is the exact
+	     behaviour this exists to replace, so it reports a floor instead. ]]
+	return if track.Length > 0.05 then track.Length else DEATH_FALLBACK_LENGTH
+end
+
 --[[ Plays a non-looping track over the top of whatever is moving. Used for the
      attack swing, so the telegraph the config asks for is actually visible. ]]
 function InfectedAnimator.playOnce(self, role: string, holdFor: number?)
@@ -437,6 +483,11 @@ function InfectedAnimator.has(self, role: string): boolean
 end
 
 function InfectedAnimator.stopAll(self)
+	-- Except the death clip, which is the one track that is SUPPOSED to outlive
+	-- the thing that is stopping everything. See playDeath.
+	if self.dying then
+		return
+	end
 	for _, track in self.tracks do
 		if track.IsPlaying then
 			track:Stop(0.1)
@@ -449,10 +500,17 @@ end
 function InfectedAnimator.destroy(self)
 	self:stopAll()
 	for name, track in self.tracks do
-		pcall(function()
-			track:Destroy()
-		end)
-		self.tracks[name] = nil
+		--[[ The death clip is left playing and left alive. Destroying an
+		     AnimationTrack stops it, and this runs while the body is still
+		     performing the collapse GoreService is waiting on — the Animator
+		     itself belongs to the Humanoid and goes with the corpse, so the
+		     track has somewhere to live without us. ]]
+		if not (self.dying and name == "death") then
+			pcall(function()
+				track:Destroy()
+			end)
+			self.tracks[name] = nil
+		end
 	end
 end
 

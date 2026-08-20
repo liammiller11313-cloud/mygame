@@ -87,7 +87,14 @@ EconomyConfig.KillReward = table.freeze({
 	[Enums.Infected.Common] = 2,
 	[Enums.Infected.Hunter] = 5,
 	[Enums.Infected.Jockey] = 5,
-	[Enums.Infected.Rusher] = 5,
+	[Enums.Infected.Charger] = 5,
+	--[[ The three that threaten a PLACE rather than a body pay the same as the
+	     three that pin one. A Boomer deals almost no damage and decides more
+	     fights than anything short of a Tank; paying for damage dealt would rank
+	     it below a Common, which is the opposite of what it is worth. ]]
+	[Enums.Infected.Tongue] = 5,
+	[Enums.Infected.Boomer] = 5,
+	[Enums.Infected.Spitter] = 5,
 	[Enums.Infected.Witch] = 8,
 	[Enums.Infected.Tank] = 8,
 })
