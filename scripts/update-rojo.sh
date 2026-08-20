@@ -4,6 +4,7 @@
 #   ./scripts/update-rojo.sh           update to the latest release
 #   ./scripts/update-rojo.sh 7.6.1     update to a specific version
 #   ./scripts/update-rojo.sh --check   say what is available, change nothing
+#   ./scripts/update-rojo.sh --from    install a zip you already downloaded
 #
 # ── WHY BOTH HALVES, ALWAYS ──────────────────────────────────────────────────
 # Rojo is two programs that talk to each other: a CLI serving your files and a
@@ -22,9 +23,11 @@ REPO="$(pwd -P)"
 
 TARGET=""
 CHECK_ONLY=0
+FROM=""
 case "${1:-}" in
   --check) CHECK_ONLY=1 ;;
-  -h|--help) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  --from) FROM="${2:-auto}" ;;
+  -h|--help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "") ;;
   -*) echo "unknown option: $1" >&2; exit 2 ;;
   *) TARGET="${1#v}" ;;
@@ -74,8 +77,48 @@ case "$ROJO" in
     ;;
 esac
 
+# ── a zip already on disk ───────────────────────────────────────────────────
+# Downloading it yourself from the releases page is a perfectly ordinary way to
+# have Rojo, and re-fetching a file that is already in ~/Downloads to do the
+# same job is a waste of everyone's afternoon. Everything AFTER the download —
+# clearing quarantine, stopping the autostart job so the swap actually takes,
+# repinning rokit.toml, installing the matching plugin — is the part that
+# matters, and it is identical either way.
+LOCAL_ZIP=""
+if [ -n "$FROM" ]; then
+  if [ "$FROM" = "auto" ]; then
+    # Newest matching zip in Downloads. Matched against THIS machine's build, so
+    # a zip for the wrong architecture is not silently picked up.
+    LOCAL_ZIP="$(ls -t "$HOME/Downloads"/rojo-*-"$SLUG".zip 2>/dev/null | head -1)"
+    if [ -z "$LOCAL_ZIP" ]; then
+      echo "No rojo-*-$SLUG.zip found in ~/Downloads." >&2
+      echo "Pass the path instead:  ./scripts/update-rojo.sh --from /path/to/the.zip" >&2
+      #[[ Named separately because it is a different problem with a different
+      #   fix: a zip IS there, for a machine this is not. ]]
+      OTHER="$(ls -t "$HOME/Downloads"/rojo-*.zip 2>/dev/null | head -1)"
+      if [ -n "$OTHER" ]; then
+        echo "" >&2
+        echo "There is $(basename "$OTHER") there, but this machine needs the $SLUG build." >&2
+      fi
+      exit 1
+    fi
+  else
+    LOCAL_ZIP="$FROM"
+  fi
+
+  if [ ! -f "$LOCAL_ZIP" ]; then
+    echo "No such file: $LOCAL_ZIP" >&2
+    exit 1
+  fi
+  echo "using:     $LOCAL_ZIP"
+
+  # From the filename, so the rokit.toml pin and the messages are right. If it
+  # has been renamed, the binary itself is asked once it is unpacked.
+  TARGET="$(basename "$LOCAL_ZIP" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+fi
+
 # ── what is available ───────────────────────────────────────────────────────
-if [ -z "$TARGET" ]; then
+if [ -z "$TARGET" ] && [ -z "$LOCAL_ZIP" ]; then
   echo "checking for the latest release..."
   LATEST_JSON="$(curl -fsSL -m 20 https://api.github.com/repos/rojo-rbx/rojo/releases/latest 2>/dev/null)"
   TARGET="$(printf '%s' "$LATEST_JSON" | grep -m1 '"tag_name"' | sed 's/.*"v\{0,1\}\([0-9][^"]*\)".*/\1/')"
@@ -86,9 +129,17 @@ if [ -z "$TARGET" ]; then
     exit 1
   fi
 fi
-echo "latest:    $TARGET"
+if [ -n "$LOCAL_ZIP" ]; then
+  echo "zip holds: ${TARGET:-unknown from the filename, will ask the binary}"
+else
+  echo "latest:    $TARGET"
+fi
 
-if [ "$CURRENT" = "$TARGET" ]; then
+#[[ A local zip skips the "already on it" exit. Passing a specific file is an
+#   explicit instruction to install THAT, and refusing because the version
+#   string matches is the script second-guessing something it was just told —
+#   the case where that matters is reinstalling over a bad copy. ]]
+if [ -z "$LOCAL_ZIP" ] && [ "$CURRENT" = "$TARGET" ]; then
   echo ""
   echo "Already on $TARGET."
   echo "If Studio still says 'protocol version mismatch', the PLUGIN is the half"
@@ -126,19 +177,26 @@ restore_agent() {
 }
 
 # ── download and swap ───────────────────────────────────────────────────────
-ASSET="rojo-$TARGET-$SLUG.zip"
-URL="https://github.com/rojo-rbx/rojo/releases/download/v$TARGET/$ASSET"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "downloading $ASSET"
-if ! curl -fsSL -m 120 -o "$TMP/rojo.zip" "$URL"; then
-  echo "" >&2
-  echo "Download failed: $URL" >&2
-  echo "Check that version $TARGET exists and has a $SLUG build:" >&2
-  echo "  https://github.com/rojo-rbx/rojo/releases" >&2
-  restore_agent
-  exit 1
+if [ -n "$LOCAL_ZIP" ]; then
+  cp "$LOCAL_ZIP" "$TMP/rojo.zip"
+else
+  ASSET="rojo-$TARGET-$SLUG.zip"
+  URL="https://github.com/rojo-rbx/rojo/releases/download/v$TARGET/$ASSET"
+  echo "downloading $ASSET"
+  if ! curl -fsSL -m 120 -o "$TMP/rojo.zip" "$URL"; then
+    echo "" >&2
+    echo "Download failed: $URL" >&2
+    echo "Check that version $TARGET exists and has a $SLUG build:" >&2
+    echo "  https://github.com/rojo-rbx/rojo/releases" >&2
+    echo "" >&2
+    echo "If you have already downloaded it, install that instead:" >&2
+    echo "  ./scripts/update-rojo.sh --from" >&2
+    restore_agent
+    exit 1
+  fi
 fi
 
 if ! unzip -oq "$TMP/rojo.zip" -d "$TMP"; then
@@ -160,14 +218,26 @@ chmod +x "$NEW"
 # docs/SETUP_MAC.md walks through by hand for the first install.
 xattr -d com.apple.quarantine "$NEW" 2>/dev/null
 
+# Kept until the replacement is proven to run — see below.
+[ -f "$REPO/rojo" ] && cp -p "$REPO/rojo" "$REPO/rojo.previous"
 mv -f "$NEW" "$REPO/rojo"
 ROJO=./rojo
 INSTALLED="$("$ROJO" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 if [ -z "$INSTALLED" ]; then
-  echo "The new binary is in place but will not report a version." >&2
+  echo "" >&2
+  echo "The new binary is in place but will not run." >&2
+  echo "The usual cause is the wrong build: this machine is $OS $ARCH and needs" >&2
+  echo "the $SLUG zip. Check which one you downloaded." >&2
+  #[[ Put the old one back. Leaving a binary that does not run where a working
+  #   one used to be is worse than not having updated. ]]
+  if [ -f "$REPO/rojo.previous" ]; then
+    mv -f "$REPO/rojo.previous" "$REPO/rojo"
+    echo "Your previous Rojo has been put back." >&2
+  fi
   restore_agent
   exit 1
 fi
+rm -f "$REPO/rojo.previous"
 echo "CLI is now $INSTALLED"
 
 # ── keep the project pin honest ─────────────────────────────────────────────

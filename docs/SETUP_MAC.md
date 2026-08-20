@@ -143,6 +143,25 @@ to match, and installs the Studio plugin that belongs to the new CLI. To see
 what is available without changing anything, add `--check`; to pin a specific
 version, pass it: `./scripts/update-rojo.sh 7.7.0`.
 
+**Already downloaded the zip yourself?** Then use it instead of fetching it
+again:
+
+```bash
+./scripts/update-rojo.sh --from
+```
+
+That picks the newest `rojo-*` zip in `~/Downloads` that matches this Mac's
+build, or takes a path if you point it at one:
+`./scripts/update-rojo.sh --from ~/Desktop/rojo-7.7.0-macos-aarch64.zip`.
+Everything after the download is the part that matters — clearing macOS
+quarantine, stopping the autostart job so the swap actually takes, repinning
+`rokit.toml`, installing the matching plugin — and it is identical either way.
+
+If the new binary turns out not to run, which almost always means the zip was
+for a different architecture, your previous Rojo is put back and nothing is
+repinned. A Rojo that does not run where a working one used to be is worse than
+not having updated.
+
 **Then restart Roblox Studio.** A plugin that is already loaded stays the old
 one until Studio closes and reopens, which looks exactly like the update not
 having worked.
