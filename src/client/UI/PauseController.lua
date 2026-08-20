@@ -44,6 +44,7 @@ local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
+local FreeCursor = require(script.Parent.FreeCursor)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -102,7 +103,12 @@ local state = {
 }
 
 local restore = {
+	--[[ Owned here, written by FreeCursor. These screens nest — this one can open
+	     over a live round and the settings panel opens over this one — so a shared
+	     slot would have the inner screen hand back the outer screen's camera. ]]
 	cameraMode = nil :: any,
+	cameraZoom = nil :: any,
+	cameraMinZoom = nil :: any,
 	mouseIcon = nil :: any,
 }
 
@@ -163,19 +169,9 @@ local function setSuppressed(value: boolean)
 	callController("TouchController", "setVisible", not value)
 
 	if value then
-		restore.cameraMode = player.CameraMode
-		restore.mouseIcon = UserInputService.MouseIconEnabled
-		player.CameraMode = Enum.CameraMode.Classic
-		UserInputService.MouseIconEnabled = true
+		FreeCursor.take(restore)
 	else
-		if restore.cameraMode ~= nil then
-			player.CameraMode = restore.cameraMode
-		end
-		if restore.mouseIcon ~= nil then
-			UserInputService.MouseIconEnabled = restore.mouseIcon
-		end
-		restore.cameraMode = nil
-		restore.mouseIcon = nil
+		FreeCursor.giveBack(restore)
 	end
 end
 
@@ -420,9 +416,7 @@ function PauseController:start()
 			if not state.suppressed then
 				return
 			end
-			restore.cameraMode = player.CameraMode
-			player.CameraMode = Enum.CameraMode.Classic
-			UserInputService.MouseIconEnabled = true
+			FreeCursor.take(restore)
 		end)
 	end)
 

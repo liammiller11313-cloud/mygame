@@ -1,0 +1,103 @@
+--!nonstrict
+--[[
+	FreeCursor — hand the mouse back to the player, and take it away again.
+
+		FreeCursor.take(restore)      -- opening a screen with things to click
+		FreeCursor.giveBack(restore)  -- closing it
+
+	`restore` is the CALLER'S OWN table. This module owns the rules; the caller
+	owns the saved values, because these screens nest — the settings panel opens
+	over the pause menu, which can open over a live round — and a single shared
+	slot would have the inner screen hand back the outer screen's camera.
+
+	── WHY IT IS NOT JUST CameraMode ───────────────────────────────────────────
+	Three screens each had their own copy of this and all three were wrong the
+	same way: they set `CameraMode = Classic` and stopped.
+
+	That is only half of it. CameraController writes
+	`CameraMaxZoomDistance = 0.5` for any survivor who is not Dead or
+	Spectating, and Roblox forces FIRST PERSON — and therefore a pinned cursor —
+	whenever the camera is zoomed that far in, whatever the mode says.
+	ViewmodelController already tested the pair together and said so in a
+	comment: `CameraMode == Classic and CameraMaxZoomDistance > 1`.
+
+	It hid because the main menu usually opens when the player is Dead or
+	Spectating, where the zoom is already 128. The two places it did not hide:
+
+	  * the PAUSE menu, which opens mid-round while alive — press pause, and the
+	    cursor stays welded to the middle of the screen with Resume unclickable;
+	  * a TEAM WIPE, which leaves everyone Incapacitated rather than Dead, so the
+	    results screen came up over a 0.5 zoom and a desktop player could not
+	    click the screen the game had just put them on.
+
+	── ORDERING ────────────────────────────────────────────────────────────────
+	Roblox clamps the two zoom properties against each other, so the order of the
+	writes is load-bearing in both directions and is the reason this is a
+	function rather than four lines copied a fourth time.
+]]
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+
+--[[ Far enough that Roblox stops forcing first person, close enough that this
+     stays a cursor release rather than a spectator camera. CameraController
+     uses 128 for a dead player who has nothing to do but watch the team; there
+     is no reason to let someone pull that far back behind a scoreboard. ]]
+local FREE_ZOOM = 12
+
+local FreeCursor = {}
+
+export type Restore = {
+	cameraMode: any,
+	cameraZoom: any,
+	cameraMinZoom: any,
+	mouseIcon: any,
+}
+
+function FreeCursor.take(restore: Restore)
+	--[[ Only the FIRST take records anything. A screen opening over another
+	     already-free screen would otherwise save the freed values as the ones to
+	     hand back, and closing it would leave the camera unlocked for the round. ]]
+	if restore.cameraMode == nil then
+		restore.cameraMode = player.CameraMode
+		restore.cameraZoom = player.CameraMaxZoomDistance
+		restore.cameraMinZoom = player.CameraMinZoomDistance
+		restore.mouseIcon = UserInputService.MouseIconEnabled
+	end
+
+	player.CameraMode = Enum.CameraMode.Classic
+	-- Max first: the min is compared against it, and setting a min of 4 while the
+	-- max is still 0.5 is rejected.
+	player.CameraMaxZoomDistance = FREE_ZOOM
+	player.CameraMinZoomDistance = math.min(FREE_ZOOM, 4)
+	UserInputService.MouseIconEnabled = true
+end
+
+function FreeCursor.giveBack(restore: Restore)
+	if restore.cameraMinZoom ~= nil and restore.cameraZoom ~= nil then
+		-- Min first on the way back, the mirror of the reason above: the max being
+		-- restored is the smaller of the two.
+		player.CameraMinZoomDistance = restore.cameraMinZoom
+		player.CameraMaxZoomDistance = restore.cameraZoom
+	end
+	if restore.cameraMode ~= nil then
+		player.CameraMode = restore.cameraMode
+	end
+	if restore.mouseIcon ~= nil then
+		UserInputService.MouseIconEnabled = restore.mouseIcon
+	end
+	restore.cameraMode = nil
+	restore.cameraZoom = nil
+	restore.cameraMinZoom = nil
+	restore.mouseIcon = nil
+end
+
+--[[ Whether the cursor is currently free, by the same test ViewmodelController
+     uses. For a caller that needs to know rather than to change it. ]]
+function FreeCursor.isFree(): boolean
+	return player.CameraMode == Enum.CameraMode.Classic and player.CameraMaxZoomDistance > 1
+end
+
+return FreeCursor

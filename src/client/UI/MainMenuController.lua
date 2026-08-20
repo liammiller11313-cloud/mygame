@@ -98,6 +98,7 @@ local UITheme = require(Shared.Config.UITheme)
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local Widgets = require(script.Parent.Widgets)
 local UiSound = require(script.Parent.UiSound)
+local FreeCursor = require(script.Parent.FreeCursor)
 local Confetti = require(script.Parent.Confetti)
 local TitleFlicker = require(script.Parent.TitleFlicker)
 
@@ -353,7 +354,11 @@ local help = {
 }
 
 local restore = {
+	--[[ Owned here, written by FreeCursor — these screens nest, so a shared slot
+	     would have the inner one hand back the outer one's camera. ]]
 	cameraMode = nil :: any,
+	cameraZoom = nil :: any,
+	cameraMinZoom = nil :: any,
 	mouseIcon = nil :: any,
 }
 
@@ -441,9 +446,7 @@ local function reassertFreeCursor()
 		if not state.suppressed then
 			return
 		end
-		restore.cameraMode = player.CameraMode
-		player.CameraMode = Enum.CameraMode.Classic
-		UserInputService.MouseIconEnabled = true
+		FreeCursor.take(restore)
 	end)
 end
 
@@ -482,19 +485,9 @@ local function setSuppressed(value: boolean)
 	state.blurTarget = if value then BLUR_SIZE else 0
 
 	if value then
-		restore.cameraMode = player.CameraMode
-		restore.mouseIcon = UserInputService.MouseIconEnabled
-		player.CameraMode = Enum.CameraMode.Classic
-		UserInputService.MouseIconEnabled = true
+		FreeCursor.take(restore)
 	else
-		if restore.cameraMode ~= nil then
-			player.CameraMode = restore.cameraMode
-		end
-		if restore.mouseIcon ~= nil then
-			UserInputService.MouseIconEnabled = restore.mouseIcon
-		end
-		restore.cameraMode = nil
-		restore.mouseIcon = nil
+		FreeCursor.giveBack(restore)
 	end
 end
 
