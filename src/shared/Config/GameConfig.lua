@@ -290,7 +290,27 @@ GameConfig.Recoil = table.freeze({
 })
 
 GameConfig.Corpses = table.freeze({
-	MaxRagdolls = 26, -- oldest is recycled past this; keeps the framerate honest
+	--[[
+		How many corpses may exist at once. Past this the OLDEST is recycled.
+
+		This is what actually decides whether a body lasts its corpseLifetime, and
+		at 26 it decided "no": a horde puts 26 bodies on the floor in seconds, so
+		every corpse was destroyed almost immediately no matter what its lifetime
+		said. That is the "bodies disappear instantly" report, and the lifetime
+		was never the thing to change.
+
+		48 is affordable now for a reason rather than by hope. GoreService anchors
+		a ragdoll once it has settled, so a corpse past its first second costs
+		draw calls and no physics or physics replication — the cost this ceiling
+		was defending against is only paid by the handful still falling.
+
+		Deliberately NOT device-scaled, unlike the client-side gore budgets.
+		Corpses are replicated instances that every client shares, so this is a
+		server decision and one client's hardware cannot be allowed to decide how
+		many bodies everyone else sees. The client-side budgets in GoreConfig are
+		where a phone gets its relief.
+	]]
+	MaxRagdolls = 48,
 	MaxGibs = 90,
 	MaxBloodDecals = 160,
 })

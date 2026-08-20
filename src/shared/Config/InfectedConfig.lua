@@ -101,7 +101,11 @@ InfectedConfig.Definitions = {
 
 		gibThreshold = 45,
 		dismemberable = true,
-		corpseLifetime = 22,
+		--[[ 35, up from 22. The number is the one asked for, but the reason it
+		     was reachable is GoreService freezing a corpse once it settles: a
+		     ragdoll that has stopped moving is anchored and stops being a
+		     simulation, so keeping it costs draw calls rather than physics. ]]
+		corpseLifetime = 35,
 	},
 
 	--[[ Pounces from above and pins one survivor, dealing steady damage until a

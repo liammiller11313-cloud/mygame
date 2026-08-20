@@ -910,6 +910,34 @@ for p, text in sources.items():
             )
 
 
+
+# ── 12. The two corpse ceilings must agree ──────────────────────────────────
+#
+# GoreService takes math.min(GoreConfig.Budget.MaxActiveRagdolls,
+# GameConfig.Corpses.MaxRagdolls). Raising one and not the other is a change
+# that does nothing and looks like it worked — which is exactly what happened
+# the first time this was raised.
+def _number_in(path: str, table_name: str, key: str):
+    for p, text in sources.items():
+        if not str(p).endswith(path):
+            continue
+        block = text.split(table_name, 1)
+        if len(block) < 2:
+            return None
+        m = re.search(r"^\t%s = (\d+)," % key, block[1], re.M)
+        return int(m.group(1)) if m else None
+    return None
+
+_gore_cap = _number_in("GoreConfig.lua", "GoreConfig.Budget", "MaxActiveRagdolls")
+_game_cap = _number_in("GameConfig.lua", "GameConfig.Corpses", "MaxRagdolls")
+if _gore_cap is not None and _game_cap is not None and _gore_cap != _game_cap:
+    problems.append(
+        f"GoreConfig.Budget.MaxActiveRagdolls ({_gore_cap}) and "
+        f"GameConfig.Corpses.MaxRagdolls ({_game_cap}) disagree — GoreService takes the "
+        f"tighter of the two, so the larger one has no effect and reads like it does"
+    )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

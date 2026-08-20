@@ -247,7 +247,12 @@ GoreConfig.Budget = table.freeze({
 	MaxActiveGibs = 90,
 	MaxActiveLimbs = 40,
 	MaxActiveDecals = 160,
-	MaxActiveRagdolls = 26,
+	--[[ Kept equal to GameConfig.Corpses.MaxRagdolls on purpose: GoreService
+	     takes the TIGHTER of the two, so raising one and not the other is a
+	     change that does nothing and looks like it worked. Both are 48 now,
+	     which settled corpses being anchored is what pays for — see the note on
+	     GameConfig.Corpses.MaxRagdolls for why that is affordable. ]]
+	MaxActiveRagdolls = 48,
 	MaxGoreEventsPerSecond = 26, -- server-side throttle during a full horde
 	CullDistance = 260, -- gore beyond this is never sent to a client
 })

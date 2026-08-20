@@ -1149,6 +1149,35 @@ end
 --[[ The one loop. Expiry for corpses, limbs and ledger entries, plus the pool
      check — a few dozen records at 5Hz, allocating nothing except on the frame
      a body actually settles and sends its pool event. ]]
+--[[
+	Turns a settled corpse from a physics body into scenery.
+
+	A ragdoll that has stopped moving is still a full simulation: a dozen parts
+	with BallSocketConstraints between them, solved every frame and replicated to
+	every client, for a body that is not going anywhere. That cost is why the
+	corpse ceiling was 26, and 26 is a few seconds during a horde — which is the
+	whole of "bodies disappear instantly".
+
+	Anchoring is invisible at the moment it happens, because the only bodies that
+	reach here have been below SETTLE_SPEED for SETTLE_TIME. What it buys is that
+	a corpse past this point costs draw calls and nothing else, which is what
+	makes keeping them for thirty-five seconds affordable rather than a trade
+	against the frame rate.
+
+	The constraints are left in place rather than destroyed. They are inert
+	against anchored parts, removing them is a dozen more Instance operations on
+	a frame that just did some, and leaving them means a corpse can be unfrozen
+	later — for a body a Tank punts across the room, if that is ever wanted —
+	without rebuilding the ragdoll.
+]]
+local function freezeCorpse(model: Model)
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+		end
+	end
+end
+
 function GoreService:_sweep(deltaTime: number)
 	local now = os.clock()
 
@@ -1173,6 +1202,7 @@ function GoreService:_sweep(deltaTime: number)
 				record.stillFor += deltaTime
 				if record.stillFor >= SETTLE_TIME then
 					record.pooled = true
+					freezeCorpse(model)
 					self:_emit({
 						model = model,
 						level = LEVEL.None,
