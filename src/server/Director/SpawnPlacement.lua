@@ -68,6 +68,25 @@ local NODE_CACHE_TIME = 2
      are all currently in view must still be able to place a spawn. ]]
 local NODE_ATTEMPT_SHARE = 0.75
 
+--[[
+	How far the ceiling opens when the strict search finds nothing at all.
+
+	1.75x, once. Not a slider and not a loop that keeps widening: past roughly
+	this the body has so far to walk that it arrives after the moment it was
+	spawned for, and a Director that always eventually succeeds is a Director
+	that has stopped telling you your map is wrong.
+]]
+local RELAX_DISTANCE = 1.75
+
+local warned: { [string]: boolean } = {}
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn("[SpawnPlacement] " .. message)
+end
+
 local SpawnPlacement = {}
 
 local random = Random.new()
@@ -254,6 +273,12 @@ end
 	rejecting, so a starving Director logs "18 in sight, 4 too close" instead of
 	"could not spawn".
 
+	A search that finds nothing does NOT simply fail. It gives up its softest
+	rules one at a time and tries again — see the relaxation ladder inside — so
+	a map whose spawn nodes all sit outside the ceiling produces infected that
+	walk further than intended rather than a round with no infected in it. The
+	minimum distance and the out-of-sight rule never relax.
+
 	`options.anchor` searches around a point instead of around the team — a
 	Boomer's bile splash, a panic event's trigger, a boss zone. An anchored
 	search deliberately drops the flow window: flow describes the team's progress
@@ -303,108 +328,195 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	local tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
 	local nodeIndex = 0
 
-	for attempt = 1, attempts do
-		local candidate: Vector3?
+	--[[
+		── THE RELAXATION LADDER ───────────────────────────────────────────────
+		A map whose spawn nodes all sit outside the ceiling produces a Director
+		that never spawns anything at all. That is not hypothetical: a test place
+		logged "16 too far ... 16 tagged nodes" every eight seconds while the
+		pressure escalated from 1 to 6 and not one body arrived, because every
+		node was farther from the team than MaxDistanceFromSurvivor and the search
+		had nothing softer to give up.
 
-		if useNodes and attempt <= nodeBudget then
-			nodeIndex += 1
-			local node = nodeOrder[nodeIndex]
-			if node then
-				candidate = node.Position
-			end
-		end
-		if not candidate then
-			local origin = anchor
-			if not origin then
-				origin = survey[random:NextInteger(1, surveyCount)].position
-			end
-			candidate = sampleAround(origin :: Vector3, minDistance, maxDistance)
-		end
-		local point = candidate :: Vector3
+		So a failed strict search gives up its rules in order of how much they
+		matter, one pass at a time:
 
-		-- ── free tests ──────────────────────────────────────────────────────
-		local nearestSquared = math.huge
-		for index = 1, surveyCount do
-			local squared = distanceSquared(survey[index].position, point)
-			if squared < nearestSquared then
-				nearestSquared = squared
+		  1. everything                       — what we actually want
+		  2. minus the flow window            — spawning behind the team reads
+		                                        worse than spawning nothing? no.
+		  3. minus the distance ceiling       — they walk further than ideal
+
+		The two rules that protect the ILLUSION never relax. A body still may not
+		appear inside MinDistanceFromSurvivor and still may not appear in anyone's
+		view, because a zombie materialising in front of a player is the one
+		failure worse than an empty corridor.
+
+		A pass that cannot change the outcome is skipped, so the ordinary case
+		costs exactly one pass and the degenerate case is bounded at three.
+
+		── WHAT THIS COSTS, AND WHY THAT IS ACCEPTABLE ─────────────────────────
+		On a map where the strict search succeeds — which is every map that is
+		authored correctly — this is free: pass 1 returns and passes 2 and 3 never
+		run. On a map where it does not, every placement pays up to three times the
+		raycasts, permanently, because the strict pass keeps failing for the same
+		reason it failed the first time.
+
+		That is deliberately NOT cached away behind a "this map is bad" flag. The
+		cost is the price of a map that needs fixing, it is bounded, and the
+		warning above says exactly what to fix — whereas a cache would make the
+		symptom quiet and the map stay wrong. Spawning nothing at all, which is
+		what happened before, was not cheaper in any sense that matters.
+	]]
+	local strictMaxSquared = maxDistanceSquared
+	local relaxedFlow = false
+	local relaxedDistance = false
+
+	for pass = 1, 3 do
+		if pass == 2 then
+			-- Nothing to give up if flow was never applied or never rejected
+			-- anything.
+			if teamFlow == nil or outOfFlow == 0 then
+				continue
 			end
+			teamFlow = nil
+			relaxedFlow = true
+		elseif pass == 3 then
+			-- An anchored search keeps its radius: a bile horde that arrives from
+			-- outside the bile is not the event any more, and PANIC.SpawnRadius is
+			-- that event's own definition rather than a global default.
+			if anchor or tooFar == 0 then
+				continue
+			end
+			maxDistanceSquared = strictMaxSquared * RELAX_DISTANCE * RELAX_DISTANCE
+			relaxedDistance = true
 		end
-		if nearestSquared < minDistanceSquared then
-			tooClose += 1
-			continue
-		end
-		-- With an anchor the ceiling belongs to the anchor: a panic wave is
-		-- bounded by its own radius, not by how far the team has spread out.
-		if anchor then
-			if distanceSquared(anchor, point) > maxDistanceSquared then
+
+		tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
+		nodeIndex = 0
+
+		for attempt = 1, attempts do
+			local candidate: Vector3?
+
+			if useNodes and attempt <= nodeBudget then
+				nodeIndex += 1
+				local node = nodeOrder[nodeIndex]
+				if node then
+					candidate = node.Position
+				end
+			end
+			if not candidate then
+				local origin = anchor
+				if not origin then
+					origin = survey[random:NextInteger(1, surveyCount)].position
+				end
+				candidate = sampleAround(origin :: Vector3, minDistance, maxDistance)
+			end
+			local point = candidate :: Vector3
+
+			-- ── free tests ──────────────────────────────────────────────────────
+			local nearestSquared = math.huge
+			for index = 1, surveyCount do
+				local squared = distanceSquared(survey[index].position, point)
+				if squared < nearestSquared then
+					nearestSquared = squared
+				end
+			end
+			if nearestSquared < minDistanceSquared then
+				tooClose += 1
+				continue
+			end
+			-- With an anchor the ceiling belongs to the anchor: a panic wave is
+			-- bounded by its own radius, not by how far the team has spread out.
+			if anchor then
+				if distanceSquared(anchor, point) > maxDistanceSquared then
+					tooFar += 1
+					continue
+				end
+			elseif nearestSquared > maxDistanceSquared then
 				tooFar += 1
 				continue
 			end
-		elseif nearestSquared > maxDistanceSquared then
-			tooFar += 1
-			continue
-		end
 
-		-- ── one raycast: is there a floor here at all ───────────────────────
-		local ground, normal = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore)
-		if not ground or not normal then
-			noGround += 1
-			continue
-		end
-		if normal.Y < MIN_GROUND_NORMAL_Y then
-			steep += 1
-			continue
-		end
-
-		-- The ground point can be a long way below the sample, so the band is
-		-- re-checked against where the body would actually stand.
-		local groundedNearest = math.huge
-		for index = 1, surveyCount do
-			local squared = distanceSquared(survey[index].position, ground)
-			if squared < groundedNearest then
-				groundedNearest = squared
+			-- ── one raycast: is there a floor here at all ───────────────────────
+			local ground, normal = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore)
+			if not ground or not normal then
+				noGround += 1
+				continue
 			end
-		end
-		if groundedNearest < minDistanceSquared then
-			tooClose += 1
-			continue
-		end
+			if normal.Y < MIN_GROUND_NORMAL_Y then
+				steep += 1
+				continue
+			end
 
-		-- ── flow window ─────────────────────────────────────────────────────
-		if teamFlow and level and typeof(level.getFlowDistance) == "function" then
-			local ok, flow = pcall(level.getFlowDistance, level, ground)
-			if ok and typeof(flow) == "number" then
-				local ahead = flow - teamFlow
-				if ahead < minFlowAhead or ahead > maxFlowAhead then
-					outOfFlow += 1
-					continue
+			-- The ground point can be a long way below the sample, so the band is
+			-- re-checked against where the body would actually stand.
+			local groundedNearest = math.huge
+			for index = 1, surveyCount do
+				local squared = distanceSquared(survey[index].position, ground)
+				if squared < groundedNearest then
+					groundedNearest = squared
 				end
 			end
-		end
+			if groundedNearest < minDistanceSquared then
+				tooClose += 1
+				continue
+			end
 
-		-- ── headroom ────────────────────────────────────────────────────────
-		local clearance = SPAWNING.SpawnGroundClearance
-		local headroom = Workspace:Raycast(
-			ground + Vector3.new(0, 0.1, 0),
-			Vector3.new(0, clearance, 0),
-			RaycastUtil.excluding(ignore)
-		)
-		if headroom then
-			blocked += 1
-			continue
-		end
+			-- ── flow window ─────────────────────────────────────────────────────
+			if teamFlow and level and typeof(level.getFlowDistance) == "function" then
+				local ok, flow = pcall(level.getFlowDistance, level, ground)
+				if ok and typeof(flow) == "number" then
+					local ahead = flow - teamFlow
+					if ahead < minFlowAhead or ahead > maxFlowAhead then
+						outOfFlow += 1
+						continue
+					end
+				end
+			end
 
-		-- ── the rule that matters ───────────────────────────────────────────
-		-- Tested at body height, not at the floor: a floor point can be hidden
-		-- behind a crate whose top half is in plain view, and it is the body the
-		-- player would see appear.
-		if requireOutOfSight and isVisible(ground + Vector3.new(0, clearance, 0)) then
-			inSight += 1
-			continue
-		end
+			-- ── headroom ────────────────────────────────────────────────────────
+			local clearance = SPAWNING.SpawnGroundClearance
+			local headroom = Workspace:Raycast(
+				ground + Vector3.new(0, 0.1, 0),
+				Vector3.new(0, clearance, 0),
+				RaycastUtil.excluding(ignore)
+			)
+			if headroom then
+				blocked += 1
+				continue
+			end
 
-		return ground, nil
+			-- ── the rule that matters ───────────────────────────────────────────
+			-- Tested at body height, not at the floor: a floor point can be hidden
+			-- behind a crate whose top half is in plain view, and it is the body the
+			-- player would see appear.
+			if requireOutOfSight and isVisible(ground + Vector3.new(0, clearance, 0)) then
+				inSight += 1
+				continue
+			end
+
+			if relaxedDistance then
+				warnOnce(
+					"relaxed:distance",
+					string.format(
+						"no legal spawn within %d studs of the team — placing at up to %d instead. "
+							.. "Every spawn node this search could see is outside the ceiling, which "
+							.. "means the infected walk a long way before they reach anyone. Move some "
+							.. "FL_SpawnNode parts nearer the route, or raise "
+							.. "DirectorConfig.Spawning.MaxDistanceFromSurvivor.",
+						math.floor(math.sqrt(strictMaxSquared)),
+						math.floor(math.sqrt(maxDistanceSquared))
+					)
+				)
+			elseif relaxedFlow then
+				warnOnce(
+					"relaxed:flow",
+					"no legal spawn inside the flow window — placing without it. The horde will "
+						.. "arrive from behind the team as often as from ahead until the level's "
+						.. "flow nodes cover the route they actually take."
+				)
+			end
+			return ground, nil
+		end
 	end
 
 	local parts = {}
@@ -433,12 +545,23 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		table.insert(parts, "no candidates generated")
 	end
 
+	--[[ Naming the relaxations that were already tried is the point of this
+	     string: "24 attempts, all too far" invites raising the ceiling, and
+	     "even with the ceiling opened" says the ceiling was never the problem. ]]
+	local gaveUp = ""
+	if relaxedDistance then
+		gaveUp = "; even with the ceiling opened to " .. tostring(math.floor(math.sqrt(maxDistanceSquared)))
+	elseif relaxedFlow then
+		gaveUp = "; even without the flow window"
+	end
+
 	return nil,
 		string.format(
-			"no spawn point in %d attempts (%s%s)",
+			"no spawn point in %d attempts (%s%s%s)",
 			attempts,
 			table.concat(parts, ", "),
-			if useNodes then string.format("; %d tagged nodes", #nodeCache) else "; no tagged nodes"
+			if useNodes then string.format("; %d tagged nodes", #nodeCache) else "; no tagged nodes",
+			gaveUp
 		)
 end
 
