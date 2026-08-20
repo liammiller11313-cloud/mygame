@@ -131,6 +131,49 @@ git pull
 each time. Or run `./scripts/dev.sh --pull-only` in that second tab, which is
 the automatic half without starting a second Rojo.
 
+## Updating Rojo
+
+```bash
+cd ~/Documents/mygame
+./scripts/update-rojo.sh
+```
+
+That finds the newest release, replaces `./rojo`, updates the `rokit.toml` pin
+to match, and installs the Studio plugin that belongs to the new CLI. To see
+what is available without changing anything, add `--check`; to pin a specific
+version, pass it: `./scripts/update-rojo.sh 7.7.0`.
+
+**Then restart Roblox Studio.** A plugin that is already loaded stays the old
+one until Studio closes and reopens, which looks exactly like the update not
+having worked.
+
+### Why it always does both halves
+
+Rojo is two programs talking to each other: the CLI serving your files, and the
+plugin receiving them. They speak a versioned protocol, so updating one and not
+the other does not give you a newer Rojo — it gives you a Rojo that refuses to
+connect, with *"protocol version mismatch"*. `rojo plugin install` installs the
+plugin build belonging to the CLI that ran it, which is why the script runs it
+for you rather than leaving it as a step to remember.
+
+If it ever cannot install the plugin, it says so and exits non-zero rather than
+reporting success — a CLI and plugin on different versions is precisely the
+state that breaks Connect, and being told it worked is what would stop you
+looking there.
+
+### If you switch to Rokit
+
+`rokit.toml` in this repo pins every tool version, and Rokit is the tidier way
+to manage them. If your `rojo` comes from Rokit, the update script notices and
+steps aside — do it there instead:
+
+```bash
+rokit install
+rojo plugin install
+```
+
+after editing the version in `rokit.toml`.
+
 ## Your models are safe
 
 Rojo only manages what `default.project.json` declares — the `src/` tree plus a few
@@ -141,7 +184,7 @@ your Zombieville map, or anything else you have in the place.
 
 | Symptom | Fix |
 |---|---|
-| "Protocol version mismatch" | Run `./rojo plugin install` — it installs the plugin version that exactly matches your CLI. |
+| "Protocol version mismatch" | Run `./rojo plugin install` — it installs the plugin version that exactly matches your CLI — then **restart Studio**. `./scripts/update-rojo.sh` does this as part of updating. |
 | Connect button does nothing | The server isn't running. Check the Terminal window still shows "listening". |
 | "Address already in use" | A Rojo server is already running. Close the other Terminal window, or use `./rojo serve --port 34873` and enter that port in Studio. |
 | Studio can't reach localhost | Studio → Settings → Security → enable **Allow HTTP Requests** for the place. |

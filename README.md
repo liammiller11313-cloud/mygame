@@ -66,6 +66,11 @@ On macOS, `./scripts/autostart.sh install` makes that happen at login through a
 launchd LaunchAgent, so there is no command to run at all. `docs/SETUP_MAC.md`
 covers it.
 
+To update Rojo later, `./scripts/update-rojo.sh` replaces the CLI, repins
+`rokit.toml`, and installs the matching Studio plugin — the CLI and the plugin
+speak a versioned protocol, so updating one without the other is what produces
+"protocol version mismatch".
+
 To build a `.rbxl` without Studio in the loop:
 
 ```bash
