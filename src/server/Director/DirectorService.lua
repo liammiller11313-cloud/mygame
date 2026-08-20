@@ -101,14 +101,12 @@ local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
-local SpawnField = require(script.Parent.SpawnField)
 local SpawnPlacement = require(script.Parent.SpawnPlacement)
 
 local INTENSITY = DirectorConfig.Intensity
 local PACING = DirectorConfig.Pacing
 local POPULATION = DirectorConfig.Population
 local SPAWNING = DirectorConfig.Spawning
-local FIELD = DirectorConfig.Field
 local SPECIALS = DirectorConfig.Specials
 local BOSSES = DirectorConfig.Bosses
 local PANIC = DirectorConfig.PanicEvent
@@ -411,38 +409,51 @@ function DirectorService:init()
 	self._accumulator = 0
 end
 
-function DirectorService:start()
-	--[[ A new map is a new field. Every point learned about the last one is a
-	     point in empty space now, and offering one would put a horde in the sky.
-	     Hooked here rather than in SpawnField itself so the module stays a pure
-	     data structure with no opinion about rounds. ]]
-	local maps = Registry.find("MapService")
-	if maps and maps.mapChanged then
-		self._trove:add(maps.mapChanged:connect(function()
-			SpawnField.reset()
-		end))
+--[[ One line per stuck spot per round, keyed to a coarse grid cell. A node a
+     body cannot leave produces a report every time the Director uses it, and a
+     warning that repeats every half-minute is a warning nobody reads. ]]
+local warned: { [string]: boolean } = {}
+
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
 	end
+	warned[key] = true
+	warn("[DirectorService] " .. message)
+end
 
+function DirectorService:start()
 	--[[
-		The field learns which of its own points were lies.
+		A body that gets stuck is still worth hearing about.
 
-		SpawnField tests whether a body FITS somewhere, not whether it can walk
-		out — its header is explicit about that being SpawnPlacement's problem,
-		and SpawnPlacement's rules are about distance, flow and sight rather than
-		reachability. So a rooftop or a sealed courtyard is a point the field will
-		happily offer forever.
+		InfectedService says so when a common it placed has spent half a minute
+		unable to close a single stud on anybody, and `fromSpawn` distinguishes
+		"never went anywhere at all" from "chased, fell behind, gave up". The
+		first one means a spawn node is somewhere a body cannot leave, and the
+		only thing that can fix that is a person moving the node — so it is
+		reported rather than worked around.
 
-		InfectedService is the only thing that finds out. When a common it placed
-		has spent half a minute unable to close a single stud on anybody, it says
-		so, and `fromSpawn` distinguishes "never went anywhere at all" — a bad
-		point — from "chased, fell behind, gave up", which is a body the team
-		outran and says nothing about the place it came from.
+		This used to condemn the offending cell of a learned field. There is no
+		field any more: the Director spawns at the level's tagged nodes, and
+		silently retiring one a designer placed would hide exactly the problem
+		they need to see.
 	]]
 	local infected = Registry.find("InfectedService")
 	if infected and infected.marooned then
 		self._trove:add(infected.marooned:connect(function(position: Vector3, fromSpawn: boolean)
 			if fromSpawn then
-				SpawnField.condemn(position)
+				warnOnce(
+					string.format("stuck:%d:%d", position.X // 16, position.Z // 16),
+					string.format(
+						"a body spawned near (%d, %d, %d) never closed any ground on the team "
+							.. "before it was reaped — the FL_SpawnNode nearest there is probably "
+							.. "somewhere a zombie cannot walk out of. Check it for a roof, a "
+							.. "fence, or a sealed courtyard.",
+						position.X,
+						position.Y,
+						position.Z
+					)
+				)
 			end
 		end))
 	end
@@ -501,58 +512,8 @@ end
 --  Tick
 -- ════════════════════════════════════════════════════════════════════════════
 
---[[
-	Teaches the field where bodies can stand, a little per tick.
-
-	Two things, and they cost almost nothing together. The sweep explores a
-	bounded handful of grid cells — that is what lets a horde come out of a room
-	nobody has walked into yet, which is most of what "spawn anywhere" means. The
-	breadcrumbs record where survivors ARE, which is free and true by
-	construction: a player is standing there, so a body fits there.
-
-	Breadcrumbs are rate-limited because a standing player would otherwise store
-	the same cell eight times a second and learn nothing from any of it.
-]]
-function DirectorService:_feedField(now: number)
-	SpawnField.step()
-
-	--[[ And one reachability check per tick, against a real survivor.
-
-	     The sweep only produces CANDIDATES now — a downward ray lands on the roof
-	     of a shed as happily as it lands on a street, and both look like flat
-	     ground with clear headroom. A candidate becomes a spawn point when
-	     PathfindingService says a body could walk from it to the team, which is
-	     the question that was never being asked and the reason bodies were
-	     appearing somewhere they could never leave.
-
-	     Passing the survivor rather than letting SpawnField find one keeps the
-	     module free of Players entirely, and this is the tick that already knows
-	     who is alive. ]]
-	local anchor = self._characters[1]
-	local anchorRoot = anchor and anchor:FindFirstChild("HumanoidRootPart")
-	if anchorRoot and anchorRoot:IsA("BasePart") then
-		SpawnField.validate(anchorRoot.Position)
-	end
-
-	if now - (self._breadcrumbAt or 0) < FIELD.BreadcrumbInterval then
-		return
-	end
-	self._breadcrumbAt = now
-	for _, character in self._characters do
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if root and root:IsA("BasePart") then
-			--[[ The FEET, not the root. Every other stage of the placement chain
-			     works in ground points, and a root sits about three studs up — a
-			     breadcrumb at root height would be a point in mid-air that the
-			     volume test then rejects for the rest of the round. ]]
-			SpawnField.remember(root.Position - Vector3.new(0, root.Size.Y * 0.5 + 1.5, 0))
-		end
-	end
-end
-
 function DirectorService:_tick(dt: number, now: number)
 	self:_refreshSurvivors()
-	self:_feedField(now)
 	self:_updateIntensity(dt)
 	self:_updatePressure()
 	self:_updatePacing(now)

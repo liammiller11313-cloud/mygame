@@ -37,6 +37,12 @@ GameConfig.PartRegions = table.freeze({
 	-- hit: no 4x multiplier, no headshotAlwaysKills, no decapitation. A hitbox
 	-- that disagrees with what the player can see is the worst bug a shooter has.
 	FakeHead = Enums.HitRegion.Head,
+	--[[ The Tongue's tongue. It is the creature's whole silhouette at range —
+	     the part a player actually aims at while it is dragging a teammate — and
+	     scoring it as a torso hit meant the shot that looks like the obvious
+	     answer was worth the least. Head, so shooting the tongue is worth what
+	     shooting the Tongue is worth. ]]
+	tongue = Enums.HitRegion.Head,
 	UpperTorso = Enums.HitRegion.Torso,
 	LowerTorso = Enums.HitRegion.Torso,
 	Torso = Enums.HitRegion.Torso,

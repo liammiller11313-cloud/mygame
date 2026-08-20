@@ -55,53 +55,6 @@ DirectorConfig.Population = table.freeze({
 --[[ Where a spawn is allowed to appear. Getting this right is most of what makes
      a Director feel fair: enemies must arrive from somewhere plausible, never
      materialise in your field of view. ]]
---[[
-	SpawnField — how the Director learns where a body can stand.
-
-	See src/server/Director/SpawnField.lua. These decide how finely the map is
-	mapped and how much of a tick that costs; none of them decide whether a point
-	is a GOOD place to spawn, which stays SpawnPlacement's job.
-]]
-DirectorConfig.Field = table.freeze({
-	--[[ Grid spacing. 12 studs is roughly a doorway: fine enough that a room is
-	     represented by several cells rather than one, coarse enough that a large
-	     map is a few thousand cells rather than a hundred thousand. Halving this
-	     quadruples the sweep. ]]
-	CellSize = 12,
-
-	--[[ Vertical grain of the cell key, so two floors of a stairwell are
-	     different places and a kerb is not. Deliberately much coarser than
-	     CellSize: a storey is the unit that matters vertically. ]]
-	FloorHeight = 14,
-
-	--[[ How far above the map's own bounding box the probe ray starts, and how
-	     far below it may end. Margin rather than exactness, because a map's
-	     bounding box does not include a part that was moved after load. ]]
-	SkyMargin = 40,
-
-	--[[ Same rule as SpawnPlacement's: a body cannot stand on a wall. Restated
-	     rather than shared because these are two different questions — that one
-	     is about a chosen spawn, this one is about what goes in the map at all —
-	     and the day one wants to be stricter than the other, they can be. ]]
-	MinGroundNormalY = 0.65,
-
-	--[[ Cells probed per Director tick. The Director runs at 8Hz, so 12 is a
-	     hundred cells a second: a large map is mapped in under a minute while
-	     each tick pays a bounded slice, and the field is useful from the first
-	     cell rather than only when finished. ]]
-	SweepBudget = 12,
-
-	--[[ How often the "things a spawn may overlap" list is rebuilt. It changes
-	     as bodies spawn and die, and rebuilding it per probed cell would be the
-	     most expensive thing in the sweep by a wide margin. ]]
-	IgnoreRefresh = 1.0,
-
-	--[[ How often a survivor's position is dropped into the field as a
-	     breadcrumb. Every tick would store the same cell eight times a second
-	     for a standing player and learn nothing. ]]
-	BreadcrumbInterval = 0.75,
-})
-
 DirectorConfig.Spawning = table.freeze({
 	MinDistanceFromSurvivor = 45,
 	MaxDistanceFromSurvivor = 190,

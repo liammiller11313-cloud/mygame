@@ -32,7 +32,6 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
-local SpawnField = require(script.Parent.SpawnField)
 local SpawnVolume = require(script.Parent.SpawnVolume)
 local RigUtil = require(Shared.Util.RigUtil)
 local Types = require(Shared.Types)
@@ -65,28 +64,62 @@ local MIN_GROUND_NORMAL_Y = 0.5
      is short enough that a map streamed in mid-round is picked up anyway. ]]
 local NODE_CACHE_TIME = 2
 
---[[ Share of the attempt budget spent on tagged nodes before falling back to
-     sampling. A map with plenty of nodes should use them, but a map whose nodes
-     are all currently in view must still be able to place a spawn. ]]
-local NODE_ATTEMPT_SHARE = 0.75
+--[[
+	── SPAWN NODES ARE THE SOURCE. ─────────────────────────────────────────────
+
+	Almost the whole attempt budget goes to the level's tagged nodes, and what is
+	left is a last resort rather than a peer.
+
+	This module briefly learned the map for itself: a grid sweep dropped a ray in
+	every cell, kept whatever flat ground it found, and offered those points
+	alongside the designer's tags. It was not precise enough, and it could not be
+	— a downward ray lands on the roof of a shed exactly as happily as it lands
+	on a street, and no amount of clearance testing or pathfinding after the fact
+	turns a point nobody chose into a point somebody meant. Bodies arrived in
+	places that were technically standable and obviously wrong.
+
+	A tagged node is a human being saying "a zombie may come from here". That is
+	information no query produces, and the correct amount of second-guessing it
+	is none. Sixteen deliberate places beat eleven hundred discovered ones.
+
+	The ring keeps a small share for one reason only: a map with no nodes, or
+	whose every node is currently in view, still has to be able to place a body
+	rather than stall the Director. It warns when it is used, because needing it
+	means the map wants more nodes.
+]]
+local NODE_ATTEMPT_SHARE = 0.9
 
 --[[
-	The share of attempts drawn from the learned field, once nodes have had
-	theirs.
+	How much room a node needs to itself before it may be used again.
 
-	The field is everywhere in the map a body can stand — see SpawnField — and it
-	is the reason the Director is no longer limited to a designer's tags and the
-	doughnut around the team. It goes AFTER the tagged nodes on purpose: a tag is
-	a human saying "put them here", and that outranks a cell a sweep happened to
-	find.
+	MinDistanceFromSurvivor already keeps bodies away from the team, and the
+	relaxation ladder deliberately never gives it up. This is a second, smaller
+	rule that answers a different question: is this specific node OCCUPIED right
+	now.
 
-	It goes BEFORE the ring samples for the opposite reason. A ring sample is a
-	guess at a position that is then tested; a field point is already known to be
-	standable, so the expensive half of the test is behind it. Spending the
-	remaining attempts on guesses when known-good points are available was most
-	of why a badly tagged map starved.
+	It matters for two cases the distance ceiling does not cover.
+
+	A caller may pass its own `minDistance` — a bile horde or a panic event
+	names its own radius — and nothing stopped that being smaller than a body.
+	This does not read that field, so a survivor standing on a node keeps it
+	from being used no matter what radius the event asked for.
+
+	And a wave is many bodies through one call. With sixteen nodes and a horde
+	of twelve, nothing kept two bodies off the same node on the same tick, so
+	they materialised inside each other and shoved themselves apart — which
+	looks exactly like the spawn-into-geometry bug and is not one.
 ]]
-local FIELD_ATTEMPT_SHARE = 0.6
+local NODE_OCCUPIED_RADIUS = 9
+local NODE_OCCUPIED_SQUARED = NODE_OCCUPIED_RADIUS * NODE_OCCUPIED_RADIUS
+
+--[[ How long a node stays spoken for after a body is placed on it. Long enough
+     for that body to walk off it, short enough that a small map does not run
+     out of places to spawn during a sustained horde. ]]
+local NODE_COOLDOWN = 1.5
+
+--[[ When each node last had a body put on it, keyed by the node instance. Weak
+     keys: a map swap destroys the nodes and this must not hold them alive. ]]
+local nodeUsedAt = (setmetatable({}, { __mode = "k" }) :: any) :: { [Instance]: number }
 
 --[[
 	How far the ceiling opens when the strict search finds nothing at all.
@@ -193,6 +226,22 @@ local function buildSurvey(survivors: { Model }): number
 		end
 	end
 	return surveyCount
+end
+
+--[[ Whether a node is free right now: nobody standing on it, and nothing placed
+     on it in the last breath. Deliberately independent of every rule in the
+     relaxation ladder — a ladder gives up rules to find somewhere at all, and
+     "somewhere at all" must never mean on top of a player. ]]
+local function nodeIsFree(node: Instance, position: Vector3, now: number): boolean
+	if now - (nodeUsedAt[node] or -math.huge) < NODE_COOLDOWN then
+		return false
+	end
+	for index = 1, surveyCount do
+		if distanceSquared(survey[index].position, position) < NODE_OCCUPIED_SQUARED then
+			return false
+		end
+	end
+	return true
 end
 
 --[[ Everything a placement raycast must not be stopped by: the survivors
@@ -344,13 +393,6 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		shuffleNodes()
 	end
 	local nodeBudget = if useNodes then math.max(1, math.floor(attempts * NODE_ATTEMPT_SHARE)) else 0
-	--[[ Whatever the nodes did not take, less the ring's share. An anchored
-	     search skips the field entirely: a bile horde or a panic event is about
-	     one PLACE, and offering it the whole map would make it a horde that
-	     happens to arrive somewhere. ]]
-	local fieldBudget = if anchor
-		then 0
-		else nodeBudget + math.floor((attempts - nodeBudget) * FIELD_ATTEMPT_SHARE)
 
 	local tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
 	local nodeIndex = 0
@@ -434,20 +476,26 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 
 		for attempt = 1, attempts do
 			local candidate: Vector3?
+			--[[ Which node this candidate came from, or nil for a ring sample.
+			     Carried down to the accept so the node can be marked used — a
+			     node is only spoken for once a body actually goes on it, never
+			     because it was merely considered. ]]
+			local chosenNode: Instance? = nil
+			local now = os.clock()
 
 			if useNodes and attempt <= nodeBudget then
-				nodeIndex += 1
-				local node = nodeOrder[nodeIndex]
-				if node then
-					candidate = node.Position
+				--[[ Walks past occupied nodes rather than spending the attempt on
+				     one. A node with somebody standing on it is not a near miss to
+				     be tested and rejected; it is simply not this tick's node. ]]
+				while nodeIndex < #nodeOrder do
+					nodeIndex += 1
+					local node = nodeOrder[nodeIndex]
+					if node and nodeIsFree(node, node.Position, now) then
+						candidate = node.Position
+						chosenNode = node
+						break
+					end
 				end
-			end
-			--[[ Then the learned field: somewhere in the map a body is already
-			     known to fit. Everything below still applies — distance, flow,
-			     line of sight — so this widens what gets CONSIDERED without
-			     loosening a single rule about what is acceptable. ]]
-			if not candidate and attempt <= fieldBudget then
-				candidate = SpawnField.sample(random)
 			end
 			if not candidate then
 				local origin = anchor
@@ -563,6 +611,12 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 						.. "flow nodes cover the route they actually take."
 				)
 			end
+			--[[ Marked here and nowhere else: the moment a body is actually
+			     placed. Every earlier exit from this attempt leaves the node free
+			     for the next one. ]]
+			if chosenNode then
+				nodeUsedAt[chosenNode] = now
+			end
 			return ground, nil
 		end
 	end
@@ -608,11 +662,13 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			"no spawn point in %d attempts (%s%s%s)",
 			attempts,
 			table.concat(parts, ", "),
-			string.format(
-				"%s; %d point(s) learned from the map",
-				if useNodes then string.format("; %d tagged nodes", #nodeCache) else "; no tagged nodes",
-				SpawnField.stats().known
-			),
+			--[[ The node count is the actionable half of this message. A map with
+			     no tagged nodes, or with sixteen that are all in view, is a map
+			     that wants more FL_SpawnNode parts — and that is a thing a person
+			     can go and do. ]]
+			if useNodes
+				then string.format("; %d tagged node(s)", #nodeCache)
+				else "; NO tagged nodes — add FL_SpawnNode parts to the map",
 			gaveUp
 		)
 end
