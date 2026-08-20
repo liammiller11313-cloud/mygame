@@ -99,6 +99,7 @@ local GamepadFocus = require(script.Parent.GamepadFocus)
 local Widgets = require(script.Parent.Widgets)
 local UiSound = require(script.Parent.UiSound)
 local FreeCursor = require(script.Parent.FreeCursor)
+local LobbyClock = require(script.Parent.LobbyClock)
 local Confetti = require(script.Parent.Confetti)
 local TitleFlicker = require(script.Parent.TitleFlicker)
 
@@ -329,6 +330,11 @@ local lobby = {
 	players = 0,
 	maxPlayers = GameModeConfig.Classic.MaxPlayers,
 	canStart = false,
+	--[[ The lobby is deliberately not counting down because nobody in this
+	     server has picked a mode yet. Starts true so a menu built before the
+	     first LobbyStateChanged says CHOOSE A MODE rather than flashing a
+	     countdown state it has no numbers for. ]]
+	awaitingChoice = true,
 	inProgress = false,
 	waveIndex = 0,
 	joinable = true,
@@ -638,12 +644,27 @@ local function refreshLobby()
 		-- The number itself is written by updateCountdown, which also owns the
 		-- colour: it is the only thing that knows how little time is left.
 		lobbyCaption.Text = "UNTIL IT STARTS"
+	elseif lobby.awaitingChoice then
+		--[[ Nobody has picked, so there is no clock and the server is not waiting
+		     on anyone to arrive — it is waiting on THIS player. Saying WAITING FOR
+		     SURVIVORS here was a lie about whose turn it is, and it read as the
+		     menu being stuck. ]]
+		lobbyBig.Text = "—"
+		lobbyBig.TextColor3 = COLOR.TextDim
+		lobbyCaption.Text = "CHOOSE A MODE TO START"
+		state.countdownShown = -1
 	else
 		lobbyBig.Text = "—"
 		lobbyBig.TextColor3 = COLOR.TextDim
 		lobbyCaption.Text = "WAITING FOR SURVIVORS"
 		state.countdownShown = -1
 	end
+
+	--[[ The clock follows the player out of the menu and over the shop and the
+	     loadout screen — see UI/LobbyClock. Being pulled into a round from
+	     inside a shop with no warning is the bug that giving people time to
+	     browse would otherwise create. ]]
+	LobbyClock.set(if lobby.inProgress then 0 else lobby.endsAt, state.committed or lobby.canStart)
 	refreshEntries()
 end
 
@@ -661,6 +682,7 @@ local function onLobbyState(payload: any)
 	lobby.maxPlayers = tonumber(payload.maxPlayers) or lobby.maxPlayers
 	lobby.waveIndex = tonumber(payload.waveIndex) or 0
 	lobby.canStart = payload.canStart == true
+	lobby.awaitingChoice = payload.awaitingChoice == true
 	lobby.inProgress = payload.inProgress == true
 	lobby.joinable = payload.joinable ~= false
 
@@ -982,6 +1004,10 @@ function MainMenuController:close()
 		confetti:clear()
 	end
 	state.open = false
+	--[[ The chip outlives the menu's own ScreenGui by design — it draws above the
+	     shop and the loadout screen — so closing the menu has to take it down
+	     explicitly. Nothing else is watching. ]]
+	LobbyClock.set(0, false)
 	refreshVisibility()
 end
 
@@ -1118,6 +1144,10 @@ local function update(dt: number)
 	if state.open then
 		updateFlicker(now)
 		updateCountdown()
+		--[[ Driven from here rather than from a loop of its own, like Confetti and
+		     TitleFlicker: the menu already owns exactly one RenderStepped and the
+		     chip is a second view of the number updateCountdown just wrote. ]]
+		LobbyClock.update()
 
 		if state.pending ~= "" and now >= state.pendingUntil then
 			state.pending = ""
@@ -2194,6 +2224,8 @@ end
 
 function MainMenuController:destroy()
 	setSuppressed(false)
+	-- Its own ScreenGui, so the menu's trove does not take it with it.
+	LobbyClock.destroy()
 	table.clear(modeEntries)
 	table.clear(navEntries)
 	table.clear(resultRows)

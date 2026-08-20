@@ -137,6 +137,7 @@ local sentMode = ""
 local sentCountdown = -1
 local sentPlayers = -1
 local sentCanStart = false
+local sentAwaiting = false
 local sentRunning = false
 local sentAt = 0
 
@@ -454,11 +455,39 @@ end
 	all want Versus (MinPlayersToStart 4) get a Classic round instead of a
 	countdown that never reaches zero — an unplayable lobby is a worse answer than
 	the wrong mode.
+
+	── NOBODY HAS CHOSEN YET IS NOT A VOTE FOR THE DEFAULT ─────────────────────
+	Silence counts as a vote for the default ONCE somebody has actually picked
+	something — that is what stops one player dragging three quiet ones into
+	Versus. It must not be what STARTS the lobby, and for a while it was: a
+	server with one player who had touched nothing claimed the default mode and
+	began counting down within a second of them spawning in.
+
+	From the player's side that is the menu shoving them into a round while they
+	are still reading it. There is a shop, a loadout screen and a gunsmith on
+	that menu and no time to open any of them, which is the whole complaint.
+
+	So the lobby waits. Until at least one person has said what they want to
+	play, this returns nil, the claim stays empty and there is no clock. The
+	countdown is a consequence of somebody choosing — which is also what makes it
+	mean anything when it appears.
 ]]
+local function anyoneHasChosen(): boolean
+	for _, player in Players:GetPlayers() do
+		if desired[player] then
+			return true
+		end
+	end
+	return false
+end
+
 local function tallyPreferredMode(): string?
 	local players = Players:GetPlayers()
 	local count = #players
 	if count == 0 then
+		return nil
+	end
+	if not anyoneHasChosen() then
 		return nil
 	end
 
@@ -522,6 +551,11 @@ local function buildPayload(): { [string]: any }
 		players = players,
 		maxPlayers = maxPlayersFor(mode),
 		canStart = claimedMode ~= nil and players >= minPlayersFor(mode),
+		--[[ True while the lobby is deliberately not counting down because nobody
+		     has picked a mode. The menu needs this to say CHOOSE A MODE rather
+		     than WAITING FOR SURVIVORS: one is an instruction and the other is a
+		     lie about whose turn it is. ]]
+		awaitingChoice = not running and claimedMode == nil,
 		inProgress = running,
 		waveIndex = roundWaveIndex(),
 		joinable = isJoinableHere(mode),
@@ -538,6 +572,7 @@ local function broadcastLobbyState(force: boolean?)
 		and payload.countdown == sentCountdown
 		and payload.players == sentPlayers
 		and payload.canStart == sentCanStart
+		and payload.awaitingChoice == sentAwaiting
 		and payload.inProgress == sentRunning
 	if not force and unchanged and now - sentAt < RESEND_INTERVAL then
 		return
@@ -545,6 +580,7 @@ local function broadcastLobbyState(force: boolean?)
 
 	sentMode, sentCountdown, sentPlayers = payload.mode, payload.countdown, payload.players
 	sentCanStart, sentRunning, sentAt = payload.canStart, payload.inProgress, now
+	sentAwaiting = payload.awaitingChoice
 	Remotes.Event.LobbyStateChanged:FireAllClients(payload)
 end
 

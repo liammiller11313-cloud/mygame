@@ -359,11 +359,17 @@ UITheme.DisplayOrder = table.freeze({
 	     loadout screen share this layer: they are the same kind of thing and
 	     they are never open at the same time. ]]
 	Settings = 88,
+	--[[ Above the shop and the loadout screen, because the lobby countdown has to
+	     be readable from INSIDE them. The lobby waits for somebody to pick a mode
+	     before it starts counting, precisely so a player can go and spend their
+	     dollars first — and a clock that the shop hides is how that turns into
+	     being yanked into a round mid-purchase. See UI/LobbyClock. ]]
+	LobbyClock = 89,
 	--[[ Above those, because the pause menu is what a player reaches for to get
 	     OUT of one of them. A pause menu that can end up behind the screen it is
 	     meant to escape is worse than no pause menu. ]]
-	Pause = 89,
-	Fade = 90,
+	Pause = 90,
+	Fade = 91,
 })
 
 --[[
