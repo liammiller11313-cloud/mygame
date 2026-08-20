@@ -274,6 +274,14 @@ GoreConfig.Budget = table.freeze({
 GoreConfig.BudgetScale = table.freeze({
 	Desktop = 1.0,
 	Console = 0.7,
+	--[[ A tablet is not a phone. It has a real GPU and four times the screen, so
+	     a phone's budget wastes it — but it is still a handheld with a shared
+	     memory budget, so a desktop's does not fit either. It was folded into
+	     Mobile until Device gained the class; before that, ANY class this table
+	     did not recognise fell through `or 1.0` to the full desktop load, so
+	     naming a new one without a row here would have been worse than not
+	     naming it at all. ]]
+	Tablet = 0.55,
 	Mobile = 0.4,
 })
 

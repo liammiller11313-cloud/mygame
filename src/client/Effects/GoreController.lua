@@ -47,17 +47,16 @@
 	    can tell the difference, and the horde can.
 ]]
 
-local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
+local Device = require(Shared.Util.Device)
 local Registry = require(Shared.Util.Registry)
 
 --[[ For the screen-blood droplets: they lay out in offsets, so they have to be
@@ -86,17 +85,13 @@ local LEVEL = Enums.GoreLevel
 	scope — before any controller has started — and three lines of duplication
 	beats a load-order dependency that only breaks in the field.
 ]]
-local function deviceClass(): string
-	if GuiService:IsTenFootInterface() then
-		return "Console"
-	end
-	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-		return "Mobile"
-	end
-	return "Desktop"
-end
-
-local DEVICE_BUDGET = GoreConfig.budgetFor(deviceClass())
+--[[ From Shared/Util/Device now, which is the same three checks this file used
+     to own — with two bugs out of them. It tested `not KeyboardEnabled`, so a
+     phone with a paired Bluetooth keyboard got the DESKTOP budget, permanently,
+     because the answer was frozen at module scope. And it could not tell a
+     tablet from a phone, because that needs the viewport and the camera does not
+     exist this early. Device is lazy for exactly that reason. ]]
+local DEVICE_BUDGET = GoreConfig.budgetFor(Device.get())
 
 --[[ GameConfig.Corpses restates two of GoreConfig.Budget's ceilings. Rather
      than pick a winner and let the other drift into a lie, take the tighter of
@@ -121,6 +116,12 @@ local MAX_DECALS = math.min(BUDGET.MaxActiveDecals, GameConfig.Corpses.MaxBloodD
 	prefers a clean screen gets their LOW; somebody on a phone gets the device
 	floor whatever they pick, because a setting cannot buy them a GPU.
 ]]
+--[[ The two inputs to particleScale, kept separately because either can move
+     on its own: the player changes the quality setting, or Device revises its
+     answer once the camera exists. Multiplying them at the point of change and
+     keeping only the product meant whichever moved second silently discarded
+     the other. ]]
+local qualityScale = 1
 local particleScale = DEVICE_BUDGET.particles
 
 --[[ The blood a flying chunk leaves behind it. Rate is per second and the window
@@ -1071,8 +1072,8 @@ end
 	was born with, which is invisible — a burst lives under a second.
 ]]
 function GoreController:setQuality(scale: number)
-	local wanted = if typeof(scale) == "number" and scale == scale then math.clamp(scale, 0, 1) else 1
-	particleScale = DEVICE_BUDGET.particles * wanted
+	qualityScale = if typeof(scale) == "number" and scale == scale then math.clamp(scale, 0, 1) else 1
+	particleScale = DEVICE_BUDGET.particles * qualityScale
 end
 
 function GoreController:getQuality(): number
@@ -1121,6 +1122,27 @@ local function update(deltaTime: number)
 	updateDecals(now)
 end
 
+--[[
+	Re-reads the device budget and the ceilings that come off it.
+
+	Called from init and again whenever Device.changed fires, and both matter for
+	the same reason: at MODULE scope the camera may not exist yet, and Device
+	deliberately answers Mobile in that case rather than guessing upward. Sizing
+	a desktop's pools from that answer would be the low-budget bug in reverse —
+	so the numbers above are a floor, and this is the measurement.
+
+	Raising a ceiling afterwards is safe: `gibSlot` and `decalSlot` create their
+	slots on demand, so a larger MAX simply lets the ring buffer grow into it.
+	Lowering one leaves a few slots past the cursor that are never reused again,
+	which is a handful of parts and not worth code to reclaim.
+]]
+local function adoptDeviceBudget()
+	DEVICE_BUDGET = GoreConfig.budgetFor(Device.get())
+	MAX_GIBS = math.min(BUDGET.MaxActiveGibs, GameConfig.Corpses.MaxGibs, DEVICE_BUDGET.gibs)
+	MAX_DECALS = math.min(BUDGET.MaxActiveDecals, GameConfig.Corpses.MaxBloodDecals, DEVICE_BUDGET.decals)
+	particleScale = DEVICE_BUDGET.particles * qualityScale
+end
+
 function GoreController:init()
 	folder = Instance.new("Folder")
 	folder.Name = "FL_Gore"
@@ -1130,6 +1152,11 @@ function GoreController:init()
 	decalParams.FilterType = Enum.RaycastFilterType.Exclude
 	decalParams.IgnoreWater = true
 	decalParams.RespectCanCollide = false
+
+	--[[ The camera exists by now, so this is the first answer worth trusting —
+	     see adoptDeviceBudget. ]]
+	adoptDeviceBudget()
+	trove:add(Device.changed:connect(adoptDeviceBudget))
 end
 
 function GoreController:start()
