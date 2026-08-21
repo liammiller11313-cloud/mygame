@@ -1409,11 +1409,11 @@ function InfectedService:_trackMaroon(record: any, nearest: number, elapsed: num
 		return false
 	end
 
-	--[[ Both places. Where it was PUT is what a spawn node can be blamed for;
-	     where it ENDED UP is how far it managed to get, which is the difference
-	     between a node inside a sealed courtyard and a body that walked two
-	     hundred studs and wedged itself behind a car. ]]
-	self.marooned:Fire(position, not record.progressed, record.spawnedAt)
+	--[[ Both places, and the window they span. Where it was PUT is what a spawn
+	     node can be blamed for; where it ENDED UP is how far it managed to get;
+	     and the window is what makes that distance mean anything — twenty-six
+	     studs is a lot for a second and nothing at all for twenty-five. ]]
+	self.marooned:Fire(position, not record.progressed, record.spawnedAt, MAROON_TIME)
 	self:despawn(record.model)
 	return true
 end
