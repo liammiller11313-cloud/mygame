@@ -467,9 +467,78 @@ function InfectedAnimator.setState(self, role: string, speed: number)
 	track:AdjustSpeed(rate)
 end
 
+--[[
+	Throws away tracks whose asset never arrived, ONCE, shortly after spawn.
+
+	── WHY IT CANNOT BE ANSWERED AT LOAD TIME ──────────────────────────────────
+	Animator:LoadAnimation does not throw for an id that does not exist, or that
+	belongs to another creator. It hands back an ordinary AnimationTrack that
+	reports IsPlaying and moves nothing. The only thing that really knows is
+	PreloadAsync, and AnimationCache.preload is task.spawn'd — so when the FIRST
+	body of a kind finishes loading its tracks the fetch has not returned yet and
+	hasFailed answers "not known to have failed", which is indistinguishable from
+	"fine". That body is the one that kicks the fetch off, so it is always the
+	one that gets this wrong.
+
+	── WHY A DEAD TRACK IS WORSE THAN NO TRACK ─────────────────────────────────
+	The client's InfectedPoseController stands down for any body with tracks
+	playing, on the reasoning that something better is already driving it. A body
+	holding tracks that fetch-failed is therefore animated by the clip (which
+	moves nothing) AND not animated by the poser (which stood down for it) — a
+	rig that slides around the map in a T-pose, which is the exact failure the
+	poser exists to prevent.
+
+	Dropping them puts the body back under the poser. Not as good as the clip
+	that was meant to play, much better than nothing, and the warning at load
+	time already named the id so the real fix is still visible.
+
+	This is what `validateAt` was always for. It was set at spawn and never read
+	— four comments referred to this function and it did not exist — so a body
+	whose ids failed kept them for its whole life.
+]]
+local function dropFailed(self)
+	local dropped = false
+	for role, id in self.trackIds do
+		if not AnimationCache.hasFailed(id) then
+			continue
+		end
+		local track = self.tracks[role]
+		if track then
+			--[[ Stopped before it is forgotten. A track this module drops still
+			     belongs to the Animator, and one left playing keeps the poser
+			     standing down for a body nothing is driving — which is the whole
+			     problem, not half of it. ]]
+			if track.IsPlaying then
+				track:Stop(0)
+			end
+			track:Destroy()
+		end
+		self.tracks[role] = nil
+		self.trackIds[role] = nil
+		dropped = true
+	end
+
+	if not dropped then
+		return
+	end
+	--[[ The cached role and rate described tracks that no longer exist, so the
+	     next setState has to be treated as a change rather than as a no-op. ]]
+	self.current = ""
+	self.rate = -1
+end
+
 --[[ Reads the body and picks a state. This is the only thing the brain has to
      call; everything above is bookkeeping. ]]
 function InfectedAnimator.update(self, runSpeed: number)
+	--[[ Once, a couple of seconds in, and then never again — see dropFailed. It
+	     runs from here rather than on a timer because this is already the tick
+	     every live body pays, and a body that never ticks has no animation to be
+	     wrong about. ]]
+	if self.validateAt > 0 and os.clock() >= self.validateAt then
+		self.validateAt = 0
+		dropFailed(self)
+	end
+
 	if os.clock() < self.oneShotUntil then
 		return
 	end
