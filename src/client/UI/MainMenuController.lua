@@ -438,22 +438,24 @@ end
 
 --[[
 	CameraController re-applies LockFirstPerson every time the survivor state
-	changes, and LockFirstPerson pins the cursor to the centre of the screen. If
-	that happens while the menu is up, nothing on it can be clicked. So the value
-	it just wrote is taken as the one to hand back on close, and the camera is
-	unlocked again — deferred, because this runs on the same attribute signal and
-	has to land after CameraController's own handler.
+	changes, and LockFirstPerson pins the cursor to the centre of the screen —
+	which, landing while the menu is up, made everything on it unclickable.
+
+	This used to be a deferred re-take that raced CameraController's own handler
+	and hoped to land after it. It no longer has to: CameraController asks
+	FreeCursor whether a screen is holding the mouse and stands down while one
+	is, so the camera is never taken back from underneath this menu in the first
+	place. Kept as a call site because the menu still wants a hook here, and
+	because a no-op with a reason beats deleting the connection and rediscovering
+	why it existed.
 ]]
 local function reassertFreeCursor()
 	if not state.suppressed then
 		return
 	end
-	task.defer(function()
-		if not state.suppressed then
-			return
-		end
-		FreeCursor.take(restore)
-	end)
+	--[[ Idempotent: FreeCursor counts a screen once however many times it takes,
+	     and the properties it writes are the ones already in force. ]]
+	FreeCursor.take(restore)
 end
 
 --[[ Everything the menu takes over while it is on screen, in one place so it can

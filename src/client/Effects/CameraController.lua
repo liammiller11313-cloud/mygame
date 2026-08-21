@@ -58,6 +58,11 @@ local ShotPattern = require(Shared.Util.ShotPattern)
 local Spring = require(Shared.Util.Spring)
 local Trove = require(Shared.Util.Trove)
 
+--[[ For one question only: is a screen with buttons on it currently holding the
+     mouse. See applyCameraMode. FreeCursor reaches back the other way through
+     the Registry rather than a require, so this stays one-directional. ]]
+local FreeCursor = require(script.Parent.Parent.UI.FreeCursor)
+
 local PA = Attributes.Player
 local STATE = Enums.SurvivorState
 local HITSTOP = GoreConfig.HitStop
@@ -530,6 +535,26 @@ end
 -- ── state ───────────────────────────────────────────────────────────────────
 
 local function applyCameraMode()
+	--[[
+		STAND DOWN while a screen owns the mouse.
+
+		This runs on every change of the player's state attribute, and it used to
+		run unconditionally — so anything that changed state while a screen was
+		open took the cursor back out from under it. A team wipe leaves everyone
+		Incapacitated, the results screen opens over that, and the round then
+		resets the state: LockFirstPerson, a 0.5 zoom, and a desktop player
+		staring at a scoreboard they cannot click. Being downed or revived under
+		the pause menu did the same thing to Resume.
+
+		Nothing is lost by skipping it. `state.survivorState` is already up to
+		date, so the moment the last screen gives the cursor back FreeCursor asks
+		here again and this applies whatever is true THEN — which is the whole
+		reason giveBack asks rather than replaying its snapshot.
+	]]
+	if FreeCursor.isHeld() then
+		return
+	end
+
 	local survivor = state.survivorState
 	if NO_CHARACTER_STATES[survivor] then
 		-- Dead or spectating: let the player pull back and watch the team, which

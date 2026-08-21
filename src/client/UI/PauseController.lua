@@ -403,21 +403,20 @@ function PauseController:start()
 	end)
 
 	--[[
-		CameraController re-applies LockFirstPerson on every survivor state change,
-		and LockFirstPerson pins the cursor to the middle of the screen. If that
-		lands while this is up, nothing on it can be clicked. Deferred, because it
-		runs on the same signal and has to land after that handler.
+		CameraController re-applies LockFirstPerson on every survivor state change
+		— being downed, revived or respawned — and LockFirstPerson pins the cursor
+		to the middle of the screen, which used to leave Resume unclickable under
+		an open pause menu.
+
+		It was a deferred re-take racing CameraController's handler for the same
+		signal. CameraController now stands down entirely while any screen holds
+		the mouse, so the cursor is never taken back from under this one; this
+		re-asserts the free camera without the race, and is idempotent.
 	]]
 	trove:connect(player:GetAttributeChangedSignal(PA.State), function()
-		if not state.suppressed then
-			return
-		end
-		task.defer(function()
-			if not state.suppressed then
-				return
-			end
+		if state.suppressed then
 			FreeCursor.take(restore)
-		end)
+		end
 	end)
 
 	refreshButton()

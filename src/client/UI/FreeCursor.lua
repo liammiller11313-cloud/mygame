@@ -60,6 +60,43 @@ export type Restore = {
 	mouseIcon: any,
 }
 
+--[[
+	Which screens are currently holding the cursor, and how many.
+
+	── WHY A COUNT AND NOT A BOOLEAN ───────────────────────────────────────────
+	These screens nest. Settings opens over the pause menu, the pause menu opens
+	over a live round, a vote opens over the main menu. A boolean would let the
+	INNER screen closing declare the cursor free for the outer one that is still
+	up, which is precisely the bug this exists to stop.
+
+	── WHY ANYTHING OUTSIDE THIS FILE NEEDS TO KNOW ────────────────────────────
+	CameraController re-asserts LockFirstPerson and a 0.5 zoom every time the
+	player's state attribute changes, and it does that whether or not a screen
+	with buttons on it is up. So the cursor was being taken back UNDERNEATH an
+	open screen by anything that changed state while it was open:
+
+	  * a team wipe leaves everyone Incapacitated, the results screen opens, and
+	    the round then resets the state — re-pinning the mouse over the very
+	    screen the game just put the player on, which is the original report;
+	  * being downed, revived or respawned while the pause menu is open does the
+	    same thing to Resume;
+	  * and closing an INNER screen did it too, because giveBack asks
+	    CameraController to re-assert — so pause, open settings, come back, and
+	    the pause menu you are still looking at has a pinned cursor.
+
+	All three are one fact: CameraController owns those properties and had no way
+	to know it was being asked to fight a screen. Now it can ask.
+]]
+local holders: { [any]: boolean } = {}
+local holderCount = 0
+
+--[[ Whether ANY screen currently holds the cursor. CameraController stands down
+     while this is true rather than writing properties that would be wrong the
+     moment it wrote them; the last giveBack asks it for a fresh answer. ]]
+function FreeCursor.isHeld(): boolean
+	return holderCount > 0
+end
+
 function FreeCursor.take(restore: Restore)
 	--[[ Only the FIRST take records anything. A screen opening over another
 	     already-free screen would otherwise save the freed values as the ones to
@@ -69,6 +106,13 @@ function FreeCursor.take(restore: Restore)
 		restore.cameraZoom = player.CameraMaxZoomDistance
 		restore.cameraMinZoom = player.CameraMinZoomDistance
 		restore.mouseIcon = UserInputService.MouseIconEnabled
+	end
+	--[[ Keyed on the caller's own table, so a screen that takes twice without
+	     giving back — which happens, since take is called from refresh functions
+	     that run on every visibility change — counts once and is released once. ]]
+	if not holders[restore] then
+		holders[restore] = true
+		holderCount += 1
 	end
 
 	player.CameraMode = Enum.CameraMode.Classic
@@ -96,6 +140,16 @@ end
 	load-order failure rather than a normal frame.
 ]]
 function FreeCursor.giveBack(restore: Restore)
+	--[[ RELEASED FIRST, and the order is load-bearing. Everything below either
+	     asks CameraController for the camera it wants or replays a snapshot, and
+	     CameraController now declines to touch the camera while a screen is
+	     holding it — so releasing after the refresh would make the refresh a
+	     no-op and leave the cursor free for the rest of the round. ]]
+	if holders[restore] then
+		holders[restore] = nil
+		holderCount -= 1
+	end
+
 	if restore.mouseIcon ~= nil then
 		UserInputService.MouseIconEnabled = restore.mouseIcon
 	end

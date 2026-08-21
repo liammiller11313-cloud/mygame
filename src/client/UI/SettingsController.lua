@@ -1087,21 +1087,18 @@ function SettingsController:start()
 	--[[
 		CameraController re-applies LockFirstPerson every time the survivor state
 		changes — on a death, on a revive, on a respawn — and LockFirstPerson pins
-		the cursor to the middle of the screen. If that lands while the panel is
-		up, nothing on it can be clicked again. So the value it just wrote becomes
-		the one to hand back on close, and the cursor is freed again. Deferred,
-		because this runs on the same signal and has to land after that handler.
+		the cursor to the middle of the screen, which used to make this panel
+		unclickable when one of those landed while it was open.
+
+		The old shape was a deferred re-take that raced CameraController's handler
+		for the same signal and hoped to land second. CameraController now asks
+		whether a screen is holding the mouse and leaves the camera alone while
+		one is, so there is nothing to race.
 	]]
 	trove:connect(player:GetAttributeChangedSignal(Attributes.Player.State), function()
-		if not state.suppressed then
-			return
-		end
-		task.defer(function()
-			if not state.suppressed then
-				return
-			end
+		if state.suppressed then
 			FreeCursor.take(restore)
-		end)
+		end
 	end)
 
 	--[[ Re-fitted on every viewport change, and re-POINTED rather than re-added
