@@ -681,45 +681,46 @@ function InfectedService:damage(model: Model, amount: number, ctx: any): any
 end
 
 --[[
-	Holds an unrigged body together, and says so once per variant.
+	Rigs a body that arrived without joints, and says so once per variant.
 
 	Only ever runs for a rig that came out of Workspace with no Motor6Ds at all.
-	A rig with SOME joints is left completely alone: a partially rigged model is a
-	model whose author made choices, and welding over those would freeze the limbs
-	that do work.
+	A rig with SOME joints is left completely alone: a partially rigged model is
+	one whose author made choices, and building over those would move limbs that
+	are already where they were meant to be.
+
+	This used to WELD the loose parts to the root. That stopped the body coming
+	apart in mid-air and produced a body that could never animate, because an
+	AnimationTrack drives Motor6Ds and a weld is not one — so a model somebody
+	forgot to rig was a rigid slab sliding at the team. RigUtil.buildMissingJoints
+	builds the real skeleton instead, without moving a single part, so the body
+	both holds together and plays the zombie set.
+
+	It is still not a fix for the MODEL: the joints are placed at standard
+	fractions of each part's size, which is right for a humanoid and a guess for
+	anything stylised. Fix it in Studio with studio-scripts/RigDoctor, which
+	builds exactly the same joints where you can see the result.
 ]]
 function InfectedService:_boltTogether(model: Model, kind: string)
 	if #RigUtil.getMotors(model) > 0 then
 		return
 	end
 
-	local root = RigUtil.getRoot(model)
-	if not root then
+	local built = RigUtil.buildMissingJoints(model)
+	if built == 0 then
 		return
-	end
-
-	local welded = 0
-	for _, part in RigUtil.getBodyParts(model) do
-		if part ~= root and #part:GetJoints() == 0 then
-			local weld = Instance.new("WeldConstraint")
-			weld.Name = "FL_RigBolt"
-			weld.Part0 = root
-			weld.Part1 = part
-			weld.Parent = root
-			welded += 1
-		end
 	end
 
 	warnOnce(
 		"unrigged:" .. tostring(model:GetAttribute("FL_Variant") or kind),
 		string.format(
-			"%s variant %q has NO Motor6D joints in the world, so its limbs were welded to the "
-				.. "root to stop the body coming apart in mid-air (%d part(s)). It cannot animate "
-				.. "or be dismembered and it will slide around rigid. Open the model in Studio and "
-				.. "join its limbs to the torso with Motor6D.",
+			"%s variant %q arrived with NO Motor6D joints, so %d were built for it at spawn — "
+				.. "otherwise the body comes apart in mid-air and its brain walks an invisible "
+				.. "root at the team. It will animate, but the joints are placed by proportion "
+				.. "rather than by whoever built the model. Run studio-scripts/RigDoctor to do "
+				.. "this properly, once, where you can see it.",
 			kind,
 			tostring(model:GetAttribute("FL_Variant") or model.Name),
-			welded
+			built
 		)
 	)
 end

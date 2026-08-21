@@ -412,6 +412,11 @@ end
 --[[ One line per stuck spot per round, keyed to a coarse grid cell. A node a
      body cannot leave produces a report every time the Director uses it, and a
      warning that repeats every half-minute is a warning nobody reads. ]]
+--[[ How close a reaped body has to be to a spawn node before that node is what
+     gets blamed. Wider than a body and narrower than a room: a body reaped well
+     away from every node walked there under its own power. ]]
+local NODE_BLAME_RADIUS = 40
+
 local warned: { [string]: boolean } = {}
 
 local function warnOnce(key: string, message: string)
@@ -420,6 +425,43 @@ local function warnOnce(key: string, message: string)
 	end
 	warned[key] = true
 	warn("[DirectorService] " .. message)
+end
+
+--[[
+	The spawn node nearest a point, by NAME, or nil.
+
+	Coordinates are true and nearly useless: finding "(-132, 52, 259)" in Studio
+	means eyeballing the 3D view, while a name is something you can type into the
+	Explorer's search box and be looking at in a second. The Director already
+	knows every node — it spawns at them — so the report may as well say which
+	one rather than making a person work it out.
+]]
+local function nearestNodeName(position: Vector3): string?
+	local level = Registry.find("LevelService")
+	if not level or typeof(level.getSpawnNodes) ~= "function" then
+		return nil
+	end
+	local ok, nodes = pcall(level.getSpawnNodes, level)
+	if not ok or typeof(nodes) ~= "table" then
+		return nil
+	end
+
+	local best, bestSquared = nil, math.huge
+	for _, node in nodes :: { BasePart } do
+		if node and node.Parent then
+			local squared = (node.Position - position).Magnitude ^ 2
+			if squared < bestSquared then
+				best, bestSquared = node, squared
+			end
+		end
+	end
+	--[[ Only when it is actually near. A body reaped a hundred studs from every
+	     node walked there and got stuck on scenery, and naming the closest node
+	     would send somebody to inspect a node that is fine. ]]
+	if best and bestSquared <= NODE_BLAME_RADIUS * NODE_BLAME_RADIUS then
+		return best.Name
+	end
+	return nil
 end
 
 function DirectorService:start()
@@ -442,17 +484,33 @@ function DirectorService:start()
 	if infected and infected.marooned then
 		self._trove:add(infected.marooned:connect(function(position: Vector3, fromSpawn: boolean)
 			if fromSpawn then
+				local node = nearestNodeName(position)
 				warnOnce(
-					string.format("stuck:%d:%d", position.X // 16, position.Z // 16),
 					string.format(
-						"a body spawned near (%d, %d, %d) never closed any ground on the team "
-							.. "before it was reaped — the FL_SpawnNode nearest there is probably "
-							.. "somewhere a zombie cannot walk out of. Check it for a roof, a "
-							.. "fence, or a sealed courtyard.",
-						position.X,
-						position.Y,
-						position.Z
-					)
+						"stuck:%s",
+						node or string.format("%d:%d", position.X // 16, position.Z // 16)
+					),
+					if node
+						then string.format(
+							"bodies spawned at the FL_SpawnNode named %q are never reaching the "
+								.. "team — they get reaped without closing any ground at all. It is "
+								.. "somewhere a zombie cannot walk out of: check it for a roof, a "
+								.. "fence, or a sealed courtyard. Nearest point (%d, %d, %d).",
+							node,
+							position.X,
+							position.Y,
+							position.Z
+						)
+						else string.format(
+							"a body reaped near (%d, %d, %d) never closed any ground on the team, "
+								.. "and there is no spawn node within %d studs of it — so it walked "
+								.. "there and got stuck on scenery rather than being spawned into a "
+								.. "trap.",
+							position.X,
+							position.Y,
+							position.Z,
+							NODE_BLAME_RADIUS
+						)
 				)
 			end
 		end))

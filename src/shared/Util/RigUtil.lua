@@ -235,6 +235,216 @@ function RigUtil.makeDebris(model: Model)
 	end
 end
 
+--[[
+	The standard skeletons, parent -> child, with each joint's pivot expressed in
+	the PARENT's own space as fractions of its size.
+
+	Fractions rather than studs so a half-scale Common and a Tank at 2.35 both get
+	their shoulder in the right place without a table per size.
+]]
+local R6_SKELETON = table.freeze({
+	table.freeze({ joint = "RootJoint", parent = "HumanoidRootPart", child = "Torso", at = Vector3.zero }),
+	table.freeze({ joint = "Neck", parent = "Torso", child = "Head", at = Vector3.new(0, 0.5, 0) }),
+	table.freeze({
+		joint = "Left Shoulder",
+		parent = "Torso",
+		child = "Left Arm",
+		at = Vector3.new(-0.5, 0.25, 0),
+	}),
+	table.freeze({
+		joint = "Right Shoulder",
+		parent = "Torso",
+		child = "Right Arm",
+		at = Vector3.new(0.5, 0.25, 0),
+	}),
+	table.freeze({
+		joint = "Left Hip",
+		parent = "Torso",
+		child = "Left Leg",
+		at = Vector3.new(-0.25, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "Right Hip",
+		parent = "Torso",
+		child = "Right Leg",
+		at = Vector3.new(0.25, -0.5, 0),
+	}),
+})
+
+local R15_SKELETON = table.freeze({
+	table.freeze({ joint = "Root", parent = "HumanoidRootPart", child = "LowerTorso", at = Vector3.zero }),
+	table.freeze({
+		joint = "Waist",
+		parent = "LowerTorso",
+		child = "UpperTorso",
+		at = Vector3.new(0, 0.5, 0),
+	}),
+	table.freeze({ joint = "Neck", parent = "UpperTorso", child = "Head", at = Vector3.new(0, 0.5, 0) }),
+	table.freeze({
+		joint = "LeftShoulder",
+		parent = "UpperTorso",
+		child = "LeftUpperArm",
+		at = Vector3.new(-0.5, 0.4, 0),
+	}),
+	table.freeze({
+		joint = "LeftElbow",
+		parent = "LeftUpperArm",
+		child = "LeftLowerArm",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "LeftWrist",
+		parent = "LeftLowerArm",
+		child = "LeftHand",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "RightShoulder",
+		parent = "UpperTorso",
+		child = "RightUpperArm",
+		at = Vector3.new(0.5, 0.4, 0),
+	}),
+	table.freeze({
+		joint = "RightElbow",
+		parent = "RightUpperArm",
+		child = "RightLowerArm",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "RightWrist",
+		parent = "RightLowerArm",
+		child = "RightHand",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "LeftHip",
+		parent = "LowerTorso",
+		child = "LeftUpperLeg",
+		at = Vector3.new(-0.5, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "LeftKnee",
+		parent = "LeftUpperLeg",
+		child = "LeftLowerLeg",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "LeftAnkle",
+		parent = "LeftLowerLeg",
+		child = "LeftFoot",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "RightHip",
+		parent = "LowerTorso",
+		child = "RightUpperLeg",
+		at = Vector3.new(0.5, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "RightKnee",
+		parent = "RightUpperLeg",
+		child = "RightLowerLeg",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+	table.freeze({
+		joint = "RightAnkle",
+		parent = "RightLowerLeg",
+		child = "RightFoot",
+		at = Vector3.new(0, -0.5, 0),
+	}),
+})
+
+local function namedPart(model: Model, name: string): BasePart?
+	local found = model:FindFirstChild(name, true)
+	return if found and found:IsA("BasePart") then found else nil
+end
+
+--[[
+	"R6" or "R15", by the one test the whole game agrees on.
+
+	AnimationConfig.rigOf is this function; it forwards here rather than keeping
+	its own copy, because the skeleton a repair BUILDS and the clip set that will
+	be PLAYED on it have to be the same answer. Two independent expressions —
+	even two identical ones — is a pair that can disagree, and the failure mode is
+	an R6 clip loaded onto a body that was just given R15 joints: it plays, it
+	reports itself as playing, and nothing moves.
+
+	Shallow, deliberately. A rig's own torso is a direct child of the model; a
+	recursive search finds an "UpperTorso" inside an accessory or a prop the model
+	happens to be carrying and calls a hand-built R6 zombie an R15 one.
+]]
+function RigUtil.rigTypeOf(model: Model): string
+	return if model:FindFirstChild("UpperTorso") then "R15" else "R6"
+end
+
+--[[
+	Builds whatever standard joints a rig is missing, and returns how many.
+
+	── WHY THIS EXISTS AT RUNTIME AND NOT ONLY IN A STUDIO SCRIPT ──────────────
+	A model with no Motor6Ds is a pile of loose parts: the Humanoid holds the
+	root up at hip height and everything else falls or hangs where it was placed.
+	The first answer to that was to WELD the parts to the root, which stops the
+	body coming apart — and produces a body that can never animate, because an
+	AnimationTrack drives Motor6Ds and a weld is not one. Half a fix.
+
+	These are the same joints, built the same way. A rig repaired here holds
+	together AND plays the zombie set, so a model somebody forgot to rig is a
+	model that looks slightly stiff rather than one that is visibly broken.
+
+	── IT CANNOT MOVE A LIMB ───────────────────────────────────────────────────
+	A Motor6D holds Part1 at `Part0.CFrame * C0 * C1:Inverse()`. Deriving BOTH C0
+	and C1 from the same world pivot makes that expression evaluate to exactly
+	the limb's current CFrame, so whatever pose the parts are in is the pose they
+	keep — at any size and any proportion.
+
+	Welds between two parts it is about to joint are removed first. That is
+	usually WHY the model has no joints (built by dragging parts together, and
+	Studio welded them), and a weld left in place beside a Motor6D wins.
+]]
+function RigUtil.buildMissingJoints(model: Model): number
+	local have: { [string]: boolean } = {}
+	for _, child in RigUtil.mapMotorChildren(model) do
+		have[child.Name] = true
+	end
+
+	local skeleton = if RigUtil.rigTypeOf(model) == "R15" then R15_SKELETON else R6_SKELETON
+	local built = 0
+
+	for _, spec in skeleton do
+		if have[spec.child] then
+			continue
+		end
+		local parent = namedPart(model, spec.parent)
+		local child = namedPart(model, spec.child)
+		--[[ A missing PART is not a fault. Plenty of rigs have no separate hands
+		     or feet, and inventing one would be worse than leaving the joint out. ]]
+		if not parent or not child then
+			continue
+		end
+
+		for _, joint in child:GetJoints() do
+			if joint:IsA("WeldConstraint") or joint:IsA("Weld") or joint:IsA("Snap") then
+				joint:Destroy()
+			end
+		end
+
+		local offset =
+			Vector3.new(spec.at.X * parent.Size.X, spec.at.Y * parent.Size.Y, spec.at.Z * parent.Size.Z)
+		local pivot = parent.CFrame * CFrame.new(offset)
+
+		local motor = Instance.new("Motor6D")
+		motor.Name = spec.joint
+		motor.Part0 = parent
+		motor.Part1 = child
+		motor.C0 = parent.CFrame:ToObjectSpace(pivot)
+		motor.C1 = child.CFrame:ToObjectSpace(pivot)
+		motor.Parent = parent
+		built += 1
+	end
+
+	return built
+end
+
 --[[ Sets every part's collision group in one call. ]]
 function RigUtil.setCollisionGroup(model: Model, groupName: string)
 	for _, part in RigUtil.getBodyParts(model) do

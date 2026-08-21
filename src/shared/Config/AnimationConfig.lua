@@ -37,6 +37,12 @@
 	is what the warning in InfectedAnimator is for.
 ]]
 
+--[[ The one dependency this file has. RigUtil owns the R6/R15 test — see
+     AnimationConfig.rigOf for why that must not be a second copy of the same
+     expression. RigUtil requires GameConfig and Enums and nothing else, so there
+     is no cycle. ]]
+local RigUtil = require(script.Parent.Parent.Util.RigUtil)
+
 local AnimationConfig = {}
 
 export type AnimationSet = {
@@ -477,7 +483,12 @@ end
      Humanoid.RigType. A supplied rig frequently reports R6 while being built
      with R15 limb names, and it is the NAMES an animation addresses. ]]
 function AnimationConfig.rigOf(model: Model): string
-	return if model:FindFirstChild("UpperTorso") then "R15" else "R6"
+	--[[ RigUtil owns the test. The skeleton a repair BUILDS on an unrigged body
+	     and the clip set played on it afterwards have to be the same answer, and
+	     two copies of the same expression is a pair that can drift into loading
+	     an R6 clip onto R15 joints — which plays, reports itself as playing, and
+	     moves nothing. ]]
+	return RigUtil.rigTypeOf(model)
 end
 
 --[[
