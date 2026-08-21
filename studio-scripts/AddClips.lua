@@ -54,8 +54,26 @@
 -- ────────────────────────────────────────────────────────────────────────────
 local APPLY = false -- set to true to actually write the clips
 
---[[ Role -> animation id. Numbers or full rbxassetid:// strings both work.
-     Delete a line to leave that role on the built-in clip. ]]
+--[[
+	Where the clips come from. Use ONE of these two.
+
+	COPY_FROM is almost always the answer. Name a model that already animates the
+	way you want — one of the ones the boot log did NOT list as falling back — and
+	its ids are read off it and written to the targets. You never have to find an
+	id, type an id, or know what an id looks like.
+
+	    local COPY_FROM = "Common/14"     -- a model under Assets.Infected
+	    local COPY_FROM = "selection"     -- or select it and use the other target
+
+	Leave it as "" to type ids in CLIPS instead, which is what you want when the
+	animation is one you made in the Animation Editor and published: its id is on
+	its page under Creations, and the number in that page's URL is the id.
+]]
+local COPY_FROM = ""
+
+--[[ Role -> animation id. Ignored entirely when COPY_FROM is set. Numbers or
+     full rbxassetid:// strings both work; delete a line to leave that role on
+     the built-in clip. ]]
 local CLIPS = {
 	idle = 0,
 	walk = 0,
@@ -170,6 +188,35 @@ local function resolveTargets(): ({ Model }, string)
 	return models, "Assets.Infected"
 end
 
+--[[
+	Reads every clip off one model, as role -> id.
+
+	Looks in FL_Animations first — that is where a prepared rig keeps them — and
+	then anywhere else in the model, which is where a rig that still has its
+	original Animate script keeps them. Both are just "an Animation whose parent
+	is named for the role", which is the same rule the game's own harvester uses.
+]]
+local function readClipsFrom(model: Model): ({ [string]: string }, number)
+	local found: { [string]: string } = {}
+	local count = 0
+
+	for _, descendant in model:GetDescendants() do
+		if not descendant:IsA("Animation") or descendant.AnimationId == "" then
+			continue
+		end
+		local parent = descendant.Parent
+		local role = if parent and parent ~= model then string.lower(parent.Name) else "idle"
+		--[[ First one wins per role. A model with two idles has them for variety,
+		     and picking one is what the game does per body anyway. ]]
+		if KNOWN_ROLES[role] and not found[role] then
+			found[role] = descendant.AnimationId
+			count += 1
+		end
+	end
+
+	return found, count
+end
+
 --[[ Writes one role into the model's clip folder. Returns "added", "kept" for a
      role that was already there with OVERWRITE off, or nil if nothing changed. ]]
 local function writeClip(model: Model, role: string, id: string): string?
@@ -212,14 +259,44 @@ end
 -- ────────────────────────────────────────────────────────────────────────────
 
 local roles = {}
-for role, value in CLIPS do
-	if not KNOWN_ROLES[role] then
-		warn(string.format("[AddClips] %q is not a role this game plays — ignored", role))
-		continue
+local sourceLabel = "the CLIPS table"
+
+if COPY_FROM ~= "" then
+	--[[ resolveTargets already knows how to turn "Common/14" or "selection" into
+	     models, so the source is found the same way the targets are. ]]
+	local saved = TARGET
+	TARGET = COPY_FROM
+	local sources = resolveTargets()
+	TARGET = saved
+
+	if #sources == 0 then
+		warn(string.format("[AddClips] COPY_FROM found no model for %q", tostring(COPY_FROM)))
+	else
+		local source = sources[1]
+		local found, count = readClipsFrom(source)
+		roles = found
+		sourceLabel = string.format("%s (%d clip(s))", source.Name, count)
+		if count == 0 then
+			warn(
+				string.format(
+					"[AddClips] %q carries no animation ids of its own — it is one of the "
+						.. "models animating from the built-in set, so there is nothing to "
+						.. "copy FROM. Pick one the boot log did not list.",
+					source.Name
+				)
+			)
+		end
 	end
-	local id = assetId(value)
-	if id then
-		roles[role] = id
+else
+	for role, value in CLIPS do
+		if not KNOWN_ROLES[role] then
+			warn(string.format("[AddClips] %q is not a role this game plays — ignored", role))
+			continue
+		end
+		local id = assetId(value)
+		if id then
+			roles[role] = id
+		end
 	end
 end
 
@@ -233,7 +310,9 @@ print(
 	"── AddClips ──────────────────────────────────────────────────────────"
 )
 if #ordered == 0 then
-	print("No clips filled in. Put animation ids in the CLIPS table at the top.")
+	print("No clips to write.")
+	print("  Either set COPY_FROM to a model that already animates the way you want,")
+	print("  or put animation ids in the CLIPS table. Both are at the top of this script.")
 	return
 end
 
@@ -243,6 +322,7 @@ print(
 		then "APPLY MODE — writing clips. Ctrl+Z undoes all of it."
 		else "REPORT ONLY — nothing is being changed."
 )
+print(string.format("  clips from %s", sourceLabel))
 print(string.format("  %d role(s): %s", #ordered, table.concat(ordered, ", ")))
 print(string.format("  %d model(s) from %s", #targets, where))
 
