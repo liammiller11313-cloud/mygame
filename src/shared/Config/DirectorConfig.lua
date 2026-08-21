@@ -134,6 +134,25 @@ DirectorConfig.PanicEvent = table.freeze({
      a team that is fine finds ammo. This is the quietest and most effective
      difficulty adjustment in the whole design. ]]
 DirectorConfig.ItemPlacement = table.freeze({
+	--[[
+		Whether the Director puts WEAPONS on the map's item pads.
+
+		Off. The shop sells guns and melee, and a rifle lying in a doorway
+		undercuts the thing the player just spent Dollars on — it makes buying a
+		primary a choice about impatience rather than a choice about money, and
+		it makes the pad you walk past the reason you never went back to the shop.
+
+		The consumables stay, and they are the reason the pads exist at all.
+		Medkits, pills and throwables are the Director's quietest difficulty
+		adjustment: a team that is hurting finds pills in the next room. That
+		mechanic is about the FIGHT and has nothing to do with the economy, so
+		nothing about the shop argues with it.
+
+		Turning this back on restores the original cascade exactly, including
+		hand-authored FL_Slot pads that name a weapon slot.
+	]]
+	PlaceWeapons = false,
+
 	BaseHealthItemChance = 0.30,
 	HurtTeamHealthItemBonus = 0.45, -- added when the team average is low
 	BaseThrowableChance = 0.35,

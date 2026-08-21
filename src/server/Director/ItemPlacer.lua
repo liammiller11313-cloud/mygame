@@ -45,6 +45,11 @@ local PLACEMENT = DirectorConfig.ItemPlacement
 local ITEM_SPAWN_TAG = "FL_ItemSpawn"
 local SLOT_ATTRIBUTE = "FL_Slot"
 
+--[[ How many times the slot cascade repeats when weapons are switched off. Four
+     passes leaves under a one-in-a-thousand chance of reaching the forced case,
+     so the configured weights survive essentially intact. ]]
+local CONSUMABLE_REROLLS = 4
+
 --[[
 	Team health at or below this fraction earns the full HurtTeamHealthItemBonus,
 	and the bonus ramps in linearly from full health. Derived from the game's own
@@ -200,17 +205,51 @@ local function someoneAwaitsRescue(): boolean
 	return ok and typeof(waiting) == "table" and #waiting > 0
 end
 
---[[ Which slot this pad should hold, weighted by how the team is doing. ]]
+--[[ True for a slot that holds something bought from the shop rather than found
+     on the floor. See DirectorConfig.ItemPlacement.PlaceWeapons. ]]
+local WEAPON_SLOTS = table.freeze({
+	[Enums.Slot.Primary] = true,
+	[Enums.Slot.Secondary] = true,
+	[Enums.Slot.Melee] = true,
+})
+
+--[[
+	Which slot this pad should hold, weighted by how the team is doing.
+
+	The cascade is three independent gates and a fall-through, and the
+	fall-through is the WEAPON case — so with PlaceWeapons off it cannot simply
+	return nothing, or every pad that missed all three rolls would be empty and
+	the map would go from too generous to bare.
+
+	Instead the cascade repeats. Health, pills and throwables keep their relative
+	weights exactly as configured; the attempts that would have produced a gun are
+	spent re-rolling among the three that remain, and the last one is forced so
+	this always terminates. What changes is what is on the pads, not how many.
+]]
 function ItemPlacer:_rollSlot(hurt: number): string
-	if random:NextNumber() < PLACEMENT.BaseHealthItemChance + PLACEMENT.HurtTeamHealthItemBonus * hurt then
-		return Enums.Slot.Health
+	local attempts = if PLACEMENT.PlaceWeapons then 1 else CONSUMABLE_REROLLS
+
+	for attempt = 1, attempts do
+		if
+			random:NextNumber()
+			< PLACEMENT.BaseHealthItemChance + PLACEMENT.HurtTeamHealthItemBonus * hurt
+		then
+			return Enums.Slot.Health
+		end
+		if random:NextNumber() < PLACEMENT.BasePillChance then
+			return Enums.Slot.Pills
+		end
+		if random:NextNumber() < PLACEMENT.BaseThrowableChance then
+			return Enums.Slot.Throwable
+		end
+		--[[ Out of re-rolls with weapons off: take the throwable rather than
+		     leave the pad bare. A throwable is the least consequential of the
+		     three, which makes it the right thing to over-supply slightly. ]]
+		if not PLACEMENT.PlaceWeapons and attempt == attempts then
+			return Enums.Slot.Throwable
+		end
 	end
-	if random:NextNumber() < PLACEMENT.BasePillChance then
-		return Enums.Slot.Pills
-	end
-	if random:NextNumber() < PLACEMENT.BaseThrowableChance then
-		return Enums.Slot.Throwable
-	end
+
 	return Enums.Slot.Primary
 end
 
@@ -351,6 +390,16 @@ function ItemPlacer:_stock(pads: { BasePart }): number
 		local slot = if typeof(declared) == "string" and Enums.Slot[declared]
 			then declared
 			else self:_rollSlot(hurt)
+
+		--[[ A hand-authored pad that names a weapon slot is redirected too. The
+		     designer meant it, but "no guns on the floor" is a rule about the
+		     ECONOMY rather than about this pad, and honouring the attribute here
+		     would leave a rifle in a doorway that nothing else in the game agrees
+		     should be there. Rolled rather than skipped, so the pad still holds
+		     something. ]]
+		if WEAPON_SLOTS[slot] and not PLACEMENT.PlaceWeapons then
+			slot = self:_rollSlot(hurt)
+		end
 
 		local itemId = self:_rollItem(slot)
 		if itemId then

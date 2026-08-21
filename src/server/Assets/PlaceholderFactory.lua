@@ -257,6 +257,24 @@ local STRIPPED_CLASSES = table.freeze({
 ]]
 local ANIMATION_FOLDER = "FL_Animations"
 
+--[[
+	Which animation source each prepared variant ended up on, for the boot summary.
+
+	A rig that ships its own clips keeps them — it knows its own proportions
+	better than a generic package does — and one that ships none gets this game's
+	configured set. Both are correct, and from the outside they are
+	indistinguishable: a folder of thirty-five Commons where some animate from
+	their own clips and some from the built-in ones looks like the built-in ones
+	being applied at random.
+
+	So it says so. Named per variant rather than counted, because the answer a
+	person needs is which MODEL to open.
+]]
+local animationSources: { own: { [string]: { string } }, config: { [string]: { string } } } = {
+	own = {},
+	config = {},
+}
+
 local function harvestAnimations(model: Model): number
 	local found = 0
 	local existing = model:FindFirstChild(ANIMATION_FOLDER)
@@ -1112,6 +1130,18 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		nothing addressed to this rig's joints either, which is the case where the
 		body really does fall through to the client's procedural poser.
 	]]
+	--[[ Which SOURCE this variant will animate from, recorded per model so the
+	     boot summary can name the ones falling back. "Some of them use the
+	     built-in clips instead of mine" is impossible to act on without knowing
+	     WHICH, and nothing in the game was saying. ]]
+	local sourceList = if harvested > 0 then animationSources.own else animationSources.config
+	local bucket = sourceList[kind]
+	if not bucket then
+		bucket = {}
+		sourceList[kind] = bucket
+	end
+	table.insert(bucket, model.Name)
+
 	if harvested == 0 and not AnimationConfig.forInfected(kind, AnimationConfig.rigOf(model)) then
 		warnOnce(
 			"noanims:" .. kind,
@@ -3024,6 +3054,29 @@ function PlaceholderFactory:ensureAssets()
 			table.concat(rigs, ", ")
 		)
 	)
+
+	--[[ Which rigs animate from their own clips and which fall back to this
+	     game's set. Both are correct; only one of them is visible from Studio. ]]
+	local usingConfig = {}
+	for kind, variants in animationSources.config do
+		table.sort(variants)
+		table.insert(usingConfig, string.format("%s: %s", kind, table.concat(variants, ", ")))
+	end
+	if #usingConfig > 0 then
+		table.sort(usingConfig)
+		local ownCount = 0
+		for _, variants in animationSources.own do
+			ownCount += #variants
+		end
+		print(
+			string.format(
+				"[PlaceholderFactory] animating from the built-in clips because the model carries "
+					.. "none of its own (%d other rig(s) use theirs) — %s",
+				ownCount,
+				table.concat(usingConfig, " · ")
+			)
+		)
+	end
 
 	if #empty > 0 then
 		print(
