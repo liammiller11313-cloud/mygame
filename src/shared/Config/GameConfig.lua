@@ -10,6 +10,24 @@ local Enums = require(script.Parent.Parent.Enums)
 
 local GameConfig = {}
 
+--[[
+	Which build of the code this place is actually running.
+
+	Printed in the server's boot banner, and it exists because a pasted log could
+	not answer the one question that had to be answered first: is this the code
+	with the fix in it, or the code from before it? Every line number in a Roblox
+	log belongs to a file that may not have changed, so matching them proves
+	nothing, and the absence of a new warning means either "fixed" or "not synced"
+	with no way to tell which.
+
+	BUMPED BY HAND on every push. That is deliberate rather than lazy: there is no
+	build step here — Rojo syncs source files straight into the place — so there
+	is nothing to inject a commit hash from, and a stamp that lies is worse than
+	none. If it is stale, the log says so honestly: the code in Studio is at least
+	as new as this date, and no newer than the push that set it.
+]]
+GameConfig.BuildStamp = "2026-08-21c"
+
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true
 

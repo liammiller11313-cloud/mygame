@@ -280,6 +280,12 @@ local animationSources: { own: { [string]: { string } }, config: { [string]: { s
      it wrong is silent. ]]
 local animationRig: { [string]: string } = {}
 
+--[[ And WHY, for an R15 verdict: the name of the part that decided it. R6 is
+     the absence of evidence and has none, so this stays empty for one. See
+     RigUtil.rigTypeOf — printing the cause is what turns "but I built that as
+     R6" into a part somebody can go and rename. ]]
+local animationRigWhy: { [string]: string } = {}
+
 local function harvestAnimations(model: Model): number
 	--[[
 		READ EVERYTHING FIRST, then rebuild. The order is the whole correctness
@@ -1177,7 +1183,11 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	     themselves as playing, and move nothing — and the procedural poser stands
 	     down because tracks are playing. Recorded per kind so the summary can say
 	     "Tank: R15" rather than leaving it to be inferred. ]]
-	animationRig[kind] = AnimationConfig.rigOf(model)
+	local detectedRig, decidedBy = AnimationConfig.rigOf(model)
+	animationRig[kind] = detectedRig
+	if decidedBy then
+		animationRigWhy[kind] = decidedBy
+	end
 
 	if harvested == 0 and not AnimationConfig.forInfected(kind, AnimationConfig.rigOf(model)) then
 		warnOnce(
@@ -3099,7 +3109,16 @@ function PlaceholderFactory:ensureAssets()
 		table.sort(variants)
 		table.insert(
 			usingConfig,
-			string.format("%s [%s]: %s", kind, animationRig[kind] or "?", table.concat(variants, ", "))
+			string.format(
+				"%s [%s%s]: %s",
+				kind,
+				animationRig[kind] or "?",
+				--[[ Only ever on an R15 line, and it is the line people argue
+				     with: a rig built as R6 that reads R15 gets clips aimed at
+				     joints it does not have, which plays and moves nothing. ]]
+				if animationRigWhy[kind] then " — has a part named " .. animationRigWhy[kind] else "",
+				table.concat(variants, ", ")
+			)
 		)
 	end
 	if #usingConfig > 0 then

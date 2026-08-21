@@ -666,7 +666,13 @@ local function line(label: string, detail: string, milliseconds: number?)
 end
 
 print(BAR)
-print(string.format("  FADING LIGHT — server up in %.0f ms", (os.clock() - bootStarted) * 1000))
+print(
+	string.format(
+		"  FADING LIGHT — build %s — server up in %.0f ms",
+		tostring(GameConfig.BuildStamp),
+		(os.clock() - bootStarted) * 1000
+	)
+)
 print(RULE)
 line("collision", string.format("%d groups, %d rules", #COLLISION_GROUPS, #COLLISION_RULES), collisionMs)
 line("modules", string.format("%d of %d loaded", #loaded, #MODULES), loadMs)

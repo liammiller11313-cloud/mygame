@@ -120,10 +120,16 @@ local function rigTypeOf(model)
 			continue
 		end
 		if not d:FindFirstAncestorWhichIsA("Accessory") then
-			return "R15"
+			--[[ The verdict AND the part that decided it. R15 is a positive test
+			     with exactly one piece of evidence behind it, and that evidence is
+			     the only useful reply to "but I built that as R6": one stray mesh
+			     named LowerTorso inside an otherwise-R6 model is the whole bug,
+			     and it hands the rig a clip set aimed at joints it does not have.
+			     R6 is the absence of evidence and has none to give. ]]
+			return "R15", d.Name
 		end
 	end
-	return "R6"
+	return "R6", nil
 end
 
 --[[ Which end of each existing Motor6D is the child, by walking the rig outward
@@ -222,8 +228,9 @@ local function inspect(model, label)
 		have[child.Name] = true
 	end
 
-	local isR6 = rigTypeOf(model) == "R6"
-	local rig = if isR6 then "R6" else "R15"
+	local detected, decidedBy = rigTypeOf(model)
+	local isR6 = detected == "R6"
+	local rig = if isR6 then "R6" else string.format("R15 (has a part named %s)", decidedBy)
 	local skeleton = if isR6 then R6 else R15
 	local notes, fixes = {}, {}
 

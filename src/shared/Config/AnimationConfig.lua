@@ -482,12 +482,15 @@ end
 --[[ "R6" or "R15", from the joints the model actually has rather than from
      Humanoid.RigType. A supplied rig frequently reports R6 while being built
      with R15 limb names, and it is the NAMES an animation addresses. ]]
-function AnimationConfig.rigOf(model: Model): string
+function AnimationConfig.rigOf(model: Model): (string, string?)
 	--[[ RigUtil owns the test. The skeleton a repair BUILDS on an unrigged body
 	     and the clip set played on it afterwards have to be the same answer, and
 	     two copies of the same expression is a pair that can drift into loading
 	     an R6 clip onto R15 joints — which plays, reports itself as playing, and
 	     moves nothing. ]]
+	--[[ Both returns forwarded: the second is the part name that decided an R15
+	     verdict, which the boot summary prints so a wrong answer names its own
+	     cause instead of being a bare label to argue with. ]]
 	return RigUtil.rigTypeOf(model)
 end
 

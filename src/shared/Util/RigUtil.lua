@@ -460,7 +460,7 @@ end
 	joint audit already searched recursively, so this also ends a disagreement
 	where the audit judged a rig R15 and the animator judged the same rig R6.
 ]]
-function RigUtil.rigTypeOf(model: Model): string
+function RigUtil.rigTypeOf(model: Model): (string, string?)
 	for _, descendant in model:GetDescendants() do
 		if not descendant:IsA("BasePart") then
 			continue
@@ -470,10 +470,25 @@ function RigUtil.rigTypeOf(model: Model): string
 			continue
 		end
 		if not descendant:FindFirstAncestorWhichIsA("Accessory") then
-			return "R15"
+			--[[ WHICH part decided it, returned alongside the verdict.
+
+			     This is a positive test with one piece of evidence behind it, and
+			     that evidence is worth handing back rather than throwing away.
+			     The verdict picks the clip set, so getting it wrong is the
+			     quietest failure in the game — the tracks load, report themselves
+			     playing, move nothing, and the procedural poser stands down
+			     because tracks are playing. When somebody who built an R6 rig
+			     reads "R15" in the boot summary, the only useful next word is the
+			     name of the part that said so: one stray mesh called LowerTorso,
+			     inside a model that is R6 in every other respect, is the whole
+			     bug and is otherwise invisible.
+
+			     R6 is the ABSENCE of that evidence, so it has none to give and
+			     returns nil. ]]
+			return "R15", name
 		end
 	end
-	return "R6"
+	return "R6", nil
 end
 
 --[[
