@@ -489,11 +489,19 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 		interval = 0,
 		nearest = math.huge,
 
+		--[[ Where this body was PUT. Kept because the reap below reports where a
+		     body ended up, and those are different places — a body that never
+		     closed ground on the team can still have wandered a long way
+		     sideways. Blaming the spawn node nearest the REAPED position is how
+		     a report ends up saying "no node within 40 studs" about a body that
+		     came out of one. ]]
+		spawnedAt = if root then root.Position else Vector3.zero,
+
 		--[[ How far away this body was when its current no-progress window
 		     opened, and how long that window has been running. See MAROON_TIME.
 		     `progressed` stays false for a body that never closed any ground at
 		     all, which is the signature of a spawn point that was never
-		     reachable — that one also condemns the cell it came from. ]]
+		     reachable. ]]
 		progressFrom = math.huge,
 		maroonedFor = 0,
 		progressed = false,
@@ -1401,7 +1409,11 @@ function InfectedService:_trackMaroon(record: any, nearest: number, elapsed: num
 		return false
 	end
 
-	self.marooned:Fire(position, not record.progressed)
+	--[[ Both places. Where it was PUT is what a spawn node can be blamed for;
+	     where it ENDED UP is how far it managed to get, which is the difference
+	     between a node inside a sealed courtyard and a body that walked two
+	     hundred studs and wedged itself behind a car. ]]
+	self.marooned:Fire(position, not record.progressed, record.spawnedAt)
 	self:despawn(record.model)
 	return true
 end

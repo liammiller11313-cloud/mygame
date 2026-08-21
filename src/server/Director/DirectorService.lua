@@ -482,38 +482,64 @@ function DirectorService:start()
 	]]
 	local infected = Registry.find("InfectedService")
 	if infected and infected.marooned then
-		self._trove:add(infected.marooned:connect(function(position: Vector3, fromSpawn: boolean)
-			if fromSpawn then
-				local node = nearestNodeName(position)
+		self._trove:add(
+			infected.marooned:connect(function(position: Vector3, fromSpawn: boolean, spawnedAt: Vector3?)
+				if not fromSpawn then
+					return
+				end
+
+				--[[
+				Blamed at the SPAWN point, reported from both.
+
+				This used to look for a node near where the body was REAPED, and
+				a body that never closed ground on the team can still have
+				wandered a long way sideways — so it almost always found nothing
+				within 40 studs and concluded, confidently and often wrongly,
+				that the body had walked there under its own power. Five reports
+				in one second from one corner of a map all said that, and all of
+				them came out of spawn nodes.
+
+				A node is answerable for where it PUTS a body. How far that body
+				then got is a separate fact and worth printing beside it: a
+				reaped position on top of the spawn point is a sealed courtyard,
+				and one two hundred studs away is a body that walked into
+				scenery, which is a map dressing problem rather than a node one.
+			]]
+				local origin = spawnedAt or position
+				local node = nearestNodeName(origin)
+				local drifted = (position - origin).Magnitude
+
 				warnOnce(
-					string.format(
-						"stuck:%s",
-						node or string.format("%d:%d", position.X // 16, position.Z // 16)
-					),
+					string.format("stuck:%s", node or string.format("%d:%d", origin.X // 16, origin.Z // 16)),
 					if node
 						then string.format(
-							"bodies spawned at the FL_SpawnNode named %q are never reaching the "
-								.. "team — they get reaped without closing any ground at all. It is "
-								.. "somewhere a zombie cannot walk out of: check it for a roof, a "
-								.. "fence, or a sealed courtyard. Nearest point (%d, %d, %d).",
+							"bodies from the FL_SpawnNode named %q are not reaching the team. Spawned "
+								.. "at (%d, %d, %d) and reaped %d stud(s) away without closing any "
+								.. "ground. %s",
 							node,
-							position.X,
-							position.Y,
-							position.Z
+							origin.X,
+							origin.Y,
+							origin.Z,
+							drifted,
+							if drifted < 12
+								then "It barely moved, so the node is walled in — check it for a roof, "
+									.. "a fence, or a sealed courtyard."
+								else "It got out and then wedged, so the node is probably fine and "
+									.. "something on the route between there and the team is not."
 						)
 						else string.format(
-							"a body reaped near (%d, %d, %d) never closed any ground on the team, "
-								.. "and there is no spawn node within %d studs of it — so it walked "
-								.. "there and got stuck on scenery rather than being spawned into a "
-								.. "trap.",
-							position.X,
-							position.Y,
-							position.Z,
+							"a body spawned near (%d, %d, %d) never closed any ground on the team, and "
+								.. "no spawn node is within %d studs of where it started — so it was "
+								.. "placed by the ring fallback rather than at a node, which means the "
+								.. "map wants more FL_SpawnNode parts near the route.",
+							origin.X,
+							origin.Y,
+							origin.Z,
 							NODE_BLAME_RADIUS
 						)
 				)
-			end
-		end))
+			end)
+		)
 	end
 
 	local now = os.clock()

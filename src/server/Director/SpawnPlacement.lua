@@ -117,6 +117,11 @@ local NODE_OCCUPIED_SQUARED = NODE_OCCUPIED_RADIUS * NODE_OCCUPIED_RADIUS
      out of places to spawn during a sustained horde. ]]
 local NODE_COOLDOWN = 1.5
 
+--[[ How many broken nodes the failure message names before it stops. Enough to
+     act on, few enough that a map whose nodes are all in the air does not print
+     a paragraph every eight seconds. ]]
+local BROKEN_NODES_NAMED = 4
+
 --[[ When each node last had a body put on it, keyed by the node instance. Weak
      keys: a map swap destroys the nodes and this must not hold them alive. ]]
 local nodeUsedAt = (setmetatable({}, { __mode = "k" }) :: any) :: { [Instance]: number }
@@ -647,6 +652,52 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		table.insert(parts, "no candidates generated")
 	end
 
+	--[[
+		How far the nearest node actually is, and which nodes the world rejected.
+
+		The counts above say which RULE fired; they do not say what to go and do
+		about it. "11 too far" invites moving nodes without saying how much
+		nearer they need to be, and "6 with no ground" names a broken node
+		without naming WHICH — and a node with nothing under it is a node
+		somebody dragged into the air or inside a wall, which is a thirty-second
+		fix once you know its name.
+
+		Both are computed here, on the failure path only, so a search that
+		succeeds pays nothing for them.
+	]]
+	local nearestNode = math.huge
+	local broken: { string } = {}
+	for _, node in nodeCache do
+		if not node.Parent then
+			continue
+		end
+		for index = 1, surveyCount do
+			local squared = distanceSquared(survey[index].position, node.Position)
+			if squared < nearestNode then
+				nearestNode = squared
+			end
+		end
+		if #broken < BROKEN_NODES_NAMED then
+			local ground, normal = RaycastUtil.groundAt(node.Position, GROUND_SEARCH_HEIGHT, ignore)
+			if not ground or not normal then
+				table.insert(broken, node.Name .. " (nothing under it)")
+			elseif normal.Y < MIN_GROUND_NORMAL_Y then
+				table.insert(broken, node.Name .. " (on a slope)")
+			elseif not SpawnVolume.fits(ground, bodySize, ignore) then
+				table.insert(broken, node.Name .. " (no room for a body)")
+			end
+		end
+	end
+
+	local diagnosis = ""
+	if nearestNode < math.huge then
+		diagnosis =
+			string.format("; nearest node is %d studs from the team", math.floor(math.sqrt(nearestNode)))
+	end
+	if #broken > 0 then
+		diagnosis ..= "; unusable right now: " .. table.concat(broken, ", ")
+	end
+
 	--[[ Naming the relaxations that were already tried is the point of this
 	     string: "24 attempts, all too far" invites raising the ceiling, and
 	     "even with the ceiling opened" says the ceiling was never the problem. ]]
@@ -666,9 +717,11 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			     no tagged nodes, or with sixteen that are all in view, is a map
 			     that wants more FL_SpawnNode parts — and that is a thing a person
 			     can go and do. ]]
-			if useNodes
-				then string.format("; %d tagged node(s)", #nodeCache)
-				else "; NO tagged nodes — add FL_SpawnNode parts to the map",
+			(
+				if useNodes
+					then string.format("; %d tagged node(s)", #nodeCache)
+					else "; NO tagged nodes — add FL_SpawnNode parts to the map"
+			) .. diagnosis,
 			gaveUp
 		)
 end
