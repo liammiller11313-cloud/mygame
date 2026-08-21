@@ -83,6 +83,34 @@ local function partIn(model, name)
 	return if found and found:IsA("BasePart") then found else nil
 end
 
+--[[
+	"R6" or "R15", by the same rule RigUtil.rigTypeOf uses.
+
+	It has to be the same rule. This script decides which SKELETON to build and
+	the game decides which CLIP SET to play, and an animation addresses named
+	joints — so the two disagreeing means clips aimed at joints the rig does not
+	have. They load, report themselves as playing, and move nothing.
+
+	Searches, so parts grouped into a Folder while a model was being assembled
+	still read as the R15 rig they are. Skips Accessories, so a hat carrying a
+	part named UpperTorso cannot decide what the body underneath it animates
+	with.
+]]
+local function rigTypeOf(model)
+	for _, d in model:GetDescendants() do
+		if not d:IsA("BasePart") then
+			continue
+		end
+		if d.Name ~= "UpperTorso" and d.Name ~= "LowerTorso" then
+			continue
+		end
+		if not d:FindFirstAncestorWhichIsA("Accessory") then
+			return "R15"
+		end
+	end
+	return "R6"
+end
+
 --[[ Which end of each existing Motor6D is the child, by walking the rig outward
      from the root. The same rule the game uses — see RigUtil.mapMotorChildren —
      because a report that disagreed with the game about which joints a rig has
@@ -165,7 +193,7 @@ local function inspect(model, label)
 		have[child.Name] = true
 	end
 
-	local isR6 = partIn(model, "UpperTorso") == nil
+	local isR6 = rigTypeOf(model) == "R6"
 	local skeleton = if isR6 then R6 else R15
 
 	local missing, built, welds = {}, 0, 0
