@@ -152,10 +152,11 @@ end
 -- ── suppression ─────────────────────────────────────────────────────────────
 
 --[[
-	Frees the cursor and takes the trigger away, exactly as the settings panel
-	does — and for the same reason it does it conditionally. When the main menu
-	is already up it has done all of this itself, and a second owner restoring
-	on close would hand a live camera back to a player still in the lobby.
+	Takes the trigger away. CONDITIONAL, because these four are plain booleans
+	with no idea how many screens are up: when the main menu is already open it
+	has switched all of them off itself, and a second owner switching them back
+	on when it closes would hand input and the HUD back over a menu still on
+	screen.
 ]]
 local function setSuppressed(value: boolean)
 	if state.suppressed == value then
@@ -167,7 +168,27 @@ local function setSuppressed(value: boolean)
 	callController("CrosshairController", "setVisible", not value)
 	callController("PromptController", "setEnabled", not value)
 	callController("TouchController", "setVisible", not value)
+end
 
+--[[
+	The cursor, and UNCONDITIONALLY — which is the opposite of the rule above and
+	deliberately so.
+
+	This used to ride along inside setSuppressed and inherit its condition, so a
+	pause menu opened over the main menu never claimed the mouse at all: the menu
+	had it, and that was judged to be enough. It is not, because the menu can go
+	away first. Open the pause menu in the lobby, let the round start — RETURN TO
+	MAIN MENU does the same thing in reverse — and the menu closing hands the
+	camera back to a live survivor while this screen is still up, pinning the
+	cursor to the middle of it. Resume becomes unclickable and only the P key
+	gets the player out.
+
+	Claiming it is safe precisely where switching the HUD back on is not, because
+	FreeCursor COUNTS its holders. Two screens can both hold the mouse and the
+	camera only comes back when the second of them lets go, whichever order that
+	happens in.
+]]
+local function claimCursor(value: boolean)
 	if value then
 		FreeCursor.take(restore)
 	else
@@ -344,6 +365,7 @@ function PauseController:open()
 		else "THE ROUND IS STILL RUNNING."
 
 	setSuppressed(not menuIsOpen())
+	claimCursor(true)
 	refreshButton()
 	GamepadFocus.capture(entries[1] and entries[1].button)
 	UiSound.play(AudioConfig.UI.MenuConfirm)
@@ -357,6 +379,7 @@ function PauseController:close()
 	gui.Enabled = false
 	GamepadFocus.release(entries[1] and entries[1].button)
 	setSuppressed(false)
+	claimCursor(false)
 	--[[ The menu can have opened underneath while this was up — RETURN TO MAIN
 	     MENU does exactly that — in which case the restore above has just handed
 	     input and gamepad selection back over a menu that is still on screen. ]]
@@ -414,7 +437,7 @@ function PauseController:start()
 		re-asserts the free camera without the race, and is idempotent.
 	]]
 	trove:connect(player:GetAttributeChangedSignal(PA.State), function()
-		if state.suppressed then
+		if state.open then
 			FreeCursor.take(restore)
 		end
 	end)
@@ -424,6 +447,7 @@ end
 
 function PauseController:destroy()
 	setSuppressed(false)
+	claimCursor(false)
 	table.clear(entries)
 	trove:destroy()
 end

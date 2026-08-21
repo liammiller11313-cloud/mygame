@@ -812,9 +812,12 @@ end
 	Frees the cursor so the panel can be clicked, and hands the game back on
 	close.
 
-	Only ever engages when the MENU is not already up. The menu suppresses all of
-	this itself, and a second owner restoring the camera on close would hand a
-	live camera back to a player still sitting in the lobby.
+	Only ever engages when the MENU is not already up. These four are plain
+	booleans with no idea how many screens are open, so a second owner switching
+	them back on when it closes would hand input and the HUD back over a menu
+	that is still on screen.
+
+	The CURSOR is not one of them — see claimCursor.
 ]]
 local function setSuppressed(value: boolean)
 	if state.suppressed == value then
@@ -826,7 +829,22 @@ local function setSuppressed(value: boolean)
 	callController("CrosshairController", "setVisible", not value)
 	callController("PromptController", "setEnabled", not value)
 	callController("TouchController", "setVisible", not value)
+end
 
+--[[
+	The cursor, unconditionally, which is the opposite of the rule above.
+
+	It used to ride inside setSuppressed and inherit its condition, so a panel
+	opened over the main menu never claimed the mouse — the menu had it, and that
+	looked like enough. It is not: the menu can close first, which hands the
+	camera back to a live survivor and pins the cursor to the middle of a panel
+	that is still up.
+
+	Safe to do unconditionally exactly where the four above are not, because
+	FreeCursor counts its holders: two screens can both hold the mouse and the
+	camera only returns when the second one lets go, in either order.
+]]
+local function claimCursor(value: boolean)
 	if value then
 		FreeCursor.take(restore)
 	else
@@ -861,6 +879,7 @@ function SettingsController:open()
 	     targets without having to rejoin. ]]
 	renderCategory(state.category)
 	setSuppressed(not menuIsOpen())
+	claimCursor(true)
 	GamepadFocus.capture(firstRowButton)
 	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
@@ -874,6 +893,7 @@ function SettingsController:close()
 	gui.Enabled = false
 	GamepadFocus.release(firstRowButton)
 	setSuppressed(false)
+	claimCursor(false)
 	--[[ The menu can have been open underneath the panel the whole time, or have
 	     opened while it was up — a round ending is the obvious way. Either way the
 	     release above has just handed gamepad selection back to nothing, and the
@@ -1096,7 +1116,7 @@ function SettingsController:start()
 		one is, so there is nothing to race.
 	]]
 	trove:connect(player:GetAttributeChangedSignal(Attributes.Player.State), function()
-		if state.suppressed then
+		if state.open then
 			FreeCursor.take(restore)
 		end
 	end)
@@ -1129,6 +1149,7 @@ end
 
 function SettingsController:destroy()
 	setSuppressed(false)
+	claimCursor(false)
 	rowTrove:destroy()
 	table.clear(tabs)
 	table.clear(rows)
