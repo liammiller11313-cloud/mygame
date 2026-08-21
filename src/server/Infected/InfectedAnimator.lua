@@ -204,9 +204,30 @@ function InfectedAnimator.new(model: Model, kind: string)
 	if not humanoid then
 		return nil
 	end
-	local animator = humanoid:FindFirstChildOfClass("Animator")
-	if not animator then
-		return nil
+	--[[
+		A Humanoid with no Animator used to end this function, silently, and with
+		it every clip the body was ever going to play.
+
+		That is not a rare shape. Roblox creates an Animator for a PLAYER'S
+		character; a model somebody assembled in Studio and dragged into
+		ReplicatedStorage has one only if whatever it was built from happened to
+		ship with it, and the obvious way to build a zombie — copy a rig, rename
+		the parts, delete the scripts — routinely loses it. The body then spawned,
+		walked, attacked and died without a single track ever loading, and nothing
+		anywhere said so.
+
+		So it is created instead. An Animator is an empty object with no
+		configuration and no cost; making one is the entire fix, and it belongs
+		here rather than in a warning telling somebody to go and add one by hand
+		to thirty-five models.
+	]]
+	local existing = humanoid:FindFirstChildOfClass("Animator")
+	local animator: Animator
+	if existing then
+		animator = existing
+	else
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
 	end
 
 	--[[ No longer fatal. A rig with no harvested folder can still be animated

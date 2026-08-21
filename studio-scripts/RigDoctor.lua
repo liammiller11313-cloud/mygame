@@ -1,13 +1,26 @@
 --!nonstrict
 --[[
-	RigDoctor — finds every unrigged infected model, and can rig them for you.
+	RigDoctor — finds every infected model that cannot animate, and fixes it.
 
 	Paste into the Roblox Studio COMMAND BAR and press Enter.
 
 	It runs in REPORT mode first and changes nothing. Read what it says, then set
-	REPAIR to true at the top and run it again to have it build the missing
-	joints. Repairs are one undo away (Ctrl+Z) because they happen inside a
-	ChangeHistoryService waypoint.
+	REPAIR to true at the top and run it again. Repairs are one undo away
+	(Ctrl+Z) because they happen inside a ChangeHistoryService waypoint.
+
+	── THE FOUR REASONS A RIG DOES NOT ANIMATE ─────────────────────────────────
+	  MISSING JOINT    the clip drives a Motor6D that is not there.       FIXABLE
+	  BACKWARDS JOINT  it is there with Part0 and Part1 swapped. The animator
+	                   reads Part1 as the bone, so the part the clip names is
+	                   invisible to it and that one limb never moves.      FIXABLE
+	  NO ANIMATOR      nothing under the Humanoid to load a track into, so
+	                   the body plays no clip at all, ever.                FIXABLE
+	  MISSING PART     the joint needs two parts and one of them is called
+	                   something else — "LeftArm" instead of "Left Arm".      YOU
+
+	The last one is printed and never touched. Renaming a part is a judgement
+	only the person who built the model can make; guessing which lump was meant
+	to be the left arm would break more rigs than it fixed.
 
 	── WHAT A "JOINT" IS AND WHY THIS MATTERS ──────────────────────────────────
 	A Roblox rig is parts connected by Motor6Ds. That is what an animation drives,
@@ -22,9 +35,11 @@
 	  * with SOME joints, the limbs that have one animate and the rest do not,
 	    and only the jointed limbs can ever be blown off.
 
-	The game now welds a jointless body together at spawn so it cannot come apart
-	in mid-air. That is a bandage, not a fix — a welded body still cannot animate
-	and still cannot be dismembered. This is the fix.
+	The game repairs all three fixable faults at spawn, every spawn, so a broken
+	model is playable rather than embarrassing. That is a bandage: the repair is
+	guessed from standard proportions, it is thrown away with the body, and it is
+	paid for again on the next one. Running this once writes the fix into the
+	model, where it is exact and free.
 
 	── WHY THE REPAIR CANNOT MOVE YOUR MODEL ───────────────────────────────────
 	Both ends of every joint it builds are derived from where the parts ALREADY
@@ -186,6 +201,20 @@ local function clearWelds(parent, child)
 	return removed
 end
 
+--[[
+	Everything that stops a rig animating, in one pass. There are four, and only
+	the first was ever checked:
+
+	  1. a MISSING joint — the animation drives a Motor6D that is not there;
+	  2. a BACKWARDS joint — it is there, wired the wrong way round, and the
+	     animator therefore cannot see the part it is supposed to drive;
+	  3. a MISSING PART — the joint cannot exist because one of the two parts it
+	     connects is called something non-standard, or is absent;
+	  4. no ANIMATOR under the Humanoid, so no track ever loads at all.
+
+	Only 1, 2 and 4 are repairable from here. 3 is a rename, and it has to be a
+	person doing it, because only they know which part was meant to be the arm.
+]]
 local function inspect(model, label)
 	local children = mapChildren(model)
 	local have = {}
@@ -194,17 +223,83 @@ local function inspect(model, label)
 	end
 
 	local isR6 = rigTypeOf(model) == "R6"
+	local rig = if isR6 then "R6" else "R15"
 	local skeleton = if isR6 then R6 else R15
+	local notes, fixes = {}, {}
 
-	local missing, built, welds = {}, 0, 0
+	--[[
+		BACKWARDS JOINTS. Roblox's animator takes each Motor6D's Part1 to be the
+		bone and drives the pose named after that part, so a shoulder built
+		Part0 = Left Arm, Part1 = Torso offers a bone called "Torso" and none
+		called "Left Arm". The clip keys a shoulder the engine cannot find and the
+		arm never moves, while the rest of the body animates perfectly — which is
+		why this reads as a broken animation rather than a broken model.
+
+		Swapping the parts AND swapping C0 with C1 leaves
+		`Part0.CFrame * C0 == Part1.CFrame * C1` saying exactly what it said
+		before, so nothing moves by a stud.
+	]]
+	local backwards = {}
+	for motor, child in children do
+		if motor.Part1 == child or motor.Part0 ~= child then
+			continue
+		end
+		table.insert(backwards, child.Name)
+		if REPAIR then
+			local part0, part1 = motor.Part0, motor.Part1
+			local c0, c1 = motor.C0, motor.C1
+			motor.Part0 = part1
+			motor.Part1 = part0
+			motor.C0 = c1
+			motor.C1 = c0
+		end
+	end
+	if #backwards > 0 then
+		table.sort(backwards)
+		local line = string.format("%d backwards (%s)", #backwards, table.concat(backwards, ", "))
+		table.insert(if REPAIR then fixes else notes, line)
+	end
+
+	--[[ NO ANIMATOR. Roblox makes one for a player's character and for nothing
+	     else, so a rig assembled in Studio has one only if whatever it was copied
+	     from happened to ship with it. Without it not a single track loads, and
+	     the body walks, swings and dies in complete silence. ]]
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and not humanoid:FindFirstChildOfClass("Animator") then
+		if REPAIR then
+			local animator = Instance.new("Animator")
+			animator.Parent = humanoid
+			table.insert(fixes, "added the missing Animator")
+		else
+			table.insert(notes, "no Animator under the Humanoid")
+		end
+	end
+
+	local missing, built, welds, absent, absentSeen = {}, 0, 0, {}, {}
 	for _, spec in skeleton do
 		if have[spec.child] then
 			continue
 		end
 		local parent, child = partIn(model, spec.parent), partIn(model, spec.child)
+		--[[ The PART is absent, so there is nothing to joint. Sometimes that is
+		     fine — plenty of rigs have no separate hands or feet — and sometimes
+		     it is the whole problem, because a model whose arm is called
+		     "LeftArm" instead of "Left Arm" gets no shoulder and plays a walk
+		     clip that drives a shoulder it does not have. From here the two look
+		     identical, so both are named and the reader decides. ]]
 		if not parent or not child then
-			-- The part itself is absent. Not something this can fix, and not
-			-- necessarily wrong: plenty of rigs have no separate hands or feet.
+			--[[ Named one at a time rather than through a list: a table
+			     constructor holding a nil ends a generic-for at the hole, so
+			     "the parent is fine and the child is missing" would report
+			     nothing at all. ]]
+			if not parent and not absentSeen[spec.parent] then
+				absentSeen[spec.parent] = true
+				table.insert(absent, spec.parent)
+			end
+			if not child and not absentSeen[spec.child] then
+				absentSeen[spec.child] = true
+				table.insert(absent, spec.child)
+			end
 			continue
 		end
 		table.insert(missing, spec.joint)
@@ -215,26 +310,40 @@ local function inspect(model, label)
 		end
 	end
 
-	local rig = if isR6 then "R6" else "R15"
-	if #missing == 0 then
+	if #missing > 0 then
+		if REPAIR then
+			table.insert(
+				fixes,
+				string.format(
+					"built %d joint(s)%s: %s",
+					built,
+					if welds > 0 then string.format(" (removed %d weld(s))", welds) else "",
+					table.concat(missing, ", ")
+				)
+			)
+		else
+			table.insert(notes, "missing: " .. table.concat(missing, ", "))
+		end
+	end
+	if #absent > 0 then
+		table.sort(absent)
+		--[[ Always a note, never a fix: renaming a part is a judgement only the
+		     person who built the model can make. ]]
+		table.insert(notes, "NO PART NAMED " .. table.concat(absent, ", ") .. " — rename in Studio")
+	end
+
+	local issues = #missing + #backwards
+	if #notes == 0 and #fixes == 0 then
 		print(string.format("  OK    %-28s %s, fully jointed", label, rig))
 		return 0, 0
 	end
-	if REPAIR then
-		print(
-			string.format(
-				"  FIXED %-28s %s, built %d joint(s)%s: %s",
-				label,
-				rig,
-				built,
-				if welds > 0 then string.format(" (removed %d weld(s))", welds) else "",
-				table.concat(missing, ", ")
-			)
-		)
-	else
-		print(string.format("  NEEDS %-28s %s, missing: %s", label, rig, table.concat(missing, ", ")))
+	if #fixes > 0 then
+		print(string.format("  FIXED %-28s %s, %s", label, rig, table.concat(fixes, "; ")))
 	end
-	return #missing, built
+	if #notes > 0 then
+		print(string.format("  NEEDS %-28s %s, %s", label, rig, table.concat(notes, "; ")))
+	end
+	return issues, built
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -250,7 +359,7 @@ print(
 		else "REPORT ONLY — nothing is being changed."
 )
 
-local totalMissing, totalBuilt, scanned = 0, 0, 0
+local totalIssues, totalBuilt, scanned = 0, 0, 0
 for _, root in { ReplicatedStorage, ServerStorage } do
 	local assets = root:FindFirstChild("Assets")
 	local infected = assets and assets:FindFirstChild("Infected")
@@ -270,8 +379,8 @@ for _, root in { ReplicatedStorage, ServerStorage } do
 		end
 		for _, model in models do
 			scanned += 1
-			local missing, built = inspect(model, kindFolder.Name .. "/" .. model.Name)
-			totalMissing += missing
+			local issues, built = inspect(model, kindFolder.Name .. "/" .. model.Name)
+			totalIssues += issues
 			totalBuilt += built
 		end
 	end
@@ -284,12 +393,13 @@ if scanned == 0 then
 	print("Found no models under Assets.Infected. Check the folder names.")
 elseif REPAIR then
 	print(string.format("Scanned %d model(s), built %d joint(s).", scanned, totalBuilt))
+	print("Anything printed as NEEDS above is a RENAME, which this cannot do for you.")
 	print("Play-test now. Re-run in REPORT mode to confirm everything reads OK.")
-elseif totalMissing == 0 then
-	print(string.format("Scanned %d model(s). Every one is fully jointed — nothing to do.", scanned))
+elseif totalIssues == 0 then
+	print(string.format("Scanned %d model(s). Every one is rigged correctly — nothing to do.", scanned))
 else
-	print(string.format("Scanned %d model(s), %d joint(s) missing in total.", scanned, totalMissing))
-	print("Set REPAIR = true at the top of this script and run it again to build them.")
+	print(string.format("Scanned %d model(s), %d repairable joint problem(s).", scanned, totalIssues))
+	print("Set REPAIR = true at the top of this script and run it again to fix them.")
 end
 
 if recording then

@@ -719,20 +719,99 @@ end
 ]]
 function InfectedService:_boltTogether(model: Model, kind: string)
 	local before = #RigUtil.getMotors(model)
-	local built = RigUtil.buildMissingJoints(model)
+	local variant = tostring(model:GetAttribute("FL_Variant") or model.Name)
+
+	--[[
+		BACKWARDS JOINTS FIRST, because a backwards joint is not a missing one and
+		nothing below would ever notice it.
+
+		Roblox's animator treats each Motor6D's Part1 as the bone and drives the
+		pose with that part's name. A shoulder built the other way round —
+		Part0 = Left Arm, Part1 = Torso — therefore offers the animator a bone
+		called "Torso" and no bone called "Left Arm", so an R6 walk clip keys a
+		shoulder that, as far as the engine is concerned, is not there. Every
+		other joint in the rig animates perfectly, which is what makes it read as
+		"the animation is broken" rather than "the model is".
+
+		It is also completely silent: the joint exists, so buildMissingJoints
+		correctly leaves it alone; the parts are named correctly, so the report
+		below says nothing; the body holds together and walks around. Dragging
+		with one dead arm is the only symptom.
+
+		Fixing it here rather than only reporting it is deliberate. The swap is
+		exact — see RigUtil.normalizeMotorDirection — so there is no judgement
+		call to leave to a person, and a rig assembled by hand in Studio gets
+		this wrong far too easily to be worth a round of broken bodies first.
+	]]
+	local flipped, backwards = RigUtil.normalizeMotorDirection(model)
+	if flipped > 0 then
+		table.sort(backwards)
+		warnOnce(
+			"backwards:" .. variant,
+			string.format(
+				"%s variant %q had %d joint(s) wired backwards (%s) — Part0 and Part1 the wrong "
+					.. "way round, so an animation that drives those parts moved nothing. Turned "
+					.. "round at spawn, which fixes the body but not the model: run "
+					.. "studio-scripts/RigDoctor once in Studio to fix it where it saves.",
+				kind,
+				variant,
+				flipped,
+				table.concat(backwards, ", ")
+			)
+		)
+	end
+
+	local built, unbuildable = RigUtil.buildMissingJoints(model)
+
+	--[[
+		Joints that could not be built because the PART is not there.
+
+		Reported separately and first, because it is the one failure that no
+		amount of running RigDoctor will fix and the one that looks exactly like
+		"the animation is broken". An animation addresses JOINTS; a joint needs
+		the two parts it connects; so a model whose arm is called "LeftArm" or
+		"Arm.L" instead of "Left Arm" never gets a shoulder, plays a walk clip
+		that drives a shoulder it does not have, and stands still.
+
+		Deduplicated, because a skeleton asks for the same torso six times.
+	]]
+	if #unbuildable > 0 then
+		local seen, names = {}, {}
+		for _, name in unbuildable do
+			if not seen[name] then
+				seen[name] = true
+				table.insert(names, name)
+			end
+		end
+		table.sort(names)
+		warnOnce(
+			"noparts:" .. variant,
+			string.format(
+				"%s variant %q has no part(s) named: %s — so those joints cannot be built, and "
+					.. "an animation that drives them moves nothing. Rename the parts in Studio to "
+					.. "the standard %s names. (A rig with no separate hands or feet is fine and "
+					.. "expected; a missing Torso, Head, arm or leg is not.)",
+				kind,
+				variant,
+				table.concat(names, ", "),
+				RigUtil.rigTypeOf(model)
+			)
+		)
+	end
+
 	if built == 0 then
 		return
 	end
 
 	warnOnce(
-		"unrigged:" .. tostring(model:GetAttribute("FL_Variant") or kind),
+		"unrigged:" .. variant,
 		string.format(
 			"%s variant %q was missing %d joint(s) and they were built at spawn — %s. It will "
 				.. "animate now, but the joints are placed by proportion rather than by whoever "
 				.. "built the model, and this happens again for every body of this variant. Run "
 				.. "studio-scripts/RigDoctor to do it properly, once.",
 			kind,
-			tostring(model:GetAttribute("FL_Variant") or model.Name),
+			variant,
 			built,
 			if before == 0
 				then "it arrived with none at all, so it would otherwise come apart in mid-air"

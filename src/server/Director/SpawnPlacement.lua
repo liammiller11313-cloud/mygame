@@ -65,29 +65,57 @@ local MIN_GROUND_NORMAL_Y = 0.5
 local NODE_CACHE_TIME = 2
 
 --[[
-	── SPAWN NODES ARE THE SOURCE. ─────────────────────────────────────────────
+	── WHERE CANDIDATES COME FROM ──────────────────────────────────────────────
 
-	Almost the whole attempt budget goes to the level's tagged nodes, and what is
-	left is a last resort rather than a peer.
+	Two sources, and the split between them is one number.
 
-	This module briefly learned the map for itself: a grid sweep dropped a ray in
-	every cell, kept whatever flat ground it found, and offered those points
-	alongside the designer's tags. It was not precise enough, and it could not be
-	— a downward ray lands on the roof of a shed exactly as happily as it lands
-	on a street, and no amount of clearance testing or pathfinding after the fact
-	turns a point nobody chose into a point somebody meant. Bodies arrived in
-	places that were technically standable and obviously wrong.
+	A tagged FL_SpawnNode is a person saying "a zombie may come from here", which
+	is information no query produces. The ring is a guess: a point on a doughnut
+	around the team, tested against every rule below before it is used.
 
-	A tagged node is a human being saying "a zombie may come from here". That is
-	information no query produces, and the correct amount of second-guessing it
-	is none. Sixteen deliberate places beat eleven hundred discovered ones.
+	── WHY IT IS 0.75 AND NOT 0.9 ──────────────────────────────────────────────
+	It was briefly 0.9, on the reasoning that a deliberate place beats a guessed
+	one. That is true per candidate and wrong in aggregate, because a node can be
+	unusable for reasons that have nothing to do with whether it is a good place:
+	too far from the team right now, outside the flow window, currently in
+	somebody's view, or occupied. A real map showed it — sixteen nodes, and a
+	search reporting "11 too far, 4 outside the flow window, 6 with no ground"
+	with the nearest node 388 studs away. Spawning starved while the pressure
+	kept climbing.
 
-	The ring keeps a small share for one reason only: a map with no nodes, or
-	whose every node is currently in view, still has to be able to place a body
-	rather than stall the Director. It warns when it is used, because needing it
-	means the map wants more nodes.
+	The ring does not starve. It generates a fresh point per attempt near the
+	team by construction, and every rule that protects the illusion still applies
+	to it — minimum distance, out of sight, ground, headroom, the body's own box.
+	A ring point that passes all of those is not a worse spawn than a node that
+	passes all of those; it is the same spawn without a person having chosen it.
+
+	So nodes get the larger share and first refusal, and the ring gets enough of
+	the budget to keep the horde arriving when the nodes cannot. That is what the
+	number was before the map-wide field experiment, and the experiment is what
+	made it look like the ring was the part worth cutting.
 ]]
-local NODE_ATTEMPT_SHARE = 0.9
+local NODE_ATTEMPT_SHARE = 0.75
+
+--[[
+	Attempts the ring is guaranteed, whatever the share works out to.
+
+	The share alone is not enough, and the arithmetic is worth stating because it
+	is not obvious. `nodeOrder` is walked ONCE per pass — each node is offered at
+	most once — so a node budget larger than the node count simply exhausts, and
+	every attempt past it falls through to the ring anyway. On a sixteen-node map
+	with twenty-four attempts, a share of 0.9 and a share of 0.75 both leave the
+	ring exactly eight. Changing the share there does nothing at all.
+
+	Where it DOES bite is a map with plenty of nodes: forty nodes at 0.75 leaves
+	the ring six attempts, and if those nodes are clustered away from the route
+	the horde starves while the search politely re-tests places it cannot use.
+
+	So the ring gets a floor. Nodes still get first refusal and the larger share;
+	this only guarantees that some of the budget is always spent looking near the
+	team, which is where the players are and therefore where a spawn is most
+	likely to be both legal and useful.
+]]
+local RING_MIN_ATTEMPTS = 6
 
 --[[
 	How much room a node needs to itself before it may be used again.
@@ -397,9 +425,25 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	if useNodes then
 		shuffleNodes()
 	end
-	local nodeBudget = if useNodes then math.max(1, math.floor(attempts * NODE_ATTEMPT_SHARE)) else 0
+	--[[ Capped so the ring keeps its floor. See RING_MIN_ATTEMPTS: without this
+	     a well-tagged map can spend its whole budget on nodes and starve when
+	     none of them happen to be usable right now. ]]
+	local nodeBudget = if useNodes
+		then math.clamp(
+			math.floor(attempts * NODE_ATTEMPT_SHARE),
+			1,
+			math.max(attempts - RING_MIN_ATTEMPTS, 1)
+		)
+		else 0
 
 	local tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
+	--[[ Nodes the walk stepped straight past because they are outside the band.
+	     Counted rather than merged into `tooFar` because they are a different
+	     fact about the map: `tooFar` is candidates this search generated and
+	     rejected, this is places a designer tagged that are nowhere near the
+	     team. See where nodes are picked for why they are skipped and not
+	     tested. ]]
+	local nodesOutOfRange = 0
 	local nodeIndex = 0
 
 	--[[
@@ -462,7 +506,7 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			-- An anchored search keeps its radius: a bile horde that arrives from
 			-- outside the bile is not the event any more, and PANIC.SpawnRadius is
 			-- that event's own definition rather than a global default.
-			if anchor or tooFar == 0 then
+			if anchor or (tooFar == 0 and nodesOutOfRange == 0) then
 				continue
 			end
 			--[[ BOTH, and that is the point. `maxDistanceSquared` is what the
@@ -477,6 +521,7 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		end
 
 		tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
+		nodesOutOfRange = 0
 		nodeIndex = 0
 
 		for attempt = 1, attempts do
@@ -489,17 +534,79 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			local now = os.clock()
 
 			if useNodes and attempt <= nodeBudget then
-				--[[ Walks past occupied nodes rather than spending the attempt on
-				     one. A node with somebody standing on it is not a near miss to
-				     be tested and rejected; it is simply not this tick's node. ]]
+				--[[
+					Walks past nodes it cannot use rather than spending the attempt
+					on one. A node with somebody standing on it is not a near miss to
+					be tested and rejected; it is simply not this tick's node.
+
+					── AND PAST NODES THAT ARE NOWHERE NEAR THE TEAM ────────────────
+					This is what "the old way" actually was, and losing it is what
+					starved the Director.
+
+					Every node used to be offered, tested and counted, which is fine
+					when a node is a plausible candidate and wasteful when it cannot
+					possibly be one. A real map showed the cost: sixteen tagged nodes,
+					the nearest of them 388 studs from the team, a ceiling of far less
+					than that — so sixteen of twenty-four attempts were spent
+					re-deriving that sixteen fixed points had not moved, and the ring
+					got whatever was left. Tuning the node/ring SHARE does nothing
+					about that, because nodeOrder is walked once per pass: a share
+					above the node count simply exhausts, and 0.9 and 0.75 leave the
+					ring exactly the same eight attempts.
+
+					Skipping is the fix, and it costs one squared distance compare —
+					cheaper than the acceptance test it replaces, which raycast. When
+					some nodes are in range they still get first refusal and the ring
+					still gets its floor; when NONE are, the whole budget falls
+					through to the ring on the first attempt and the horde arrives
+					from around the team exactly as it did before there were nodes at
+					all.
+
+					It stays inside the relaxation ladder rather than sidestepping it:
+					the band read here is the CURRENT pass's, so pass 3's wider
+					ceiling puts the distant nodes back in play instead of hiding them
+					from the one pass that was widened to reach them.
+				]]
 				while nodeIndex < #nodeOrder do
 					nodeIndex += 1
 					local node = nodeOrder[nodeIndex]
-					if node and nodeIsFree(node, node.Position, now) then
-						candidate = node.Position
-						chosenNode = node
-						break
+					if not node then
+						continue
 					end
+					if not nodeIsFree(node, node.Position, now) then
+						continue
+					end
+
+					local position = node.Position
+					local nearest = math.huge
+					for index = 1, surveyCount do
+						local squared = distanceSquared(survey[index].position, position)
+						if squared < nearest then
+							nearest = squared
+						end
+					end
+					--[[ Too CLOSE is counted apart from too far, and not into
+					     nodesOutOfRange, because the two ask for opposite things.
+					     Widening the ceiling in pass 3 cannot rescue a node parked
+					     next to the team — that rule never relaxes — so letting it
+					     vote for the relaxation would buy two more passes of
+					     identical work on the way to the same failure. ]]
+					if nearest < minDistanceSquared then
+						tooClose += 1
+						continue
+					end
+					--[[ With an anchor the ceiling belongs to the anchor, matching
+					     the acceptance test below: a panic wave is bounded by its own
+					     radius rather than by how far the team has spread out. ]]
+					local ceiling = if anchor then distanceSquared(anchor, position) else nearest
+					if ceiling > maxDistanceSquared then
+						nodesOutOfRange += 1
+						continue
+					end
+
+					candidate = position
+					chosenNode = node
+					break
 				end
 			end
 			if not candidate then
@@ -635,6 +742,9 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	end
 	if tooFar > 0 then
 		table.insert(parts, string.format("%d too far", tooFar))
+	end
+	if nodesOutOfRange > 0 then
+		table.insert(parts, string.format("%d node visit(s) skipped as out of range", nodesOutOfRange))
 	end
 	if outOfFlow > 0 then
 		table.insert(parts, string.format("%d outside the flow window", outOfFlow))

@@ -194,6 +194,81 @@ function RigUtil.mapMotorChildren(model: Model): { [Motor6D]: BasePart }
 	return children
 end
 
+--[[
+	Turns every Motor6D the right way round, and returns how many were backwards.
+
+	── WHY A BACKWARDS JOINT IS INVISIBLE AND FATAL ────────────────────────────
+	Roblox's animator does not read joint NAMES. For every Motor6D in the rig it
+	takes `Part1` to be the bone, and it drives the pose whose name matches that
+	part. So a shoulder wired
+
+	    Part0 = Left Arm   Part1 = Torso
+
+	presents itself to the animator as a bone called "Torso" hanging off the left
+	arm. An R6 walk clip keys "Left Arm", finds no bone by that name, and moves
+	the shoulder not at all — while every other joint in the rig animates
+	normally. The result is a body that walks with one arm nailed to its side, or
+	with nothing but its arms moving, or that simply drags.
+
+	Nothing else here could catch it. The joint EXISTS, so buildMissingJoints
+	correctly declines to build a second one over the top of it; the parts are
+	all named correctly, so the missing-part report says nothing; the rig holds
+	together and reports itself rigged. mapMotorChildren has always known which
+	end is really the child — it walks outward from the HumanoidRootPart rather
+	than trusting the convention — but knowing was only ever used to ANSWER
+	questions about the rig, never to correct it.
+
+	── THE SWAP IS EXACT, NOT APPROXIMATE ──────────────────────────────────────
+	A Motor6D holds its two ends so that
+
+	    Part0.CFrame * C0 == Part1.CFrame * C1
+
+	Exchanging the parts and exchanging C0 with C1 turns that into
+
+	    Part1.CFrame * C1 == Part0.CFrame * C0
+
+	which is the same equation. So the limb does not move by so much as a stud:
+	whatever pose the rig was built in is the pose it keeps, at any size and any
+	proportion, with no pivot to guess at.
+
+	The motor's Parent is deliberately left alone. The convention is to store a
+	joint inside Part0, but the animator collects motors by walking the whole
+	model, so where one lives changes nothing — and a rig that stores its joints
+	on the child part is a wiring this already handles rather than a fault.
+]]
+function RigUtil.normalizeMotorDirection(model: Model): (number, { string })
+	local flipped = 0
+	local names: { string } = {}
+
+	for motor, child in RigUtil.mapMotorChildren(model) do
+		if motor.Part1 == child then
+			continue
+		end
+		--[[ The resolved child has to actually BE the other endpoint. It always
+		     is for a motor the walk reached, and for one it did not the map falls
+		     back to Part1 — which the test above has already skipped. This is the
+		     guard for neither of those being true rather than a case to handle. ]]
+		if motor.Part0 ~= child then
+			continue
+		end
+
+		--[[ Read all four before writing any: `motor.Part0 = motor.Part1` first
+		     would leave the second assignment reading the value it just wrote and
+		     put both ends on the same part. ]]
+		local part0, part1 = motor.Part0, motor.Part1
+		local c0, c1 = motor.C0, motor.C1
+		motor.Part0 = part1
+		motor.Part1 = part0
+		motor.C0 = c1
+		motor.C1 = c0
+
+		flipped += 1
+		table.insert(names, child.Name)
+	end
+
+	return flipped, names
+end
+
 --[[ The child end of ONE motor, for a caller that has a motor and not a rig.
      Prefer mapMotorChildren when you are about to ask about several. ]]
 function RigUtil.motorChild(motor: Motor6D): BasePart?
@@ -425,7 +500,7 @@ end
 	usually WHY the model has no joints (built by dragging parts together, and
 	Studio welded them), and a weld left in place beside a Motor6D wins.
 ]]
-function RigUtil.buildMissingJoints(model: Model): number
+function RigUtil.buildMissingJoints(model: Model): (number, { string })
 	local have: { [string]: boolean } = {}
 	for _, child in RigUtil.mapMotorChildren(model) do
 		have[child.Name] = true
@@ -433,6 +508,9 @@ function RigUtil.buildMissingJoints(model: Model): number
 
 	local skeleton = if RigUtil.rigTypeOf(model) == "R15" then R15_SKELETON else R6_SKELETON
 	local built = 0
+	--[[ Part names a joint needed and the model does not have. See the note where
+	     these are collected. ]]
+	local unbuildable: { string } = {}
 
 	for _, spec in skeleton do
 		if have[spec.child] then
@@ -440,9 +518,24 @@ function RigUtil.buildMissingJoints(model: Model): number
 		end
 		local parent = namedPart(model, spec.parent)
 		local child = namedPart(model, spec.child)
-		--[[ A missing PART is not a fault. Plenty of rigs have no separate hands
-		     or feet, and inventing one would be worse than leaving the joint out. ]]
-		if not parent or not child then
+		--[[
+			A missing PART cannot be jointed, and the caller is told which.
+
+			Sometimes that is fine: plenty of rigs have no separate hands or feet,
+			and inventing one would be worse than leaving the joint out. Sometimes
+			it is the whole problem — an animation addresses JOINTS, and a joint
+			cannot exist without the two parts it connects, so a model whose arm
+			is called "LeftArm" or "Arm.L" instead of "Left Arm" gets no shoulder,
+			plays a walk clip that drives a shoulder it does not have, and moves
+			nothing. From the outside those two look identical, so the names go
+			back to the caller and it decides what to say about them.
+		]]
+		if not parent then
+			table.insert(unbuildable, spec.parent)
+			continue
+		end
+		if not child then
+			table.insert(unbuildable, spec.child)
 			continue
 		end
 
@@ -466,7 +559,7 @@ function RigUtil.buildMissingJoints(model: Model): number
 		built += 1
 	end
 
-	return built
+	return built, unbuildable
 end
 
 --[[ Sets every part's collision group in one call. ]]
