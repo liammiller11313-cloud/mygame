@@ -276,14 +276,25 @@ local animationSources: { own: { [string]: { string } }, config: { [string]: { s
 }
 
 local function harvestAnimations(model: Model): number
-	local found = 0
-	local existing = model:FindFirstChild(ANIMATION_FOLDER)
-	if existing then
-		existing:Destroy()
-	end
+	--[[
+		READ EVERYTHING FIRST, then rebuild. The order is the whole correctness
+		of this function.
 
-	local store: Folder? = nil
-	local buckets: { [string]: Folder } = {}
+		It used to destroy any existing FL_Animations folder before scanning. That
+		is fine for the case it was written for — a rig arriving with an Animate
+		script, harvested once — and silently wrong for the obvious way to give a
+		model clips by hand, which is to build an FL_Animations folder in the
+		shape the animator already reads. Destroying it first deleted the
+		Animations inside it, so the scan that followed found nothing and the rig
+		fell back to the configured set. The folder simply vanished, with no error
+		and no warning.
+
+		Gathering the ids before touching anything makes a hand-authored folder a
+		perfectly good SOURCE, and makes re-harvesting the same model idempotent
+		rather than destructive.
+	]]
+	type Clip = { role: string, id: string }
+	local clips: { Clip } = {}
 
 	for _, descendant in model:GetDescendants() do
 		if not descendant:IsA("Animation") or descendant.AnimationId == "" then
@@ -293,31 +304,42 @@ local function harvestAnimations(model: Model): number
 		-- A bare Animation with no meaningful parent name still beats nothing;
 		-- file it under "idle" so at least something plays.
 		local role = if parent and parent ~= model then string.lower(parent.Name) else "idle"
-
-		if not store then
-			-- Built through a local rather than assigning to `store` and then
-			-- opening a paren on the next line: Lua would read that as calling
-			-- the value Instance.new returned.
-			local created = Instance.new("Folder")
-			created.Name = ANIMATION_FOLDER
-			created.Parent = model
-			store = created
-		end
-
-		local bucket = buckets[role]
-		if not bucket then
-			bucket = Instance.new("Folder")
-			bucket.Name = role
-			bucket.Parent = store
-			buckets[role] = bucket
-		end
-
-		local copy = descendant:Clone()
-		copy.Parent = bucket
-		found += 1
+		table.insert(clips, { role = role, id = descendant.AnimationId })
 	end
 
-	return found
+	--[[ Nothing found means nothing to rebuild, and the existing folder — if
+	     there is one — was empty of usable ids anyway. Left alone rather than
+	     destroyed: an empty folder is harmless and a person put it there. ]]
+	if #clips == 0 then
+		return 0
+	end
+
+	local existing = model:FindFirstChild(ANIMATION_FOLDER)
+	if existing then
+		existing:Destroy()
+	end
+
+	local store = Instance.new("Folder")
+	store.Name = ANIMATION_FOLDER
+	store.Parent = model
+
+	local buckets: { [string]: Folder } = {}
+	for _, clip in clips do
+		local bucket = buckets[clip.role]
+		if not bucket then
+			bucket = Instance.new("Folder")
+			bucket.Name = clip.role
+			bucket.Parent = store
+			buckets[clip.role] = bucket
+		end
+
+		local animation = Instance.new("Animation")
+		animation.Name = clip.role
+		animation.AnimationId = clip.id
+		animation.Parent = bucket
+	end
+
+	return #clips
 end
 
 local function sanitise(instance: Instance): number
