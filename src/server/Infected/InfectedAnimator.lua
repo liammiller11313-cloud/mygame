@@ -41,9 +41,30 @@ local ANIMATION_FOLDER = "FL_Animations"
 	animation still moves — it just moves the same way all the time, which reads
 	far better than not moving at all.
 ]]
+--[[
+	Bucket names a rig might have used for each role, best first.
+
+	── THESE ARE ALIASES, NOT SUBSTITUTES ──────────────────────────────────────
+	Every name in a list has to be a clip that IS that role under a different
+	name, or a genuinely equivalent gait. It must never be a different role
+	borrowed to fill a gap, because filling a role here stops AnimationConfig
+	from filling it — so a wrong-role clip does not merely look wrong, it locks
+	out the correct one.
+
+	`walk` used to end in "idle", and that is exactly the trap. A rig that
+	shipped an idle and no recognisable walk got its IDLE played while walking:
+	legs still, arms in the standing pose, sliding along the floor. And because
+	the walk role was then filled, the game's own walk — a real walk — was never
+	applied to it. One line, and it only hit the models that shipped an idle but
+	no walk, which is why it looked like some Commons animating wrong at random.
+
+	Walk and run may still borrow from each other. They are the same gait at
+	different speeds, InfectedAnimator rate-matches playback to the body's real
+	velocity, and the supplied R6 set uses one id for both.
+]]
 local ROLE_FALLBACK = {
 	idle = { "idle", "stand", "zombieidle", "wait" },
-	walk = { "walk", "walkanim", "zombie", "run", "idle" },
+	walk = { "walk", "walkanim", "zombie", "run" },
 	run = { "run", "runanim", "sprint", "walk", "zombie" },
 	attack = { "attack", "swipe", "slash", "toolslash", "punch" },
 	death = { "death", "die", "dead" },
