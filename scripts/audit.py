@@ -938,6 +938,28 @@ if _gore_cap is not None and _game_cap is not None and _gore_cap != _game_cap:
     )
 
 
+# ── 13. The round-end clock has to fit what it plays ────────────────────────
+#
+# A round ends in three acts on two independent task.delay timers:
+# ResultsDuration later the map vote opens, and PostRoundDuration later the
+# server returns to the lobby regardless. So PostRoundDuration has to cover the
+# results screen AND the whole vote, or the server walks out on a vote that is
+# still open — the winner is discarded, the next round loads the old map, and
+# nothing anywhere says why.
+#
+# GameModeConfig's own comment already claims this is audited. It was not.
+_results = _number_in("GameModeConfig.lua", "GameModeConfig.Matchmaking", "ResultsDuration")
+_post = _number_in("GameModeConfig.lua", "GameModeConfig.Matchmaking", "PostRoundDuration")
+_vote = _number_in("MapConfig.lua", "MapConfig.Vote", "DurationSeconds")
+if None not in (_results, _post, _vote) and _results + _vote > _post:
+    problems.append(
+        f"GameModeConfig.Matchmaking.PostRoundDuration ({_post}s) is shorter than "
+        f"ResultsDuration ({_results}s) + MapConfig.Vote.DurationSeconds ({_vote}s) = "
+        f"{_results + _vote}s — the server returns to the lobby with the vote still open, "
+        f"so the winner is thrown away and the next round reloads the old map"
+    )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")
