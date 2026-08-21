@@ -275,6 +275,11 @@ local animationSources: { own: { [string]: { string } }, config: { [string]: { s
 	config = {},
 }
 
+--[[ Which build each kind was judged to be. See the note where this is written:
+     it is the single fact that decides which clip set a body gets, and getting
+     it wrong is silent. ]]
+local animationRig: { [string]: string } = {}
+
 local function harvestAnimations(model: Model): number
 	--[[
 		READ EVERYTHING FIRST, then rebuild. The order is the whole correctness
@@ -1163,6 +1168,14 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		sourceList[kind] = bucket
 	end
 	table.insert(bucket, model.Name)
+
+	--[[ And which BUILD the game decided this rig is, because that is what picks
+	     the clip set. An animation addresses named joints, so a rig judged wrong
+	     here gets a set aimed at joints it does not have: the tracks load, report
+	     themselves as playing, and move nothing — and the procedural poser stands
+	     down because tracks are playing. Recorded per kind so the summary can say
+	     "Tank: R15" rather than leaving it to be inferred. ]]
+	animationRig[kind] = AnimationConfig.rigOf(model)
 
 	if harvested == 0 and not AnimationConfig.forInfected(kind, AnimationConfig.rigOf(model)) then
 		warnOnce(
@@ -3082,7 +3095,10 @@ function PlaceholderFactory:ensureAssets()
 	local usingConfig = {}
 	for kind, variants in animationSources.config do
 		table.sort(variants)
-		table.insert(usingConfig, string.format("%s: %s", kind, table.concat(variants, ", ")))
+		table.insert(
+			usingConfig,
+			string.format("%s [%s]: %s", kind, animationRig[kind] or "?", table.concat(variants, ", "))
+		)
 	end
 	if #usingConfig > 0 then
 		table.sort(usingConfig)

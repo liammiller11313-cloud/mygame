@@ -142,6 +142,20 @@ local RATE_EPSILON = 0.01
      enough to read as a collapse, short enough that a body whose animation never
      loaded is not left standing while the game waits on it. ]]
 local DEATH_FALLBACK_LENGTH = 0.8
+
+--[[
+	How long after a body loads before its ids are re-checked against the cache.
+
+	AnimationCache.preload is spawned, so PreloadAsync has NOT returned by the
+	time a body finishes loading its tracks — hasFailed answers "not known to
+	have failed", which is indistinguishable from "fine", and the check at load
+	time was therefore almost never true for the FIRST body of a kind. That body
+	is the one that kicks the fetch off.
+
+	Two seconds is comfortably past a fetch that is going to resolve and short
+	enough that a body carrying dead tracks is not dead for long.
+]]
+local PRELOAD_GRACE = 2
 local MAX_RATE = 2.4
 
 --[[ A body's scale, from its kind. Falls back to 1 for a kind with no
@@ -209,6 +223,14 @@ function InfectedAnimator.new(model: Model, kind: string)
 		bodyScale = bodyScaleOf(kind),
 		humanoid = humanoid,
 		tracks = {},
+		--[[ role -> the AnimationId the track was loaded from. Only ever read by
+		     dropFailed, which needs to ask the cache about an id it no longer
+		     has the Animation instance for. ]]
+		trackIds = {},
+		--[[ When to re-ask the cache whether these ids are actually usable.
+		     ONCE, shortly after spawn. See dropFailed for why it cannot be
+		     answered at load time. ]]
+		validateAt = os.clock() + PRELOAD_GRACE,
 		current = "",
 		--[[ The playback rate last sent. See setState: this is what stops a
 		     rate-matched gait replicating a new speed to every client on every
@@ -230,6 +252,9 @@ function InfectedAnimator.new(model: Model, kind: string)
 		if not ok or not track then
 			return false
 		end
+		--[[ The id behind the track, kept so a fetch that resolves as FAILED
+		     later can find the track it poisoned. See dropFailed. ]]
+		self.trackIds[role] = animation.AnimationId
 		track.Priority = if role == "attack" or role == "death"
 			then Enum.AnimationPriority.Action
 			else Enum.AnimationPriority.Movement
@@ -305,6 +330,14 @@ function InfectedAnimator.new(model: Model, kind: string)
 				AnimationCache keeps one instance per id for the life of the
 				server and preloads it. See its header.
 			]]
+			--[[ Already known bad from an earlier body of this kind. Skipped
+			     rather than adopted-then-warned, so the SECOND zombie onward
+			     never carries a dead track at all and the role stays open for
+			     something that works. ]]
+			if AnimationCache.hasFailed(id) then
+				continue
+			end
+
 			local animation = AnimationCache.get(id)
 			if not animation then
 				warnOnce(

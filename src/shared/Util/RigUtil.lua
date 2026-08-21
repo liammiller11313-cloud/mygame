@@ -366,15 +366,39 @@ end
 	its own copy, because the skeleton a repair BUILDS and the clip set that will
 	be PLAYED on it have to be the same answer. Two independent expressions —
 	even two identical ones — is a pair that can disagree, and the failure mode is
-	an R6 clip loaded onto a body that was just given R15 joints: it plays, it
-	reports itself as playing, and nothing moves.
+	the worst one this system has: an animation addresses NAMED joints, so a set
+	aimed at the wrong build loads, reports itself as playing, and moves nothing.
+	Worse, InfectedPoseController stands down for any body with tracks playing, so
+	such a body is animated by neither.
 
-	Shallow, deliberately. A rig's own torso is a direct child of the model; a
-	recursive search finds an "UpperTorso" inside an accessory or a prop the model
-	happens to be carrying and calls a hand-built R6 zombie an R15 one.
+	── WHY IT SEARCHES, AND WHY IT SKIPS ACCESSORIES ───────────────────────────
+	This was a shallow FindFirstChild, on the reasoning that a rig's own torso is
+	a direct child of the model. That is true of a rig Roblox built and routinely
+	false of one a person assembled: parts get grouped into a Folder or a nested
+	Model while it is being put together, and nobody moves them back out because
+	nothing in Studio cares. The shallow test then calls a perfectly good R15 rig
+	an R6 one and hands it R6 clips, which is the silent failure above.
+
+	It looks anywhere now, except inside an Accessory — a hat or a backpack can
+	carry a part named anything at all, and an accessory named UpperTorso must not
+	decide what the body underneath it animates with. PlaceholderFactory's own
+	joint audit already searched recursively, so this also ends a disagreement
+	where the audit judged a rig R15 and the animator judged the same rig R6.
 ]]
 function RigUtil.rigTypeOf(model: Model): string
-	return if model:FindFirstChild("UpperTorso") then "R15" else "R6"
+	for _, descendant in model:GetDescendants() do
+		if not descendant:IsA("BasePart") then
+			continue
+		end
+		local name = descendant.Name
+		if name ~= "UpperTorso" and name ~= "LowerTorso" then
+			continue
+		end
+		if not descendant:FindFirstAncestorWhichIsA("Accessory") then
+			return "R15"
+		end
+	end
+	return "R6"
 end
 
 --[[
