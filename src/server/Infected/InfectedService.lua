@@ -689,30 +689,36 @@ function InfectedService:damage(model: Model, amount: number, ctx: any): any
 end
 
 --[[
-	Rigs a body that arrived without joints, and says so once per variant.
+	Builds whatever standard joints a body is missing, and says so once per
+	variant.
 
-	Only ever runs for a rig that came out of Workspace with no Motor6Ds at all.
-	A rig with SOME joints is left completely alone: a partially rigged model is
-	one whose author made choices, and building over those would move limbs that
-	are already where they were meant to be.
+	── IT USED TO GIVE UP ON A PARTIALLY RIGGED BODY ───────────────────────────
+	The first version bailed the moment a rig had any Motor6D at all, reasoning
+	that a partly rigged model is one whose author made choices worth respecting.
+	The boot log disproved that: a Common variant turned up with joints for
+	`Left Leg, Right Leg, Torso` and nothing else — hips and the root, no
+	shoulders, no neck. That is not a choice, it is a rig somebody stopped
+	building.
 
-	This used to WELD the loose parts to the root. That stopped the body coming
-	apart in mid-air and produced a body that could never animate, because an
-	AnimationTrack drives Motor6Ds and a weld is not one — so a model somebody
-	forgot to rig was a rigid slab sliding at the team. RigUtil.buildMissingJoints
-	builds the real skeleton instead, without moving a single part, so the body
-	both holds together and plays the zombie set.
+	And it fails in a way that looks like the animation being broken rather than
+	the model: an R6 walk clip addresses Left/Right Shoulder and Left/Right Hip,
+	so a body with hips and no shoulders walks with its arms nailed to its sides,
+	and one missing hips too just slides. "Some of them drag around" is exactly
+	that, and no amount of animation work could have fixed it.
 
-	It is still not a fix for the MODEL: the joints are placed at standard
-	fractions of each part's size, which is right for a humanoid and a guess for
-	anything stylised. Fix it in Studio with studio-scripts/RigDoctor, which
-	builds exactly the same joints where you can see the result.
+	RigUtil.buildMissingJoints only ever fills genuine gaps — it skips a role that
+	already has a joint, and skips one whose PART does not exist, so a rig with no
+	separate hands keeps not having them. That makes it safe to run on every body,
+	which is what it does now.
+
+	Still not a fix for the MODEL. The joints are placed at standard fractions of
+	each part's size, which is right for a humanoid and a guess for anything
+	stylised, and they are rebuilt on every single spawn. Run
+	studio-scripts/RigDoctor once, in Studio, where the result is visible and
+	saved.
 ]]
 function InfectedService:_boltTogether(model: Model, kind: string)
-	if #RigUtil.getMotors(model) > 0 then
-		return
-	end
-
+	local before = #RigUtil.getMotors(model)
 	local built = RigUtil.buildMissingJoints(model)
 	if built == 0 then
 		return
@@ -721,14 +727,19 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 	warnOnce(
 		"unrigged:" .. tostring(model:GetAttribute("FL_Variant") or kind),
 		string.format(
-			"%s variant %q arrived with NO Motor6D joints, so %d were built for it at spawn — "
-				.. "otherwise the body comes apart in mid-air and its brain walks an invisible "
-				.. "root at the team. It will animate, but the joints are placed by proportion "
-				.. "rather than by whoever built the model. Run studio-scripts/RigDoctor to do "
-				.. "this properly, once, where you can see it.",
+			"%s variant %q was missing %d joint(s) and they were built at spawn — %s. It will "
+				.. "animate now, but the joints are placed by proportion rather than by whoever "
+				.. "built the model, and this happens again for every body of this variant. Run "
+				.. "studio-scripts/RigDoctor to do it properly, once.",
 			kind,
 			tostring(model:GetAttribute("FL_Variant") or model.Name),
-			built
+			built,
+			if before == 0
+				then "it arrived with none at all, so it would otherwise come apart in mid-air"
+				else string.format(
+					"it arrived with %d, so the limbs those drive moved and the rest did not",
+					before
+				)
 		)
 	)
 end

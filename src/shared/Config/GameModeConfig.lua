@@ -221,7 +221,25 @@ GameModeConfig.Matchmaking = table.freeze({
 	JoinInProgressUntilWave = 4,
 	LobbyCountdown = 20,
 	LobbyCountdownWithFullServer = 8,
-	PostRoundDuration = 25, -- scoreboard, then back to the lobby
+	--[[
+		The end of a round, in two acts.
+
+		ResultsDuration is the win-or-wipeout screen ALONE. The map vote used to
+		open on the same frame the round ended, on the reasoning that running it
+		under the scoreboard costs no dead time — and it does not, but it also
+		means the moment a team finds out whether they held is the moment a vote
+		card lands on top of it. Whatever the round was worth is gone.
+
+		So the result gets the screen to itself first, and the vote follows. Long
+		enough to read the outcome and your own line on the scoreboard, short
+		enough that nobody is waiting.
+
+		PostRoundDuration covers BOTH plus the vote in between, so a server never
+		returns to the lobby with a vote still open. Audited: it has to be at
+		least ResultsDuration + MapConfig.Vote.DurationSeconds.
+	]]
+	ResultsDuration = 8,
+	PostRoundDuration = 30, -- results, then the vote, then back to the lobby
 
 	MemoryStoreMapName = "FL_OpenRounds",
 	MemoryStoreTtl = 90, -- seconds; a server must re-advertise inside this window

@@ -779,18 +779,32 @@ function RoundService:endRound(outcome: string)
 
 	self.roundEnded:fire(outcome)
 
-	--[[ The map vote runs UNDER the scoreboard rather than after it, so it costs
-	     no extra dead time, and the winner is cloned into storage the moment it
-	     is known — by the time the next round starts the swap is a reparent. ]]
-	local vote = Registry.find("MapVoteService")
-	if vote then
-		pendingMap = vote:beginVote()
-	end
+	local mine = generation
+
+	--[[
+		The result gets the screen to itself, and THEN the vote.
+
+		This used to open the vote on the same frame the round ended, so a card
+		asking about the next map landed on top of the moment a team found out
+		whether they held. Whatever the round was worth went with it.
+
+		The winner is still cloned into storage the moment it is known, so the
+		swap at the start of the next round is a reparent either way — the delay
+		costs presentation time, not loading time.
+	]]
+	task.delay(GameModeConfig.Matchmaking.ResultsDuration, function()
+		if mine ~= generation then
+			return
+		end
+		local vote = Registry.find("MapVoteService")
+		if vote then
+			pendingMap = vote:beginVote()
+		end
+	end)
 
 	-- A server that sits on a result screen forever cannot be playtested twice.
 	-- MatchmakingService owns this decision when it exists; until then the round
 	-- comes back on its own.
-	local mine = generation
 	task.delay(GameModeConfig.Matchmaking.PostRoundDuration, function()
 		if mine ~= generation then
 			return

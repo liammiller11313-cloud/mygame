@@ -54,6 +54,7 @@ local CARD_GAP = 18
 --[[ The panel the cards sit inside. Wide enough for four across at the sizes
      above plus its own padding, which is the whole roster. ]]
 local KEY_CAP = 26
+local EXIT_SIZE = 34
 local PANEL_PADDING = 34
 
 --[[ The header, as three stacked rows rather than a total everything has to be
@@ -112,6 +113,10 @@ local state = {
 	resolved = false,
 	--[[ When to close regardless of what the server does next. See RESULT_HOLD. ]]
 	closeAt = 0,
+	--[[ This player pressed the exit button. Their vote still counts — the tally
+	     is the server's — this only stops drawing the screen for them, and it
+	     clears when a NEW vote starts because that is a new question. ]]
+	dismissed = false,
 }
 
 local function newFrame(parent: Instance, name: string, color: Color3, transparency: number?): Frame
@@ -187,7 +192,9 @@ local function layoutPanel(total: number)
 	end
 end
 
-local function buildCard(option: any, index: number, total: number)
+--[[ `total` is no longer read: layoutPanel owns every card's size and
+     position, so the builder only has to know which index this is. ]]
+local function buildCard(option: any, index: number, _total: number)
 	local frame = newFrame(cardsHolder, option.id, COLOR.Panel, 0.12)
 	frame.Size = UDim2.fromOffset(CARD_WIDTH, CARD_HEIGHT)
 	frame.Position = UDim2.fromOffset((index - 1) * (CARD_WIDTH + CARD_GAP), 0)
@@ -375,6 +382,12 @@ function MapVoteController:_refresh()
 end
 
 local function setVisible(visible: boolean)
+	--[[ Dismissed stays dismissed until a new vote starts. Without this the
+	     next tally update would put the screen back up, and the close button
+	     would be a button that closes for half a second. ]]
+	if visible and state.dismissed then
+		return
+	end
 	state.visible = visible
 	screen.Enabled = visible
 	if not visible then
@@ -408,9 +421,9 @@ local function setVisible(visible: boolean)
 		     two-map vote tells a player two keys that do nothing. ]]
 		local count = #cards
 		footHint = if isTouch()
-			then "TAP A MAP"
-			elseif count > 1 then string.format("1 – %d  OR  CLICK TO VOTE", count)
-			else "CLICK TO VOTE"
+			then "TAP A MAP  ·  × TO CLOSE"
+			elseif count > 1 then string.format("1 – %d  OR  CLICK TO VOTE  ·  P  PAUSE", count)
+			else "CLICK TO VOTE  ·  P  PAUSE"
 		footLabel.Text = footHint
 		GamepadFocus.capture(cards[1] and cards[1].button)
 	else
@@ -424,6 +437,8 @@ local function onVoteStarted(payload: any)
 	end
 
 	releaseCards()
+	--[[ A new question, so a player who dismissed the last one is asked again. ]]
+	state.dismissed = false
 	state.endsAt = tonumber(payload.endsAt) or 0
 	state.myVote = ""
 	state.tally = {}
@@ -606,6 +621,42 @@ local function build()
 	clockLabel.TextXAlignment = Enum.TextXAlignment.Center
 	clockLabel.Text = ""
 
+	--[[
+		A way out.
+
+		The vote covers the screen, frees the mouse and runs for twenty seconds,
+		and once a player has voted there is nothing left for them to do on it —
+		but it was still the only thing they could look at. Worse, it opens right
+		after the round ends, so a player who wants the pause menu (or just their
+		own scoreboard) had a full-screen card in the way and no button on it.
+
+		Dismissing does NOT cancel the vote. The tally is server-side and stays
+		cast; this only stops drawing it for this player. A new vote brings the
+		screen back, because that is a new question.
+	]]
+	local exitButton = Instance.new("TextButton")
+	exitButton.Name = "Exit"
+	exitButton.AnchorPoint = Vector2.new(1, 0)
+	exitButton.Position = UDim2.new(1, 0, 0, 0)
+	exitButton.Size = UDim2.fromOffset(EXIT_SIZE, EXIT_SIZE)
+	exitButton.BackgroundTransparency = 1
+	exitButton.Font = FONT.Display
+	exitButton.TextSize = TEXT.Large
+	exitButton.TextColor3 = COLOR.TextDim
+	exitButton.Text = "×"
+	exitButton.ZIndex = 3
+	exitButton.Parent = root
+	GamepadFocus.style(exitButton)
+	trove:connect(exitButton.MouseEnter, function()
+		exitButton.TextColor3 = COLOR.TextPrimary
+	end)
+	trove:connect(exitButton.MouseLeave, function()
+		exitButton.TextColor3 = COLOR.TextDim
+	end)
+	trove:connect(exitButton.Activated, function()
+		MapVoteController:dismiss()
+	end)
+
 	local rule = newFrame(root, "Rule", COLOR.BorderBright)
 	rule.AnchorPoint = Vector2.new(0.5, 0)
 	rule.Position = UDim2.new(0.5, 0, 0, TITLE_ROW + (RULE_ROW - 2) * 0.5)
@@ -622,6 +673,22 @@ local function build()
 	footLabel.Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT)
 	footLabel.TextXAlignment = Enum.TextXAlignment.Center
 	footLabel.Text = ""
+end
+
+--[[
+	Hides the vote for this player without withdrawing their vote.
+
+	Separate from setVisible so `state.dismissed` survives the tally updates that
+	arrive afterwards: every MapVoteUpdated calls _refresh, and a screen that
+	came back on the next tally would be a close button that does not close.
+]]
+function MapVoteController:dismiss()
+	if not state.visible then
+		return
+	end
+	state.dismissed = true
+	setVisible(false)
+	UiSound.play(AudioConfig.UI.MenuBack)
 end
 
 function MapVoteController:isOpen(): boolean

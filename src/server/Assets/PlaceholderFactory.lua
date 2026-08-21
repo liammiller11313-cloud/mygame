@@ -298,7 +298,7 @@ local function harvestAnimations(model: Model): number
 		perfectly good SOURCE, and makes re-harvesting the same model idempotent
 		rather than destructive.
 	]]
-	type Clip = { role: string, id: string }
+	type Clip = { role: string, animation: Animation }
 	local clips: { Clip } = {}
 
 	for _, descendant in model:GetDescendants() do
@@ -309,7 +309,11 @@ local function harvestAnimations(model: Model): number
 		-- A bare Animation with no meaningful parent name still beats nothing;
 		-- file it under "idle" so at least something plays.
 		local role = if parent and parent ~= model then string.lower(parent.Name) else "idle"
-		table.insert(clips, { role = role, id = descendant.AnimationId })
+		--[[ Cloned HERE, before anything is destroyed, which is what lets the
+		     folder below be rebuilt from real instances rather than from
+		     hand-built ones. AnimationCache's instances are shared for the whole
+		     server and must not be reparented into a template. ]]
+		table.insert(clips, { role = role, animation = descendant:Clone() })
 	end
 
 	--[[ Nothing found means nothing to rebuild, and the existing folder — if
@@ -338,10 +342,8 @@ local function harvestAnimations(model: Model): number
 			buckets[clip.role] = bucket
 		end
 
-		local animation = Instance.new("Animation")
-		animation.Name = clip.role
-		animation.AnimationId = clip.id
-		animation.Parent = bucket
+		clip.animation.Name = clip.role
+		clip.animation.Parent = bucket
 	end
 
 	return #clips
