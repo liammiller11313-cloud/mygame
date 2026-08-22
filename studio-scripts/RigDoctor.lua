@@ -8,7 +8,7 @@
 	REPAIR to true at the top and run it again. Repairs are one undo away
 	(Ctrl+Z) because they happen inside a ChangeHistoryService waypoint.
 
-	── THE FIVE REASONS A RIG DOES NOT ANIMATE ─────────────────────────────────
+	── THE SEVEN REASONS A RIG DOES NOT ANIMATE ────────────────────────────────
 	  MISSING JOINT    the clip drives a Motor6D that is not there.       FIXABLE
 	  BACKWARDS JOINT  it is there with Part0 and Part1 swapped. The animator
 	                   reads Part1 as the bone, so the part the clip names is
@@ -18,6 +18,14 @@
 	  DUPLICATE JOINT  two Motor6Ds across the same pair. The assembly is
 	                   over-constrained, so the clip drives one and the other
 	                   holds the limb. Reads as "fully jointed" everywhere.  FIXABLE
+	  DISABLED JOINT   Motor6D.Enabled is false. Serialized, defaults to true,
+	                   invisible unless you select that exact joint — and the
+	                   engine will not drive it.                            FIXABLE
+	  NOT A CHARACTER  the parts are inside a Folder instead of directly under
+	                   the Model. Roblox resolves a rig by name among the
+	                   HUMANOID'S SIBLINGS, so Humanoid.RootPart is nil and the
+	                   body is not a character at all. Every joint present,
+	                   every name right, and nothing animates.                 YOU
 	  MISSING PART     the joint needs two parts and one of them is called
 	                   something else — "LeftArm" instead of "Left Arm".      YOU
 
@@ -151,11 +159,17 @@ local function mapChildren(model)
 			table.insert(touching[d.Part1], d)
 		end
 	end
+	--[[ NO EARLY RETURN. This used to be `if not root then return children end`,
+	     which handed back an EMPTY map — and the caller reads that map to decide
+	     which joints already exist, so an empty one says "none" and REPAIR MODE
+	     then writes a complete duplicate skeleton into the saved place. Falling
+	     through leaves the Part1 convention below to answer. ]]
 	local root = partIn(model, "HumanoidRootPart") or model.PrimaryPart
-	if not root then
-		return children, motors
+	local seen, queue, head = {}, {}, 1
+	if root then
+		seen[root] = true
+		table.insert(queue, root)
 	end
-	local seen, queue, head = { [root] = true }, { root }, 1
 	while head <= #queue do
 		local part = queue[head]
 		head += 1
@@ -168,6 +182,14 @@ local function mapChildren(model)
 					table.insert(queue, other)
 				end
 			end
+		end
+	end
+	--[[ Anything the walk never reached falls back to the convention, so a rig
+	     with no root — or a limb not connected to it — still resolves rather than
+	     silently vanishing from the map. ]]
+	for _, d in motors do
+		if not children[d] then
+			children[d] = d.Part1
 		end
 	end
 	return children, motors
@@ -342,6 +364,55 @@ local function inspect(model, label)
 	--[[ Before anything else, because a rig with this fault passes every other
 	     test in this file: the joints are all present, the parts are all named,
 	     and the body still does not animate. ]]
+	--[[ Parts that are not direct children of the Model. Roblox resolves a
+	     character's rig by name among the HUMANOID'S SIBLINGS, so a rig assembled
+	     inside a Folder has Humanoid.RootPart == nil and is not a character at
+	     all — every joint present, every name right, and nothing can animate it.
+	     Reported here and flattened by the game at boot; fixing it in the model
+	     is the permanent version. ]]
+	local nested = 0
+	for _, d in model:GetDescendants() do
+		if
+			(d:IsA("BasePart") or d:IsA("Motor6D"))
+			and d.Parent ~= model
+			and not d:FindFirstAncestorWhichIsA("Accessory")
+			and not (d:IsA("Motor6D") and d.Parent and d.Parent:IsA("BasePart"))
+		then
+			nested += 1
+		end
+	end
+	if nested > 0 then
+		table.insert(
+			notes,
+			string.format(
+				"%d part(s) NOT directly under the Model — Humanoid.RootPart cannot resolve, so this "
+					.. "is not a character and nothing can animate it. Move them up out of the Folder.",
+				nested
+			)
+		)
+	end
+	if not model:FindFirstChild("HumanoidRootPart") then
+		table.insert(notes, "no part called HumanoidRootPart directly under the Model")
+	end
+
+	--[[ Enabled is serialized, defaults to true, and is invisible unless you
+	     select that exact joint. A disabled Motor6D satisfies every "fully
+	     jointed" check and the engine refuses to drive it. ]]
+	local disabled = {}
+	for _, d in model:GetDescendants() do
+		if d:IsA("Motor6D") and not d.Enabled then
+			table.insert(disabled, if d.Part1 then d.Part1.Name else d.Name)
+			if REPAIR then
+				d.Enabled = true
+			end
+		end
+	end
+	if #disabled > 0 then
+		table.sort(disabled)
+		local line = string.format("%d DISABLED joint(s) (%s)", #disabled, table.concat(disabled, ", "))
+		table.insert(if REPAIR then fixes else notes, if REPAIR then "re-enabled " .. line else line)
+	end
+
 	local dupes = duplicateJoints(model, REPAIR)
 	if #dupes > 0 then
 		local line = string.format("%d duplicate joint(s) (%s)", #dupes, table.concat(dupes, ", "))
@@ -391,6 +462,23 @@ local function inspect(model, label)
 		end
 	end
 
+	--[[ The same hard guard the runtime uses: ask the two ACTUAL parts whether a
+	     Motor6D already spans them. A name lookup can be defeated by an unusual
+	     rig; this cannot, and in REPAIR mode the cost of being wrong is written
+	     into the place. ]]
+	local jointedPairs = {}
+	for _, d in model:GetDescendants() do
+		if d:IsA("Motor6D") and d.Part0 and d.Part1 and d.Part0 ~= d.Part1 then
+			jointedPairs[d.Part0] = jointedPairs[d.Part0] or {}
+			jointedPairs[d.Part1] = jointedPairs[d.Part1] or {}
+			jointedPairs[d.Part0][d.Part1] = true
+			jointedPairs[d.Part1][d.Part0] = true
+		end
+		if d:IsA("Motor6D") and d.Part1 then
+			have[d.Part1.Name] = true
+		end
+	end
+
 	local missing, built, welds, absent, absentSeen = {}, 0, 0, {}, {}
 	for _, spec in skeleton do
 		if have[spec.child] then
@@ -416,6 +504,10 @@ local function inspect(model, label)
 				absentSeen[spec.child] = true
 				table.insert(absent, spec.child)
 			end
+			continue
+		end
+		local spanned = jointedPairs[parent]
+		if spanned and spanned[child] then
 			continue
 		end
 		table.insert(missing, spec.joint)
@@ -448,7 +540,7 @@ local function inspect(model, label)
 		table.insert(notes, "NO PART NAMED " .. table.concat(absent, ", ") .. " — rename in Studio")
 	end
 
-	local issues = #missing + #backwards + #rivals + #dupes
+	local issues = #missing + #backwards + #rivals + #dupes + #disabled
 	if #notes == 0 and #fixes == 0 then
 		print(string.format("  OK    %-28s %s, fully jointed", label, rig))
 		return 0, 0
