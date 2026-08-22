@@ -862,8 +862,8 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 			string.format(
 				"%s variant %q has no part(s) named: %s — so those joints cannot be built, and "
 					.. "an animation that drives them moves nothing. Rename the parts in Studio to "
-					.. "the standard %s names. (A rig with no separate hands or feet is fine and "
-					.. "expected; a missing Torso, Head, arm or leg is not.)",
+					.. "the standard %s names. (Hands and feet are not listed here — a rig without "
+					.. "them is a styling choice. Everything named below is not.)",
 				kind,
 				variant,
 				table.concat(names, ", "),

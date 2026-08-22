@@ -619,6 +619,24 @@ local R15_SKELETON = table.freeze({
 	}),
 })
 
+--[[
+	Parts a rig is allowed not to have.
+
+	Plenty of R15 models end the arm at the forearm and the leg at the shin, and
+	that is a styling choice rather than a fault — the existing note on
+	buildMissingJoints says so. Without this the boot report would open by telling
+	somebody that all eight of their specials are missing four parts each, which
+	is the fastest way to teach a person to ignore a report.
+
+	Nothing on an R6 rig is optional: six parts and a root is the whole skeleton.
+]]
+local OPTIONAL_PARTS = table.freeze({
+	LeftHand = true,
+	RightHand = true,
+	LeftFoot = true,
+	RightFoot = true,
+})
+
 local function namedPart(model: Model, name: string): BasePart?
 	local found = model:FindFirstChild(name, true)
 	return if found and found:IsA("BasePart") then found else nil
@@ -773,12 +791,20 @@ function RigUtil.buildMissingJoints(model: Model): (number, { string })
 			nothing. From the outside those two look identical, so the names go
 			back to the caller and it decides what to say about them.
 		]]
+		--[[ OPTIONAL_PARTS are filtered out here for the same reason diagnose
+		     filters them: an R15 rig that ends the arm at the forearm is a styling
+		     choice, and reporting four of those per special teaches people to
+		     ignore the message that also carries the real ones. ]]
 		if not parent then
-			table.insert(unbuildable, spec.parent)
+			if not OPTIONAL_PARTS[spec.parent] then
+				table.insert(unbuildable, spec.parent)
+			end
 			continue
 		end
 		if not child then
-			table.insert(unbuildable, spec.child)
+			if not OPTIONAL_PARTS[spec.child] then
+				table.insert(unbuildable, spec.child)
+			end
 			continue
 		end
 
@@ -917,7 +943,7 @@ function RigUtil.diagnose(model: Model): RigReport
 		if not parent or not child then
 			for _, name in { spec.parent, spec.child } do
 				local present = if name == spec.parent then parent else child
-				if not present and not seenPartName[name] then
+				if not present and not seenPartName[name] and not OPTIONAL_PARTS[name] then
 					seenPartName[name] = true
 					table.insert(missingParts, name)
 				end
