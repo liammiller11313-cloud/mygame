@@ -1214,6 +1214,38 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	end
 
 	local detectedRig, decidedBy = AnimationConfig.rigOf(model)
+	--[[
+		A VARIANT THAT DISAGREES WITH ITS OWN KIND is reported by name.
+
+		animationRig is keyed by KIND, so with thirty-five Commons the last one
+		prepared writes the verdict and the boot summary prints it against all
+		thirty-five names. One model that reads R15 while the rest read R6 is
+		therefore completely invisible there — and it is the single worst thing
+		that can happen to a rig, because it is handed a clip set addressing joints
+		it does not have, which loads, reports itself playing, and moves nothing.
+
+		Cheap to catch: the first variant of a kind sets the expectation and any
+		later one that differs says so.
+	]]
+	local expectedRig = animationRig[kind]
+	if expectedRig and expectedRig ~= detectedRig then
+		local list = rigFaults[kind]
+		if not list then
+			list = {}
+			rigFaults[kind] = list
+		end
+		table.insert(
+			list,
+			string.format(
+				"%s — reads as %s while the rest of this kind read as %s%s, so it is handed clips "
+					.. "for joints it does not have",
+				model.Name,
+				detectedRig,
+				expectedRig,
+				if decidedBy then " (it has a part named " .. decidedBy .. ")" else ""
+			)
+		)
+	end
 	animationRig[kind] = detectedRig
 	if decidedBy then
 		animationRigWhy[kind] = decidedBy

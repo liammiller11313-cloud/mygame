@@ -304,7 +304,9 @@ function RigUtil.enableMotors(model: Model): (number, { string })
 end
 
 function RigUtil.clearDuplicateJoints(model: Model): (number, { string })
-	local kept: { [BasePart]: { [BasePart]: boolean } } = {}
+	--[[ The joint kept for each pair, not merely the fact that one was kept: the
+	     survivor has to be re-posed before its rival is destroyed. ]]
+	local kept: { [BasePart]: { [BasePart]: Motor6D } } = {}
 	local removed = 0
 	local thinned: { string } = {}
 
@@ -314,16 +316,45 @@ function RigUtil.clearDuplicateJoints(model: Model): (number, { string })
 			continue
 		end
 		local spanned = kept[part0]
-		if spanned and spanned[part1] then
-			table.insert(thinned, string.format("%s/%s", part0.Name, part1.Name))
-			motor:Destroy()
-			removed += 1
-			continue
+		if spanned then
+			local survivor = spanned[part1]
+			if survivor then
+				--[[
+					THE SURVIVOR IS RE-DERIVED FROM THE POSE ON SCREEN, and skipping
+					this would let a repair visibly deform the body.
+
+					Only ONE of two joints on a pair is the assembly's tree edge, and
+					that is the one deciding where the limb actually is. The other is
+					redundant and its C0/C1 can say something completely different —
+					they were authored at different times, by different hands, or one
+					of them was generated from standard proportions by this very
+					codebase. Destroy the tree edge and the limb snaps to whatever
+					the survivor happened to believe.
+
+					Which of the two is the tree edge is not something to reason
+					about, so this does not try. Both C0 and C1 are recomputed from
+					where the two parts ARE, which makes Part0.CFrame * C0 ==
+					Part1.CFrame * C1 true for the current pose by construction — the
+					same trick buildMissingJoints uses, and it holds whichever joint
+					was load-bearing.
+
+					Correct at spawn specifically, which is when this runs: the body
+					is still in its authored rest pose, so the pose captured here is
+					the rest pose the animation should offset from.
+				]]
+				survivor.C0 = part0.CFrame:ToObjectSpace(part1.CFrame)
+				survivor.C1 = CFrame.identity
+
+				table.insert(thinned, string.format("%s/%s", part0.Name, part1.Name))
+				motor:Destroy()
+				removed += 1
+				continue
+			end
 		end
 		kept[part0] = kept[part0] or {}
 		kept[part1] = kept[part1] or {}
-		kept[part0][part1] = true
-		kept[part1][part0] = true
+		kept[part0][part1] = motor
+		kept[part1][part0] = motor
 	end
 
 	return removed, thinned
@@ -709,34 +740,74 @@ end
 	joint audit already searched recursively, so this also ends a disagreement
 	where the audit judged a rig R15 and the animator judged the same rig R6.
 ]]
+--[[ Part names that belong to exactly one build. Names both rigs share — Head,
+     HumanoidRootPart — say nothing and are deliberately absent. ]]
+local R6_WITNESS = table.freeze({
+	Torso = true,
+	["Left Arm"] = true,
+	["Right Arm"] = true,
+	["Left Leg"] = true,
+	["Right Leg"] = true,
+})
+local R15_WITNESS = table.freeze({
+	UpperTorso = true,
+	LowerTorso = true,
+	LeftUpperArm = true,
+	RightUpperArm = true,
+	LeftLowerArm = true,
+	RightLowerArm = true,
+	LeftUpperLeg = true,
+	RightUpperLeg = true,
+	LeftLowerLeg = true,
+	RightLowerLeg = true,
+})
+
 function RigUtil.rigTypeOf(model: Model): (string, string?)
+	--[[
+		── COUNTED, NOT DECIDED BY THE FIRST THING SEEN ────────────────────────
+		This returned R15 the moment it met ONE part named UpperTorso or
+		LowerTorso. One stray mesh with that name — a leftover from an R15 donor
+		body, a cosmetic somebody copied in, a part renamed while experimenting —
+		therefore handed an otherwise-perfect R6 Common the R15 clip set. Those
+		clips address LeftUpperArm and RightLowerLeg, which that rig does not
+		have, so they load, report themselves playing, move nothing, and the
+		fallback stands down for a body it should be driving.
+
+		It is a per-model property, so it hit SOME of the thirty-five and not the
+		others, and it is invisible: the boot log said [R6] because that verdict
+		is stored per KIND and the last variant to be prepared overwrote it.
+
+		Counting witnesses instead makes it take five parts to outvote five parts.
+		A real R15 rig has ten distinctive names and a real R6 rig has five, so
+		the honest cases are never close — and one stray part loses 5-to-1 instead
+		of winning outright.
+	]]
+	local r6, r15 = 0, 0
+	local firstR15: string? = nil
 	for _, descendant in model:GetDescendants() do
 		if not descendant:IsA("BasePart") then
 			continue
 		end
-		local name = descendant.Name
-		if name ~= "UpperTorso" and name ~= "LowerTorso" then
+		if descendant:FindFirstAncestorWhichIsA("Accessory") then
 			continue
 		end
-		if not descendant:FindFirstAncestorWhichIsA("Accessory") then
-			--[[ WHICH part decided it, returned alongside the verdict.
-
-			     This is a positive test with one piece of evidence behind it, and
-			     that evidence is worth handing back rather than throwing away.
-			     The verdict picks the clip set, so getting it wrong is the
-			     quietest failure in the game — the tracks load, report themselves
-			     playing, move nothing, and the procedural poser stands down
-			     because tracks are playing. When somebody who built an R6 rig
-			     reads "R15" in the boot summary, the only useful next word is the
-			     name of the part that said so: one stray mesh called LowerTorso,
-			     inside a model that is R6 in every other respect, is the whole
-			     bug and is otherwise invisible.
-
-			     R6 is the ABSENCE of that evidence, so it has none to give and
-			     returns nil. ]]
-			return "R15", name
+		local name = descendant.Name
+		if R6_WITNESS[name] then
+			r6 += 1
+		elseif R15_WITNESS[name] then
+			r15 += 1
+			if not firstR15 then
+				firstR15 = name
+			end
 		end
 	end
+
+	if r15 > r6 then
+		return "R15", firstR15
+	end
+	--[[ Ties and empties both fall to R6, which is this game's overwhelming
+	     majority and the build buildMissingJoints can repair from the fewest
+	     parts. A rig with no distinctive names at all is one nothing can help. ]]
 	return "R6", nil
 end
 
