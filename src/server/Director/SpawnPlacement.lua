@@ -54,6 +54,20 @@ local SIGHT_COS = math.cos(math.rad(SPAWNING.SightCheckFovDegrees * 0.5))
 local GROUND_SEARCH_HEIGHT = 80
 
 --[[
+	How far ABOVE a candidate the ground ray starts.
+
+	Deliberately tiny, and it is the difference between a horde and a rooftop
+	display. Candidates are generated at a SURVIVOR'S OWN HEIGHT — a place a
+	person is standing — so the floor that belongs to them is a few studs below,
+	never above. A generous rise here does not find that floor more reliably; it
+	finds the roof of whatever the candidate is standing next to, and the body is
+	placed on it.
+
+	Five studs covers a node pushed into a kerb and nothing taller than a step.
+]]
+local GROUND_RISE = 5
+
+--[[
 	Steeper than this and it is a wall, not a floor. Geometry sanity, not
 	balance: ~60 degrees. A rig placed on a steep face slides off it immediately
 	and reads as a physics glitch rather than as an enemy arriving.
@@ -400,6 +414,7 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	local anchor = opts.anchor
 	local minDistance = opts.minDistance or SPAWNING.MinDistanceFromSurvivor
 	local maxDistance = opts.maxDistance or SPAWNING.MaxDistanceFromSurvivor
+	local maxHeight = SPAWNING.MaxHeightFromSurvivor
 	local minDistanceSquared = minDistance * minDistance
 	local maxDistanceSquared = maxDistance * maxDistance
 	local attempts = math.max(1, math.floor(opts.attempts or SPAWNING.MaxSpawnAttempts))
@@ -437,6 +452,9 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		else 0
 
 	local tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
+	--[[ Candidates whose ground sat too far above or below the team — a roof, a
+	     gantry, the bottom of a shaft. See where this is counted. ]]
+	local tooHigh = 0
 	--[[ Nodes the walk stepped straight past because they are outside the band.
 	     Counted rather than merged into `tooFar` because they are a different
 	     fact about the map: `tooFar` is candidates this search generated and
@@ -506,7 +524,11 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			-- An anchored search keeps its radius: a bile horde that arrives from
 			-- outside the bile is not the event any more, and PANIC.SpawnRadius is
 			-- that event's own definition rather than a global default.
-			if anchor or (tooFar == 0 and nodesOutOfRange == 0) then
+			--[[ tooHigh votes for this pass too, because pass 3 widens the height
+			     band along with the ceiling — so a map whose only reachable ground
+			     is a storey up would otherwise be refused a relaxation that exists
+			     precisely for it. ]]
+			if anchor or (tooFar == 0 and nodesOutOfRange == 0 and tooHigh == 0) then
 				continue
 			end
 			--[[ BOTH, and that is the point. `maxDistanceSquared` is what the
@@ -517,10 +539,16 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			     identical ground for everything else. ]]
 			maxDistance *= RELAX_DISTANCE
 			maxDistanceSquared = maxDistance * maxDistance
+			--[[ The height band widens with the ceiling rather than staying put.
+			     They are the same concession — "they walk further than ideal" — and
+			     a map that genuinely needs the wider radius is usually the one whose
+			     route also climbs. Still nowhere near a roof eighty studs up. ]]
+			maxHeight *= RELAX_DISTANCE
 			relaxedDistance = true
 		end
 
 		tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
+		tooHigh = 0
 		nodesOutOfRange = 0
 		nodeIndex = 0
 
@@ -643,7 +671,7 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			end
 
 			-- ── one raycast: is there a floor here at all ───────────────────────
-			local ground, normal = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore)
+			local ground, normal = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore, GROUND_RISE)
 			if not ground or not normal then
 				noGround += 1
 				continue
@@ -664,6 +692,35 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			end
 			if groundedNearest < minDistanceSquared then
 				tooClose += 1
+				continue
+			end
+
+			--[[
+				── HOW FAR UP OR DOWN ──────────────────────────────────────────────
+				The distance band is a SPHERE, so without this a point ninety studs
+				overhead and a hundred and fifty out is a perfectly legal spawn. On a
+				map with buildings that is a roof, and what players see is zombies
+				standing in the air that never arrive — while the ones that did
+				arrive are thin, because the stuck ones hold their slots for the full
+				maroon window.
+
+				Measured against the nearest survivor's own height rather than an
+				absolute, so a vertical map costs nothing: a team on a rooftop
+				finale gets rooftop spawns because the rule moves with them.
+
+				Against the GROUND point, not the sample — the sample was generated
+				at survivor height by construction, so testing it would always pass
+				and answer nothing.
+			]]
+			local heightGap = math.huge
+			for index = 1, surveyCount do
+				local gap = math.abs(survey[index].position.Y - ground.Y)
+				if gap < heightGap then
+					heightGap = gap
+				end
+			end
+			if heightGap > maxHeight then
+				tooHigh += 1
 				continue
 			end
 
@@ -746,6 +803,9 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	if nodesOutOfRange > 0 then
 		table.insert(parts, string.format("%d node visit(s) skipped as out of range", nodesOutOfRange))
 	end
+	if tooHigh > 0 then
+		table.insert(parts, string.format("%d too far above or below the team", tooHigh))
+	end
 	if outOfFlow > 0 then
 		table.insert(parts, string.format("%d outside the flow window", outOfFlow))
 	end
@@ -788,7 +848,8 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			end
 		end
 		if #broken < BROKEN_NODES_NAMED then
-			local ground, normal = RaycastUtil.groundAt(node.Position, GROUND_SEARCH_HEIGHT, ignore)
+			local ground, normal =
+				RaycastUtil.groundAt(node.Position, GROUND_SEARCH_HEIGHT, ignore, GROUND_RISE)
 			if not ground or not normal then
 				table.insert(broken, node.Name .. " (nothing under it)")
 			elseif normal.Y < MIN_GROUND_NORMAL_Y then

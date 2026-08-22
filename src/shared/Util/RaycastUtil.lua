@@ -150,9 +150,36 @@ function RaycastUtil.hasLineOfSight(from: Vector3, to: Vector3, ignoreList: { In
 end
 
 --[[
-	Drops a point onto the ground beneath it, returning the surface position and
+	Drops a point onto the ground BENEATH it, returning the surface position and
 	normal. Spawn placement uses this so an infected never appears half-buried in
 	a floor or hovering a stud above it.
+
+	── IT USED TO START THE RAY 80 STUDS IN THE AIR ────────────────────────────
+	`searchHeight` was used for both halves: the cast began at `position + up *
+	searchHeight` and ran down `searchHeight * 2`. So with the 80 the Director
+	passes, "the ground beneath this point" was answered by the first surface
+	found on the way down from eighty studs overhead — which, anywhere near a
+	building, is its ROOF.
+
+	That is not an edge case, it is most of a city map. A ring sample taken at a
+	survivor's own height beside a two-storey building resolved to the top of the
+	building, the body was placed there, and the players saw zombies standing in
+	the air on rooftops that then never reached them. It also explains a Jockey
+	steering toward a ledge overhead and a Spitter pooling acid on a roof: every
+	one of the seven callers wants the floor under a point, and every one of them
+	could be handed something above it instead.
+
+	So the parameter now means what its callers always assumed: how far DOWN to
+	look. The rise above is a separate, small clearance — enough that a point
+	sunk into a kerb or a node a designer pushed into the floor still finds the
+	surface it is sitting in, and far too little to reach a roof.
+
+	── WHAT THIS CANNOT DO ─────────────────────────────────────────────────────
+	It still cannot tell a street from the roof of a low shed the point happens
+	to be standing on, because from a downward ray those are the same reading.
+	Nothing about a raycast can. That question is "can a body walk from here to
+	the team", and it belongs to the caller — SpawnPlacement answers a cheap
+	approximation of it with a height band against the nearest survivor.
 
 	Reuses one params object, on the same reasoning as sightParams above: every
 	spawn attempt in the placement ladder calls this — three relaxation passes
@@ -164,14 +191,22 @@ groundParams.FilterType = Enum.RaycastFilterType.Exclude
 groundParams.IgnoreWater = true
 groundParams.RespectCanCollide = false
 
+--[[ How far above the point the cast begins when the caller does not say. Sized
+     for a point embedded in the surface it belongs to — a kerb, a sunk part, a
+     node dragged a little into the floor — and deliberately far below one
+     storey, so a roof can never answer a question about a street. ]]
+local DEFAULT_RISE = 10
+
 function RaycastUtil.groundAt(
 	position: Vector3,
-	searchHeight: number,
-	ignoreList: { Instance }
+	searchDepth: number,
+	ignoreList: { Instance },
+	riseAbove: number?
 ): (Vector3?, Vector3?)
-	local from = position + Vector3.new(0, searchHeight, 0)
+	local rise = riseAbove or DEFAULT_RISE
+	local from = position + Vector3.new(0, rise, 0)
 	groundParams.FilterDescendantsInstances = ignoreList
-	local result = workspace:Raycast(from, Vector3.new(0, -(searchHeight * 2), 0), groundParams)
+	local result = workspace:Raycast(from, Vector3.new(0, -(rise + searchDepth), 0), groundParams)
 	if not result then
 		return nil, nil
 	end

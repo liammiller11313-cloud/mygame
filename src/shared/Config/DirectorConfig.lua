@@ -58,6 +58,27 @@ DirectorConfig.Population = table.freeze({
 DirectorConfig.Spawning = table.freeze({
 	MinDistanceFromSurvivor = 45,
 	MaxDistanceFromSurvivor = 190,
+	--[[
+		How far ABOVE OR BELOW the nearest survivor a body may be placed.
+
+		The distance band is a sphere, so without this a point ninety studs up and
+		a hundred and fifty out is a legal spawn — and on a city map that is a
+		roof. Players looked up and saw zombies standing in the air, and those
+		bodies then spent the whole maroon window failing to find a way down while
+		counting against the population the Director is allowed.
+
+		Relative to the survivor rather than absolute, so it costs nothing on a
+		vertical map: a team on a rooftop finale gets rooftop spawns, because the
+		rule follows them. Twenty-five studs is somewhere between one and two
+		storeys — enough for a zombie to come down the stairs of the building you
+		are about to enter, far short of the top of it.
+
+		This is a cheap stand-in for the real question, which is "can a body walk
+		from here to the team". A raycast cannot answer that — the roof of a low
+		shed reads exactly like a street — and the honest fix for the rest of it is
+		FL_SpawnNode parts, which are a person answering it directly.
+	]]
+	MaxHeightFromSurvivor = 25,
 	MinFlowAhead = -40, -- may spawn slightly behind the team
 	MaxFlowAhead = 240, -- but mostly ahead of them
 	RequireOutOfSight = true,
