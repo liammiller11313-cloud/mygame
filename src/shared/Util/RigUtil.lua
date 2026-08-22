@@ -274,6 +274,35 @@ end
 	that: any survivor is correct once the rest are gone, and preferring the
 	author's is the least surprising rule.
 ]]
+--[[
+	Re-enables Motor6Ds somebody switched off, and returns which.
+
+	Motor6D.Enabled is a serialized property that defaults to true and is
+	invisible in the Explorer — you only see it by selecting that exact joint and
+	reading the Properties pane. A disabled one is still a Motor6D: it is counted
+	by every check in this project, it reports its Part0 and Part1, it satisfies
+	"fully jointed", and the engine will not drive it. The limb does not move and
+	nothing anywhere says why.
+
+	It gets switched off by ragdoll code, by plugins, and by hand while somebody
+	is debugging a rig. It is the cheapest possible fault to fix and was the
+	hardest to see.
+]]
+function RigUtil.enableMotors(model: Model): (number, { string })
+	local fixed = 0
+	local names: { string } = {}
+	for _, motor in RigUtil.getMotors(model) do
+		if motor.Enabled then
+			continue
+		end
+		motor.Enabled = true
+		fixed += 1
+		table.insert(names, if motor.Part1 then motor.Part1.Name else motor.Name)
+	end
+	table.sort(names)
+	return fixed, names
+end
+
 function RigUtil.clearDuplicateJoints(model: Model): (number, { string })
 	local kept: { [BasePart]: { [BasePart]: boolean } } = {}
 	local removed = 0
@@ -828,8 +857,26 @@ function RigUtil.buildMissingJoints(model: Model): (number, { string })
 			continue
 		end
 
+		--[[
+			Only a joint holding THIS PAIR, not every joint touching the limb.
+
+			This destroyed anything weld-shaped attached to the child part, which
+			is far more than it needed and takes cosmetics with it: a hat welded to
+			a Head on a rig with no Neck, a prop welded to an arm on a rig with no
+			shoulder. Those are exactly the rigs this branch runs on, so the
+			over-reach fired precisely where it did the most damage.
+
+			A weld between the two parts about to be jointed genuinely has to go —
+			a weld and a Motor6D on one pair fight, and the weld wins. A weld
+			anywhere else is somebody's model.
+		]]
 		for _, joint in child:GetJoints() do
-			if joint:IsA("WeldConstraint") or joint:IsA("Weld") or joint:IsA("Snap") then
+			if joint:IsA("Motor6D") then
+				continue
+			end
+			local held: any = joint
+			local a, b = held.Part0, held.Part1
+			if (a == parent and b == child) or (a == child and b == parent) then
 				joint:Destroy()
 			end
 		end
@@ -858,6 +905,7 @@ export type RigReport = {
 	hasHumanoid: boolean,
 	hasAnimator: boolean,
 	duplicates: { string },
+	disabled: { string },
 	rivalWelds: { string },
 	backwards: { string },
 	missingJoints: { string },
@@ -928,6 +976,13 @@ function RigUtil.diagnose(model: Model): RigReport
 		end
 	end
 
+	local disabled: { string } = {}
+	for _, motor in motors do
+		if not motor.Enabled then
+			table.insert(disabled, if motor.Part1 then motor.Part1.Name else motor.Name)
+		end
+	end
+
 	local backwards: { string } = {}
 	local have: { [string]: boolean } = {}
 	for motor, child in RigUtil.mapMotorChildren(model) do
@@ -970,6 +1025,7 @@ function RigUtil.diagnose(model: Model): RigReport
 	end
 
 	table.sort(duplicates)
+	table.sort(disabled)
 	table.sort(rivals)
 	table.sort(backwards)
 	table.sort(missingParts)
@@ -981,6 +1037,7 @@ function RigUtil.diagnose(model: Model): RigReport
 		hasHumanoid = humanoid ~= nil,
 		hasAnimator = humanoid ~= nil and humanoid:FindFirstChildOfClass("Animator") ~= nil,
 		duplicates = duplicates,
+		disabled = disabled,
 		rivalWelds = rivals,
 		backwards = backwards,
 		missingJoints = missingJoints,
@@ -1010,6 +1067,12 @@ function RigUtil.describeFaults(report: RigReport): string?
 				#report.duplicates,
 				table.concat(report.duplicates, ", ")
 			)
+		)
+	end
+	if #report.disabled > 0 then
+		table.insert(
+			parts,
+			string.format("%d DISABLED joint(s): %s", #report.disabled, table.concat(report.disabled, ", "))
 		)
 	end
 	if #report.rivalWelds > 0 then

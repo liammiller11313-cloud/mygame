@@ -89,6 +89,23 @@ Attributes.Infected = table.freeze({
 	     read by GoreService as how long to hold the ragdoll so the collapse is
 	     animated rather than replaced. Absent means ragdoll now. ]]
 	DeathHold = "FL_DeathHold",
+	--[[
+		boolean. Whether this body has any animation track that can actually drive
+		it — written by InfectedAnimator, read by the client's procedural poser.
+
+		The poser used to decide for itself by asking whether any track was
+		PLAYING, which is true of a track that moves absolutely nothing. Every way
+		a rig can be broken produces exactly that, so the fallback stood down for
+		precisely the bodies that needed it and they slid around the map animated
+		by neither. The client cannot tell the difference from where it stands —
+		but the server already knows, because it is the thing that loaded the
+		tracks and the thing that threw the dead ones away.
+
+		So it says so, and there is one writer and one answer. Absent means "no
+		opinion yet", which the poser treats as animated, because seizing a rig on
+		no evidence would fight a clip that is perfectly fine.
+	]]
+	Animated = "FL_Animated",
 })
 
 -- Written on a dropped pickup Model so the interact prompt can label it.

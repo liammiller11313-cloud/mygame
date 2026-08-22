@@ -24,6 +24,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AnimationCache = require(Shared.Util.AnimationCache)
+local Attributes = require(Shared.Net.Attributes)
 local AnimationConfig = require(Shared.Config.AnimationConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 
@@ -196,12 +197,29 @@ local function warnOnce(key: string, message: string)
 	warn("[InfectedAnimator] " .. message)
 end
 
+--[[
+	Publishes whether this body has anything that can actually drive it.
+
+	The client's procedural poser reads it. That controller cannot work the answer
+	out for itself: from where it stands a track that moves nothing is
+	indistinguishable from one that works, because both report IsPlaying — and
+	every way a rig can be broken produces exactly the first. It stood down for
+	precisely the bodies that needed it, and they slid around animated by neither.
+
+	Here the answer is simply known. This module loaded the tracks, and dropFailed
+	is the thing that throws the dead ones away.
+]]
+local function publishAnimated(model: Model, animated: boolean)
+	model:SetAttribute(Attributes.Infected.Animated, animated)
+end
+
 --[[ Loads one track per role. Tracks are loaded ONCE at spawn: Animator:LoadAnimation
      yields on first use for an id the client has never seen, and doing that lazily
      in the middle of a horde is a frame spike per new zombie. ]]
 function InfectedAnimator.new(model: Model, kind: string)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
+		publishAnimated(model, false)
 		return nil
 	end
 	--[[
@@ -449,9 +467,11 @@ function InfectedAnimator.new(model: Model, kind: string)
 				rig
 			)
 		)
+		publishAnimated(model, false)
 		return nil
 	end
 
+	publishAnimated(model, true)
 	return self
 end
 
@@ -617,6 +637,10 @@ local function dropFailed(self)
 	     next setState has to be treated as a change rather than as a no-op. ]]
 	self.current = ""
 	self.rate = -1
+	--[[ And the client is told, because this is the moment a body that looked
+	     animated stops being one. Without this the poser keeps standing down for
+	     a rig whose tracks were just destroyed. ]]
+	publishAnimated(self.model, next(self.tracks) ~= nil)
 end
 
 --[[ Reads the body and picks a state. This is the only thing the brain has to

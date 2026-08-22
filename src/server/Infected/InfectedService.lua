@@ -757,6 +757,26 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 		is how each individual model happens to be organised. A flat rig was fine.
 		A foldered one was not. Thirty-five models assembled by hand are a mix.
 	]]
+	--[[ A joint somebody switched off. Enabled is serialized, defaults to true,
+	     and is invisible unless you select that exact Motor6D and read the
+	     Properties pane — so a disabled one satisfies every "fully jointed" check
+	     in the project while the engine quietly refuses to drive it. ]]
+	local reEnabled, reEnabledNames = RigUtil.enableMotors(model)
+	if reEnabled > 0 then
+		warnOnce(
+			"disabled:" .. variant,
+			string.format(
+				"%s variant %q had %d joint(s) with Enabled set to false (%s). Roblox will not drive "
+					.. "a disabled Motor6D, so those limbs never moved while every check called the "
+					.. "rig complete. Switched back on at spawn; fix it in the model in Studio.",
+				kind,
+				variant,
+				reEnabled,
+				table.concat(reEnabledNames, ", ")
+			)
+		)
+	end
+
 	local dupesCut, dupePairs = RigUtil.clearDuplicateJoints(model)
 	if dupesCut > 0 then
 		table.sort(dupePairs)

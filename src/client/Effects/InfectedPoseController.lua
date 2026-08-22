@@ -471,6 +471,36 @@ end
 local TRACK_CHECK_INTERVAL = 0.5
 
 local function hasPlayingTracks(body: Body): boolean
+	--[[
+		THE SERVER'S VERDICT FIRST, because this controller cannot reach it.
+
+		Asking whether a track is PLAYING is not the same as asking whether
+		anything is MOVING, and every way a rig can be broken produces the first
+		without the second: an R6 clip on an R15 skeleton, a joint wired
+		backwards, a duplicate Motor6D pinning the pair, a weld beside a joint, a
+		disabled Motor6D, an empty upload, an asset that never fetched. In all of
+		them the track loads, reports IsPlaying, and the body stands still — so
+		this test handed the joints back and stood down for exactly the bodies
+		that needed it. Not animated by the clip, not animated by the fallback,
+		sliding around in its rest pose. That is "some of them just drag around".
+
+		Measuring movement from here does not work either: while this controller
+		is posing, the joints change every frame BECAUSE it is changing them, so a
+		movement test reads "animated", stands down, then reads "not animated" and
+		takes the rig back — a 2Hz oscillation, which is worse than the bug. That
+		was simulated before it was written, and it is why this is an attribute
+		instead.
+
+		The server has the answer for free: it loaded the tracks and it is what
+		throws the dead ones away. Absent means no opinion yet, which is treated
+		as animated — seizing a rig on no evidence would fight a clip that is
+		perfectly fine.
+	]]
+	if Attributes.get(body.model, IA.Animated, true) == false then
+		body.trackOwned = false
+		return false
+	end
+
 	local animator = body.animator
 	if not animator then
 		return false
