@@ -722,8 +722,46 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 	local variant = tostring(model:GetAttribute("FL_Variant") or model.Name)
 
 	--[[
-		BACKWARDS JOINTS FIRST, because a backwards joint is not a missing one and
-		nothing below would ever notice it.
+		RIVAL WELDS FIRST, because a rig that has this wrong passes every other
+		test in this file and in every diagnostic script in the repo.
+
+		Two rigid joints between the same two parts over-constrains the assembly.
+		Roblox pins the pair; the Motor6D is still there and the animation still
+		writes its Transform every frame, and the limb does not move because the
+		weld beside it is holding the offset and winning.
+
+		Nothing catches it. buildMissingJoints below clears rival welds only off a
+		limb whose joint it is about to build — inside the loop, after the skip for
+		a limb that already has one — so it fires exactly when there is no Motor6D
+		to be over-constrained by. RigDoctor says "fully jointed". CheckAnimations
+		says every id is fine. The rig type is right, the clip is right, the joints
+		are all present, and the body slides around in its rest pose.
+
+		That is "some of the common infected just drag around", and it is what you
+		get for free by assembling a model in Studio, where dragging parts together
+		welds them.
+	]]
+	local weldsCut, cutPairs = RigUtil.clearRivalJoints(model)
+	if weldsCut > 0 then
+		table.sort(cutPairs)
+		warnOnce(
+			"welded:" .. variant,
+			string.format(
+				"%s variant %q had %d weld(s) holding pairs that already have a Motor6D (%s). Two "
+					.. "rigid joints on one pair pins it, so the animation drove those limbs and "
+					.. "nothing moved. Cut at spawn, which fixes the body and not the model: run "
+					.. "studio-scripts/RigDoctor to cut them where it saves.",
+				kind,
+				variant,
+				weldsCut,
+				table.concat(cutPairs, ", ")
+			)
+		)
+	end
+
+	--[[
+		BACKWARDS JOINTS NEXT, because a backwards joint is not a missing one and
+		nothing below would ever notice it either.
 
 		Roblox's animator treats each Motor6D's Part1 as the bone and drives the
 		pose with that part's name. A shoulder built the other way round —

@@ -221,6 +221,7 @@ function InfectedAnimator.new(model: Model, kind: string)
 		here rather than in a warning telling somebody to go and add one by hand
 		to thirty-five models.
 	]]
+	local variant = tostring(model:GetAttribute("FL_Variant") or model.Name)
 	local existing = humanoid:FindFirstChildOfClass("Animator")
 	local animator: Animator
 	if existing then
@@ -228,6 +229,32 @@ function InfectedAnimator.new(model: Model, kind: string)
 	else
 		animator = Instance.new("Animator")
 		animator.Parent = humanoid
+		--[[
+			SAID OUT LOUD, and that matters more than the repair.
+
+			This was silent, on the reasoning that making the object IS the fix and
+			nobody should have to be told. That reasoning cost a long hunt. A body
+			with no Animator loaded no tracks, so nothing warned about a bad id, a
+			wrong rig, or an empty set — and the client's procedural poser picked it
+			up and shambled it, complete with its per-body drag. From the outside
+			that is a zombie animating slightly wrong, which is indistinguishable
+			from a zombie whose clips are slightly wrong, and it sent every
+			diagnostic looking at the clips.
+
+			So it reports. A rig missing this is a rig missing it in Studio too,
+			where it is one object and it stays fixed.
+		]]
+		warnOnce(
+			"noanimator:" .. variant,
+			string.format(
+				"%s variant %q had no Animator under its Humanoid, so it could not play a single "
+					.. "clip and the client's procedural poser was driving it — which looks like a "
+					.. "zombie that shambles and drags rather than like a broken one. One was "
+					.. "created at spawn. Add an Animator to the model in Studio to fix it there.",
+				kind,
+				variant
+			)
+		)
 	end
 
 	--[[ No longer fatal. A rig with no harvested folder can still be animated
@@ -318,13 +345,18 @@ function InfectedAnimator.new(model: Model, kind: string)
 	local set = AnimationConfig.forInfected(kind, rig)
 
 	if not set then
+		--[[ Per VARIANT, not per kind. rigOf is asked per MODEL, so two Commons out
+		     of thirty-five can disagree about their own build — and keyed by kind
+		     the second one is silenced by the first, which is how a single bad
+		     model hides behind thirty-four good ones. ]]
 		warnOnce(
-			string.format("norig:%s", kind),
+			string.format("norig:%s", variant),
 			string.format(
-				"%s is an %s rig and AnimationConfig has no set that addresses those joint names. "
-					.. "The client's procedural poser will drive it instead. Add an entry under "
-					.. "AnimationConfig.ByRig to give it real clips.",
+				"%s variant %q is an %s rig and AnimationConfig has no set that addresses those "
+					.. "joint names. The client's procedural poser will drive it instead. Add an "
+					.. "entry under AnimationConfig.ByRig to give it real clips.",
 				kind,
+				variant,
 				rig
 			)
 		)
@@ -366,9 +398,20 @@ function InfectedAnimator.new(model: Model, kind: string)
 					string.format("%s is not a usable animation id (%s/%s)", tostring(id), kind, role)
 				)
 			elseif not adopt(role, animation) then
+				--[[ Keyed by VARIANT, unlike the two id-keyed warnings either side
+				     of it. This is the failure branch of a pcall around THIS body's
+				     Animator:LoadAnimation, so it is a fact about the body rather
+				     than about the asset — and every R6 Common draws the same id, so
+				     keying it by id silences the second rig that cannot load it. ]]
 				warnOnce(
-					"refused:" .. tostring(id),
-					string.format("the Animator refused animation %d for %s/%s", id, kind, role)
+					"refused:" .. variant,
+					string.format(
+						"the Animator on %s variant %q refused animation %d for role %q",
+						kind,
+						variant,
+						id,
+						role
+					)
 				)
 			elseif AnimationCache.hasFailed(id) then
 				--[[ LoadAnimation does not throw for an id that does not exist or
@@ -391,12 +434,19 @@ function InfectedAnimator.new(model: Model, kind: string)
 	end
 
 	if next(self.tracks) == nil then
+		--[[ Per variant, and it names the rig, because this is the message that
+		     ends a search: a body here is one the poser shambles and drags, which
+		     from the outside looks like a zombie whose clips are slightly wrong
+		     rather than one with no clips at all. ]]
 		warnOnce(
-			"empty:" .. kind,
+			"empty:" .. variant,
 			string.format(
-				"%s has no usable animations from its rig or from AnimationConfig — the client's "
-					.. "procedural poser will drive it",
-				kind
+				"%s variant %q (%s) has no usable animations from its rig or from AnimationConfig "
+					.. "— the client's procedural poser will drive it, which reads as a body that "
+					.. "shambles and drags rather than as a body that is broken",
+				kind,
+				variant,
+				rig
 			)
 		)
 		return nil
@@ -409,21 +459,41 @@ end
      so a fast zombie does not appear to skate. Called from the shared brain tick;
      it does nothing at all when the state has not changed. ]]
 function InfectedAnimator.setState(self, role: string, speed: number)
-	local track = self.tracks[role] or self.tracks.walk or self.tracks.idle
-	if not track then
+	--[[
+		The role is RESOLVED first, and everything below keys off what was actually
+		found rather than off what was asked for.
+
+		The two were the same expression and it mattered. A body missing the
+		requested role falls through to walk or idle, but `self.current` recorded
+		the REQUESTED name — so on the next tick the comparison failed again, the
+		stop loop (which also filtered on the requested name) stopped the very
+		track about to be played, and the fallback restarted from t=0. Every tick.
+		A body in that state stands twitching on the first frame of its walk
+		instead of walking.
+
+		It bites hardest right after dropFailed has thrown a role away, which is
+		exactly when the body most needs the fallback to be steady.
+	]]
+	local key = if self.tracks[role]
+		then role
+		elseif self.tracks.walk then "walk"
+		elseif self.tracks.idle then "idle"
+		else nil
+	if not key then
 		return
 	end
+	local track = self.tracks[key]
 
-	if self.current ~= role then
+	if self.current ~= key then
 		for name, other in self.tracks do
-			if name ~= role and other.IsPlaying and other.Looped then
+			if name ~= key and other.IsPlaying and other.Looped then
 				other:Stop(FADE)
 			end
 		end
 		if not track.IsPlaying then
 			track:Play(FADE)
 		end
-		self.current = role
+		self.current = key
 		--[[ A different track carries its own speed, so the cached rate says
 		     nothing about it. Forgetting this is how a body switching from run to
 		     walk at a matching numeric rate keeps the run's playback speed. ]]
@@ -499,10 +569,32 @@ end
 local function dropFailed(self)
 	local dropped = false
 	for role, id in self.trackIds do
-		if not AnimationCache.hasFailed(id) then
+		local track = self.tracks[role]
+		--[[
+			Two ways a track is dead, and the second one needs care.
+
+			A REFUSED fetch is unambiguous: hasFailed is true only when PreloadAsync
+			came back with a non-Success status, and "not asked yet" reads false, so
+			nothing is thrown away for being slow.
+
+			An EMPTY UPLOAD — published with no keyframes — fetches perfectly well
+			and is zero seconds long. It plays, reports IsPlaying, moves nothing,
+			and stands the poser down: the same failure, from the other direction.
+			But Length is ALSO zero for a clip whose asset has not landed yet, and
+			those two want opposite treatment. Testing length alone would destroy
+			healthy tracks during the first seconds of a server — worst for the
+			rig-harvested ids, whose fetch does not even START until the first body
+			of that rig spawns, so the first body would be asked two seconds later
+			whether its own cold fetch had finished.
+
+			So length only counts once the fetch is known to have SUCCEEDED. Then a
+			zero means the upload is empty and always will be.
+		]]
+		local refused = AnimationCache.hasFailed(id)
+		local emptyUpload = AnimationCache.isLoaded(id) and track ~= nil and track.Length <= 0
+		if not refused and not emptyUpload then
 			continue
 		end
-		local track = self.tracks[role]
 		if track then
 			--[[ Stopped before it is forgotten. A track this module drops still
 			     belongs to the Animator, and one left playing keeps the poser

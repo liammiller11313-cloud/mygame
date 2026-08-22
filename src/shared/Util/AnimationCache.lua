@@ -206,6 +206,63 @@ function AnimationCache.hasFailed(id: number | string): boolean
 end
 
 --[[
+	Ids proven to be EMPTY UPLOADS — published before any keyframes were saved.
+
+	This cannot be answered from a fetch status, because such a clip fetches
+	perfectly well. It is only visible on a real AnimationTrack, whose Length
+	stays zero, so the answer arrives from whoever loaded one and is remembered
+	here for every later caller. Server-wide and permanent: an empty asset does
+	not fill in later.
+]]
+local emptyIds: { [string]: boolean } = {}
+
+--[[
+	Reports what a real track measured, so the next caller does not have to.
+
+	The zero is only believed once the fetch is known to have SUCCEEDED. Length
+	is also zero for a clip whose asset has not landed, and treating those the
+	same would condemn healthy clips during exactly the seconds when everything
+	is loading at once. A non-zero length always clears the flag — proof beats
+	any earlier guess.
+]]
+function AnimationCache.noteLength(id: number | string, length: number)
+	local key = contentId(id)
+	if not key then
+		return
+	end
+	if length > 0 then
+		emptyIds[key] = nil
+	elseif status[key] == true then
+		emptyIds[key] = true
+	end
+end
+
+--[[ Whether an id is known to be an empty upload. False for one nobody has
+     measured yet, so a caller can act on a fact rather than on a suspicion. ]]
+function AnimationCache.isEmpty(id: number | string): boolean
+	local key = contentId(id)
+	return key ~= nil and emptyIds[key] == true
+end
+
+--[[
+	Whether an id is known to have ARRIVED. The positive counterpart to hasFailed,
+	and false for an id that has simply not been asked about yet.
+
+	Both are needed because there are three states, not two — succeeded, failed,
+	and not yet known — and the third one is the reason a naive length test is
+	dangerous. An AnimationTrack's Length is 0 both for an empty upload and for a
+	clip whose asset has not landed, and those want opposite treatment: throw the
+	first away, wait for the second. Asking "did the fetch succeed AND is the
+	length still zero" separates them; asking about length alone destroys healthy
+	tracks during the first seconds of a server, which is exactly when a horde is
+	arriving.
+]]
+function AnimationCache.isLoaded(id: number | string): boolean
+	local key = contentId(id)
+	return key ~= nil and status[key] == true
+end
+
+--[[
 	Loads a track from an id, keeping the instance alive.
 
 	The whole reason this module exists, as one call: every previous caller wrote

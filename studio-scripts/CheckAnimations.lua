@@ -394,12 +394,35 @@ end
 --[[ What rig each id is EXPECTED to address, from where it is declared — so a
      clip that turns out to be R15 sitting in the R6 set can be named as the
      mismatch it is rather than merely described. ]]
-local expected: { [number]: string } = {}
+--[[
+	── A SET OF RIGS PER ID, NOT ONE ───────────────────────────────────────────
+	This was `{ [number]: string }` and every writer below was a plain
+	assignment, so an id declared in two sets kept whichever loop ran last and
+	the other declaration was never examined. The mismatch test then compared the
+	clip against its own surviving declaration and passed.
+
+	That is not hypothetical: 85609984089861 was the death clip in BOTH the R6
+	and R15 zombie sets. It is an R6 clip. This script printed `ok` for it while
+	all eight R15 specials froze upright for its 0.97s on every kill, because the
+	one row it could have reported it on was the row it had already overwritten.
+
+	A set makes the double declaration itself the finding — an id claimed by two
+	rigs is wrong no matter which of them the clip turns out to match, so it is
+	tested BEFORE the mismatch test rather than after it.
+]]
+local expected: { [number]: { [string]: boolean } } = {}
+local function expect(id: any, rig: string)
+	if typeof(id) ~= "number" or id <= 0 then
+		return
+	end
+	expected[id] = expected[id] or {}
+	expected[id][rig] = true
+end
 for rig, set in AnimationConfig.ByRig do
 	for role, ids in set do
 		if role ~= "rig" and typeof(ids) == "table" then
 			for _, id in ids do
-				expected[id] = rig
+				expect(id, rig)
 			end
 		end
 	end
@@ -409,14 +432,14 @@ for _, set in AnimationConfig.Infected do
 		for role, ids in set do
 			if role ~= "rig" and typeof(ids) == "table" then
 				for _, id in ids do
-					expected[id] = set.rig
+					expect(id, set.rig)
 				end
 			end
 		end
 	end
 end
 for rig, id in AnimationConfig.SurvivorHold do
-	expected[id] = rig
+	expect(id, rig)
 end
 
 --[[
@@ -433,12 +456,19 @@ local SURVIVOR_RIG = "R15"
 for _, set in AnimationConfig.Weapon do
 	for _, id in set do
 		if typeof(id) == "number" then
-			expected[id] = SURVIVOR_RIG
+			expect(id, SURVIVOR_RIG)
 		end
 	end
 end
 
-local broken, empty, mismatched, unknown, good = {}, {}, {}, {}, 0
+--[[ The spare fire/reload clips play on the same survivor as the class ones, so
+     they answer to the same rig. Without this they had no expectation at all and
+     `want and ...` short-circuited their rig check into a silent pass. ]]
+for _, id in AnimationConfig.WeaponFallback do
+	expect(id, SURVIVOR_RIG)
+end
+
+local broken, empty, mismatched, conflicted, unknown, good = {}, {}, {}, {}, {}, 0
 
 local RULE = string.rep("─", 70)
 
@@ -450,12 +480,33 @@ for _, id in order do
 	local what = table.concat(labels[id], ", ")
 	local length = lengths[id] or 0
 	local rig = rigs[id] or "?"
-	local want = expected[id]
+	local wants = {}
+	for rigName in expected[id] or {} do
+		table.insert(wants, rigName)
+	end
+	table.sort(wants)
+	local want = wants[1]
 	local status
 
 	if fetched[key] == false then
 		status = "REFUSED"
 		table.insert(broken, string.format("%s (%s) — %s", tostring(id), what, reason[key] or "?"))
+	elseif #wants > 1 then
+		--[[ Ahead of the mismatch test on purpose. One clip addresses ONE
+		     skeleton's joint names, so an id claimed by two rigs is wrong whichever
+		     of them it turns out to match — and matching one of them is exactly how
+		     this used to absolve itself. ]]
+		status = "DOUBLE "
+		table.insert(
+			conflicted,
+			string.format(
+				"%s (%s) is declared under %s, and it is a %s clip",
+				tostring(id),
+				what,
+				table.concat(wants, " AND "),
+				rig
+			)
+		)
 	elseif length <= 0 then
 		status = "EMPTY  "
 		table.insert(empty, string.format("%s (%s)", tostring(id), what))
@@ -477,7 +528,7 @@ for _, id in order do
 end
 
 print("")
-if #broken == 0 and #empty == 0 and #mismatched == 0 and #unknown == 0 then
+if #broken == 0 and #empty == 0 and #mismatched == 0 and #conflicted == 0 and #unknown == 0 then
 	print(string.format("[CheckAnimations] all %d ids load and have real clips behind them.", good))
 else
 	if #broken > 0 then
@@ -498,6 +549,18 @@ else
 		warn("    These were published with no keyframes saved. Open each in the")
 		warn("    Animation Editor, check it actually has poses on the timeline, and")
 		warn("    publish again.")
+	end
+	if #conflicted > 0 then
+		warn(string.format("[CheckAnimations] %d id(s) declared under MORE THAN ONE RIG:", #conflicted))
+		for _, line in conflicted do
+			warn("    " .. line)
+		end
+		warn("    A clip addresses one skeleton's joint names. On the other build it")
+		warn("    loads, reports itself playing, has a real length, and moves nothing —")
+		warn("    and the procedural poser stands down for it, so the body is animated")
+		warn("    by neither. Delete it from the set it does not belong to.")
+		warn("    scripts/audit.py check 14 fails the build on this, so it cannot come")
+		warn("    back silently once it is fixed.")
 	end
 	if #mismatched > 0 then
 		warn(string.format("[CheckAnimations] %d id(s) address the WRONG RIG:", #mismatched))

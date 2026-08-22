@@ -56,6 +56,7 @@ local REPAIR = false -- set to true to actually build the missing joints
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
+local Workspace = game:GetService("Workspace")
 
 --[[ The R6 skeleton, parent -> child, with the pivot expressed in the PARENT's
      own space as fractions of the two parts' sizes. Fractions rather than studs
@@ -190,14 +191,17 @@ end
 --[[ Welds between two rig parts are the usual reason a model has no joints: it
      was built by dragging parts together and Studio welded them. They have to
      GO — a weld and a Motor6D on the same pair fight, and the weld wins. ]]
-local function clearWelds(parent, child)
+local function clearWelds(model, parent, child)
 	local removed = 0
-	for _, d in parent.Parent:GetDescendants() do
+	--[[ The MODEL, not `parent.Parent`. A weld does not have to live inside
+	     either part it joins, and on a rig whose parts were grouped into a Folder
+	     — the case rigTypeOf was widened to handle — the container is not the
+	     model and half the welds are outside the search. ]]
+	for _, d in model:GetDescendants() do
 		if d:IsA("WeldConstraint") or d:IsA("Weld") or d:IsA("Snap") then
+			-- All three expose Part0/Part1; there used to be a WeldConstraint
+			-- branch here re-reading the same two fields, which did nothing.
 			local a, b = d.Part0, d.Part1
-			if d:IsA("WeldConstraint") then
-				a, b = d.Part0, d.Part1
-			end
 			if (a == parent and b == child) or (a == child and b == parent) then
 				d:Destroy()
 				removed += 1
@@ -205,6 +209,51 @@ local function clearWelds(parent, child)
 		end
 	end
 	return removed
+end
+
+--[[
+	Welds that duplicate a Motor6D — the fault every other check here is blind to.
+
+	Two rigid joints between the same two parts over-constrains the assembly.
+	Roblox spans the rigid-joint graph and one of them decides the relative
+	CFrame; when it is the weld, the animation writes the Motor6D's Transform
+	every frame and the limb does not move. Which one wins is not guaranteed, so
+	the symptom can be intermittent — a limb that animates in one place and not
+	another, which reads as a flaky animation rather than a broken model.
+
+	Reported for every rig, repaired only in REPAIR mode. Strictly PAIR-scoped:
+	the test is "do these two parts already have a Motor6D between them", which
+	is true only of a duplicate. A hat welded to a head, a weapon welded to a
+	hand, the Boomer's hump welded to its torso — none of those pairs has a
+	Motor6D, so none of them is touched.
+]]
+local function rivalWelds(model, repair)
+	local jointed = {}
+	for _, d in model:GetDescendants() do
+		if d:IsA("Motor6D") and d.Part0 and d.Part1 and d.Part0 ~= d.Part1 then
+			jointed[d.Part0] = jointed[d.Part0] or {}
+			jointed[d.Part1] = jointed[d.Part1] or {}
+			jointed[d.Part0][d.Part1] = true
+			jointed[d.Part1][d.Part0] = true
+		end
+	end
+
+	local found = {}
+	for _, d in model:GetDescendants() do
+		if not (d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("Snap")) then
+			continue
+		end
+		local a, b = d.Part0, d.Part1
+		if not a or not b or not jointed[a] or not jointed[a][b] then
+			continue
+		end
+		table.insert(found, a.Name .. "/" .. b.Name)
+		if repair then
+			d:Destroy()
+		end
+	end
+	table.sort(found)
+	return found
 end
 
 --[[
@@ -246,6 +295,16 @@ local function inspect(model, label)
 		`Part0.CFrame * C0 == Part1.CFrame * C1` saying exactly what it said
 		before, so nothing moves by a stud.
 	]]
+	--[[ Before anything else, because a rig with this fault passes every other
+	     test in this file: the joints are all present, the parts are all named,
+	     and the body still does not animate. ]]
+	local rivals = rivalWelds(model, REPAIR)
+	if #rivals > 0 then
+		local line =
+			string.format("%d weld(s) duplicating a Motor6D (%s)", #rivals, table.concat(rivals, ", "))
+		table.insert(if REPAIR then fixes else notes, if REPAIR then "cut " .. line else line)
+	end
+
 	local backwards = {}
 	for motor, child in children do
 		if motor.Part1 == child or motor.Part0 ~= child then
@@ -311,7 +370,7 @@ local function inspect(model, label)
 		end
 		table.insert(missing, spec.joint)
 		if REPAIR then
-			welds += clearWelds(parent, child)
+			welds += clearWelds(model, parent, child)
 			buildJoint(spec, parent, child)
 			built += 1
 		end
@@ -339,7 +398,7 @@ local function inspect(model, label)
 		table.insert(notes, "NO PART NAMED " .. table.concat(absent, ", ") .. " — rename in Studio")
 	end
 
-	local issues = #missing + #backwards
+	local issues = #missing + #backwards + #rivals
 	if #notes == 0 and #fixes == 0 then
 		print(string.format("  OK    %-28s %s, fully jointed", label, rig))
 		return 0, 0
@@ -391,6 +450,104 @@ for _, root in { ReplicatedStorage, ServerStorage } do
 			totalBuilt += built
 		end
 	end
+end
+
+--[[
+	── THE PREPARED TEMPLATES, AND THE BODIES THAT ARE ACTUALLY WALKING ────────
+
+	Everything above inspects the RAW models you supplied, and every diagnostic
+	this project has ever run has stopped there. The bodies in a round are two
+	transformations further on:
+
+	  1. PlaceholderFactory:adoptRig clones each source ONCE AT BOOT, unanchors
+	     it, sets collision groups, scales it, strips its scripts, and parks the
+	     result in ServerStorage.FL_Templates.Infected — deliberately NOT under
+	     Assets, so nothing above sees it;
+	  2. InfectedService clones THAT per spawn into Workspace.Infected, repairs
+	     its joints, and loads its tracks.
+
+	A fault introduced at either step is invisible to a scan of the assets, and
+	both steps are where the interesting faults live. So both are scanned, and
+	the live pass also dumps the four facts that decide whether a body animates
+	and which nothing else reports: whether it has an Animator, how many tracks
+	are actually playing on it, what the Humanoid thinks its state is, and
+	whether it is standing on anything.
+
+	RUN THIS FROM THE SERVER CONTEXT. During a playtest Studio's command bar
+	defaults to the CLIENT, where ServerStorage does not exist and the infected
+	Animator — which is server-side — has no tracks to report. Use the dropdown
+	at the bottom-right of the Output window, or the Run/Play context switcher,
+	and choose Server first.
+]]
+local function liveReport(model, label)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+	local playing = {}
+	if animator then
+		local ok, tracks = pcall(animator.GetPlayingAnimationTracks, animator)
+		if ok and typeof(tracks) == "table" then
+			for _, t in tracks do
+				table.insert(playing, string.format("%s@%.2fx", t.Name, t.Speed))
+			end
+		end
+	end
+
+	local verdict
+	if not humanoid then
+		verdict = "NO HUMANOID"
+	elseif not animator then
+		verdict = "NO ANIMATOR — cannot play a clip at all; the procedural poser is driving it"
+	elseif #playing == 0 then
+		verdict = "ANIMATOR PRESENT BUT NOTHING PLAYING — poser is driving it"
+	else
+		verdict = table.concat(playing, ", ")
+	end
+
+	local state = if humanoid then tostring(humanoid:GetState()) else "?"
+	local floor = if humanoid then tostring(humanoid.FloorMaterial) else "?"
+	print(string.format("  LIVE  %-28s %s", label, verdict))
+	print(string.format("        %-28s state %s, floor %s", "", state, floor))
+end
+
+local live = 0
+for _, folder in { ServerStorage:FindFirstChild("FL_Templates"), Workspace:FindFirstChild("Infected") } do
+	local infected = if folder and folder.Name == "FL_Templates"
+		then folder:FindFirstChild("Infected")
+		else folder
+	if not infected then
+		continue
+	end
+	local where = if infected.Parent and infected.Parent.Name == "FL_Templates" then "template" else "live"
+	for _, descendant in infected:GetChildren() do
+		local models = {}
+		if descendant:IsA("Model") then
+			table.insert(models, descendant)
+		else
+			for _, child in descendant:GetChildren() do
+				if child:IsA("Model") then
+					table.insert(models, child)
+				end
+			end
+		end
+		for _, model in models do
+			live += 1
+			scanned += 1
+			local issues, built = inspect(model, where .. ":" .. descendant.Name .. "/" .. model.Name)
+			totalIssues += issues
+			totalBuilt += built
+			if where == "live" then
+				liveReport(model, descendant.Name .. "/" .. model.Name)
+			end
+		end
+	end
+end
+if live == 0 then
+	print("")
+	print("No prepared templates and no live bodies were visible from here.")
+	print("ServerStorage.FL_Templates.Infected exists only after the server has booted,")
+	print("and Workspace.Infected only while a round is running — so to inspect the")
+	print("bodies that actually walk around, press Play, let a horde spawn, switch the")
+	print("command bar to the SERVER context, and run this again.")
 end
 
 print(

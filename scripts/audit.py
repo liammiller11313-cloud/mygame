@@ -960,6 +960,77 @@ if None not in (_results, _post, _vote) and _results + _vote > _post:
     )
 
 
+# ── 14. One animation id may not be declared under two different rigs ───────
+#
+# A Roblox animation addresses joints BY NAME. An R6 clip keys "Left Arm" and
+# "Right Hip"; an R15 rig has no joints called that, so the track loads, reports
+# IsPlaying, has a real Length, and moves absolutely nothing — and
+# InfectedPoseController stands down for any body with a track playing, so the
+# body is animated by neither the clip nor the fallback.
+#
+# That is why the sets are keyed by rig. Listing the SAME id under two of them
+# says the one clip addresses both skeletons, which no clip does.
+#
+# Found the hard way: 85609984089861 was the death clip in ZOMBIE_R6 and in
+# ZOMBIE_R15. It is an R6 clip. Every R15 special therefore froze upright for
+# the 0.97s GoreService held its ragdoll waiting for a collapse that was never
+# going to play. CheckAnimations could not catch it either — its `expected` map
+# is keyed by id, so the second set overwrote the first and the mismatch test
+# compared the id against itself.
+def _enclosing_table(text: str, at: int):
+    """The brace-balanced { ... } that directly contains offset `at`."""
+    depth, start = 0, None
+    for i in range(at, -1, -1):
+        c = text[i]
+        if c == "}":
+            depth += 1
+        elif c == "{":
+            if depth == 0:
+                start = i
+                break
+            depth -= 1
+    if start is None:
+        return None
+    depth = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+_ANIM = next((t for p, t in code.items() if str(p).endswith("AnimationConfig.lua")), None)
+if _ANIM:
+    _rig_of_id = {}
+    # Anchored on the `rig` FIELD rather than on the `AnimationSet` type
+    # annotation, so a per-kind override under AnimationConfig.Infected — which
+    # is written inline and carries no annotation — is covered by the same rule
+    # as the two named sets. That table is empty today; it is where the next one
+    # of these comes from.
+    for _m in re.finditer(r'rig = "(\w+)"', _ANIM):
+        _block = _enclosing_table(_ANIM, _m.start())
+        if _block is None:
+            continue
+        for _id in set(re.findall(r"\b(\d{6,})\b", _block)):
+            _rig_of_id.setdefault(_id, set()).add(_m.group(1))
+    # SurvivorHold is the same hazard in a flatter shape: R6 = id, R15 = id.
+    _hold = re.search(r"SurvivorHold = table\.freeze\(\{(.*?)\}\)", _ANIM, re.S)
+    if _hold:
+        for _rig, _id in re.findall(r"(\w+) = (\d{6,})", _hold.group(1)):
+            _rig_of_id.setdefault(_id, set()).add(_rig)
+    for _id, _rigs in sorted(_rig_of_id.items()):
+        if len(_rigs) > 1:
+            problems.append(
+                f"src/shared/Config/AnimationConfig.lua  animation {_id} is declared under "
+                f"{' and '.join(sorted(_rigs))} — one clip addresses ONE skeleton's joint names, "
+                f"so on the other build it loads, reports itself playing, and moves nothing while "
+                f"the procedural poser stands down for it"
+            )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

@@ -536,7 +536,7 @@ end
 	fallback exists only for a brain being driven outside the service's loop.
 ]]
 function InfectedBrain:update(dt: number, snapshot: any)
-	if self.destroyed or self.paused then
+	if self.destroyed then
 		return
 	end
 
@@ -550,12 +550,34 @@ function InfectedBrain:update(dt: number, snapshot: any)
 		return
 	end
 
-	local now = os.clock()
+	--[[
+		THE ANIMATOR TICKS EVEN WHILE THE BRAIN IS PAUSED, and that ordering is the
+		whole point of it sitting here rather than below the pause guard.
 
-	-- One vector compare per body per tick, on the loop that is already running.
+		A pause stands the AI down so something else can drive the body — a
+		special's scripted phase, a Versus player, a support hook. The body is
+		still moving; it is just not this brain deciding where. But the gait was
+		chosen below the guard, so a paused body kept whatever it was last playing
+		— or, if it was paused before its first tick, nothing at all, and stood in
+		its rest pose while being flown around the map.
+
+		Safe above the guard because InfectedAnimator.update reads the HUMANOID and
+		nothing else: Health, GetState, and MoveDirection * WalkSpeed. It has no
+		opinion about the AI state and never asks for one. It does need the guards
+		above it, though — destroy() nils this field, and a body whose model or
+		root has gone is not one to ask about its own speed.
+
+		One vector compare per body per tick, on the loop that is already running.
+	]]
 	if self.animator then
 		self.animator:update(self.definition.runSpeed)
 	end
+
+	if self.paused then
+		return
+	end
+
+	local now = os.clock()
 
 	-- Staggered bodies do nothing at all. That is the point of a stagger.
 	if now < self.staggerUntil then

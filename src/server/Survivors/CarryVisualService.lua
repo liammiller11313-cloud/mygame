@@ -168,6 +168,26 @@ local holding: { [Player]: { character: Model, track: AnimationTrack?, id: numbe
      never reach and the prompt system has to keep evaluating. ]]
 local STRIPPED = { "LuaSourceContainer", "BodyMover", "ProximityPrompt", "ClickDetector", "Sound" }
 
+--[[ How long after a hold pose starts before its Length is believed. An
+     AnimationTrack does not report one the instant it is created, and a clip
+     whose asset is still arriving reads zero exactly like an empty upload — so
+     the measurement waits long enough that a fetch which is going to resolve
+     has, and AnimationCache refuses to call it empty until the fetch is known to
+     have succeeded anyway. See setHoldPose. ]]
+local HOLD_MEASURE_DELAY = 2
+
+--[[ One line per distinct problem, per server. These name an ASSET rather than
+     a player, so a broken clip must not print once per survivor per pickup for
+     the rest of the round. ]]
+local warned: { [string]: boolean } = {}
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn("[CarryVisualService] " .. message)
+end
+
 --[[ The part to hang things off. R15 keeps the chest in UpperTorso and R6 calls
      the whole thing Torso; falling back to the root means an unusual rig gets a
      kit in roughly the right place rather than no kit at all. ]]
@@ -594,11 +614,32 @@ local function holdIdleId(player: Player, character: Model?): number?
 		if ok and typeof(weaponId) == "string" then
 			local definition = WeaponConfig.get(weaponId)
 			local set = definition and AnimationConfig.forWeaponClass(definition.class)
-			--[[ A hold Roblox has REFUSED is worse than no hold at all: the caller
-			     stops on a failed id, so the arm keeps swinging as if nothing were
-			     in it. Roblox's own ToolNone below always loads, so a refused class
-			     pose falls back to the generic one rather than to nothing. ]]
-			if set and set.idle and not AnimationCache.hasFailed(set.idle) then
+			--[[
+				A hold Roblox has REFUSED is worse than no hold at all: the caller
+				stops on a failed id, so the arm keeps swinging as if nothing were
+				in it. Roblox's own ToolNone below always loads, so a refused class
+				pose falls back to the generic one rather than to nothing.
+
+				── AND AN EMPTY ONE IS THE SAME FAILURE ─────────────────────────
+				A clip published before any keyframes were saved fetches perfectly
+				well and is zero seconds long. It loads, sits at Action priority
+				over the walk cycle, and poses nothing — so it beats the generic
+				ToolNone below by being present, and the arm swings anyway. That is
+				not hypothetical here: the Shotgun idle is exactly this, so the one
+				weapon that most needs a two-handed low-ready is the only one in the
+				armoury with no hold pose at all.
+
+				Gated on isLoaded, not on length alone. Length is also zero for a
+				clip whose asset has not landed yet, and dropping one of those would
+				take the hold away from every survivor in the first seconds of a
+				round — so it only counts as empty once the fetch is known to have
+				succeeded.
+			]]
+			local usable = set
+				and set.idle
+				and not AnimationCache.hasFailed(set.idle)
+				and not AnimationCache.isEmpty(set.idle)
+			if usable then
 				return set.idle
 			end
 		end
@@ -694,6 +735,50 @@ local function setHoldPose(player: Player, wanted: boolean)
 	track:Play(0.15)
 
 	holding[player] = { character = character, track = track, id = id }
+
+	--[[
+		MEASURE IT ONCE, and if it turns out to be an empty upload, fall back.
+
+		A clip published before any keyframes were saved fetches successfully and
+		is zero seconds long. It loads, wins the shoulder at Action priority, and
+		poses nothing — so it beats Roblox's generic ToolNone below by being
+		present, and the arm swings as if the hands were empty. The Shotgun idle in
+		this place is exactly that, which is why the one weapon most in need of a
+		two-handed low-ready is the only one without a hold pose.
+
+		Deferred, because Length is not populated the instant a track is created —
+		and read through AnimationCache, which only believes a zero once the fetch
+		has actually succeeded. So a clip that is merely still arriving is left
+		alone; one that arrived empty is recorded server-wide, and holdIdleId then
+		routes every survivor to SurvivorHold instead. That recursion terminates:
+		the second pass cannot choose the same id.
+	]]
+	task.delay(HOLD_MEASURE_DELAY, function()
+		local current = holding[player]
+		if not current or current.track ~= track or not track.Parent then
+			return
+		end
+		if AnimationCache.isEmpty(id) then
+			return
+		end
+		AnimationCache.noteLength(id, track.Length)
+		if not AnimationCache.isEmpty(id) then
+			return
+		end
+		warnOnce(
+			"emptyhold:" .. tostring(id),
+			string.format(
+				"animation %d is a hold pose with no keyframes in it — it fetched, but it is zero "
+					.. "seconds long, so it posed nothing while outranking the generic hold. Falling "
+					.. "back to SurvivorHold. Open it in the Animation Editor, check the timeline "
+					.. "actually has poses on it, and publish again.",
+				id
+			)
+		)
+		track:Stop(0)
+		holding[player] = nil
+		setHoldPose(player, true)
+	end)
 end
 
 --[[

@@ -103,8 +103,11 @@ export type AnimationSet = {
 	telegraphs its swing with InfectedBrain's C0 pose, which is what that pose
 	has always been for.
 
-	Both sets DO have a death clip, and the note on the R15 set explains how it
-	and the ragdoll take turns on the same body.
+	This set has a death clip and the R15 one does not — see the note there. The
+	one id that was in both is an R6 clip, so it was only ever doing anything
+	here. The note on the R15 set also explains how a death clip and the ragdoll
+	take turns on the same body, which is the part worth reading before adding
+	one back.
 ]]
 local ZOMBIE_R6: AnimationSet = {
 	rig = "R6",
@@ -134,6 +137,10 @@ local ZOMBIE_R6: AnimationSet = {
 	the variation being a lie.
 
 	── THE DEATH CLIP AND THE RAGDOLL ──────────────────────────────────────────
+	Kept here even though this set no longer declares a death clip, because it is
+	the design note for whoever adds an R15 one — and because it explains why an
+	R6 clip sitting in this set was so much worse than nothing.
+
 	These two want the same body and only one of them can have it. Ragdolling
 	DISABLES every Motor6D in the rig and puts the Humanoid into Physics state,
 	so there is nothing left for a keyframe to drive — a death clip that plays
@@ -151,7 +158,35 @@ local ZOMBIE_R6: AnimationSet = {
 ]]
 local ZOMBIE_R15: AnimationSet = {
 	rig = "R15",
-	death = { 85609984089861 },
+	--[[
+		NO DEATH CLIP, and its absence is load-bearing.
+
+		85609984089861 was listed here as well as in the R6 set above. It is an R6
+		clip — measured, not assumed: studio-scripts/CheckAnimations reads the
+		KeyframeSequence's own Pose names, and they are Torso / Left Arm /
+		Right Leg. An R15 rig has no joints by those names.
+
+		What that cost, on every clean kill of all eight R15 specials: the track
+		loaded and reported itself playing, so playDeath took its first branch,
+		stopped the clips that WERE driving the rig with Stop(0), and returned
+		0.97s. GoreService clamps that against a 1.1s cap it never reached,
+		deferred the ragdoll by the full 0.97s — and, because the body is being
+		held, applied NO knockback at all. So the special snapped from its run
+		cycle into its rest pose, took no visible reaction to the shot, stood
+		perfectly still for very nearly a second, and only then went limp.
+
+		Strictly worse than having no death clip, which is what this now is:
+		playDeath returns 0 for an absent track, GoreService ragdolls on the frame
+		of the kill, and the knockback is applied. A body that is deleted upright
+		and replaced with a sack is the thing the death clip was added to fix —
+		but a clip that cannot move a single joint does not fix it, it just holds
+		the corpse still while failing to.
+
+		To give the specials a real collapse: upload an R15 death clip and declare
+		it HERE, under R15 only. Everything downstream already works — the R6
+		Commons exercise the whole path correctly. scripts/audit.py check 14
+		fails the build if one id is ever declared under two rigs again.
+	]]
 	idle = { 3489171152 },
 	walk = { 3489174223 },
 	run = { 3489173414 },

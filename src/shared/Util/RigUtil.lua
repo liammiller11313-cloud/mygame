@@ -195,6 +195,90 @@ function RigUtil.mapMotorChildren(model: Model): { [Motor6D]: BasePart }
 end
 
 --[[
+	Destroys any Weld, WeldConstraint or Snap that duplicates a Motor6D, and
+	returns how many, with the pairs it cut.
+
+	── THIS IS THE ONE THAT LOOKS LIKE NOTHING IS WRONG ────────────────────────
+	Two rigid joints between the same two parts is an over-constrained assembly,
+	and Roblox resolves it by pinning the pair. The Motor6D is still there, the
+	animation still writes its Transform every frame, and the limb does not move
+	— because the weld beside it is holding the two parts at a fixed offset and
+	winning.
+
+	Every diagnostic this project has says such a rig is FINE. RigDoctor reports
+	"fully jointed", because the joints genuinely are all present.
+	CheckAnimations reports every id ok, because the clips genuinely are. The
+	boot summary reports the right rig, because it is. Nothing warns, and the
+	body slides around the map in its rest pose — which is exactly the symptom
+	reported as "they just drag around".
+
+	── WHY buildMissingJoints DOES NOT ALREADY DO THIS ─────────────────────────
+	It clears rival welds, but only off a limb whose joint it is about to BUILD,
+	inside the loop and after the `if have[spec.child] then continue end` that
+	skips a limb already jointed. So it fires precisely when there is no Motor6D
+	to be over-constrained by, and never in the case that needs it. On a rig that
+	reports fully jointed, that loop never executes at all.
+
+	── WHY IT CANNOT EAT A LEGITIMATE WELD ─────────────────────────────────────
+	The test is not "is this a weld on a rig part". It is "are these two parts
+	ALREADY connected by a Motor6D" — which is true only for a duplicate. A hat
+	welded to a head, a weapon welded to a hand, a prop welded to a torso: none
+	of those pairs has a Motor6D, so none of them is touched. That is why this is
+	safe to run on every body of every rig, including ones nobody has a problem
+	with.
+]]
+function RigUtil.clearRivalJoints(model: Model): (number, { string })
+	local motors = RigUtil.getMotors(model)
+	if #motors == 0 then
+		return 0, {}
+	end
+
+	--[[ Every pair a Motor6D already connects, both ways round, because a weld
+	     is free to name the same two parts in the opposite order. ]]
+	local jointed: { [BasePart]: { [BasePart]: boolean } } = {}
+	for _, motor in motors do
+		local part0, part1 = motor.Part0, motor.Part1
+		if not part0 or not part1 or part0 == part1 then
+			continue
+		end
+		jointed[part0] = jointed[part0] or {}
+		jointed[part1] = jointed[part1] or {}
+		jointed[part0][part1] = true
+		jointed[part1][part0] = true
+	end
+
+	local removed = 0
+	local cut: { string } = {}
+	for _, descendant in model:GetDescendants() do
+		if
+			not descendant:IsA("Weld")
+			and not descendant:IsA("WeldConstraint")
+			and not descendant:IsA("Snap")
+		then
+			continue
+		end
+		--[[ All three carry Part0/Part1, but they share no common superclass that
+		     declares them, so the read is done through a cast rather than through
+		     three near-identical branches. ]]
+		local joint: any = descendant
+		local part0, part1 = joint.Part0, joint.Part1
+		if not part0 or not part1 then
+			continue
+		end
+		local sameAsMotor = jointed[part0]
+		if not sameAsMotor or not sameAsMotor[part1] then
+			continue
+		end
+
+		table.insert(cut, string.format("%s/%s", part0.Name, part1.Name))
+		descendant:Destroy()
+		removed += 1
+	end
+
+	return removed, cut
+end
+
+--[[
 	Turns every Motor6D the right way round, and returns how many were backwards.
 
 	── WHY A BACKWARDS JOINT IS INVISIBLE AND FATAL ────────────────────────────
