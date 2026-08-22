@@ -54,6 +54,9 @@ local Attributes = require(Shared.Net.Attributes)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Device = require(Shared.Util.Device)
 local Registry = require(Shared.Util.Registry)
+--[[ For the rig lookups ONLY. The server and this file were resolving the same
+     rig in different ways and getting different answers — see resolveJoints. ]]
+local RigUtil = require(Shared.Util.RigUtil)
 local Trove = require(Shared.Util.Trove)
 
 local IA = Attributes.Infected
@@ -184,25 +187,43 @@ local RUN_BLEND_FLOOR = 0.55
 	both. `lead` marks the joints that swing WITH the stride (legs, and the
 	opposite arm) versus against it.
 ]]
+--[[
+	Keyed on the CHILD PART each joint drives, not on the joint's own name.
+
+	These used to hold joint names — "Left Shoulder", "RightElbow" — and were
+	looked up against Motor6D.Name. That is not how Roblox resolves an animation
+	and never was: the engine takes each Motor6D's Part1 to be the bone and
+	matches the pose named after that PART. A joint's own name is decoration.
+
+	The consequence was silent and one-sided. A rig wired perfectly but with its
+	joints called "LeftShoulder" instead of "Left Shoulder" — which is what you
+	get by building an R6 rig from an R15 donor, and is invisible in the Explorer
+	unless you look — animated correctly from its clips and could not be posed at
+	all by this fallback. So it looked fine right up until the clips failed for
+	some other reason, and then it had no safety net.
+
+	Part names are also the thing every other check in the project keys on, so
+	this is now one vocabulary across the server, the client and the tools.
+]]
 local R6_JOINTS = {
-	{ name = "Right Shoulder", role = "arm", sign = 1 },
-	{ name = "Left Shoulder", role = "arm", sign = -1 },
-	{ name = "Right Hip", role = "leg", sign = -1 },
-	{ name = "Left Hip", role = "leg", sign = 1 },
-	{ name = "Neck", role = "head", sign = 1 },
+	{ part = "Right Arm", role = "arm", sign = 1 },
+	{ part = "Left Arm", role = "arm", sign = -1 },
+	{ part = "Right Leg", role = "leg", sign = -1 },
+	{ part = "Left Leg", role = "leg", sign = 1 },
+	{ part = "Head", role = "head", sign = 1 },
 }
 
 local R15_JOINTS = {
-	{ name = "RightShoulder", role = "arm", sign = 1 },
-	{ name = "LeftShoulder", role = "arm", sign = -1 },
-	{ name = "RightElbow", role = "elbow", sign = 1 },
-	{ name = "LeftElbow", role = "elbow", sign = -1 },
-	{ name = "RightHip", role = "leg", sign = -1 },
-	{ name = "LeftHip", role = "leg", sign = 1 },
-	{ name = "RightKnee", role = "knee", sign = -1 },
-	{ name = "LeftKnee", role = "knee", sign = 1 },
-	{ name = "Waist", role = "waist", sign = 1 },
-	{ name = "Neck", role = "head", sign = 1 },
+	{ part = "RightUpperArm", role = "arm", sign = 1 },
+	{ part = "LeftUpperArm", role = "arm", sign = -1 },
+	{ part = "RightLowerArm", role = "elbow", sign = 1 },
+	{ part = "LeftLowerArm", role = "elbow", sign = -1 },
+	{ part = "RightUpperLeg", role = "leg", sign = -1 },
+	{ part = "LeftUpperLeg", role = "leg", sign = 1 },
+	{ part = "RightLowerLeg", role = "knee", sign = -1 },
+	{ part = "LeftLowerLeg", role = "knee", sign = 1 },
+	{ part = "UpperTorso", role = "waist", sign = 1 },
+	{ part = "Head", role = "head", sign = 1 },
 }
 
 -- ── state ───────────────────────────────────────────────────────────────────
@@ -310,26 +331,47 @@ local function resolveJoints(body: Body)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	body.humanoid = humanoid
 	body.animator = if humanoid then humanoid:FindFirstChildOfClass("Animator") else nil
-	body.root = model:FindFirstChild("HumanoidRootPart") :: BasePart?
+	--[[
+		── THREE LOOKUPS, ALL OF WHICH USED TO BE WRONG IN A DIFFERENT WAY ─────
+		This is the safety net: it drives any body whose clips are not driving it.
+		So a hole here does not degrade a body, it strands one — and every hole it
+		had was in exactly the models most likely to need it.
 
-	--[[ R15 is detected by its own joints rather than by RigType, because a
-	     hand-built rig routinely reports R6 while having R15 limb names, and it
-	     is the NAMES this has to match. ]]
-	local layout = if model:FindFirstChild("UpperTorso") then R15_JOINTS else R6_JOINTS
+		ROOT was `model:FindFirstChild("HumanoidRootPart")`, with no recursive
+		flag. Group a rig's parts into a Folder in Studio and that is nil, poseBody
+		bails, and the body is animated by nothing at all. That is the same shallow
+		lookup that was just fixed in RigUtil.getRoot, and having it in both places
+		meant a nested rig lost the clips AND the fallback.
+
+		LAYOUT was `model:FindFirstChild("UpperTorso")`, shallow again, and it only
+		tested one of the two R15 torso names. A nested R15 rig was posed with the
+		R6 joint list, which matches nothing on it. RigUtil.rigTypeOf is the one
+		answer the server already uses; there is no reason for a second opinion.
+
+		JOINTS were keyed on Motor6D.Name. That is not how Roblox resolves a pose —
+		the engine takes each Motor6D's Part1 to be the bone and matches the pose
+		named after that PART. This file's own header says so. A rig wired
+		perfectly but with joints named "LeftShoulder" instead of "Left Shoulder"
+		therefore animated correctly from its clips and could not be posed at all
+		by the fallback. Keying on the child part's name makes both systems agree
+		about what a joint is called, which is the only way they can agree about
+		whether one is missing.
+	]]
+	body.root = RigUtil.getRoot(model)
+
+	local layout = if RigUtil.rigTypeOf(model) == "R15" then R15_JOINTS else R6_JOINTS
 
 	--[[ One pass over the rig, not one per joint. A ten-joint R15 body against
 	     forty descendants is four hundred comparisons done the other way, per
 	     body, and a wave-seven horde resolves forty-six of them inside a few
 	     frames of each other. ]]
 	local motors: { [string]: Motor6D } = {}
-	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("Motor6D") then
-			motors[descendant.Name] = descendant
-		end
+	for motor, child in RigUtil.mapMotorChildren(model) do
+		motors[child.Name] = motor
 	end
 
 	for _, entry in layout do
-		local motor = motors[entry.name]
+		local motor = motors[entry.part]
 		if motor then
 			table.insert(body.joints, { motor = motor, role = entry.role, sign = entry.sign })
 		end

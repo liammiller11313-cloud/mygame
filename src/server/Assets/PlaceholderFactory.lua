@@ -1255,6 +1255,78 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	scaleRigGeometry(model, scale)
 	humanoid.HipHeight *= scale
 
+	--[[
+		── FLATTEN THE RIG, AND THIS IS THE ONE THAT MATTERS MOST ──────────────
+		Roblox resolves a character's rig by NAME AMONG THE HUMANOID'S SIBLINGS.
+		Humanoid.RootPart is the child of THIS MODEL called HumanoidRootPart — not
+		a descendant, a child. Group a rig's parts into a Folder or a sub-Model
+		while assembling it in Studio, which is an entirely ordinary thing to do,
+		and the Humanoid resolves no rig at all: RootPart is nil, the character
+		never becomes a character, and the Animator drives nothing.
+
+		Everything else about such a model looks perfect. The parts are there, the
+		Motor6Ds are there and correctly wired, the names are right, the clips
+		load and report themselves playing. Every diagnostic in this project said
+		"fully jointed" about exactly these models, because they are.
+
+		It also explains why it was SOME of the thirty-five Commons and not all of
+		them: the discriminator is how each individual model happens to be
+		organised in the explorer, and thirty-five models assembled by hand over
+		time are a mix.
+
+		So the rig is flattened here, once, at boot, on the template — every body
+		of that kind is cloned from it afterwards. Accessories are left completely
+		alone: their parts belong inside them, that is how Roblox expects an
+		accessory, and pulling a Handle out would break the attachment welding it
+		to the head. Emptied containers go, so the model does not keep a Folder
+		that now holds nothing.
+	]]
+	local flattened = 0
+	local emptied: { Instance } = {}
+	for _, descendant in model:GetDescendants() do
+		if descendant.Parent == model then
+			continue
+		end
+		if not descendant:IsA("BasePart") and not descendant:IsA("Motor6D") then
+			continue
+		end
+		if descendant:FindFirstAncestorWhichIsA("Accessory") then
+			continue
+		end
+		--[[ A Motor6D conventionally lives inside Part0 and is perfectly happy
+		     there — it is reparented only when the part it lives in is itself
+		     being moved, so the two stay together. ]]
+		if descendant:IsA("Motor6D") and descendant.Parent and descendant.Parent:IsA("BasePart") then
+			continue
+		end
+		local container = descendant.Parent
+		descendant.Parent = model
+		flattened += 1
+		if container and container ~= model then
+			table.insert(emptied, container)
+		end
+	end
+	for _, container in emptied do
+		if container.Parent and #container:GetChildren() == 0 then
+			container:Destroy()
+		end
+	end
+	if flattened > 0 then
+		warnOnce(
+			"nested:" .. kind .. ":" .. model.Name,
+			string.format(
+				"%s rig %q kept %d of its parts inside a Folder or sub-Model. Roblox resolves a "
+					.. "character's rig by name among the HUMANOID'S SIBLINGS, so Humanoid.RootPart "
+					.. "was nil and nothing could animate it — while every joint check called it "
+					.. "fully jointed, because it was. Flattened at boot. Move the parts up to sit "
+					.. "directly under the Model in Studio to fix it there.",
+				kind,
+				model.Name,
+				flattened
+			)
+		)
+	end
+
 	local root = RigUtil.getRoot(model)
 	if not root then
 		warnOnce("noroot:" .. kind, string.format("the %s rig has no BasePart at all", kind))
@@ -1262,6 +1334,34 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		return nil
 	end
 	model.PrimaryPart = root
+
+	--[[
+		The remaining way to have no Humanoid.RootPart, checked by NAME rather than
+		by reading the property.
+
+		Humanoid.RootPart is resolved by the engine and this template is sitting in
+		ServerStorage, not Workspace — so reading it here would risk warning about
+		every rig in the game on the strength of an implementation detail. The name
+		is the thing that decides it and the name is checkable anywhere: Roblox
+		looks for a sibling called exactly "HumanoidRootPart", and a rig whose root
+		is called "Root", "HRP" or "Torso" does not have one however tidily its
+		parts are arranged.
+	]]
+	if not model:FindFirstChild("HumanoidRootPart") then
+		warnOnce(
+			"norootpart:" .. kind .. ":" .. model.Name,
+			string.format(
+				"%s rig %q has no part called HumanoidRootPart directly under the Model — the "
+					.. "nearest thing to a root is %q. Roblox resolves Humanoid.RootPart by that "
+					.. "exact name among the Humanoid's siblings, and without it the body is not a "
+					.. "character: it cannot walk, and nothing can animate it. Rename that part in "
+					.. "Studio.",
+				kind,
+				model.Name,
+				root.Name
+			)
+		)
+	end
 
 	humanoid.MaxHealth = definition.health
 	humanoid.Health = definition.health

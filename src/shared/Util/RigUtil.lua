@@ -356,16 +356,28 @@ function RigUtil.clearRivalJoints(model: Model): (number, { string })
 	local removed = 0
 	local cut: { string } = {}
 	for _, descendant in model:GetDescendants() do
-		if
-			not descendant:IsA("Weld")
-			and not descendant:IsA("WeldConstraint")
-			and not descendant:IsA("Snap")
-		then
+		--[[
+			EVERY rigid joint class, not the three that were obvious.
+
+			This tested Weld, WeldConstraint and Snap. A model assembled with
+			legacy surface joints gets Glue and Snap; one built from an old rig
+			carries Motor or Rotate; and all of them hold two parts together
+			exactly as hard as a Weld does. The one that survives the sweep is the
+			one that pins the limb, so a partial list is a sweep that reports
+			success and changes nothing.
+
+			Motor6D is deliberately absent: a second one of those is a duplicate
+			JOINT rather than a rival, and clearDuplicateJoints owns that case
+			because "which one survives" has a different right answer there.
+		]]
+		if not descendant:IsA("JointInstance") and not descendant:IsA("WeldConstraint") then
 			continue
 		end
-		--[[ All three carry Part0/Part1, but they share no common superclass that
-		     declares them, so the read is done through a cast rather than through
-		     three near-identical branches. ]]
+		if descendant:IsA("Motor6D") then
+			continue
+		end
+		--[[ They carry Part0/Part1 but share no superclass that declares both, so
+		     the read is done through a cast rather than through a branch each. ]]
 		local joint: any = descendant
 		local part0, part1 = joint.Part0, joint.Part1
 		if not part0 or not part1 then
