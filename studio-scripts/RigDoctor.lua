@@ -131,7 +131,7 @@ local function rigTypeOf(model)
 		if d.Name ~= "UpperTorso" and d.Name ~= "LowerTorso" then
 			continue
 		end
-		if not d:FindFirstAncestorWhichIsA("Accessory") then
+		if not d:FindFirstAncestorWhichIsA("Accoutrement") then
 			--[[ The verdict AND the part that decided it. R15 is a positive test
 			     with exactly one piece of evidence behind it, and that evidence is
 			     the only useful reply to "but I built that as R6": one stray mesh
@@ -375,7 +375,7 @@ local function inspect(model, label)
 		if
 			(d:IsA("BasePart") or d:IsA("Motor6D"))
 			and d.Parent ~= model
-			and not d:FindFirstAncestorWhichIsA("Accessory")
+			and not d:FindFirstAncestorWhichIsA("Accoutrement")
 			and not (d:IsA("Motor6D") and d.Parent and d.Parent:IsA("BasePart"))
 		then
 			nested += 1

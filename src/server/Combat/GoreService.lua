@@ -338,7 +338,7 @@ local function collectRig(model: Model): ({ BasePart }, { [string]: Motor6D })
 	local parts: { BasePart } = {}
 	local motors: { [string]: Motor6D } = {}
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("BasePart") and not descendant:FindFirstAncestorWhichIsA("Accessory") then
+		if descendant:IsA("BasePart") and not descendant:FindFirstAncestorWhichIsA("Accoutrement") then
 			table.insert(parts, descendant)
 		end
 	end

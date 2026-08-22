@@ -110,7 +110,7 @@ function RigUtil.getRoot(model: Model): BasePart?
 		if not descendant:IsA("BasePart") then
 			continue
 		end
-		if descendant:FindFirstAncestorWhichIsA("Accessory") then
+		if descendant:FindFirstAncestorWhichIsA("Accoutrement") then
 			continue
 		end
 		local name = descendant.Name
@@ -131,12 +131,26 @@ function RigUtil.getRoot(model: Model): BasePart?
 	return torso or anyPart
 end
 
---[[ Every BasePart in a rig, excluding accessories. Used by the ragdoll and
-     dismemberment code, which must not try to weld a hat. ]]
+--[[
+	Every BasePart in a rig, excluding accessories. Used by the ragdoll and
+	dismemberment code, which must not try to weld a hat.
+
+	── ACCOUTREMENT, NOT ACCESSORY ─────────────────────────────────────────────
+	Every one of these tests said "Accessory", which misses the legacy `Hat`
+	class: Hat and Accessory are SIBLINGS under Accoutrement, so IsA("Accessory")
+	is false for a Hat. A rig wearing a legacy hat — which is most zombie models
+	old enough to be R6 — therefore had its hat's Handle counted as a body part
+	here, offered as a possible ROOT by getRoot, and allowed to vote on whether
+	the rig is R6 or R15 in rigTypeOf.
+
+	That is a per-model difference between two rigs that look identical, which is
+	the shape of every real fault in this investigation. Testing the base class
+	covers Hat, Accessory and anything else Roblox adds under it.
+]]
 function RigUtil.getBodyParts(model: Model): { BasePart }
 	local parts = {}
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("BasePart") and not descendant:FindFirstAncestorWhichIsA("Accessory") then
+		if descendant:IsA("BasePart") and not descendant:FindFirstAncestorWhichIsA("Accoutrement") then
 			table.insert(parts, descendant)
 		end
 	end
@@ -788,7 +802,7 @@ function RigUtil.rigTypeOf(model: Model): (string, string?)
 		if not descendant:IsA("BasePart") then
 			continue
 		end
-		if descendant:FindFirstAncestorWhichIsA("Accessory") then
+		if descendant:FindFirstAncestorWhichIsA("Accoutrement") then
 			continue
 		end
 		local name = descendant.Name

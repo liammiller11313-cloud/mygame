@@ -827,7 +827,7 @@ local function applyPassThrough(model: Model): number
 			continue
 		end
 		local cosmetic = GameConfig.PassThroughParts[descendant.Name] == true
-			or descendant:FindFirstAncestorWhichIsA("Accessory") ~= nil
+			or descendant:FindFirstAncestorWhichIsA("Accoutrement") ~= nil
 		if cosmetic and descendant.CanQuery then
 			descendant.CanQuery = false
 			descendant.CanTouch = false
@@ -1322,7 +1322,7 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		if not descendant:IsA("BasePart") and not descendant:IsA("Motor6D") then
 			continue
 		end
-		if descendant:FindFirstAncestorWhichIsA("Accessory") then
+		if descendant:FindFirstAncestorWhichIsA("Accoutrement") then
 			continue
 		end
 		--[[ A Motor6D conventionally lives inside Part0 and is perfectly happy
