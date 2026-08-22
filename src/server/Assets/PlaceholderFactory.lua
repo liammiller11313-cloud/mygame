@@ -286,6 +286,11 @@ local animationRig: { [string]: string } = {}
      R6" into a part somebody can go and rename. ]]
 local animationRigWhy: { [string]: string } = {}
 
+--[[ Per kind, one line per VARIANT that has something wrong with its rig. See
+     where this is filled: it is the answer to "which of my thirty-five models is
+     the broken one", printed at boot instead of discovered by playing. ]]
+local rigFaults: { [string]: { string } } = {}
+
 local function harvestAnimations(model: Model): number
 	--[[
 		READ EVERYTHING FIRST, then rebuild. The order is the whole correctness
@@ -1183,6 +1188,31 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	     themselves as playing, and move nothing — and the procedural poser stands
 	     down because tracks are playing. Recorded per kind so the summary can say
 	     "Tank: R15" rather than leaving it to be inferred. ]]
+	--[[
+		THE FULL RIG DIAGNOSIS, per variant, at boot.
+
+		Every repair this game does runs at SPAWN and warns once per variant — so
+		it only ever describes a model that has actually spawned, and only once
+		somebody has played long enough for the Director to pick it. With
+		thirty-five Commons that made "which of my models is broken" a question you
+		answered by playing until it came up, and it is the question that has cost
+		the most time on this project by a wide margin.
+
+		The templates have their joints by this point (verifySeverable above reads
+		them), so the same tests can run here, on every model, before anybody
+		presses play. Read-only: the repairs stay per-body, and a report that
+		quietly fixed things would make this log disagree with the game.
+	]]
+	local faults = RigUtil.describeFaults(RigUtil.diagnose(model))
+	if faults then
+		local list = rigFaults[kind]
+		if not list then
+			list = {}
+			rigFaults[kind] = list
+		end
+		table.insert(list, string.format("%s — %s", model.Name, faults))
+	end
+
 	local detectedRig, decidedBy = AnimationConfig.rigOf(model)
 	animationRig[kind] = detectedRig
 	if decidedBy then
@@ -3121,6 +3151,36 @@ function PlaceholderFactory:ensureAssets()
 			)
 		)
 	end
+	--[[
+		And the block that answers the question directly: WHICH MODELS ARE BROKEN.
+
+		One line per variant with something wrong, naming the fault rather than a
+		symptom. A clean roster prints nothing at all, so this is silence when
+		there is nothing to say and an exact list when there is.
+	]]
+	local faultLines = {}
+	for kind, variants in rigFaults do
+		table.sort(variants)
+		for _, line in variants do
+			table.insert(faultLines, string.format("%s/%s", kind, line))
+		end
+	end
+	if #faultLines > 0 then
+		table.sort(faultLines)
+		warn(
+			string.format(
+				"[PlaceholderFactory] %d rig(s) have something wrong that will stop or spoil their "
+					.. "animation. Each is repaired per body at spawn, which costs work every time and "
+					.. "guesses proportions — run studio-scripts/RigDoctor once to fix them in the "
+					.. "models themselves:",
+				#faultLines
+			)
+		)
+		for _, line in faultLines do
+			warn("    " .. line)
+		end
+	end
+
 	if #usingConfig > 0 then
 		table.sort(usingConfig)
 		local ownCount = 0

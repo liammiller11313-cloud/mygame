@@ -741,6 +741,41 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 		get for free by assembling a model in Studio, where dragging parts together
 		welds them.
 	]]
+	--[[
+		DUPLICATE MOTOR6Ds FIRST, because until very recently this code created
+		them itself and a model saved in that state still carries them.
+
+		buildMissingJoints decided which joints a rig already had from a graph
+		walk; the walk needed a root; RigUtil.getRoot was shallow while every
+		other lookup in that file was deep. So a rig whose parts sit in a Folder —
+		an entirely ordinary way to assemble one — reported NO joints and got a
+		complete second skeleton laid over its first, on every spawn. Two rigid
+		joints on a pair over-constrains the assembly: the clip drives one, the
+		other holds the limb, and the body slides around in its rest pose.
+
+		It was SOME of the Commons and not all of them because the discriminator
+		is how each individual model happens to be organised. A flat rig was fine.
+		A foldered one was not. Thirty-five models assembled by hand are a mix.
+	]]
+	local dupesCut, dupePairs = RigUtil.clearDuplicateJoints(model)
+	if dupesCut > 0 then
+		table.sort(dupePairs)
+		warnOnce(
+			"duplicates:" .. variant,
+			string.format(
+				"%s variant %q arrived with %d duplicate joint(s) — a second Motor6D across a pair "
+					.. "that already had one (%s). That over-constrains the assembly, so the "
+					.. "animation drove one joint while the other held the limb still and the body "
+					.. "slid around in its rest pose. Thinned at spawn. Run "
+					.. "studio-scripts/RigDoctor to remove them from the model itself.",
+				kind,
+				variant,
+				dupesCut,
+				table.concat(dupePairs, ", ")
+			)
+		)
+	end
+
 	local weldsCut, cutPairs = RigUtil.clearRivalJoints(model)
 	if weldsCut > 0 then
 		table.sort(cutPairs)

@@ -73,15 +73,62 @@ function RigUtil.isAlive(model: Model): boolean
 end
 
 --[[ The primary part to aim at, measure from, or apply an impulse to. ]]
+--[[
+	── THIS SEARCHES DESCENDANTS, AND IT HAS TO ────────────────────────────────
+	It used to use FindFirstChild and FindFirstChildWhichIsA with no recursive
+	flag, while rigTypeOf and namedPart in this same file search every descendant.
+	That inconsistency was not cosmetic — it was the bug.
+
+	Group a rig's parts into a Folder in Studio, which is a completely ordinary
+	thing to do while assembling one, and this returned nil. mapMotorChildren then
+	took its `if not root then return children end` exit and handed back an EMPTY
+	joint map. buildMissingJoints reads that map to decide which joints already
+	exist, found none, and — using namedPart, which IS deep and therefore found
+	every part — built a SECOND COMPLETE SKELETON on top of the first. Two
+	Motor6Ds on every pair, rebuilt on every spawn.
+
+	A pair with two rigid joints is an over-constrained assembly. The animation
+	writes Transform on one of them and the other holds the limb where it is, so
+	the body slides around in its rest pose. That is "some of them just drag
+	around", and it was SOME because it depended on how each individual model
+	happened to be organised: a flat rig was fine, a foldered one was not.
+
+	Forty-five other callers ask this for a body's root — targeting, damage, gore,
+	melee, the brain's own steering. Every one of them was getting nil for such a
+	rig too.
+
+	Order: the real HumanoidRootPart first wherever it lives, because PrimaryPart
+	is frequently set to something else or not set at all; then PrimaryPart; then
+	a torso; then anything. Accessories are skipped throughout — a hat's Handle is
+	not a body's root.
+]]
 function RigUtil.getRoot(model: Model): BasePart?
-	local root = model:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root
+	local torso: BasePart? = nil
+	local anyPart: BasePart? = nil
+
+	for _, descendant in model:GetDescendants() do
+		if not descendant:IsA("BasePart") then
+			continue
+		end
+		if descendant:FindFirstAncestorWhichIsA("Accessory") then
+			continue
+		end
+		local name = descendant.Name
+		if name == "HumanoidRootPart" then
+			return descendant
+		end
+		if not torso and (name == "Torso" or name == "UpperTorso") then
+			torso = descendant
+		end
+		if not anyPart then
+			anyPart = descendant
+		end
 	end
+
 	if model.PrimaryPart then
 		return model.PrimaryPart
 	end
-	return model:FindFirstChildWhichIsA("BasePart")
+	return torso or anyPart
 end
 
 --[[ Every BasePart in a rig, excluding accessories. Used by the ragdoll and
@@ -154,13 +201,18 @@ function RigUtil.mapMotorChildren(model: Model): { [Motor6D]: BasePart }
 		end
 	end
 
+	--[[ NO EARLY RETURN. This used to be `if not root then return children end`,
+	     which handed back an EMPTY map — and buildMissingJoints reads this map to
+	     decide which joints already exist, so an empty one told it the rig had
+	     none and it built a duplicate skeleton. Falling through leaves the
+	     conventional Part1 reading below to answer, which is right for every
+	     normally-wired rig and is never worse than nothing. ]]
 	local root = RigUtil.getRoot(model)
-	if not root then
-		return children
+	local seen: { [BasePart]: boolean } = {}
+	if root then
+		seen[root] = true
 	end
-
-	local seen: { [BasePart]: boolean } = { [root] = true }
-	local queue: { BasePart } = { root }
+	local queue: { BasePart } = if root then { root } else {}
 	local head = 1
 	while head <= #queue do
 		local part = queue[head]
@@ -192,6 +244,60 @@ function RigUtil.mapMotorChildren(model: Model): { [Motor6D]: BasePart }
 	end
 
 	return children
+end
+
+--[[
+	Destroys SECOND and subsequent Motor6Ds spanning the same pair of parts, and
+	returns how many, with the pairs it thinned.
+
+	── WHY A RIG CAN HAVE TWO OF THE SAME JOINT ────────────────────────────────
+	Most often because this code built them. buildMissingJoints decided which
+	joints a rig already had from a graph walk that needed a root, and the root
+	lookup was shallow — so a rig whose parts sit inside a Folder reported no
+	joints at all and got a complete second skeleton laid over the first, at every
+	spawn. Both of those are fixed and buildMissingJoints now refuses on the pair
+	directly, but a model somebody saved in that state, or one hand-built with a
+	spare joint, still arrives carrying them.
+
+	── WHY IT MATTERS ──────────────────────────────────────────────────────────
+	Two rigid joints on one pair over-constrains the assembly. Roblox spans the
+	rigid-joint graph and one of them decides the relative CFrame; the animation
+	writes Transform on whichever Motor6D the animator resolved by name, and if
+	that is not the one holding the pair, the limb does not move. Which one wins
+	is not something to rely on, so the symptom can differ between two bodies of
+	the same model — and every diagnostic still reports the rig as fully jointed,
+	because it is. It has too many joints, not too few.
+
+	── WHICH ONE SURVIVES ──────────────────────────────────────────────────────
+	The first one seen in descendant order, which is the model's own, because the
+	ones this code adds are parented later. Nothing tries to be cleverer than
+	that: any survivor is correct once the rest are gone, and preferring the
+	author's is the least surprising rule.
+]]
+function RigUtil.clearDuplicateJoints(model: Model): (number, { string })
+	local kept: { [BasePart]: { [BasePart]: boolean } } = {}
+	local removed = 0
+	local thinned: { string } = {}
+
+	for _, motor in RigUtil.getMotors(model) do
+		local part0, part1 = motor.Part0, motor.Part1
+		if not part0 or not part1 or part0 == part1 then
+			continue
+		end
+		local spanned = kept[part0]
+		if spanned and spanned[part1] then
+			table.insert(thinned, string.format("%s/%s", part0.Name, part1.Name))
+			motor:Destroy()
+			removed += 1
+			continue
+		end
+		kept[part0] = kept[part0] or {}
+		kept[part1] = kept[part1] or {}
+		kept[part0][part1] = true
+		kept[part1][part0] = true
+	end
+
+	return removed, thinned
 end
 
 --[[
@@ -600,7 +706,45 @@ end
 	Studio welded them), and a weld left in place beside a Motor6D wins.
 ]]
 function RigUtil.buildMissingJoints(model: Model): (number, { string })
+	--[[
+		── TWO INDEPENDENT GUARDS, BECAUSE ONE OF THEM ALREADY FAILED ──────────
+		This used to decide "does this limb already have a joint" from
+		mapMotorChildren alone. That map is derived from a graph walk, the walk
+		needed a root, the root lookup was shallow, and for a rig whose parts sit
+		in a Folder the map came back EMPTY — so every limb looked unjointed and
+		this function built a second complete skeleton over the first, on every
+		single spawn. Two Motor6Ds on a pair is an over-constrained assembly: the
+		clip drives one and the other holds the limb, and the body slides around
+		in its rest pose.
+
+		The root lookup is fixed and the map no longer comes back empty. Neither
+		of those is allowed to be the only thing standing between this function
+		and that outcome again, so the real guard is now read straight off the
+		Motor6Ds themselves:
+
+		  PAIRS   the two parts this spec would join are already joined. This is
+		          the exact condition for a duplicate and it needs no walk at all.
+		  CLAIMED the child part is already the child end of some joint, even a
+		          differently-shaped one. Keeps a rig whose author jointed a limb
+		          somewhere unconventional from being second-guessed.
+	]]
+	local jointedPairs: { [BasePart]: { [BasePart]: boolean } } = {}
 	local have: { [string]: boolean } = {}
+	for _, motor in RigUtil.getMotors(model) do
+		local part0, part1 = motor.Part0, motor.Part1
+		if not part0 or not part1 or part0 == part1 then
+			continue
+		end
+		jointedPairs[part0] = jointedPairs[part0] or {}
+		jointedPairs[part1] = jointedPairs[part1] or {}
+		jointedPairs[part0][part1] = true
+		jointedPairs[part1][part0] = true
+		--[[ By NAME, from the raw endpoint. normalizeMotorDirection runs before
+		     this in _boltTogether, so Part1 is the child by then; and even if it
+		     did not, claiming one extra name only ever declines to build, which
+		     is the safe direction. ]]
+		have[part1.Name] = true
+	end
 	for _, child in RigUtil.mapMotorChildren(model) do
 		have[child.Name] = true
 	end
@@ -638,6 +782,14 @@ function RigUtil.buildMissingJoints(model: Model): (number, { string })
 			continue
 		end
 
+		--[[ The hard guard. Everything above this line is a name lookup and can
+		     be defeated by an unusual rig; this cannot, because it asks the two
+		     actual parts whether a Motor6D already spans them. ]]
+		local spanned = jointedPairs[parent]
+		if spanned and spanned[child] then
+			continue
+		end
+
 		for _, joint in child:GetJoints() do
 			if joint:IsA("WeldConstraint") or joint:IsA("Weld") or joint:IsA("Snap") then
 				joint:Destroy()
@@ -659,6 +811,199 @@ function RigUtil.buildMissingJoints(model: Model): (number, { string })
 	end
 
 	return built, unbuildable
+end
+
+export type RigReport = {
+	rig: string,
+	rootName: string?,
+	motorCount: number,
+	hasHumanoid: boolean,
+	hasAnimator: boolean,
+	duplicates: { string },
+	rivalWelds: { string },
+	backwards: { string },
+	missingJoints: { string },
+	missingParts: { string },
+}
+
+--[[
+	Everything wrong with a rig, without changing any of it.
+
+	── WHY THIS EXISTS SEPARATELY FROM THE REPAIRS ─────────────────────────────
+	The repairs run at SPAWN, on a clone, and each warns once per variant — so
+	they only ever describe a variant that has actually spawned, and only after
+	somebody has played long enough for it to. With thirty-five Commons and a
+	Director that picks at random, "which of my models is broken" was a question
+	you answered by playing until it came up.
+
+	This is the same set of tests with nothing destroyed, so it can be run at BOOT
+	over every prepared template and answer that question in one block of the
+	startup log — the log people already paste when they ask for help.
+
+	It must not mutate. Templates are shared by every body of a kind, and the
+	repairs are deliberately per-body: a report that quietly fixed things would
+	make the boot log disagree with what the game is actually doing.
+]]
+function RigUtil.diagnose(model: Model): RigReport
+	local rig = RigUtil.rigTypeOf(model)
+	local root = RigUtil.getRoot(model)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local motors = RigUtil.getMotors(model)
+
+	--[[ Pairs, for the two faults that are defined on a pair rather than on a
+	     part: a second Motor6D across one, and a weld beside one. ]]
+	local seenPair: { [BasePart]: { [BasePart]: boolean } } = {}
+	local duplicates: { string } = {}
+	for _, motor in motors do
+		local part0, part1 = motor.Part0, motor.Part1
+		if not part0 or not part1 or part0 == part1 then
+			continue
+		end
+		local spanned = seenPair[part0]
+		if spanned and spanned[part1] then
+			table.insert(duplicates, string.format("%s/%s", part0.Name, part1.Name))
+			continue
+		end
+		seenPair[part0] = seenPair[part0] or {}
+		seenPair[part1] = seenPair[part1] or {}
+		seenPair[part0][part1] = true
+		seenPair[part1][part0] = true
+	end
+
+	local rivals: { string } = {}
+	for _, descendant in model:GetDescendants() do
+		if
+			not descendant:IsA("Weld")
+			and not descendant:IsA("WeldConstraint")
+			and not descendant:IsA("Snap")
+		then
+			continue
+		end
+		local joint: any = descendant
+		local part0, part1 = joint.Part0, joint.Part1
+		if not part0 or not part1 then
+			continue
+		end
+		local spanned = seenPair[part0]
+		if spanned and spanned[part1] then
+			table.insert(rivals, string.format("%s/%s", part0.Name, part1.Name))
+		end
+	end
+
+	local backwards: { string } = {}
+	local have: { [string]: boolean } = {}
+	for motor, child in RigUtil.mapMotorChildren(model) do
+		have[child.Name] = true
+		if motor.Part1 ~= child and motor.Part0 == child then
+			table.insert(backwards, child.Name)
+		end
+	end
+	for _, motor in motors do
+		if motor.Part1 then
+			have[motor.Part1.Name] = true
+		end
+	end
+
+	local skeleton = if rig == "R15" then R15_SKELETON else R6_SKELETON
+	local missingJoints: { string } = {}
+	local missingParts: { string } = {}
+	local seenPartName: { [string]: boolean } = {}
+	for _, spec in skeleton do
+		if have[spec.child] then
+			continue
+		end
+		local parent = namedPart(model, spec.parent)
+		local child = namedPart(model, spec.child)
+		if not parent or not child then
+			for _, name in { spec.parent, spec.child } do
+				local present = if name == spec.parent then parent else child
+				if not present and not seenPartName[name] then
+					seenPartName[name] = true
+					table.insert(missingParts, name)
+				end
+			end
+			continue
+		end
+		local spanned = seenPair[parent]
+		if spanned and spanned[child] then
+			continue
+		end
+		table.insert(missingJoints, spec.joint)
+	end
+
+	table.sort(duplicates)
+	table.sort(rivals)
+	table.sort(backwards)
+	table.sort(missingParts)
+
+	return {
+		rig = rig,
+		rootName = if root then root.Name else nil,
+		motorCount = #motors,
+		hasHumanoid = humanoid ~= nil,
+		hasAnimator = humanoid ~= nil and humanoid:FindFirstChildOfClass("Animator") ~= nil,
+		duplicates = duplicates,
+		rivalWelds = rivals,
+		backwards = backwards,
+		missingJoints = missingJoints,
+		missingParts = missingParts,
+	}
+end
+
+--[[ The report as one human sentence, or nil when the rig is clean. Kept beside
+     diagnose so the wording of a fault lives in one place rather than once per
+     caller — the boot summary and the Studio script must not describe the same
+     rig differently. ]]
+function RigUtil.describeFaults(report: RigReport): string?
+	local parts: { string } = {}
+	if not report.hasHumanoid then
+		table.insert(parts, "NO HUMANOID")
+	elseif not report.hasAnimator then
+		table.insert(parts, "no Animator (cannot play any clip)")
+	end
+	if report.motorCount == 0 then
+		table.insert(parts, "NO JOINTS AT ALL")
+	end
+	if #report.duplicates > 0 then
+		table.insert(
+			parts,
+			string.format(
+				"%d duplicate joint(s): %s",
+				#report.duplicates,
+				table.concat(report.duplicates, ", ")
+			)
+		)
+	end
+	if #report.rivalWelds > 0 then
+		table.insert(
+			parts,
+			string.format(
+				"%d weld(s) beside a joint: %s",
+				#report.rivalWelds,
+				table.concat(report.rivalWelds, ", ")
+			)
+		)
+	end
+	if #report.backwards > 0 then
+		table.insert(
+			parts,
+			string.format(
+				"%d backwards joint(s): %s",
+				#report.backwards,
+				table.concat(report.backwards, ", ")
+			)
+		)
+	end
+	if #report.missingJoints > 0 then
+		table.insert(parts, "missing " .. table.concat(report.missingJoints, ", "))
+	end
+	if #report.missingParts > 0 then
+		table.insert(parts, "NO PART NAMED " .. table.concat(report.missingParts, ", "))
+	end
+	if #parts == 0 then
+		return nil
+	end
+	return table.concat(parts, "; ")
 end
 
 --[[ Sets every part's collision group in one call. ]]

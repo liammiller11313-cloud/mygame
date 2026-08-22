@@ -8,13 +8,16 @@
 	REPAIR to true at the top and run it again. Repairs are one undo away
 	(Ctrl+Z) because they happen inside a ChangeHistoryService waypoint.
 
-	── THE FOUR REASONS A RIG DOES NOT ANIMATE ─────────────────────────────────
+	── THE FIVE REASONS A RIG DOES NOT ANIMATE ─────────────────────────────────
 	  MISSING JOINT    the clip drives a Motor6D that is not there.       FIXABLE
 	  BACKWARDS JOINT  it is there with Part0 and Part1 swapped. The animator
 	                   reads Part1 as the bone, so the part the clip names is
 	                   invisible to it and that one limb never moves.      FIXABLE
 	  NO ANIMATOR      nothing under the Humanoid to load a track into, so
 	                   the body plays no clip at all, ever.                FIXABLE
+	  DUPLICATE JOINT  two Motor6Ds across the same pair. The assembly is
+	                   over-constrained, so the clip drives one and the other
+	                   holds the limb. Reads as "fully jointed" everywhere.  FIXABLE
 	  MISSING PART     the joint needs two parts and one of them is called
 	                   something else — "LeftArm" instead of "Left Arm".      YOU
 
@@ -212,6 +215,47 @@ local function clearWelds(model, parent, child)
 end
 
 --[[
+	A SECOND Motor6D across a pair that already has one.
+
+	Until this was fixed, the game created these itself: buildMissingJoints
+	decided which joints a rig already had from a graph walk, the walk needed a
+	root, and RigUtil.getRoot searched only the model's direct children while
+	every other lookup in that file searched descendants. So a rig whose parts sit
+	inside a Folder — an ordinary way to assemble one — reported NO joints and got
+	a complete second skeleton laid over its first.
+
+	Two rigid joints on a pair over-constrains the assembly: the animation drives
+	one and the other holds the limb, so the body slides in its rest pose. And
+	every check ever written here called such a rig "fully jointed", because it
+	is. It has too many joints, not too few.
+
+	The first one in descendant order is kept — the model's own, since added ones
+	are parented later.
+]]
+local function duplicateJoints(model, repair)
+	local kept, found = {}, {}
+	for _, d in model:GetDescendants() do
+		if not (d:IsA("Motor6D") and d.Part0 and d.Part1 and d.Part0 ~= d.Part1) then
+			continue
+		end
+		local spanned = kept[d.Part0]
+		if spanned and spanned[d.Part1] then
+			table.insert(found, d.Part0.Name .. "/" .. d.Part1.Name)
+			if repair then
+				d:Destroy()
+			end
+			continue
+		end
+		kept[d.Part0] = kept[d.Part0] or {}
+		kept[d.Part1] = kept[d.Part1] or {}
+		kept[d.Part0][d.Part1] = true
+		kept[d.Part1][d.Part0] = true
+	end
+	table.sort(found)
+	return found
+end
+
+--[[
 	Welds that duplicate a Motor6D — the fault every other check here is blind to.
 
 	Two rigid joints between the same two parts over-constrains the assembly.
@@ -298,6 +342,12 @@ local function inspect(model, label)
 	--[[ Before anything else, because a rig with this fault passes every other
 	     test in this file: the joints are all present, the parts are all named,
 	     and the body still does not animate. ]]
+	local dupes = duplicateJoints(model, REPAIR)
+	if #dupes > 0 then
+		local line = string.format("%d duplicate joint(s) (%s)", #dupes, table.concat(dupes, ", "))
+		table.insert(if REPAIR then fixes else notes, if REPAIR then "removed " .. line else line)
+	end
+
 	local rivals = rivalWelds(model, REPAIR)
 	if #rivals > 0 then
 		local line =
@@ -398,7 +448,7 @@ local function inspect(model, label)
 		table.insert(notes, "NO PART NAMED " .. table.concat(absent, ", ") .. " — rename in Studio")
 	end
 
-	local issues = #missing + #backwards + #rivals
+	local issues = #missing + #backwards + #rivals + #dupes
 	if #notes == 0 and #fixes == 0 then
 		print(string.format("  OK    %-28s %s, fully jointed", label, rig))
 		return 0, 0
