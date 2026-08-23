@@ -26,7 +26,7 @@ local GameConfig = {}
 	none. If it is stale, the log says so honestly: the code in Studio is at least
 	as new as this date, and no newer than the push that set it.
 ]]
-GameConfig.BuildStamp = "2026-08-23a"
+GameConfig.BuildStamp = "2026-08-23b"
 
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true
@@ -132,6 +132,28 @@ GameConfig.Survivor = table.freeze({
 	     to where the head now is. ]]
 	CrouchSpeed = 8,
 	CrouchCameraDrop = 1.6, -- studs the view lowers by
+
+	--[[
+		What crouching does to the cone of fire, as a multiplier on the whole of
+		it — base, movement penalty and recoil bloom alike.
+
+		The comment above this block has claimed since it was written that the
+		trade for the speed is "a smaller silhouette and your shots settle". The
+		silhouette was real. The settling was not implemented at all, so crouching
+		was a pure loss: two thirds of your speed for nothing.
+
+		A multiplier rather than a flat subtraction so it scales with the weapon.
+		A tenth of a degree off a shotgun is nothing and off a sniper is most of
+		its cone; a third off either is the same decision. It multiplies bloom too,
+		which is what makes crouching worth doing with an automatic specifically —
+		the same thing crouch-spraying does in Counter-Strike.
+
+		Applied identically by BallisticsService and by WeaponController, because
+		the crosshair renders this number and the server fires it. If the two ever
+		disagree the crosshair is lying about where the bullet goes, which is worse
+		than having no crosshair.
+	]]
+	CrouchSpreadMultiplier = 0.65,
 	SprintStaminaDrain = 26, -- per second
 	SprintStaminaRegen = 18, -- per second
 	MaxStamina = 100,

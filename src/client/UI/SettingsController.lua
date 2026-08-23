@@ -455,6 +455,8 @@ local function applySetting(key: string, value: any)
 		callController("MusicController", "setEnabled", value > 0)
 	elseif key == "sensitivity" then
 		UserInputService.MouseDeltaSensitivity = math.clamp(value, 0.05, 10)
+	elseif key == "toggleCrouch" then
+		callController("InputController", "setCrouchToggle", value == true)
 	elseif key == "subtitles" then
 		callController("SubtitleController", "setEnabled", value == true)
 	elseif key == "difficulty" then

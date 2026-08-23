@@ -274,6 +274,15 @@ function InputController:isDown(action: string): boolean
 	return down[action] == true
 end
 
+--[[ Whether crouch is a tap or a hold. Off by default: holding is what a player
+     who has never opened the settings expects, and it is what every prompt in
+     the game says. ]]
+local crouchToggle = false
+
+local function isCrouching(): boolean
+	return Attributes.get(player, Attributes.Player.IsCrouching, false) == true
+end
+
 local function setDown(action: string, isDown: boolean)
 	if down[action] == isDown then
 		return
@@ -284,9 +293,20 @@ local function setDown(action: string, isDown: boolean)
 	     rather than forward(). The server owns whether it is granted; this only
 	     reports that the button is down, and reports the release too — including
 	     the release setEnabled() synthesises when a menu opens, which is what
-	     stops a player being stuck crouched behind the scoreboard. ]]
+	     stops a player being stuck crouched behind the scoreboard.
+
+	     In TOGGLE mode only the press says anything, and what it says is the
+	     opposite of what the server currently has. Asking the ATTRIBUTE rather
+	     than remembering our own last request is what makes it self-heal: the
+	     server drops crouch on its own whenever the body stops being upright, so
+	     a client keeping its own flag would come back from a jump believing it
+	     was still crouched and spend the next tap standing up from a stand. ]]
 	if action == Action.Crouch then
-		Remotes.Event.SetCrouchState:FireServer(isDown)
+		if not crouchToggle then
+			Remotes.Event.SetCrouchState:FireServer(isDown)
+		elseif isDown then
+			Remotes.Event.SetCrouchState:FireServer(not isCrouching())
+		end
 	end
 
 	local perAction = if isDown then beganSignals[action] else endedSignals[action]
@@ -681,6 +701,29 @@ function InputController:setEnabled(value: boolean)
 				setDown(action, false)
 			end
 		end
+		--[[ And crouch specifically, which the loop above cannot reach in toggle
+		     mode: the key was tapped and released long ago, so nothing is `down`
+		     while the player is very much still crouched. Without this, opening
+		     the scoreboard with toggle crouch on left them stuck at eight studs a
+		     second — the exact bug the synthesised release exists to prevent,
+		     walking back in through the new door. ]]
+		if isCrouching() then
+			Remotes.Event.SetCrouchState:FireServer(false)
+		end
+	end
+end
+
+--[[ Set from the settings panel. Standing up on the way through: flipping the
+     rule while crouched would otherwise leave a held-mode player crouched with
+     nothing holding the key, and the release edge that would have freed them
+     already happened. ]]
+function InputController:setCrouchToggle(value: boolean)
+	if crouchToggle == value then
+		return
+	end
+	crouchToggle = value == true
+	if isCrouching() then
+		Remotes.Event.SetCrouchState:FireServer(false)
 	end
 end
 

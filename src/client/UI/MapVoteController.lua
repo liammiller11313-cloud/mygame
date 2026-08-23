@@ -55,6 +55,20 @@ local CARD_GAP = 18
      above plus its own padding, which is the whole roster. ]]
 local KEY_CAP = 26
 local EXIT_SIZE = 34
+--[[ The way back to the main menu, bottom-left of the panel. Wide enough for its
+     own label rather than a glyph: the × beside it already means "put this away",
+     and a second icon next to it would be a guess. ]]
+local MENU_BUTTON_WIDTH = 140
+local MENU_BUTTON_HEIGHT = 30
+--[[ Its own row under the hint rather than a corner of the hint's.
+
+     Everything in this panel is centred across its full width, and the panel
+     shrinks to 420 for a one-map vote or a narrow phone. A labelled button in a
+     bottom corner would meet the centred hint there — the × gets away with the
+     same corner only because it is 34 pixels wide and a glyph. A row of its own
+     cannot collide at any width, and it reads as leaving rather than as part of
+     the hint. ]]
+local MENU_ROW = MENU_BUTTON_HEIGHT + 10
 local PANEL_PADDING = 34
 
 --[[ The header, as three stacked rows rather than a total everything has to be
@@ -66,7 +80,11 @@ local RULE_ROW = 18
 local CLOCK_ROW = TEXT.Heading + 6
 local HEADER_HEIGHT = TITLE_ROW + RULE_ROW + CLOCK_ROW
 
-local FOOTER_HEIGHT = 44
+--[[ The hint row plus the main-menu row beneath it. Both places that size the
+     panel add this to the header and the cards, so the extra row is accounted
+     for everywhere by changing it here. ]]
+local HINT_ROW = 44
+local FOOTER_HEIGHT = HINT_ROW + MENU_ROW
 local BAR_HEIGHT = 4
 local BAR_CHASE = 1 / MOTION.Normal
 
@@ -657,6 +675,60 @@ local function build()
 		MapVoteController:dismiss()
 	end)
 
+	--[[
+		Out of the game entirely, as opposed to the × which only stops drawing the
+		vote.
+
+		These are two different wants and the × served neither of them well. A
+		player who is done for the evening was, at the one moment the game asks
+		them a question and frees their mouse, given a close button that put them
+		back in a first-person view they then had to open the pause menu from.
+		Every other full-screen menu here offers a way to the main menu; the vote
+		is the screen most likely to be up when somebody wants one.
+
+		Dismisses first, exactly as the pause menu closes itself before opening the
+		menu: this screen owns a FreeCursor claim and the menu takes its own, and
+		two overlays holding the cursor at once is how a player ends up unable to
+		close either. The vote stays cast — the tally is the server's and leaving
+		the screen was never a withdrawal.
+	]]
+	local menuButton = Instance.new("TextButton")
+	menuButton.Name = "MainMenu"
+	menuButton.AnchorPoint = Vector2.new(0.5, 1)
+	menuButton.Position = UDim2.new(0.5, 0, 1, 0)
+	menuButton.Size = UDim2.fromOffset(MENU_BUTTON_WIDTH, MENU_BUTTON_HEIGHT)
+	menuButton.BackgroundTransparency = 1
+	menuButton.AutoButtonColor = false
+	menuButton.BorderSizePixel = 0
+	menuButton.Font = FONT.Body
+	menuButton.TextSize = TEXT.Small
+	menuButton.TextColor3 = COLOR.TextDim
+	menuButton.Text = "MAIN MENU"
+	menuButton.ZIndex = 3
+	menuButton.Parent = root
+	GamepadFocus.style(menuButton)
+
+	local menuStroke = Instance.new("UIStroke")
+	menuStroke.Color = COLOR.Border
+	menuStroke.Thickness = 1
+	menuStroke.Parent = menuButton
+
+	trove:connect(menuButton.MouseEnter, function()
+		menuButton.TextColor3 = COLOR.TextPrimary
+		menuStroke.Color = COLOR.BorderBright
+	end)
+	trove:connect(menuButton.MouseLeave, function()
+		menuButton.TextColor3 = COLOR.TextDim
+		menuStroke.Color = COLOR.Border
+	end)
+	trove:connect(menuButton.Activated, function()
+		MapVoteController:dismiss()
+		local menu = Registry.find("MainMenuController")
+		if menu and typeof(menu.open) == "function" then
+			pcall(menu.open, menu)
+		end
+	end)
+
 	local rule = newFrame(root, "Rule", COLOR.BorderBright)
 	rule.AnchorPoint = Vector2.new(0.5, 0)
 	rule.Position = UDim2.new(0.5, 0, 0, TITLE_ROW + (RULE_ROW - 2) * 0.5)
@@ -669,8 +741,8 @@ local function build()
 
 	footLabel = newLabel(root, "Foot", FONT.Body, TEXT.Small, COLOR.TextDim)
 	footLabel.AnchorPoint = Vector2.new(0.5, 1)
-	footLabel.Position = UDim2.new(0.5, 0, 1, 0)
-	footLabel.Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT)
+	footLabel.Position = UDim2.new(0.5, 0, 1, -MENU_ROW)
+	footLabel.Size = UDim2.new(1, 0, 0, HINT_ROW)
 	footLabel.TextXAlignment = Enum.TextXAlignment.Center
 	footLabel.Text = ""
 end

@@ -289,7 +289,16 @@ local function coneFor(): number
 	end
 	-- max() guards a definition whose spreadMax sits under its own base spread:
 	-- bloom may widen the cone, never tighten it.
-	return math.min(base + state.bloom, math.max(definition.spreadMax, base))
+	local cone = math.min(base + state.bloom, math.max(definition.spreadMax, base))
+	--[[ Crouch last, on the clamped total, so it tightens the movement penalty
+	     and the recoil bloom as well as the base. Line for line what
+	     BallisticsService.coneFor does, off the same server-owned attribute —
+	     the crosshair renders this and the server fires it, so the two agreeing
+	     is the whole contract. ]]
+	if Attributes.get(player, PA.IsCrouching, false) then
+		cone *= GameConfig.Survivor.CrouchSpreadMultiplier
+	end
+	return cone
 end
 
 --[[

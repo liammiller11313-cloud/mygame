@@ -32,6 +32,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -286,11 +287,27 @@ local function update(dt: number)
 		return
 	end
 
-	local target = math.clamp(
-		CROSSHAIR.MinGap + currentSpread() * CROSSHAIR.GapPerDegree,
-		CROSSHAIR.MinGap,
-		CROSSHAIR.MaxGap
-	)
+	--[[
+		Crouching pulls the whole reticle in, not only the cone-proportional part.
+
+		currentSpread() already carries the crouch multiplier — WeaponController
+		applies it, and BallisticsService applies the same one to the shot — so the
+		second term tightens on its own. What does not is MinGap, which is an
+		OFFSET added to every reading rather than a floor under it, and it is most
+		of the gap for a weapon that is already accurate: a rifle at 0.4 degrees of
+		aim spends three of its five pixels on it. Left alone, crouching with the
+		most precise gun in the game would move the reticle by two thirds of a
+		pixel, which is to say by nothing.
+
+		Scaling it by the same factor makes the reticle contract by exactly that
+		factor whatever is in your hands — a rifle behaves like the SMG behaves —
+		and it stays honest, because it is the same number the cone moved by.
+	]]
+	local floor = CROSSHAIR.MinGap
+	if Attributes.get(player, PA.IsCrouching, false) then
+		floor *= GameConfig.Survivor.CrouchSpreadMultiplier
+	end
+	local target = math.clamp(floor + currentSpread() * CROSSHAIR.GapPerDegree, floor, CROSSHAIR.MaxGap)
 	state.gap += (target - state.gap) * math.min(dt * CROSSHAIR.SmoothSpeed, 1)
 
 	if math.abs(state.gap - state.appliedGap) > GAP_EPSILON then

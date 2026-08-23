@@ -213,6 +213,14 @@ SettingsConfig.Definitions = table.freeze({
 		action = "Crouch",
 	},
 	{
+		key = "toggleCrouch",
+		label = "TOGGLE CROUCH",
+		category = "CONTROLS",
+		kind = "toggle",
+		default = false,
+		blurb = "Tap to crouch and tap again to stand, instead of holding the key.",
+	},
+	{
 		key = "bindUseItem",
 		label = "USE ITEM",
 		category = "CONTROLS",

@@ -254,8 +254,16 @@ local function isMoving(character: Model, humanoid: Humanoid): boolean
 	return velocity.X * velocity.X + velocity.Z * velocity.Z > MOVING_SPEED_SQUARED
 end
 
---[[ The cone, in degrees of half-angle. Pure read — call decayBloom first. ]]
+--[[ The cone, in degrees of half-angle. Pure read — call decayBloom first.
+
+     The crouch multiplier is applied LAST, to the clamped total, so it tightens
+     the movement penalty and the recoil bloom as well as the base — which is the
+     whole reason to crouch behind an automatic. Read from the attribute rather
+     than from anything the client sent: the server owns crouch, and WeaponController
+     reads the same attribute so the crosshair cannot promise a cone this will not
+     fire. ]]
 local function coneFor(
+	shooter: Player,
 	state: ShooterState,
 	definition: WeaponDefinition,
 	character: Model,
@@ -267,7 +275,11 @@ local function coneFor(
 	end
 	-- max() guards a definition whose spreadMax is under its own base spread:
 	-- bloom may only ever widen the cone, never tighten it.
-	return math.min(base + state.bloom, math.max(definition.spreadMax, base))
+	local cone = math.min(base + state.bloom, math.max(definition.spreadMax, base))
+	if Attributes.get(shooter, Attributes.Player.IsCrouching, false) then
+		cone *= GameConfig.Survivor.CrouchSpreadMultiplier
+	end
+	return cone
 end
 
 --[[
@@ -371,7 +383,7 @@ function BallisticsService:getEffectiveSpread(player: Player): number
 
 	local state = stateFor(player)
 	decayBloom(state, definition, os.clock())
-	return coneFor(state, definition, character, humanoid)
+	return coneFor(player, state, definition, character, humanoid)
 end
 
 --[[
@@ -479,7 +491,7 @@ function BallisticsService:resolveShot(
 	-- ── the cone ─────────────────────────────────────────────────────────────
 	local unit = direction.Unit
 	decayBloom(state, definition, now)
-	local spread = coneFor(state, definition, character, humanoid)
+	local spread = coneFor(shooter, state, definition, character, humanoid)
 	state.bloom = math.min(state.bloom + definition.bloomPerShot, math.max(definition.spreadMax, 0))
 	state.lastFireAt = now
 
