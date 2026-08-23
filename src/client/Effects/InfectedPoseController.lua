@@ -265,6 +265,8 @@ type Body = {
 	     that is genuinely broken. ]]
 	seenAt: number,
 	fallbackSince: number,
+	-- Playing tracks this client last counted, or -1 if the call itself failed.
+	trackCount: number,
 }
 
 local bodies: { [Model]: Body } = {}
@@ -459,6 +461,7 @@ local function track(model: Instance)
 		trackCheckedAt = -math.huge,
 		seenAt = clock,
 		fallbackSince = 0,
+		trackCount = 0,
 	}
 end
 
@@ -567,7 +570,10 @@ local function hasPlayingTracks(body: Body): boolean
 	body.trackCheckedAt = clock
 
 	local ok, tracks = pcall(animator.GetPlayingAnimationTracks, animator)
-	body.trackOwned = ok and typeof(tracks) == "table" and #tracks > 0
+	--[[ Kept so the fallback report can quote it. A count of zero beside a server
+	     that says it is playing a walk is the whole diagnosis. ]]
+	body.trackCount = if ok and typeof(tracks) == "table" then #tracks else -1
+	body.trackOwned = body.trackCount > 0
 	return body.trackOwned
 end
 
@@ -795,12 +801,35 @@ local function step(dt: number)
 			and clock - body.fallbackSince > FALLBACK_REPORT_DELAY
 		then
 			reportedFallback[body.variant] = true
+			--[[
+				Both ends of the question in one line.
+
+				"The client sees no tracks" is half a fact. The half that decides
+				what to fix is what the SERVER thought it was doing at the same
+				moment — it publishes the gait it believes is playing, so:
+
+				  gait "walk", animated=true   the server started a clip and this
+				                               client cannot see it. A replication
+				                               or ownership problem, not a rig one.
+				  gait "", animated=true       tracks loaded and none was ever
+				                               played. A server-side bug in the
+				                               tick that chooses a gait.
+				  animated=false               the server knows it has nothing
+				                               usable, and said so.
+
+				Three different causes that look identical from here, which is why
+				the last two reports pointed at innocent models.
+			]]
 			warn(
 				string.format(
-					"[InfectedPoseController] %q is being animated by the procedural fallback, not by "
-						.. "its clips — it has an Animator but nothing is playing on it. That is the "
-						.. "shamble you see instead of the walk you uploaded.",
-					body.variant
+					"[InfectedPoseController] %q is on the procedural fallback: it has an Animator, "
+						.. "this client sees %d playing track(s), and the server says animated=%s "
+						.. "gait=%q. If the gait is a real role and the count is 0, the clip is "
+						.. "playing on the server and not reaching this client.",
+					body.variant,
+					body.trackCount,
+					tostring(Attributes.get(body.model, IA.Animated, nil :: boolean?)),
+					tostring(Attributes.get(body.model, IA.Gait, ""))
 				)
 			)
 		end

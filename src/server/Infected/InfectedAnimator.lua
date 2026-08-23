@@ -524,6 +524,11 @@ function InfectedAnimator.setState(self, role: string, speed: number)
 			track:Play(FADE)
 		end
 		self.current = key
+		--[[ Published on the change only, so this costs a handful of replicated
+		     writes per body per second at worst. It is what lets the client's
+		     fallback report say whether the server had started a clip at all —
+		     see Attributes.Infected.Gait. ]]
+		self.model:SetAttribute(Attributes.Infected.Gait, key)
 		--[[ A different track carries its own speed, so the cached rate says
 		     nothing about it. Forgetting this is how a body switching from run to
 		     walk at a matching numeric rate keeps the run's playback speed. ]]

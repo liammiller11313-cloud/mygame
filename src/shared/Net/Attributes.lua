@@ -106,6 +106,18 @@ Attributes.Infected = table.freeze({
 		no evidence would fight a clip that is perfectly fine.
 	]]
 	Animated = "FL_Animated",
+	--[[
+		string. The gait role the SERVER believes is playing on this body right
+		now — "walk", "idle", "run", "fall" — or "" when it has started nothing.
+
+		Written only when it changes, which is a handful of times per body per
+		second at most, and it exists to settle one question no single machine can
+		answer alone: when the client's fallback takes over a body, is that because
+		the server never started a clip, or because the server started one and this
+		client cannot see it? Those have opposite fixes, and from either end alone
+		they look identical.
+	]]
+	Gait = "FL_Gait",
 })
 
 -- Written on a dropped pickup Model so the interact prompt can label it.
