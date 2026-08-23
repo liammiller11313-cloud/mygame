@@ -57,6 +57,10 @@ local Registry = require(Shared.Util.Registry)
 --[[ For the rig lookups ONLY. The server and this file were resolving the same
      rig in different ways and getting different answers — see resolveJoints. ]]
 local RigUtil = require(Shared.Util.RigUtil)
+--[[ To fetch the infected clips on THIS machine at boot. See start(): the
+     server preloads them and the client never did. ]]
+local AnimationCache = require(Shared.Util.AnimationCache)
+local AnimationConfig = require(Shared.Config.AnimationConfig)
 local Trove = require(Shared.Util.Trove)
 
 local IA = Attributes.Infected
@@ -555,7 +559,11 @@ local function hasPlayingTracks(body: Body): boolean
 		body.trackOwned = false
 		return false
 	end
-	if verdict == nil and clock - body.seenAt < ANIMATED_GRACE then
+	--[[ Undecided, OR decided-yes but nothing visible here yet. Both mean the
+	     same thing from this machine: the clip is coming and seizing the rig now
+	     would fight it. The assets are preloaded at boot (see start), so this is
+	     the tail of a cold fetch rather than the common case it used to be. ]]
+	if verdict ~= false and clock - body.seenAt < ANIMATED_GRACE then
 		body.trackOwned = true
 		return true
 	end
@@ -865,6 +873,31 @@ function InfectedPoseController:init()
 end
 
 function InfectedPoseController:start()
+	--[[
+		FETCH THE ANIMATION ASSETS ON THIS MACHINE. Nothing did, and that is why
+		this controller kept taking bodies over.
+
+		Roblox fetches an animation asset PER PEER. InfectedService preloads every
+		id at boot — on the SERVER — so the server's tracks have real lengths and
+		play immediately. The client was never told to fetch anything. So a
+		replicated track arrived for a body whose keyframes this machine did not
+		have yet, the client's Animator reported nothing playing, and this
+		controller concluded the clip had failed and seized the rig.
+
+		It explains every part of the shape that made it so hard to pin down: it
+		hits SOME bodies, because it is a race between the asset arriving and this
+		client first stepping that body; it hits Commons and the Spitter alike,
+		because it has nothing to do with rigs or clip sets; the set of models
+		looks random because it is; and none of it appears in the server's log,
+		because the server has the assets and is perfectly happy.
+
+		One call, at boot, before any body exists. AnimationCache deduplicates and
+		spawns the fetch, so this costs the client nothing it was not going to pay
+		anyway — it just pays it once, up front, instead of mid-horde and one
+		zombie at a time.
+	]]
+	AnimationCache.preload(AnimationConfig.allIds())
+
 	local existing = Workspace:FindFirstChild("Infected")
 	if existing then
 		watchFolder(existing)
