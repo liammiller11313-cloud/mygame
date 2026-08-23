@@ -504,11 +504,37 @@ local function cancelInteract()
 	end
 end
 
---[[ The glyph in the box is whatever Interact is actually bound to, read back
-     from InputController rather than assumed, so a rebind relabels the prompt. ]]
+--[[
+	The glyph in the box is whatever Interact is actually bound to, read back from
+	InputController rather than assumed, so a rebind relabels the prompt.
+
+	── AND NOTHING AT ALL ON A TOUCHSCREEN ─────────────────────────────────────
+	This drew a keyboard E regardless of what the player was holding, so a phone
+	player standing over a downed teammate was told, in a box, to press a key
+	their device does not have — while the button that actually does it sat
+	unlabelled in the corner of their own screen.
+
+	The HUD's hotbar already got this right: "a key glyph there would be
+	instructions for hardware the player does not have". This is the same rule,
+	and the box goes with the glyph rather than sitting there empty.
+]]
 local function readKeyGlyph()
 	local controller = Registry.find("InputController")
 	if not controller or typeof(controller.getBindings) ~= "function" then
+		return
+	end
+	local touch = typeof(controller.isTouchScheme) == "function"
+		and select(2, pcall(controller.isTouchScheme, controller)) == true
+	keyBox.Visible = not touch
+	--[[ And the text closes the gap the box leaves. It is left-aligned from just
+	     past the box, so hiding the box alone would push the whole prompt a
+	     key-width off centre. ]]
+	local indent = if touch then 0 else KEY_BOX + LAYOUT.ElementGap * 2
+	textLabel.Position = UDim2.new(0.5, -PROMPT_WIDTH * 0.5 + indent, 0.5, 0)
+	textLabel.Size = UDim2.fromOffset(PROMPT_WIDTH - indent, KEY_BOX)
+	if touch then
+		state.interactKey = ""
+		keyLabel.Text = ""
 		return
 	end
 	local ok, bindings = pcall(controller.getBindings, controller)
@@ -674,6 +700,14 @@ function PromptController:start()
 	if input and typeof(input.onBegan) == "function" then
 		trove:add(input:onBegan(input.Action.Interact):connect(beginInteract))
 		trove:add(input:onEnded(input.Action.Interact):connect(cancelInteract))
+		--[[ Re-read when the player changes what they are holding. The glyph was
+		     resolved exactly once at start, so a rebind relabelled nothing and a
+		     phone player who had touched the screen after this ran was still being
+		     shown a key. Every other glyph in the interface already follows the
+		     scheme; this one did not. ]]
+		if input.schemeChanged then
+			trove:add(input.schemeChanged:connect(readKeyGlyph))
+		end
 	else
 		warn("[PromptController] no InputController; interact prompts will display but cannot be started")
 	end

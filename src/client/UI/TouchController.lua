@@ -31,6 +31,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
@@ -181,6 +182,12 @@ type PadButton = {
 	action: string,
 	-- Shown only while its verb would do something. See refreshState.
 	contextual: boolean,
+	-- Drawn heavier, and never fully dimmed. Fire and Jump.
+	prominent: boolean,
+	-- What the state sweep last painted a LATCHED button. See LATCHED.
+	lit: boolean,
+	-- The touch currently holding this button down. See newButton's InputBegan.
+	held: InputObject?,
 }
 
 local buttons: { PadButton } = {}
@@ -217,6 +224,32 @@ local function paint(entry, held: boolean)
 	entry.stroke.Color = if held then COLOR.AccentBright else COLOR.BorderBright
 	entry.stroke.Thickness = if held or prominent then RING_HELD else RING_IDLE
 	entry.label.TextColor3 = if held then COLOR.AccentBright else COLOR.TextPrimary
+end
+
+--[[
+	Lets a button's verb go, whoever is asking.
+
+	One place, because a held verb has three ways to end and every one of them
+	has to clear the SAME three things — the remembered touch, the server-facing
+	action, and the paint. The touch lifting is the ordinary one; the other two
+	are a contextual button being taken off screen under a finger, and the whole
+	pad being hidden by a menu. Both of those already raised the release; neither
+	cleared `held`, so the next InputBegan on that button would have seen it as
+	still occupied and refused to press it at all.
+]]
+local function releaseEntry(entry)
+	entry.held = nil
+	local input = Registry.find("InputController")
+	if input then
+		input:raise(entry.action, false)
+	end
+	--[[ A latched button is left alone: the finger coming off crouch says nothing
+	     about whether the player is crouched, and the state sweep owns it.
+	     Painting false here and letting the sweep light it again a tick later
+	     would be a flicker on every tap. ]]
+	if not LATCHED[entry.action] then
+		paint(entry, false)
+	end
 end
 
 local function newButton(action: string, label: string, size: number, prominent: boolean?): any
@@ -280,40 +313,52 @@ local function newButton(action: string, label: string, size: number, prominent:
 		--[[ What the state sweep last painted a LATCHED button, so it writes only
 		     when the answer moves. Meaningless for every other button. ]]
 		lit = false,
+		--[[ The touch that is currently holding this button down, or nil. See the
+		     note on InputBegan: the finger owns the verb, not the button. ]]
+		held = nil :: InputObject?,
 	}
 	paint(entry, false)
 
-	--[[ InputBegan/Ended on the button rather than Activated. Activated only
-	     fires on release, which would make holding the trigger impossible: FIRE
-	     and AIM are held verbs, and a fire button you have to tap once per round
-	     is not a fire button. ]]
+	--[[
+		InputBegan on the button rather than Activated. Activated only fires on
+		release, which would make holding the trigger impossible: FIRE and AIM are
+		held verbs, and a fire button you have to tap once per round is not a fire
+		button.
+
+		── THE FINGER OWNS THE VERB, NOT THE BUTTON ────────────────────────────
+		The release used to be frame.InputEnded, and that is the bug that made
+		mobile unplayable. A GuiObject fires InputEnded when the touch LEAVES ITS
+		BOUNDS as well as when the finger lifts — so on a 64-pixel circle under a
+		thumb that is also steering, the verb was released every time the contact
+		patch drifted a few pixels.
+
+		FIRE survived it: you press it again a third of a second later and never
+		notice. A HOLD did not. Reviving a teammate is several seconds of keeping
+		one verb down, and every micro-drift cancelled it and sent CancelInteract —
+		so a player could stand over a downed teammate with the prompt on screen,
+		press USE, and simply never revive them. That is "mobile players can't
+		interact", and it was never the button being unreachable.
+
+		So the touch is remembered and released from UserInputService.InputEnded,
+		which fires for that exact InputObject when the FINGER actually lifts,
+		wherever it has wandered to by then.
+	]]
 	trove:connect(frame.InputBegan, function(input: InputObject)
 		if input.UserInputType ~= Enum.UserInputType.Touch then
 			return
 		end
-		local input_ = Registry.find("InputController")
-		if input_ and input_:raise(action, true) then
-			paint(entry, true)
-		end
-	end)
-
-	local function release(input: InputObject)
-		if input.UserInputType ~= Enum.UserInputType.Touch then
+		--[[ One finger at a time per button. A second touch landing on a button
+		     already held would overwrite the InputObject being watched for, and
+		     the first finger's lift would then never release the verb. ]]
+		if entry.held then
 			return
 		end
 		local input_ = Registry.find("InputController")
-		if input_ then
-			input_:raise(action, false)
+		if input_ and input_:raise(action, true) then
+			entry.held = input
+			paint(entry, true)
 		end
-		--[[ A latched button is left alone: the finger coming off crouch says
-		     nothing about whether the player is crouched, and the state sweep owns
-		     it. Painting false here and letting the sweep light it again a frame
-		     later would be a flicker on every tap. ]]
-		if not LATCHED[action] then
-			paint(entry, false)
-		end
-	end
-	trove:connect(frame.InputEnded, release)
+	end)
 
 	table.insert(buttons, entry)
 	return entry
@@ -393,6 +438,30 @@ local function refreshState()
 	end
 
 	for _, entry in buttons do
+		--[[
+			A held touch whose InputObject has already finished.
+
+			The backstop to the UserInputService watcher, and it is worth having
+			because the failure it covers is the worst one this file can produce: a
+			verb held forever. The watcher covers the finger lifting; this covers a
+			touch that ends without one arriving — the GUI being torn down under
+			it, or the OS taking the input away mid-press.
+
+			Roblox marks the InputObject itself once it is done, so this is one
+			property read per held button, fifteen times a second, and it turns
+			"stuck for the rest of the round" into "stuck for one tick".
+		]]
+		local held = entry.held
+		if
+			held
+			and (
+				held.UserInputState == Enum.UserInputState.End
+				or held.UserInputState == Enum.UserInputState.Cancel
+			)
+		then
+			releaseEntry(entry)
+		end
+
 		--[[ Crouch, painted from the server's own answer rather than from the
 		     finger. See LATCHED. ]]
 		if LATCHED[entry.action] then
@@ -408,11 +477,7 @@ local function refreshState()
 				--[[ Released on the way out. A finger still down on a button that
 				     vanishes never delivers its InputEnded, and the verb would
 				     stay held for the rest of the round. ]]
-				local input = Registry.find("InputController")
-				if input then
-					input:raise(entry.action, false)
-				end
-				paint(entry, false)
+				releaseEntry(entry)
 			end
 		end
 	end
@@ -432,9 +497,7 @@ local function refresh()
 		     the button that would have raised the release is gone. Everything is
 		     let go on the way out. ]]
 		for _, entry in buttons do
-			if input then
-				input:raise(entry.action, false)
-			end
+			releaseEntry(entry)
 			--[[ Cleared with the paint, or the state sweep would compare against a
 			     lit it no longer matches and decline to light crouch again when the
 			     pad comes back. ]]
@@ -561,6 +624,21 @@ function TouchController:start()
 	if input and input.schemeChanged then
 		trove:add(input.schemeChanged:connect(refresh))
 	end
+
+	--[[ The finger lifting anywhere on the screen, which is the only thing that
+	     genuinely ends a held touch verb. Matched by InputObject identity, so a
+	     second finger elsewhere on the pad releases only its own button. See the
+	     note on InputBegan for why the button's own InputEnded cannot be used. ]]
+	trove:connect(UserInputService.InputEnded, function(input: InputObject)
+		if input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+		for _, entry in buttons do
+			if entry.held == input then
+				releaseEntry(entry)
+			end
+		end
+	end)
 
 	suppressRobloxJump()
 
