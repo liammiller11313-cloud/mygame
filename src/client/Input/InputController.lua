@@ -706,8 +706,13 @@ function InputController:setEnabled(value: boolean)
 		     while the player is very much still crouched. Without this, opening
 		     the scoreboard with toggle crouch on left them stuck at eight studs a
 		     second — the exact bug the synthesised release exists to prevent,
-		     walking back in through the new door. ]]
-		if isCrouching() then
+		     walking back in through the new door.
+
+		     Toggle mode ONLY. In hold mode the loop above already fired the
+		     release, and the attribute it would be tested against has not made the
+		     round trip yet — so this fired a second, identical remote every time a
+		     menu opened while crouched. ]]
+		if crouchToggle and isCrouching() then
 			Remotes.Event.SetCrouchState:FireServer(false)
 		end
 	end

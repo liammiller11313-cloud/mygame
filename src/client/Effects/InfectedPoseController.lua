@@ -473,8 +473,25 @@ local function track(model: Instance)
 		return
 	end
 
-	--[[ Here rather than in the pose loop: this is a one-shot per body, and the
-	     loop is the thing the whole file exists to keep cheap. ]]
+	--[[
+		Here AND again when the rig resolves, and the second one is the one that
+		does the work.
+
+		This is reached from the folder's ChildAdded, which fires the instant the
+		MODEL arrives — and a Roblox model replicates progressively, so at this
+		moment it is very nearly empty. That is the same fact resolveJoints exists
+		to cope with, and it retries for ten seconds because of it. Walking
+		GetDescendants here therefore found almost nothing to strip, and every part
+		that arrived afterwards — which is the entire rig — kept its shadow.
+
+		So the one thing on a handset that took the horde's dynamic shadow casters
+		away was, in practice, taking none of them away. A phone was drawing a
+		shadow for every limb of every zombie on screen.
+
+		Kept here as well because it costs one walk of an almost-empty model and it
+		is correct for a body that HAS fully arrived by now — a Common recycled out
+		of a pool, or a rig the client already had.
+	]]
 	stripShadows(model)
 
 	local seed = seedFor(model)
@@ -881,11 +898,13 @@ local function step(dt: number)
 			body.resolveAt = clock + RESOLVE_RETRY
 			if resolveJoints(body) then
 				body.resolved = true
+				stripShadows(model)
 			elseif clock - body.seenAt > RESOLVE_GIVE_UP then
 				--[[ Bounded, so a rig that genuinely has no joints or no Animator is
 				     not re-walked for the rest of the round. Whatever was found is
 				     what it gets, and the report below says so. ]]
 				body.resolved = true
+				stripShadows(model)
 			end
 		end
 
@@ -1015,7 +1034,29 @@ function InfectedPoseController:init()
 	--[[ In init rather than at module scope, because the camera exists by now and
 	     Device's answer is a measurement rather than its safe floor. ]]
 	adoptDeviceBands()
-	trove:add(Device.changed:connect(adoptDeviceBands))
+	--[[
+		Re-strip on a revision, not only re-band.
+
+		Device deliberately answers before the camera exists and corrects itself
+		once it does, which is the whole reason the bands are re-read here rather
+		than resolved at module scope. The distances self-correct for free — the
+		loop reads them every frame — but shadows do not: stripping is a one-off
+		per body, so every zombie tracked before the answer moved would keep its
+		casters for the rest of the round.
+
+		That is the same hole the strip already had at track time, one level up,
+		and it lands on the same player: the handset that was called a desktop for
+		its first second.
+	]]
+	trove:add(Device.changed:connect(function()
+		local was = dropRigShadows
+		adoptDeviceBands()
+		if dropRigShadows and not was then
+			for model in bodies do
+				stripShadows(model)
+			end
+		end
+	end))
 end
 
 function InfectedPoseController:start()

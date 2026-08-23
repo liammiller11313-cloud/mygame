@@ -909,6 +909,62 @@ for p, text in sources.items():
                 f"line {at + 1} — this writes a GLOBAL and the local keeps its initial value"
             )
 
+# ── 11b. READING a top-level local before it is declared ────────────────────
+#
+# Same trap as 11, other direction, and it bites harder. A function written
+# above the local it reads does not see that local at all — the name resolves to
+# a global, which is nil:
+#
+#     local function latchedState()
+#         return Attributes.get(player, ...)   -- `player` is nil here
+#     end
+#     local player = Players.LocalPlayer       -- declared AFTER
+#
+# 11 catches the write and reports a value that never changes. This is the read,
+# and it does not fail quietly: it errors the first time the function is called,
+# which on a control surface is the first time somebody presses the button.
+#
+# Only inside a `local function` body, and only for a name the function does not
+# introduce itself as a parameter or a local of its own.
+for p, text in sources.items():
+    lines = text.split("\n")
+    declared: dict = {}
+    for i, line in enumerate(lines):
+        m = re.match(r"^local (?:function )?([A-Za-z_]\w*)", line)
+        if m and m.group(1) not in declared:
+            declared[m.group(1)] = i
+
+    start = None
+    shadowed: set = set()
+    for i, line in enumerate(lines):
+        head = re.match(r"^local function [A-Za-z_]\w*\(([^)]*)\)", line)
+        if head:
+            start = i
+            shadowed = {a.split(":")[0].strip() for a in head.group(1).split(",") if a.strip()}
+            continue
+        if start is None:
+            continue
+        if line == "end":
+            start = None
+            continue
+        own = re.match(r"^[ \t]+local (?:function )?([A-Za-z_]\w*)", line)
+        if own:
+            shadowed.add(own.group(1))
+        for m in re.finditer(r"(?<![.:\w])([A-Za-z_]\w*)", line):
+            name = m.group(1)
+            if name in shadowed:
+                continue
+            # The assignment form is 11's to report, not this one's.
+            if re.match(r"^[ \t]*" + re.escape(name) + r"\s*(=[^=]|[-+*/%]=|\.\.=)", line):
+                continue
+            at = declared.get(name)
+            if at is not None and at > i and at > start:
+                problems.append(
+                    f"{rel(p)}:{i + 1}  reads '{name}' but `local {name}` is not declared until "
+                    f"line {at + 1} — inside this function the name is a GLOBAL, so it is nil "
+                    f"and the call errors the first time anything reaches it"
+                )
+
 
 
 # ── 12. The two corpse ceilings must agree ──────────────────────────────────

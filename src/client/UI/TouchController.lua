@@ -33,6 +33,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
@@ -139,6 +140,35 @@ local CONTEXTUAL: { [string]: boolean } = {
 local TouchController = {}
 
 local player = Players.LocalPlayer
+
+--[[
+	Verbs whose button stays lit after the finger comes off it.
+
+	Crouch, and only crouch: with TOGGLE CROUCH on it is a tap, so the finger
+	leaving the button means nothing about whether the player is crouched. The
+	button unlit itself on release and left them crouched with no lit control
+	anywhere on screen — on the one platform where the toggle is worth having,
+	because holding a virtual button down while also steering and shooting is
+	what the setting exists to avoid.
+
+	Painted from the server's own IsCrouching attribute rather than from anything
+	this file remembers. That is right in HOLD mode too — the server drops crouch
+	by itself whenever the body stops being upright, so a button mirroring the
+	finger was already lying every time a player crouch-walked off a ledge.
+]]
+--[[ How often the button states are re-read. See the note on the connection. ]]
+local STATE_INTERVAL = 1 / 15
+
+local LATCHED: { [string]: boolean } = {
+	Crouch = true,
+}
+
+local function latchedState(action: string): boolean
+	if action == "Crouch" then
+		return Attributes.get(player, Attributes.Player.IsCrouching, false) == true
+	end
+	return false
+end
 local trove = Trove.new()
 
 local gui: ScreenGui
@@ -149,7 +179,7 @@ type PadButton = {
 	stroke: UIStroke,
 	label: TextLabel,
 	action: string,
-	-- Shown only while its verb would do something. See refreshContextual.
+	-- Shown only while its verb would do something. See refreshState.
 	contextual: boolean,
 }
 
@@ -247,6 +277,9 @@ local function newButton(action: string, label: string, size: number, prominent:
 		action = action,
 		contextual = false,
 		prominent = prominent == true,
+		--[[ What the state sweep last painted a LATCHED button, so it writes only
+		     when the answer moves. Meaningless for every other button. ]]
+		lit = false,
 	}
 	paint(entry, false)
 
@@ -272,7 +305,13 @@ local function newButton(action: string, label: string, size: number, prominent:
 		if input_ then
 			input_:raise(action, false)
 		end
-		paint(entry, false)
+		--[[ A latched button is left alone: the finger coming off crouch says
+		     nothing about whether the player is crouched, and the state sweep owns
+		     it. Painting false here and letting the sweep light it again a frame
+		     later would be a flicker on every tap. ]]
+		if not LATCHED[action] then
+			paint(entry, false)
+		end
 	end
 	trove:connect(frame.InputEnded, release)
 
@@ -342,7 +381,7 @@ end
 	permanently is a permanent hole in the view for something relevant maybe
 	fifteen seconds a round.
 ]]
-local function refreshContextual()
+local function refreshState()
 	if not gui or not gui.Enabled then
 		return
 	end
@@ -354,6 +393,15 @@ local function refreshContextual()
 	end
 
 	for _, entry in buttons do
+		--[[ Crouch, painted from the server's own answer rather than from the
+		     finger. See LATCHED. ]]
+		if LATCHED[entry.action] then
+			local lit = latchedState(entry.action)
+			if entry.lit ~= lit then
+				entry.lit = lit
+				paint(entry, lit)
+			end
+		end
 		if entry.contextual and entry.frame.Visible ~= live then
 			entry.frame.Visible = live
 			if not live then
@@ -387,6 +435,10 @@ local function refresh()
 			if input then
 				input:raise(entry.action, false)
 			end
+			--[[ Cleared with the paint, or the state sweep would compare against a
+			     lit it no longer matches and decline to light crouch again when the
+			     pad comes back. ]]
+			entry.lit = false
 			paint(entry, false)
 		end
 	end
@@ -512,7 +564,28 @@ function TouchController:start()
 
 	suppressRobloxJump()
 
-	trove:connect(RunService.RenderStepped, refreshContextual)
+	--[[
+		Polled, but not every frame.
+
+		What it asks changes far slower than the screen redraws: PromptController
+		recomputes its target on a 0.1s scan, and crouch is a server attribute that
+		moves when a thumb does. Sixty times a second was six wasted passes out of
+		seven — each one a Registry lookup and a pcall — on the one platform in the
+		game with a battery and a thermal limit.
+
+		Fifteen is under a frame and a half of latency on a button appearing, which
+		nobody can see, and it is still four times faster than the data behind it
+		actually changes.
+	]]
+	local sinceState = 0
+	trove:connect(RunService.RenderStepped, function(dt: number)
+		sinceState += dt
+		if sinceState < STATE_INTERVAL then
+			return
+		end
+		sinceState = 0
+		refreshState()
+	end)
 
 	refresh()
 end
