@@ -620,9 +620,53 @@ local function dropFailed(self)
 			So length only counts once the fetch is known to have SUCCEEDED. Then a
 			zero means the upload is empty and always will be.
 		]]
-		local refused = AnimationCache.hasFailed(id)
-		local emptyUpload = AnimationCache.isLoaded(id) and track ~= nil and track.Length <= 0
-		if not refused and not emptyUpload then
+		--[[
+			ONLY a refused fetch. The zero-length branch is gone, and removing it is
+			the point of this change.
+
+			hasFailed is a fact about the ASSET and is server-wide: PreloadAsync
+			came back with a non-Success status for that id, it is never coming,
+			and every body of every kind is equally affected. Dropping on it is
+			safe because it cannot single one body out.
+
+			Length is a fact about THIS TRACK on THIS Animator, and it populates
+			asynchronously per track. So a body whose track had not filled its
+			Length in by the two-second check had that track STOPPED AND DESTROYED
+			— permanently, because validateAt is disarmed on the same pass — while
+			its neighbour, spawned a frame later or luckier with the scheduler,
+			kept its own copy of the identical clip and walked normally.
+
+			That is a per-BODY coin flip on a per-body property, which is exactly
+			the shape of "some of the Commons use the fallback instead of my
+			animation", and it was self-inflicted. The isLoaded gate I added was
+			meant to prevent it and could not: isLoaded asks whether the ASSET
+			arrived, which says nothing about whether THIS track has measured it.
+
+			What the branch was written for — an empty upload, published with no
+			keyframes — is real, and it is handled where it actually occurs.
+			CarryVisualService measures the survivor hold pose and falls back on
+			its own. No infected id in this game is zero-length, so here the branch
+			protected against nothing and cost bodies their animation.
+
+			A zero length is still worth SAYING, so it is reported below and not
+			acted on.
+		]]
+		if not AnimationCache.hasFailed(id) then
+			if track and track.Length <= 0 and AnimationCache.isLoaded(id) then
+				warnOnce(
+					"zerolength:" .. tostring(id),
+					string.format(
+						"animation %d fetched but measures zero seconds on %s/%s. If that is an empty "
+							.. "upload, open it in the Animation Editor, check the timeline actually has "
+							.. "poses on it, and publish again. The track is being left alone rather "
+							.. "than dropped, because a track that has simply not measured itself yet "
+							.. "reads exactly the same.",
+						id,
+						self.kind,
+						role
+					)
+				)
+			end
 			continue
 		end
 		if track then
@@ -647,6 +691,21 @@ local function dropFailed(self)
 	     next setState has to be treated as a change rather than as a no-op. ]]
 	self.current = ""
 	self.rate = -1
+	--[[ Loud, because a body silently losing its clips is the failure this whole
+	     investigation has been about. Keyed by kind and role rather than by body:
+	     the id is shared, so if it is genuinely dead it is dead for everyone and
+	     one line says so. ]]
+	warnOnce(
+		"dropped:" .. self.kind,
+		string.format(
+			"%s lost animation track(s) whose asset Roblox refused to fetch — those bodies fall "
+				.. "back to the client's procedural gait. Run studio-scripts/CheckAnimations to see "
+				.. "which id and why; the usual cause is an animation uploaded under a different "
+				.. "account from the one that owns this place.",
+			self.kind
+		)
+	)
+
 	--[[ And the client is told, because this is the moment a body that looked
 	     animated stops being one. Without this the poser keeps standing down for
 	     a rig whose tracks were just destroyed. ]]

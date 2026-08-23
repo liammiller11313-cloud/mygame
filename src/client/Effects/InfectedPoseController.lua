@@ -236,6 +236,10 @@ type Joint = {
 
 type Body = {
 	model: Model,
+	--[[ Which of a kind's models this body is, for the fallback report. Read once
+	     at track time rather than per frame: it is written by PlaceholderFactory
+	     at boot and cannot change. ]]
+	variant: string,
 	root: BasePart?,
 	humanoid: Humanoid?,
 	animator: Animator?,
@@ -427,6 +431,7 @@ local function track(model: Instance)
 
 	bodies[model] = {
 		model = model,
+		variant = tostring(model:GetAttribute("FL_Variant") or model.Name),
 		root = nil,
 		humanoid = nil,
 		animator = nil,
@@ -449,6 +454,10 @@ local function track(model: Instance)
 		trackCheckedAt = -math.huge,
 	}
 end
+
+--[[ Variants already named as falling back, so the message is one line per
+     model rather than one per body. ]]
+local reportedFallback: { [string]: boolean } = {}
 
 local function untrack(model: Instance)
 	bodies[model :: Model] = nil
@@ -705,6 +714,33 @@ local function step(dt: number)
 		if hasPlayingTracks(body) then
 			clearPose(body)
 			continue
+		end
+
+		--[[
+			SAY WHICH BODIES THIS IS DRIVING, once per variant.
+
+			This controller is the fallback, and a body reaching it is a body whose
+			real animation is not playing. That is the single most useful fact in
+			diagnosing "some of them use the shamble instead of my walk" — and
+			until now it was the one thing nobody could see, because the decision
+			is made HERE, on the client, and every diagnostic written for this
+			problem has run on the server.
+
+			Once per variant, not per body: thirty-five Commons at a wave-seven
+			horde would otherwise be a wall. And only for a body that HAS an
+			Animator — one without is already reported at boot, and repeating it
+			forty-six times a round adds nothing.
+		]]
+		if body.animator and not reportedFallback[body.variant] then
+			reportedFallback[body.variant] = true
+			warn(
+				string.format(
+					"[InfectedPoseController] %q is being animated by the procedural fallback, not by "
+						.. "its clips — it has an Animator but nothing is playing on it. That is the "
+						.. "shamble you see instead of the walk you uploaded.",
+					body.variant
+				)
+			)
 		end
 
 		if distanceSquared > NEAR_DISTANCE_SQUARED then
