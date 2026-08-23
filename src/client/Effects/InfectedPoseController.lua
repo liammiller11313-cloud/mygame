@@ -260,6 +260,11 @@ type Body = {
 	posed: boolean, -- has this controller written a Transform since it last cleared
 	trackOwned: boolean, -- cached answer from hasPlayingTracks
 	trackCheckedAt: number,
+	--[[ When this client first saw the body, and when it last STARTED using the
+	     fallback for it. Both exist to tell a body that is still loading from one
+	     that is genuinely broken. ]]
+	seenAt: number,
+	fallbackSince: number,
 }
 
 local bodies: { [Model]: Body } = {}
@@ -452,6 +457,8 @@ local function track(model: Instance)
 		posed = false,
 		trackOwned = false,
 		trackCheckedAt = -math.huge,
+		seenAt = clock,
+		fallbackSince = 0,
 	}
 end
 
@@ -479,6 +486,18 @@ end
 ]]
 local TRACK_CHECK_INTERVAL = 0.5
 
+--[[ How long a body may go without the server saying whether it is animated
+     before this controller stops waiting and decides for itself. Comfortably
+     longer than a cold LoadAnimation, short enough that a body the server never
+     answers for is not stranded in a rest pose for the round. ]]
+local ANIMATED_GRACE = 5
+
+--[[ How long a body must be CONTINUOUSLY on the fallback before it is worth
+     reporting. Without this the report fires on the spawn window above and names
+     bodies that are about to start animating perfectly — which is exactly what it
+     did the first time it ran. ]]
+local FALLBACK_REPORT_DELAY = 4
+
 local function hasPlayingTracks(body: Body): boolean
 	--[[
 		THE SERVER'S VERDICT FIRST, because this controller cannot reach it.
@@ -505,9 +524,37 @@ local function hasPlayingTracks(body: Body): boolean
 		as animated — seizing a rig on no evidence would fight a clip that is
 		perfectly fine.
 	]]
-	if Attributes.get(body.model, IA.Animated, true) == false then
+	--[[
+		THREE ANSWERS, NOT TWO, and the third is the one that was being read wrong.
+
+		false  the server loaded this body's tracks and none of them are usable.
+		true   it loaded them and they are.
+		ABSENT it has not finished yet.
+
+		The third is not a rare startup case, it is EVERY body. InfectedService
+		parents the model into Workspace and only then builds the brain, and
+		LoadAnimation yields on the first use of an id — so every zombie is visible
+		to this client, carrying an Animator replicated with its template and
+		playing nothing at all, for a real window before its clips begin.
+
+		This read the absent case as "no tracks playing" and seized the rig, so
+		every single zombie shambled procedurally for the first moments of its
+		life and then snapped into its walk cycle. Whichever ones you happened to
+		be looking at during that window were the ones "not using my animation" —
+		which is why the models it named looked random, and why they were.
+
+		So an undecided body is left alone. The grace is bounded: if the server
+		somehow never answers, this falls through to counting tracks rather than
+		abandoning a body forever on the strength of a missing attribute.
+	]]
+	local verdict = Attributes.get(body.model, IA.Animated, nil :: boolean?)
+	if verdict == false then
 		body.trackOwned = false
 		return false
+	end
+	if verdict == nil and clock - body.seenAt < ANIMATED_GRACE then
+		body.trackOwned = true
+		return true
 	end
 
 	local animator = body.animator
@@ -713,6 +760,10 @@ local function step(dt: number)
 		     horde walking differently from the near half. ]]
 		if hasPlayingTracks(body) then
 			clearPose(body)
+			--[[ Cleared, so a body that flickers to the fallback for a frame and
+			     recovers never accumulates toward the report. Only an unbroken run
+			     counts. ]]
+			body.fallbackSince = 0
 			continue
 		end
 
@@ -731,7 +782,18 @@ local function step(dt: number)
 			Animator — one without is already reported at boot, and repeating it
 			forty-six times a round adds nothing.
 		]]
-		if body.animator and not reportedFallback[body.variant] then
+		--[[ Only once it has LASTED. The first version of this reported on the
+		     spawn window and named six bodies that were about to animate
+		     perfectly well. A fallback that persists past the grace is a real
+		     one. ]]
+		if body.fallbackSince == 0 then
+			body.fallbackSince = clock
+		end
+		if
+			body.animator
+			and not reportedFallback[body.variant]
+			and clock - body.fallbackSince > FALLBACK_REPORT_DELAY
+		then
 			reportedFallback[body.variant] = true
 			warn(
 				string.format(
