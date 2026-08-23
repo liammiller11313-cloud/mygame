@@ -1188,30 +1188,6 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	     themselves as playing, and move nothing — and the procedural poser stands
 	     down because tracks are playing. Recorded per kind so the summary can say
 	     "Tank: R15" rather than leaving it to be inferred. ]]
-	--[[
-		THE FULL RIG DIAGNOSIS, per variant, at boot.
-
-		Every repair this game does runs at SPAWN and warns once per variant — so
-		it only ever describes a model that has actually spawned, and only once
-		somebody has played long enough for the Director to pick it. With
-		thirty-five Commons that made "which of my models is broken" a question you
-		answered by playing until it came up, and it is the question that has cost
-		the most time on this project by a wide margin.
-
-		The templates have their joints by this point (verifySeverable above reads
-		them), so the same tests can run here, on every model, before anybody
-		presses play. Read-only: the repairs stay per-body, and a report that
-		quietly fixed things would make this log disagree with the game.
-	]]
-	local faults = RigUtil.describeFaults(RigUtil.diagnose(model))
-	if faults then
-		local list = rigFaults[kind]
-		if not list then
-			list = {}
-			rigFaults[kind] = list
-		end
-		table.insert(list, string.format("%s — %s", model.Name, faults))
-	end
 
 	local detectedRig, decidedBy = AnimationConfig.rigOf(model)
 	--[[
@@ -1314,6 +1290,7 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		that now holds nothing.
 	]]
 	local flattened = 0
+	local movedNames: { string } = {}
 	local emptied: { Instance } = {}
 	for _, descendant in model:GetDescendants() do
 		if descendant.Parent == model then
@@ -1332,6 +1309,13 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 			continue
 		end
 		local container = descendant.Parent
+		--[[ Named, and named with where it came FROM. "kept 1 of its parts inside
+		     a Folder" is true and useless — the part that matters is almost always
+		     HumanoidRootPart, and knowing that turns a puzzle into a drag-and-drop. ]]
+		table.insert(
+			movedNames,
+			string.format("%s (was in %s)", descendant.Name, if container then container.Name else "?")
+		)
 		descendant.Parent = model
 		flattened += 1
 		if container and container ~= model then
@@ -1347,14 +1331,16 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		warnOnce(
 			"nested:" .. kind .. ":" .. model.Name,
 			string.format(
-				"%s rig %q kept %d of its parts inside a Folder or sub-Model. Roblox resolves a "
-					.. "character's rig by name among the HUMANOID'S SIBLINGS, so Humanoid.RootPart "
+				"%s rig %q kept %d of its parts inside a Folder or sub-Model: %s. Roblox resolves "
+					.. "a character's rig by name among the HUMANOID'S SIBLINGS, so Humanoid.RootPart "
 					.. "was nil and nothing could animate it — while every joint check called it "
-					.. "fully jointed, because it was. Flattened at boot. Move the parts up to sit "
-					.. "directly under the Model in Studio to fix it there.",
+					.. "fully jointed, because it was. Flattened at boot. Drag those parts up to sit "
+					.. "directly under the Model in Studio to fix it there, or run "
+					.. "studio-scripts/RigDoctor in REPAIR mode to do it for you.",
 				kind,
 				model.Name,
-				flattened
+				flattened,
+				RigUtil.tally(movedNames)
 			)
 		)
 	end
@@ -1416,6 +1402,20 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	if not humanoid:FindFirstChildOfClass("Animator") then
 		local animator = Instance.new("Animator")
 		animator.Parent = humanoid
+		--[[ Said per model, because the fault report at the end of this function
+		     runs AFTER this repair and will not mention it. Without an Animator a
+		     body cannot play a single clip, so it is worth knowing which of your
+		     models ship without one even though the game supplies it. ]]
+		warnOnce(
+			"noanimator:" .. kind .. ":" .. model.Name,
+			string.format(
+				"%s rig %q has no Animator under its Humanoid. One was added at boot — without it "
+					.. "the body could not play any clip at all. Add an Animator to the model in "
+					.. "Studio to fix it there.",
+				kind,
+				model.Name
+			)
+		)
 	end
 
 	local shadowCaster = largestPart(model)
@@ -1453,6 +1453,32 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	-- Which of the thirteen commons this is. Purely diagnostic, and worth its
 	-- keep the first time one variant turns out to be missing an arm joint.
 	model:SetAttribute("FL_Variant", model.Name)
+
+	--[[
+		THE RIG DIAGNOSIS, LAST — after every repair this function performs.
+
+		It ran near the top, which made it describe the model as SUPPLIED rather
+		than as prepared, and the first real boot proved how badly that misleads:
+		thirty-six of forty-three rigs were reported as having no Animator, by a
+		check running two hundred lines before the code that creates one. Thirty-
+		six lines of noise, in the one report whose whole job is to be the signal.
+
+		Running it here means it lists what is STILL wrong once boot has done what
+		it can — which is exactly the set that gets repaired again on every single
+		body, forever, and therefore exactly the set worth fixing in Studio. The
+		faults boot DOES fix announce themselves individually where they are fixed,
+		so nothing is lost by leaving them out here.
+	]]
+	local faults = RigUtil.describeFaults(RigUtil.diagnose(model))
+	if faults then
+		local list = rigFaults[kind]
+		if not list then
+			list = {}
+			rigFaults[kind] = list
+		end
+		table.insert(list, string.format("%s — %s", model.Name, faults))
+	end
+
 	return model
 end
 

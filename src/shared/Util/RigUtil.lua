@@ -1130,6 +1130,34 @@ function RigUtil.diagnose(model: Model): RigReport
 	}
 end
 
+--[[
+	A list of names collapsed into "name xN", sorted, for a message a person reads.
+
+	The first real boot produced a line containing "Right Arm/Torso" ten times in
+	a row, then "Torso/Left Arm" five times — twenty-eight repeats on one model.
+	That is accurate and unreadable, and an unreadable report is one nobody acts
+	on. The count is the information; the repetition is not.
+]]
+function RigUtil.tally(names: { string }): string
+	local counts: { [string]: number } = {}
+	local order: { string } = {}
+	for _, name in names do
+		if not counts[name] then
+			counts[name] = 0
+			table.insert(order, name)
+		end
+		counts[name] += 1
+	end
+	table.sort(order)
+
+	local parts: { string } = {}
+	for _, name in order do
+		local n = counts[name]
+		table.insert(parts, if n > 1 then string.format("%s x%d", name, n) else name)
+	end
+	return table.concat(parts, ", ")
+end
+
 --[[ The report as one human sentence, or nil when the rig is clean. Kept beside
      diagnose so the wording of a fault lives in one place rather than once per
      caller — the boot summary and the Studio script must not describe the same
@@ -1147,17 +1175,13 @@ function RigUtil.describeFaults(report: RigReport): string?
 	if #report.duplicates > 0 then
 		table.insert(
 			parts,
-			string.format(
-				"%d duplicate joint(s): %s",
-				#report.duplicates,
-				table.concat(report.duplicates, ", ")
-			)
+			string.format("%d duplicate joint(s): %s", #report.duplicates, RigUtil.tally(report.duplicates))
 		)
 	end
 	if #report.disabled > 0 then
 		table.insert(
 			parts,
-			string.format("%d DISABLED joint(s): %s", #report.disabled, table.concat(report.disabled, ", "))
+			string.format("%d DISABLED joint(s): %s", #report.disabled, RigUtil.tally(report.disabled))
 		)
 	end
 	if #report.rivalWelds > 0 then
@@ -1166,18 +1190,14 @@ function RigUtil.describeFaults(report: RigReport): string?
 			string.format(
 				"%d weld(s) beside a joint: %s",
 				#report.rivalWelds,
-				table.concat(report.rivalWelds, ", ")
+				RigUtil.tally(report.rivalWelds)
 			)
 		)
 	end
 	if #report.backwards > 0 then
 		table.insert(
 			parts,
-			string.format(
-				"%d backwards joint(s): %s",
-				#report.backwards,
-				table.concat(report.backwards, ", ")
-			)
+			string.format("%d backwards joint(s): %s", #report.backwards, RigUtil.tally(report.backwards))
 		)
 	end
 	if #report.missingJoints > 0 then

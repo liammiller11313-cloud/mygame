@@ -772,7 +772,7 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 				kind,
 				variant,
 				reEnabled,
-				table.concat(reEnabledNames, ", ")
+				RigUtil.tally(reEnabledNames)
 			)
 		)
 	end
@@ -791,7 +791,7 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 				kind,
 				variant,
 				dupesCut,
-				table.concat(dupePairs, ", ")
+				RigUtil.tally(dupePairs)
 			)
 		)
 	end
@@ -809,7 +809,7 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 				kind,
 				variant,
 				weldsCut,
-				table.concat(cutPairs, ", ")
+				RigUtil.tally(cutPairs)
 			)
 		)
 	end
@@ -849,7 +849,7 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 				kind,
 				variant,
 				flipped,
-				table.concat(backwards, ", ")
+				RigUtil.tally(backwards)
 			)
 		)
 	end

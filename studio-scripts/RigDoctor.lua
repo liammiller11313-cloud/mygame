@@ -25,7 +25,7 @@
 	                   the Model. Roblox resolves a rig by name among the
 	                   HUMANOID'S SIBLINGS, so Humanoid.RootPart is nil and the
 	                   body is not a character at all. Every joint present,
-	                   every name right, and nothing animates.                 YOU
+	                   every name right, and nothing animates.              FIXABLE
 	  MISSING PART     the joint needs two parts and one of them is called
 	                   something else — "LeftArm" instead of "Left Arm".      YOU
 
@@ -370,7 +370,7 @@ local function inspect(model, label)
 	     all — every joint present, every name right, and nothing can animate it.
 	     Reported here and flattened by the game at boot; fixing it in the model
 	     is the permanent version. ]]
-	local nested = 0
+	local nested, nestedNames, emptied = {}, {}, {}
 	for _, d in model:GetDescendants() do
 		if
 			(d:IsA("BasePart") or d:IsA("Motor6D"))
@@ -378,18 +378,39 @@ local function inspect(model, label)
 			and not d:FindFirstAncestorWhichIsA("Accoutrement")
 			and not (d:IsA("Motor6D") and d.Parent and d.Parent:IsA("BasePart"))
 		then
-			nested += 1
+			table.insert(nested, d)
+			table.insert(nestedNames, d.Name .. " (in " .. d.Parent.Name .. ")")
 		end
 	end
-	if nested > 0 then
-		table.insert(
-			notes,
-			string.format(
-				"%d part(s) NOT directly under the Model — Humanoid.RootPart cannot resolve, so this "
-					.. "is not a character and nothing can animate it. Move them up out of the Folder.",
-				nested
-			)
+	if #nested > 0 then
+		if REPAIR then
+			--[[ The one fault on this list that is worth repairing rather than
+			     merely reporting, and it was marked YOU until a real boot proved
+			     it is the fault: eleven of thirty-five Commons had exactly this,
+			     one part each, and flattening them is what fixed them. It is
+			     mechanical — the part belongs directly under the Model, the game
+			     already does this at every boot, and doing it here does it once. ]]
+			for _, d in nested do
+				local container = d.Parent
+				d.Parent = model
+				if container ~= model then
+					table.insert(emptied, container)
+				end
+			end
+			for _, container in emptied do
+				if container.Parent and #container:GetChildren() == 0 then
+					container:Destroy()
+				end
+			end
+		end
+		table.sort(nestedNames)
+		local line = string.format(
+			"%d part(s) NOT directly under the Model (%s) — Humanoid.RootPart cannot resolve, so "
+				.. "this is not a character and nothing can animate it",
+			#nested,
+			table.concat(nestedNames, ", ")
 		)
+		table.insert(if REPAIR then fixes else notes, if REPAIR then "moved up: " .. line else line)
 	end
 	if not model:FindFirstChild("HumanoidRootPart") then
 		table.insert(notes, "no part called HumanoidRootPart directly under the Model")
@@ -540,7 +561,7 @@ local function inspect(model, label)
 		table.insert(notes, "NO PART NAMED " .. table.concat(absent, ", ") .. " — rename in Studio")
 	end
 
-	local issues = #missing + #backwards + #rivals + #dupes + #disabled
+	local issues = #missing + #backwards + #rivals + #dupes + #disabled + #nested
 	if #notes == 0 and #fixes == 0 then
 		print(string.format("  OK    %-28s %s, fully jointed", label, rig))
 		return 0, 0
