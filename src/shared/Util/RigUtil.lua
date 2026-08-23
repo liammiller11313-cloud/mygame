@@ -706,6 +706,55 @@ local R15_SKELETON = table.freeze({
 })
 
 --[[
+	Every part name Roblox's own character resolution cares about.
+
+	Used to decide which parts MUST be direct children of the Model. Roblox
+	resolves a character's rig by name among the Humanoid's siblings, so these
+	have to sit there — and nothing else does.
+
+	The distinction is not academic. The first version of the flatten moved
+	anything nested, and the very first real boot showed what that means: eleven
+	Commons reported "1 part inside a Folder", and the part was `Hair (was in
+	Head)`. A hair mesh parented inside a head is a completely ordinary way to
+	build a model, it has nothing to do with Humanoid.RootPart, and hoisting it to
+	the Model turns a cosmetic into something getBodyParts counts as a limb — so
+	the ragdoll constrains it and dismemberment can pick it. The repair was
+	inventing a fault and then causing a real one.
+]]
+local STANDARD_PARTS = table.freeze({
+	HumanoidRootPart = true,
+	-- R6
+	Torso = true,
+	Head = true,
+	["Left Arm"] = true,
+	["Right Arm"] = true,
+	["Left Leg"] = true,
+	["Right Leg"] = true,
+	-- R15
+	LowerTorso = true,
+	UpperTorso = true,
+	LeftUpperArm = true,
+	LeftLowerArm = true,
+	LeftHand = true,
+	RightUpperArm = true,
+	RightLowerArm = true,
+	RightHand = true,
+	LeftUpperLeg = true,
+	LeftLowerLeg = true,
+	LeftFoot = true,
+	RightUpperLeg = true,
+	RightLowerLeg = true,
+	RightFoot = true,
+})
+
+--[[ Whether this name is one Roblox's character resolution looks for among the
+     Humanoid's siblings. Anything else is the model author's business and must
+     be left exactly where they put it. ]]
+function RigUtil.isStandardPart(name: string): boolean
+	return STANDARD_PARTS[name] == true
+end
+
+--[[
 	Parts a rig is allowed not to have.
 
 	Plenty of R15 models end the arm at the forearm and the leg at the shin, and

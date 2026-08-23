@@ -105,6 +105,33 @@ local R15 = {
 	{ joint = "RightAnkle", parent = "RightLowerLeg", child = "RightFoot", at = Vector3.new(0, -0.5, 0) },
 }
 
+--[[ The part names Roblox resolves a character's rig by, so the nesting check
+     can tell a misplaced BODY PART from a cosmetic somebody deliberately put
+     inside one. Must match RigUtil.isStandardPart. ]]
+local STANDARD_PARTS = {
+	HumanoidRootPart = true,
+	Torso = true,
+	Head = true,
+	["Left Arm"] = true,
+	["Right Arm"] = true,
+	["Left Leg"] = true,
+	["Right Leg"] = true,
+	LowerTorso = true,
+	UpperTorso = true,
+	LeftUpperArm = true,
+	LeftLowerArm = true,
+	LeftHand = true,
+	RightUpperArm = true,
+	RightLowerArm = true,
+	RightHand = true,
+	LeftUpperLeg = true,
+	LeftLowerLeg = true,
+	LeftFoot = true,
+	RightUpperLeg = true,
+	RightLowerLeg = true,
+	RightFoot = true,
+}
+
 local function partIn(model, name)
 	local found = model:FindFirstChild(name, true)
 	return if found and found:IsA("BasePart") then found else nil
@@ -377,6 +404,12 @@ local function inspect(model, label)
 			and d.Parent ~= model
 			and not d:FindFirstAncestorWhichIsA("Accoutrement")
 			and not (d:IsA("Motor6D") and d.Parent and d.Parent:IsA("BasePart"))
+			--[[ Only the names Roblox's character resolution looks for. A hair
+			     mesh inside a head is an ordinary way to build a model and has
+			     nothing to do with Humanoid.RootPart; hoisting it would turn a
+			     cosmetic into something the ragdoll and dismemberment treat as a
+			     limb. A nested Torso or HumanoidRootPart is a real fault. ]]
+			and not (d:IsA("BasePart") and not STANDARD_PARTS[d.Name])
 		then
 			table.insert(nested, d)
 			table.insert(nestedNames, d.Name .. " (in " .. d.Parent.Name .. ")")

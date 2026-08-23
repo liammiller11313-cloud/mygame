@@ -291,6 +291,11 @@ local animationRigWhy: { [string]: string } = {}
      the broken one", printed at boot instead of discovered by playing. ]]
 local rigFaults: { [string]: { string } } = {}
 
+--[[ Rigs that shipped with no Animator. The game adds one, so this is a note
+     about the MODELS rather than a fault in the game — collected and printed as
+     a single line, because it is routinely most of the roster. ]]
+local missingAnimator: { string } = {}
+
 local function harvestAnimations(model: Model): number
 	--[[
 		READ EVERYTHING FIRST, then rebuild. The order is the whole correctness
@@ -1302,6 +1307,25 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		if descendant:FindFirstAncestorWhichIsA("Accoutrement") then
 			continue
 		end
+		--[[
+			ONLY the parts Roblox's character resolution actually looks for.
+
+			This moved anything nested, and the first real boot showed exactly what
+			that costs: eleven Commons reported one nested part each, and the part
+			was `Hair (was in Head)`. A hair mesh inside a head is an ordinary way
+			to build a model. It has nothing to do with Humanoid.RootPart — which
+			resolved fine on every one of those rigs, because HumanoidRootPart was
+			already a direct child — so the repair fixed nothing, announced a fault
+			that did not exist, and hoisted a cosmetic to the Model where
+			getBodyParts counts it as a limb: the ragdoll then constrains it and
+			dismemberment can blow it off.
+
+			A nested HumanoidRootPart or Torso is a real fault and is still moved.
+			A nested anything-else is the author's business.
+		]]
+		if descendant:IsA("BasePart") and not RigUtil.isStandardPart(descendant.Name) then
+			continue
+		end
 		--[[ A Motor6D conventionally lives inside Part0 and is perfectly happy
 		     there — it is reparented only when the part it lives in is itself
 		     being moved, so the two stay together. ]]
@@ -1331,12 +1355,12 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 		warnOnce(
 			"nested:" .. kind .. ":" .. model.Name,
 			string.format(
-				"%s rig %q kept %d of its parts inside a Folder or sub-Model: %s. Roblox resolves "
-					.. "a character's rig by name among the HUMANOID'S SIBLINGS, so Humanoid.RootPart "
-					.. "was nil and nothing could animate it — while every joint check called it "
-					.. "fully jointed, because it was. Flattened at boot. Drag those parts up to sit "
-					.. "directly under the Model in Studio to fix it there, or run "
-					.. "studio-scripts/RigDoctor in REPAIR mode to do it for you.",
+				"%s rig %q kept %d RIG part(s) inside a Folder or sub-Model: %s. Roblox resolves a "
+					.. "character's rig by name among the HUMANOID'S SIBLINGS, so a body part down "
+					.. "there is a body part the Humanoid cannot see — while every joint check calls "
+					.. "the rig fully jointed, because it is. Moved up at boot. Drag them directly "
+					.. "under the Model in Studio to fix it there, or run studio-scripts/RigDoctor "
+					.. "in REPAIR mode to do it for you.",
 				kind,
 				model.Name,
 				flattened,
@@ -1402,20 +1426,12 @@ local function adoptRig(model: Model, kind: string, definition, scale: number): 
 	if not humanoid:FindFirstChildOfClass("Animator") then
 		local animator = Instance.new("Animator")
 		animator.Parent = humanoid
-		--[[ Said per model, because the fault report at the end of this function
-		     runs AFTER this repair and will not mention it. Without an Animator a
-		     body cannot play a single clip, so it is worth knowing which of your
-		     models ship without one even though the game supplies it. ]]
-		warnOnce(
-			"noanimator:" .. kind .. ":" .. model.Name,
-			string.format(
-				"%s rig %q has no Animator under its Humanoid. One was added at boot — without it "
-					.. "the body could not play any clip at all. Add an Animator to the model in "
-					.. "Studio to fix it there.",
-				kind,
-				model.Name
-			)
-		)
+		--[[ Collected rather than warned per model. It is worth knowing which of
+		     your models ship without an Animator — without one a body cannot play
+		     a single clip — but thirty-seven identical lines is not a report, it
+		     is a wall, and the first boot that printed them buried the seven rigs
+		     that had something the game could NOT fix. One line, at the end. ]]
+		table.insert(missingAnimator, kind .. "/" .. model.Name)
 	end
 
 	local shadowCaster = largestPart(model)
@@ -3316,6 +3332,20 @@ function PlaceholderFactory:ensureAssets()
 		symptom. A clean roster prints nothing at all, so this is silence when
 		there is nothing to say and an exact list when there is.
 	]]
+	if #missingAnimator > 0 then
+		table.sort(missingAnimator)
+		warn(
+			string.format(
+				"[PlaceholderFactory] %d rig(s) ship with no Animator under their Humanoid, so they "
+					.. "could not play a single clip on their own. One was added to each at boot, which "
+					.. "costs nothing and fully fixes them — add an Animator in Studio if you would "
+					.. "rather the models carried their own: %s",
+				#missingAnimator,
+				table.concat(missingAnimator, ", ")
+			)
+		)
+	end
+
 	local faultLines = {}
 	for kind, variants in rigFaults do
 		table.sort(variants)
