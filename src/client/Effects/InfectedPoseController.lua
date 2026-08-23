@@ -271,6 +271,10 @@ type Body = {
 	fallbackSince: number,
 	-- Playing tracks this client last counted, or -1 if the call itself failed.
 	trackCount: number,
+	--[[ The clip THIS client is playing on the body, and which gait it is for,
+	     when the server's own track never became visible here. See driveLocally. ]]
+	localTrack: AnimationTrack?,
+	localGait: string,
 }
 
 local bodies: { [Model]: Body } = {}
@@ -466,6 +470,8 @@ local function track(model: Instance)
 		seenAt = clock,
 		fallbackSince = 0,
 		trackCount = 0,
+		localTrack = nil,
+		localGait = "",
 	}
 end
 
@@ -474,6 +480,15 @@ end
 local reportedFallback: { [string]: boolean } = {}
 
 local function untrack(model: Instance)
+	--[[ A clip this client started belongs to this client, and nothing else will
+	     ever stop it. The Animator goes with the corpse, so a track left running
+	     holds a dead body in a walk cycle. ]]
+	local body = bodies[model :: Model]
+	if body and body.localTrack then
+		body.localTrack:Stop(0)
+		body.localTrack:Destroy()
+		body.localTrack = nil
+	end
 	bodies[model :: Model] = nil
 end
 
@@ -583,6 +598,79 @@ local function hasPlayingTracks(body: Body): boolean
 	body.trackCount = if ok and typeof(tracks) == "table" then #tracks else -1
 	body.trackOwned = body.trackCount > 0
 	return body.trackOwned
+end
+
+--[[
+	Plays the body's clip ON THIS CLIENT when the server's copy is not visible
+	here.
+
+	── WHY THIS EXISTS RATHER THAN ANOTHER GUESS AT REPLICATION ────────────────
+	AnimationTrack:Play() replicates as an EVENT. A client that begins observing a
+	body after its last Play never receives one, and there is no way to ask for it
+	retroactively. That is survivable for a body whose gait keeps changing — every
+	change re-announces — and permanent for a body standing still, which announces
+	once and then never again. Three builds of reports agreed: every body the
+	fallback took over was in the idle state, and never one in walk or run.
+
+	Two fixes were tried at the far end of that: preloading the assets on this
+	client, and having the server re-announce a stale gait. Neither can be
+	verified from here, and neither addresses the case where the event is simply
+	gone.
+
+	This does, and it needs no theory about replication at all. The server already
+	publishes what it believes is playing — FL_Animated and FL_Gait are attributes,
+	which replicate as STATE and are therefore always correct for a client however
+	late it arrives. So when the server says a clip should be running and this
+	machine cannot see one, this machine loads it and plays it itself, from the
+	same AnimationConfig the server used.
+
+	The result is self-correcting: the moment a local track is playing,
+	hasPlayingTracks counts it, the procedural gait stands down, and the body is
+	driven by the clip it was always supposed to have. If the server's own track
+	is ALSO visible, both play the same keyframes at the same priority and blend
+	to the same pose, so the duplicate costs a track and changes nothing.
+]]
+local function driveLocally(body: Body): boolean
+	local animator = body.animator
+	if not animator then
+		return false
+	end
+	local gait = Attributes.get(body.model, IA.Gait, "")
+	if gait == "" then
+		return false
+	end
+
+	--[[ Already driving the right thing. Checked before any lookup: this runs for
+	     every un-clipped body every frame, and the steady state is that nothing
+	     needs to change. ]]
+	local current = body.localTrack
+	if body.localGait == gait and current and current.IsPlaying then
+		return true
+	end
+
+	local set =
+		AnimationConfig.forInfected(Attributes.get(body.model, IA.Kind, ""), RigUtil.rigTypeOf(body.model))
+	local ids = if set then (set :: any)[gait] else nil
+	local id = if typeof(ids) == "table" then ids[1] else nil
+	if not id then
+		return false
+	end
+
+	if current then
+		current:Stop(0.1)
+	end
+	local track = AnimationCache.load(animator, id)
+	if not track then
+		return false
+	end
+	--[[ The same priority and looping the server uses, so a server track that IS
+	     visible and this one cannot fight: same clip, same priority, same pose. ]]
+	track.Priority = Enum.AnimationPriority.Movement
+	track.Looped = true
+	track:Play(0.15)
+	body.localTrack = track
+	body.localGait = gait
+	return true
 end
 
 --[[ Hands the joints back, once. Called every frame while a rig's own clips are
@@ -772,7 +860,16 @@ local function step(dt: number)
 		     animations owns its own Transform at ninety studs exactly as much as
 		     at nine, and writing over it there would show as the far half of a
 		     horde walking differently from the near half. ]]
-		if hasPlayingTracks(body) then
+		local clipped = hasPlayingTracks(body)
+		if clipped and body.localTrack then
+			--[[ A clip THIS client started is what is playing, and it has to keep
+			     following the server's gait. Nothing else will do it: the branch
+			     that starts one only runs while nothing is playing, and by now
+			     something is. Without this a body that started walking would go on
+			     playing the idle this client began for it. ]]
+			driveLocally(body)
+		end
+		if clipped then
 			clearPose(body)
 			--[[ Cleared, so a body that flickers to the fallback for a frame and
 			     recovers never accumulates toward the report. Only an unbroken run
@@ -796,6 +893,17 @@ local function step(dt: number)
 			Animator — one without is already reported at boot, and repeating it
 			forty-six times a round adds nothing.
 		]]
+		--[[ Before giving up on the clip, try to play it here. Only after the
+		     grace, so this never races a track that is simply still arriving. ]]
+		--[[ The server says a clip should be running and none is visible here, and
+		     the grace has passed so it is not simply still arriving. Play it on
+		     this machine — see driveLocally. ]]
+		if clock - body.seenAt >= ANIMATED_GRACE and driveLocally(body) then
+			clearPose(body)
+			body.fallbackSince = 0
+			continue
+		end
+
 		--[[ Only once it has LASTED. The first version of this reported on the
 		     spawn window and named six bodies that were about to animate
 		     perfectly well. A fallback that persists past the grace is a real

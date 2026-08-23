@@ -800,7 +800,17 @@ function InfectedAnimator.update(self, runSpeed: number)
 		self.assertedAt = os.clock()
 		local idle = self.tracks.idle
 		if idle then
-			idle:Play(FADE)
+			--[[ STOPPED FIRST, and that is the whole point of the pair. Play() on a
+			     track that is already playing is not guaranteed to do anything —
+			     and doing nothing is exactly what must not happen here, because the
+			     Play is the replicated announcement this exists to make. Stopping
+			     first guarantees the next Play is a real state change with a real
+			     event behind it.
+
+			     Free of visual cost on a one-second looping idle, which is the only
+			     gait this runs for. ]]
+			idle:Stop(0)
+			idle:Play(0)
 		end
 	end
 
