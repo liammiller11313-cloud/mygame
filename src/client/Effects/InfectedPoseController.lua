@@ -269,6 +269,8 @@ type Body = {
 	     that is genuinely broken. ]]
 	seenAt: number,
 	fallbackSince: number,
+	-- When this body may next be re-resolved, while it is still incomplete.
+	resolveAt: number,
 	-- Playing tracks this client last counted, or -1 if the call itself failed.
 	trackCount: number,
 	--[[ The clip THIS client is playing on the body, and which gait it is for,
@@ -343,9 +345,41 @@ local function seedFor(model: Model): number
 	return hash
 end
 
-local function resolveJoints(body: Body)
-	body.resolved = true
+--[[
+	Works out what this client can drive on a body, and says whether it managed.
+
+	── IT USED TO BE A ONE-SHOT, AND THAT IS THE BUG ───────────────────────────
+	`body.resolved = true` was the FIRST line, so this ran exactly once: the first
+	frame this controller ever stepped that body. A Roblox model replicates
+	PROGRESSIVELY — the Model instance arrives, ChildAdded fires, and its
+	Humanoid, its Animator and its Motor6Ds land afterwards. The server also
+	repairs joints AFTER parenting the model into Workspace, so even a fully
+	replicated body can be mid-repair at that moment.
+
+	Resolve one frame too early and the body was written off for its whole life:
+	body.animator nil, body.joints empty. What that costs is total, and silent in
+	all four directions at once.
+
+	  * hasPlayingTracks returns false on a nil animator, so the clip never wins
+	  * driveLocally returns false on a nil animator, so this client cannot start
+	    one either
+	  * poseBody has no joints to write, so the procedural gait cannot run
+	  * and the fallback report is gated on body.animator, so it never says a word
+
+	A body in that state is driven by nothing, by anything, and is invisible to
+	the one diagnostic built to find it. It is per-body and it is a race, which is
+	why it is always SOME of them, why it survives every fix made on the server,
+	and why it outlived the client preload and the local-clip playback — both of
+	which need the animator this had already given up on.
+
+	So it retries. Complete means a Humanoid, an Animator, a root and at least one
+	joint; anything less is worth asking again about in a moment.
+]]
+local function resolveJoints(body: Body): boolean
 	local model = body.model
+	--[[ Cleared first: this can now run more than once, and appending to a list
+	     that already has entries would give a joint two drivers. ]]
+	table.clear(body.joints)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	body.humanoid = humanoid
@@ -395,6 +429,8 @@ local function resolveJoints(body: Body)
 			table.insert(body.joints, { motor = motor, role = entry.role, sign = entry.sign })
 		end
 	end
+
+	return body.humanoid ~= nil and body.animator ~= nil and body.root ~= nil and #body.joints > 0
 end
 
 --[[
@@ -469,6 +505,7 @@ local function track(model: Instance)
 		trackCheckedAt = -math.huge,
 		seenAt = clock,
 		fallbackSince = 0,
+		resolveAt = 0,
 		trackCount = 0,
 		localTrack = nil,
 		localGait = "",
@@ -519,6 +556,13 @@ local ANIMATED_GRACE = 5
      bodies that are about to start animating perfectly — which is exactly what it
      did the first time it ran. ]]
 local FALLBACK_REPORT_DELAY = 4
+
+--[[ How often an incomplete body is re-examined, and how long that is worth
+     doing. A model streams in over a few frames and the server finishes
+     repairing its joints shortly after parenting it, so a quarter of a second is
+     unhurried; ten seconds is far past either. ]]
+local RESOLVE_RETRY = 0.25
+local RESOLVE_GIVE_UP = 10
 
 local function hasPlayingTracks(body: Body): boolean
 	--[[
@@ -830,14 +874,102 @@ local function step(dt: number)
 			continue
 		end
 
-		if not body.resolved then
-			resolveJoints(body)
-			if #body.joints == 0 then
-				-- Nothing to drive. Left in the table rather than dropped so the
-				-- resolve is not retried every frame for a rig that has no joints.
-				continue
+		if not body.resolved and clock >= body.resolveAt then
+			--[[ Throttled rather than per-frame: each attempt walks the rig's
+			     descendants, and a body still streaming in is not going to finish
+			     between two frames. ]]
+			body.resolveAt = clock + RESOLVE_RETRY
+			if resolveJoints(body) then
+				body.resolved = true
+			elseif clock - body.seenAt > RESOLVE_GIVE_UP then
+				--[[ Bounded, so a rig that genuinely has no joints or no Animator is
+				     not re-walked for the rest of the round. Whatever was found is
+				     what it gets, and the report below says so. ]]
+				body.resolved = true
 			end
 		end
+
+		--[[
+			── THE CLIP COMES FIRST, FOR EVERY BODY ────────────────────────────
+			Ahead of the joint, root and distance guards below, and that ordering
+			is load-bearing rather than tidy.
+
+			Those three guards are about what THIS CONTROLLER can do with a body:
+			it needs a joint list to write, a root to measure from, and the body
+			to be close enough to be worth posing. None of that has anything to do
+			with whether the body's own ANIMATION should be running — a clip drives
+			the rig's real Motor6Ds at any distance, with or without a joint list
+			this controller understands.
+
+			Sitting after them, the clip logic never ran for a body whose joints
+			had not resolved, or which had drifted past the cull radius. So the one
+			population most likely to need a clip started for it was the one
+			population guaranteed not to get one.
+		]]
+		local clipped = hasPlayingTracks(body)
+		if clipped and body.localTrack then
+			--[[ A clip THIS client started is what is playing, and it has to keep
+			     following the server's gait. Nothing else will do it: the branch
+			     below only runs while nothing is playing, and by now something is.
+			     Without this a body that started walking would go on playing the
+			     idle this client began for it. ]]
+			driveLocally(body)
+		elseif not clipped and clock - body.seenAt >= ANIMATED_GRACE then
+			--[[ The server says a clip should be running and none is visible here,
+			     and the grace has passed so it is not simply still arriving. Play
+			     it on this machine — see driveLocally. ]]
+			clipped = driveLocally(body)
+		end
+
+		if clipped then
+			clearPose(body)
+			--[[ Cleared, so a body that flickers to the fallback for a frame and
+			     recovers never accumulates toward the report. Only an unbroken run
+			     counts. ]]
+			body.fallbackSince = 0
+			continue
+		end
+
+		--[[
+			SAY WHICH BODIES ARE ON THE FALLBACK, once per variant, after it has
+			LASTED.
+
+			The decision is made HERE, on the client, and every diagnostic written
+			for this problem ran on the server — so this was the one fact nobody
+			could see. It reports both ends of it, because "this client sees no
+			tracks" is half a fact and the half that decides what to fix is what
+			the server thought it was doing at the same moment.
+
+			NOT gated on body.animator any more. It was, and that hid the worst
+			case there is: a body whose Animator never resolved on this client is
+			driven by nothing, animated by nothing, and was silently exempt from
+			the one report built to find it.
+		]]
+		if body.fallbackSince == 0 then
+			body.fallbackSince = clock
+		end
+		if not reportedFallback[body.variant] and clock - body.fallbackSince > FALLBACK_REPORT_DELAY then
+			reportedFallback[body.variant] = true
+			warn(
+				string.format(
+					"[InfectedPoseController] %q is on the procedural fallback. This client: "
+						.. "animator=%s, joints=%d, playing tracks=%d. The server: animated=%s "
+						.. "gait=%q. An animator of nil means this client never resolved one for the "
+						.. "body; a real gait with 0 tracks means the server's clip is not reaching "
+						.. "here and could not be started locally either.",
+					body.variant,
+					tostring(body.animator ~= nil),
+					#body.joints,
+					body.trackCount,
+					tostring(Attributes.get(body.model, IA.Animated, nil :: boolean?)),
+					tostring(Attributes.get(body.model, IA.Gait, ""))
+				)
+			)
+		end
+
+		--[[ Everything past here is the procedural gait, which is the only part
+		     that needs a joint list, a root, and the body to be near enough to
+		     bother posing. ]]
 		if #body.joints == 0 then
 			continue
 		end
@@ -856,100 +988,6 @@ local function step(dt: number)
 		--[[ Far bodies are stepped every third frame with three frames' worth of
 		     dt, so the gait advances at the same rate — it is sampled coarsely,
 		     not slowed down. ]]
-		--[[ Checked at every distance, not just up close. A rig that ships real
-		     animations owns its own Transform at ninety studs exactly as much as
-		     at nine, and writing over it there would show as the far half of a
-		     horde walking differently from the near half. ]]
-		local clipped = hasPlayingTracks(body)
-		if clipped and body.localTrack then
-			--[[ A clip THIS client started is what is playing, and it has to keep
-			     following the server's gait. Nothing else will do it: the branch
-			     that starts one only runs while nothing is playing, and by now
-			     something is. Without this a body that started walking would go on
-			     playing the idle this client began for it. ]]
-			driveLocally(body)
-		end
-		if clipped then
-			clearPose(body)
-			--[[ Cleared, so a body that flickers to the fallback for a frame and
-			     recovers never accumulates toward the report. Only an unbroken run
-			     counts. ]]
-			body.fallbackSince = 0
-			continue
-		end
-
-		--[[
-			SAY WHICH BODIES THIS IS DRIVING, once per variant.
-
-			This controller is the fallback, and a body reaching it is a body whose
-			real animation is not playing. That is the single most useful fact in
-			diagnosing "some of them use the shamble instead of my walk" — and
-			until now it was the one thing nobody could see, because the decision
-			is made HERE, on the client, and every diagnostic written for this
-			problem has run on the server.
-
-			Once per variant, not per body: thirty-five Commons at a wave-seven
-			horde would otherwise be a wall. And only for a body that HAS an
-			Animator — one without is already reported at boot, and repeating it
-			forty-six times a round adds nothing.
-		]]
-		--[[ Before giving up on the clip, try to play it here. Only after the
-		     grace, so this never races a track that is simply still arriving. ]]
-		--[[ The server says a clip should be running and none is visible here, and
-		     the grace has passed so it is not simply still arriving. Play it on
-		     this machine — see driveLocally. ]]
-		if clock - body.seenAt >= ANIMATED_GRACE and driveLocally(body) then
-			clearPose(body)
-			body.fallbackSince = 0
-			continue
-		end
-
-		--[[ Only once it has LASTED. The first version of this reported on the
-		     spawn window and named six bodies that were about to animate
-		     perfectly well. A fallback that persists past the grace is a real
-		     one. ]]
-		if body.fallbackSince == 0 then
-			body.fallbackSince = clock
-		end
-		if
-			body.animator
-			and not reportedFallback[body.variant]
-			and clock - body.fallbackSince > FALLBACK_REPORT_DELAY
-		then
-			reportedFallback[body.variant] = true
-			--[[
-				Both ends of the question in one line.
-
-				"The client sees no tracks" is half a fact. The half that decides
-				what to fix is what the SERVER thought it was doing at the same
-				moment — it publishes the gait it believes is playing, so:
-
-				  gait "walk", animated=true   the server started a clip and this
-				                               client cannot see it. A replication
-				                               or ownership problem, not a rig one.
-				  gait "", animated=true       tracks loaded and none was ever
-				                               played. A server-side bug in the
-				                               tick that chooses a gait.
-				  animated=false               the server knows it has nothing
-				                               usable, and said so.
-
-				Three different causes that look identical from here, which is why
-				the last two reports pointed at innocent models.
-			]]
-			warn(
-				string.format(
-					"[InfectedPoseController] %q is on the procedural fallback: it has an Animator, "
-						.. "this client sees %d playing track(s), and the server says animated=%s "
-						.. "gait=%q. If the gait is a real role and the count is 0, the clip is "
-						.. "playing on the server and not reaching this client.",
-					body.variant,
-					body.trackCount,
-					tostring(Attributes.get(body.model, IA.Animated, nil :: boolean?)),
-					tostring(Attributes.get(body.model, IA.Gait, ""))
-				)
-			)
-		end
-
 		if distanceSquared > NEAR_DISTANCE_SQUARED then
 			body.frame = (body.frame + 1) % FAR_STRIDE
 			if body.frame ~= 0 then
