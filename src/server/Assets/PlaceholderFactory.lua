@@ -13,7 +13,12 @@
 	        Infected/<Kind>/         one or more rig variants
 	        Weapons/<modelName>      third-person / world model
 	        Viewmodels/<modelName>   first-person model
+	        Throwables/<Id>          molotov, pipe bomb, bile jar
 	        Pickups/<Slot>_<ItemId>  optional; grey-boxed when absent
+
+	A Model or a TOOL is accepted anywhere in that tree. Roblox hands you a weapon
+	as a Tool and that is what most supplied props are; rejecting one was a silent
+	grey-box over an asset the user had placed correctly.
 
 	ServerStorage is searched as well, because somebody dropping models into a
 	place puts them wherever is convenient and being fussy about which storage
@@ -165,19 +170,72 @@ local function park(category: string, name: string, model: Model, publish: boole
 	return model
 end
 
---[[ Every Model an entry offers: itself when it is one, its Model children when
-     it is a folder of variants. ]]
-local function modelsIn(entry: Instance): { Model }
-	if entry:IsA("Model") then
+--[[
+	Every model an entry offers: itself when it is one, its model children when it
+	is a folder of variants.
+
+	── A TOOL COUNTS ───────────────────────────────────────────────────────────
+	Roblox hands you a weapon as a Tool. That is what the toolbox gives you, what
+	a free model of a molotov is, and what somebody who has built their own throws
+	together — a Handle, some parts, a Sound or two. This used to accept only a
+	Model, so a Tool dropped into the right folder with the right name was rejected
+	SILENTLY and the game grey-boxed over the top of it, which is the worst
+	possible outcome: the user has done everything right and there is no message
+	saying otherwise.
+
+	A Tool is a container of parts with a Handle, which is exactly what everything
+	downstream of here wants. The only thing it is not is the class name this
+	function was checking for.
+]]
+local function isSupplyContainer(instance: Instance): boolean
+	return instance:IsA("Model") or instance:IsA("Tool")
+end
+
+local function modelsIn(entry: Instance): { Instance }
+	if isSupplyContainer(entry) then
 		return { entry }
 	end
 	local models = {}
 	for _, child in entry:GetChildren() do
-		if child:IsA("Model") then
+		if isSupplyContainer(child) then
 			table.insert(models, child)
 		end
 	end
 	return models
+end
+
+--[[
+	A supplied entry as a Model this module can own and take apart.
+
+	Never the user's instance: everything past this point sanitises, welds,
+	scales and reparents, and doing that to what is sitting in their Explorer
+	would edit their asset out from under them.
+
+	A Tool's contents are lifted into a fresh Model rather than the Tool being
+	cloned as-is. A Tool parented into Workspace is a pickup Roblox itself will
+	offer to anybody who touches it, it carries its own grip and activation
+	behaviour, and none of that survives contact with a game that owns its own
+	carrying. The parts are all that was ever wanted.
+]]
+local function cloneAsModel(entry: Instance): Model?
+	if entry:IsA("Model") then
+		return entry:Clone()
+	end
+	if not entry:IsA("Tool") then
+		return nil
+	end
+	local model = Instance.new("Model")
+	model.Name = entry.Name
+	for _, child in entry:GetChildren() do
+		child:Clone().Parent = model
+	end
+	--[[ A Tool's Handle is its grip by definition, so it is the pivot every
+	     caller here would otherwise have to guess at. ]]
+	local handle = model:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		model.PrimaryPart = handle
+	end
+	return model
 end
 
 --[[
@@ -208,7 +266,7 @@ local function suppliedEntry(category: string, names: { string }): Instance?
 			local assets = root:FindFirstChild(ASSETS_FOLDER)
 			local folder = assets and assets:FindFirstChild(category)
 			local entry = folder and folder:FindFirstChild(name)
-			if entry and (entry:IsA("Model") or entry:IsA("Folder")) and #modelsIn(entry) > 0 then
+			if entry and (isSupplyContainer(entry) or entry:IsA("Folder")) and #modelsIn(entry) > 0 then
 				return entry
 			end
 		end
@@ -1527,7 +1585,8 @@ local function variantsFor(kind: string): { Model }
 	local supplied = suppliedEntry("Infected", { kind })
 	if supplied then
 		for _, source in modelsIn(supplied) do
-			local rig = adoptRig(source:Clone(), kind, definition, definition.scale)
+			local copy = cloneAsModel(source)
+			local rig = copy and adoptRig(copy, kind, definition, definition.scale)
 			if rig then
 				rig.Parent = folder
 				table.insert(prepared, rig)
@@ -1958,8 +2017,9 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 
 	if supplied then
 		local candidates = modelsIn(supplied)
-		if candidates[1] then
-			prepared = adoptWeapon(candidates[1]:Clone(), definition.id, viewmodel)
+		local copy = candidates[1] and cloneAsModel(candidates[1])
+		if copy then
+			prepared = adoptWeapon(copy, definition.id, viewmodel)
 		end
 		if prepared then
 			resolved[category].real += 1
@@ -2205,6 +2265,81 @@ local function finishPickup(model: Model): Model?
 	return model
 end
 
+local throwableTemplates: { [string]: Model? } = {}
+
+--[[
+	The model a throwable is drawn as, or nil when the user has not supplied one.
+
+	Nil is not a failure and is not warned about: the procedural pickup and the
+	procedural projectile are both perfectly good, and a game with no throwable
+	models in it should say nothing about the fact.
+
+	── ONE MODEL, THREE PLACES ─────────────────────────────────────────────────
+	A molotov is seen in a hand, on the floor, and turning over in the air, and
+	before this each of those was answered separately: the floor could use a
+	supplied model, the hand showed NOTHING for a throwable, and the thrown object
+	was a hardcoded cylinder that never asked. So a user who supplied a molotov saw
+	it in exactly one of the three places it appears.
+
+	Prepared once, like everything else here. Welded to its own Handle so it
+	travels as one object, and every part made non-queryable — a thrown bottle
+	must never stop a bullet meant for the zombie behind it.
+]]
+function PlaceholderFactory:buildThrowableModel(kind: string): Model?
+	if typeof(kind) ~= "string" then
+		return nil
+	end
+	local source = throwableTemplates[kind]
+	if source == nil then
+		--[[ Cached as `false` rather than left nil, so a kind with no model is
+		     looked up once per server rather than once per throw. A horde's worth
+		     of pipe bombs is a lot of folder walks for an answer that cannot
+		     change. ]]
+		local supplied = suppliedEntry("Throwables", { kind })
+		local candidates = if supplied then modelsIn(supplied) else {}
+		local built = candidates[1] and cloneAsModel(candidates[1])
+		if not built then
+			throwableTemplates[kind] = false :: any
+			return nil
+		end
+		sanitise(built)
+
+		local anchor = built.PrimaryPart or built:FindFirstChildWhichIsA("BasePart", true)
+		if not anchor then
+			built:Destroy()
+			throwableTemplates[kind] = false :: any
+			return nil
+		end
+		built.PrimaryPart = anchor
+
+		for _, part in basePartsOf(built) do
+			part.Anchored = false
+			part.CanCollide = false
+			--[[ Never queryable. A bottle in flight that stops a bullet meant for
+			     the Common behind it is the worst kind of bug: invisible, and it
+			     costs a kill. ]]
+			part.CanQuery = false
+			part.CanTouch = false
+			part.CastShadow = false
+			part.Locked = true
+			if part ~= anchor then
+				part.Massless = true
+				weldTo(anchor, part)
+			end
+		end
+
+		source = park("Throwables", kind, built)
+		throwableTemplates[kind] = source
+	end
+	if not source then
+		return nil
+	end
+
+	local clone = (source :: Model):Clone()
+	clone.Name = kind
+	return clone
+end
+
 local pickupTemplates: { [string]: Model } = {}
 
 --[[ A small readable object, lying on the floor, glowing just enough to be
@@ -2222,10 +2357,17 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 		local supplied = suppliedEntry("Pickups", { key, itemId })
 		if supplied then
 			local candidates = modelsIn(supplied)
-			if candidates[1] then
-				built = candidates[1]:Clone()
+			built = candidates[1] and cloneAsModel(candidates[1])
+			if built then
 				sanitise(built)
 			end
+		end
+
+		--[[ A throwable's own model, so the bottle on the floor is the bottle you
+		     are about to hold and throw. Below an explicit Pickups entry, which is
+		     someone deliberately wanting the floor version to differ. ]]
+		if not built then
+			built = self:buildThrowableModel(itemId)
 		end
 
 		if not built and WeaponConfig.get(itemId) then
@@ -3419,6 +3561,30 @@ end
 ]]
 function PlaceholderFactory:ensureAssetFolders()
 	local assets = folderIn(ReplicatedStorage, ASSETS_FOLDER)
+	--[[ A folder per throwable, for the same reason the rig folders exist: a user
+	     with a molotov model has nowhere obvious to put it until the game has
+	     shown them where. Named by the enum id verbatim, which is what
+	     buildThrowableModel looks up. ]]
+	local throwables = folderIn(assets, "Throwables")
+	local madeThrowables = {}
+	for _, kind in Enums.Throwable do
+		if not throwables:FindFirstChild(kind) then
+			folderIn(throwables, kind)
+			table.insert(madeThrowables, kind)
+		end
+	end
+	if #madeThrowables > 0 then
+		table.sort(madeThrowables)
+		print(
+			string.format(
+				"[PlaceholderFactory] made empty throwable folders for: %s — drop a model or a "
+					.. "Tool into Assets.Throwables.<Id> and it is used in the hand, on the floor "
+					.. "and in flight on the next run.",
+				table.concat(madeThrowables, ", ")
+			)
+		)
+	end
+
 	local infected = folderIn(assets, "Infected")
 	local made = {}
 	for _, kind in Enums.Infected do

@@ -359,6 +359,39 @@ local function buildKitModel(itemId: string): Model?
 	     the actual behaviour until now, despite a comment claiming otherwise —
 	     a defib on somebody's back that reads as a medkit is worse than a bare
 	     back, because a teammate counts on that read to decide whether to push. ]]
+	--[[
+		A throwable in the hand, from the model the user supplied for it.
+
+		Until now this returned nil for every throwable, so a survivor holding a
+		molotov held nothing at all — and a teammate deciding whether to push a
+		corridor could not tell a lit bottle from an empty hand. The floor pickup
+		and the object in flight both had a model; the six seconds it spends in
+		somebody's fist did not.
+
+		Nil when nothing is supplied, which is unchanged behaviour for anyone who
+		has not put a model in Assets.Throwables and is deliberately not warned
+		about — see PlaceholderFactory.buildThrowableModel.
+	]]
+	if Enums.Throwable[itemId] then
+		local factory = Registry.find("PlaceholderFactory")
+		local thrown = factory
+			and typeof(factory.buildThrowableModel) == "function"
+			and factory:buildThrowableModel(itemId)
+		if not thrown then
+			return nil
+		end
+		tame(thrown)
+		--[[ Only the ceiling, not the medkit's scale-down beside it. A supplied
+		     bottle is already the size its author meant it to be; a kit prop is
+		     map furniture that has to be shrunk to fit a hand. This just refuses
+		     to put something enormous in one. ]]
+		local longest = longestSide(thrown)
+		if longest > KIT.CarryMaxSize then
+			scaleModel(thrown, KIT.CarryMaxSize / math.max(longest, 0.01))
+		end
+		return thrown
+	end
+
 	if itemId ~= Enums.HealthItem.Medkit then
 		return nil
 	end

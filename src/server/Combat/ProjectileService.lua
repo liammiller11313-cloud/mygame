@@ -516,6 +516,11 @@ function ProjectileService:_spawnProjectile(
 	body.CustomPhysicalProperties = PhysicalProperties.new(2.5, 0.6, 0.35, 1, 1)
 
 	local light: PointLight? = nil
+	--[[ The pipe bomb's blinking head, kept so a supplied model can hide it. See
+	     the dressing block below: the LIGHT is gameplay and stays either way, the
+	     little neon ball it hangs on is only there because the grey-box needs
+	     something to be. ]]
+	local lampPart: BasePart? = nil
 
 	if kind == THROWABLE.PipeBomb then
 		body.Color = COLOR.BorderBright
@@ -537,6 +542,7 @@ function ProjectileService:_spawnProjectile(
 		lamp.Massless = true
 		lamp.CollisionGroup = "Debris"
 		lamp.Parent = body
+		lampPart = lamp
 
 		local weld = Instance.new("WeldConstraint")
 		weld.Part0 = body
@@ -560,6 +566,54 @@ function ProjectileService:_spawnProjectile(
 	else
 		body.Color = COLOR.Bile
 		body.Material = Enum.Material.Neon
+	end
+
+	--[[
+		The user's own model, when they have supplied one.
+
+		Dressing only: the procedural part stays and keeps being the physics body,
+		it is simply made invisible. That is deliberate rather than lazy — the
+		bounce of a pipe bomb is tuned on this part's CustomPhysicalProperties and
+		its collision shape, and a supplied model whose geometry decided how it
+		skidded would make every user's bombs handle differently from every
+		other's.
+
+		Everything hung on it is massless and non-collidable for the same reason,
+		and non-queryable because a bottle in flight that stops a bullet meant for
+		the Common behind it is the worst kind of bug: invisible, and it costs a
+		kill.
+
+		Attached BEFORE the velocity below. Welding into an assembly after its
+		velocity is assigned invites the engine to recompute the body around the
+		new mass and lose the throw.
+	]]
+	local factory = Registry.find("PlaceholderFactory")
+	local dressing = factory
+		and typeof(factory.buildThrowableModel) == "function"
+		and factory:buildThrowableModel(kind)
+	if dressing then
+		body.Transparency = 1
+		--[[ The light survives, its neon ball does not: a real pipe bomb model
+		     carries its own head, and a spare glowing sphere parked where the
+		     grey-box's used to be would be floating beside it. ]]
+		if lampPart then
+			lampPart.Transparency = 1
+		end
+		dressing:PivotTo(body.CFrame)
+		for _, part in dressing:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.Massless = true
+				part.CanCollide = false
+				part.CanQuery = false
+				part.CanTouch = false
+				part.CollisionGroup = "Debris"
+				local hold = Instance.new("WeldConstraint")
+				hold.Part0 = body
+				hold.Part1 = part
+				hold.Parent = part
+			end
+		end
+		dressing.Parent = body
 	end
 
 	body.Parent = self:_container()
