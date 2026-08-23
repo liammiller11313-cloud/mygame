@@ -26,6 +26,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AnimationCache = require(Shared.Util.AnimationCache)
 local Attributes = require(Shared.Net.Attributes)
 local AnimationConfig = require(Shared.Config.AnimationConfig)
+local RigUtil = require(Shared.Util.RigUtil)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 
 local InfectedAnimator = {}
@@ -91,6 +92,11 @@ local STATE_ROLE: { [Enum.HumanoidStateType]: string } = {
 -- own configured speeds rather than a constant, so a sprinting Common and a
 -- lumbering Tank each cross the line at the right moment for their own gait.
 local MOVING_EPSILON = 0.1
+--[[ Vertical speed above which a body is genuinely leaving the ground. Low
+     enough that a real fall registers on its first frame, high enough that the
+     jitter of a Humanoid standing on a slope does not. See the airborne branch
+     in update. ]]
+local AIRBORNE_SPEED = 3
 local RUN_FRACTION = 0.62
 
 --[[
@@ -288,6 +294,10 @@ function InfectedAnimator.new(model: Model, kind: string)
 		     scale cannot change once it is this kind. ]]
 		bodyScale = bodyScaleOf(kind),
 		humanoid = humanoid,
+		--[[ For one question only: is this body ACTUALLY leaving the ground. See
+		     the airborne branch in update — the Humanoid's own state machine
+		     cannot be trusted to answer it. ]]
+		root = RigUtil.getRoot(model),
 		tracks = {},
 		--[[ role -> the AnimationId the track was loaded from. Only ever read by
 		     dropFailed, which needs to ask the cache about an id it no longer
@@ -664,14 +674,42 @@ function InfectedAnimator.update(self, runSpeed: number)
 		return
 	end
 
-	--[[ Airborne first. A zombie dropping off a catwalk is moving fast in a
-	     direction, and asking its speed would put it into a run cycle mid-air. ]]
+	--[[
+		Airborne first. A zombie dropping off a catwalk is moving fast in a
+		direction, and asking its speed would put it into a run cycle mid-air.
+
+		── BUT CORROBORATED, BECAUSE THE STATE MACHINE LIES ────────────────────
+		This branch trusted Humanoid:GetState() alone and RETURNED, so speed was
+		never consulted. A Humanoid that wrongly believes it is in Freefall —
+		which is a per-model fault, caused by a HipHeight that does not match the
+		rig's leg length, a HumanoidRootPart the floor ray misses, or legs left
+		non-collidable — therefore played the FALL clip, looped, forever. The body
+		walks around the map with a falling animation on it, and from the outside
+		that is "this one is not using my walk", which is exactly the report.
+
+		Believing the state machine is also unnecessary: whether a body is leaving
+		the ground is directly observable. A falling body has vertical velocity; a
+		body standing on a floor does not, whatever it says about itself. So the
+		state picks WHICH airborne clip and the velocity decides WHETHER to play
+		one, and a Humanoid stuck in the wrong state costs at most a frame of the
+		wrong gait instead of an entire life.
+
+		Deliberately not FloorMaterial: a Humanoid that has failed to find the
+		floor reports Air for the same reason it reports Freefall, so it would
+		agree with the lie rather than catch it.
+	]]
 	local ok, humanoidState = pcall(humanoid.GetState, humanoid)
 	if ok then
 		local role = STATE_ROLE[humanoidState]
 		if role and self.tracks[role] then
-			self:setState(role, 0)
-			return
+			local root = self.root
+			--[[ No root to ask is the old behaviour: trust the state. Better than
+			     refusing to play a fall clip at all on a body we cannot measure. ]]
+			local rising = if root then math.abs(root.AssemblyLinearVelocity.Y) > AIRBORNE_SPEED else true
+			if rising then
+				self:setState(role, 0)
+				return
+			end
 		end
 	end
 
