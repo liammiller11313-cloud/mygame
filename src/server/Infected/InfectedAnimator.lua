@@ -163,6 +163,32 @@ local DEATH_FALLBACK_LENGTH = 0.8
 	enough that a body carrying dead tracks is not dead for long.
 ]]
 local PRELOAD_GRACE = 2
+
+--[[
+	How often a body re-asserts the gait it is already playing.
+
+	AnimationTrack:Play() replicates as an EVENT, at the instant it is called. A
+	client that begins observing a body AFTERWARDS never receives it — there is no
+	retroactive "this track is playing" for a peer that was not listening.
+
+	For a body that keeps changing gait this never matters: walk, run and idle
+	trade places constantly, each swap fires a fresh Play, and any client catches
+	up within a second. For a body that is STANDING STILL it matters completely.
+	Its setState calls all no-op on `self.current == key`, so the one Play it ever
+	makes is the one at the moment it stopped — and every client that arrives
+	later sees an Animator with nothing playing on it, forever.
+
+	That is why every single body the client's fallback reported was in the idle
+	state, across two builds, and never once in walk or run. It was not a rig
+	fault, a clip fault or an asset fault; it was the one gait that never repeats
+	itself.
+
+	Three seconds is short enough that a player walking up to a stationary zombie
+	sees it animate almost immediately, and long enough that re-asserting costs
+	nothing measurable: it is one Play call per stationary body per three seconds.
+	A looping clip restarted at its own loop point is not visible.
+]]
+local GAIT_REASSERT = 3
 local MAX_RATE = 2.4
 
 --[[ A body's scale, from its kind. Falls back to 1 for a kind with no
@@ -308,6 +334,10 @@ function InfectedAnimator.new(model: Model, kind: string)
 		     answered at load time. ]]
 		validateAt = os.clock() + PRELOAD_GRACE,
 		current = "",
+		--[[ When the current gait was last announced to the world. See
+		     GAIT_REASSERT: a body that never changes gait never re-announces, and
+		     a client that arrives after the one announcement never hears it. ]]
+		assertedAt = 0,
 		--[[ The playback rate last sent. See setState: this is what stops a
 		     rate-matched gait replicating a new speed to every client on every
 		     frame of every body in the near band. ]]
@@ -524,6 +554,7 @@ function InfectedAnimator.setState(self, role: string, speed: number)
 			track:Play(FADE)
 		end
 		self.current = key
+		self.assertedAt = os.clock()
 		--[[ Published on the change only, so this costs a handful of replicated
 		     writes per body per second at worst. It is what lets the client's
 		     fallback report say whether the server had started a clip at all —
@@ -731,6 +762,46 @@ function InfectedAnimator.update(self, runSpeed: number)
 
 	if os.clock() < self.oneShotUntil then
 		return
+	end
+
+	--[[
+		RE-ANNOUNCE A GAIT THAT HAS GONE QUIET. See GAIT_REASSERT.
+
+		Play() replicates as an event, so a client that starts watching a body
+		after its last Play never learns that anything is playing. A body that
+		keeps changing gait re-announces constantly and no client can miss it for
+		long; a body standing still announces once, at the moment it stopped, and
+		is silent from then on.
+
+		Clearing `current` is all it takes: setState's own change test then treats
+		the next call as a fresh one and plays the track again. Deliberately done
+		here rather than inside setState, because setState is called several times
+		a second per body and this must fire on a clock, not on a call count.
+	]]
+	--[[
+		Clearing `current` is NOT enough, and the reason is worth stating: setState
+		only calls Play on a track that is not already playing, and on the server
+		this one is. It would clear the flag, decide nothing had to happen, and
+		announce nothing. The re-announcement has to be an actual Play call.
+
+		Restricted to IDLE deliberately. Every body the client's fallback has ever
+		reported — across three builds and two dozen lines — was in the idle state,
+		and never once in walk or run. That is exactly what this predicts: a
+		walking body flips between walk, run and idle as the brain steers it, each
+		flip fires a fresh Play, and no client stays behind for long. A stationary
+		body announces once, when it stopped, and then never again.
+
+		Re-playing a one-second looping idle is invisible. Doing the same to a walk
+		cycle every three seconds would be a visible stutter, so it is not done —
+		and if a walking body ever does turn up in that report, the gait it prints
+		will say so and this can widen with evidence instead of guesswork.
+	]]
+	if self.current == "idle" and os.clock() - self.assertedAt > GAIT_REASSERT then
+		self.assertedAt = os.clock()
+		local idle = self.tracks.idle
+		if idle then
+			idle:Play(FADE)
+		end
 	end
 
 	local humanoid = self.humanoid
