@@ -330,7 +330,54 @@ local current = {
 	hidden = false,
 	reloadRoll = 0, -- eased target for the reload lean, 0 or 1
 	reloading = false,
+	--[[ Seconds into the inspect, or -1 when it is not running. See INSPECT_*. ]]
+	inspectClock = -1,
 }
+
+--[[
+	The inspect: the gun turned over in your hands so you can actually look at it.
+
+	Everything about the viewmodel until now was REACTIVE — sway answers the
+	mouse, bob answers your feet, kick answers the trigger — so the weapon was
+	only ever seen from the one angle it is held at, moving because something
+	happened to it. This is the one motion the player asks for.
+
+	Blended on top of the same pose everything else composes into rather than
+	replacing it, so a shove or a step still reads through the inspect and the
+	gun never goes rigid.
+
+	── IT MUST NEVER COST YOU A FIGHT ──────────────────────────────────────────
+	Cancelled the instant anything real happens: aiming, firing, reloading, a
+	swing, a shove, a weapon swap, or the model being hidden. A player who is
+	admiring their rifle when a Hunter comes round the corner has to be shooting
+	on the next frame, not on the frame after the animation finished. That rule is
+	why this is an offset and not a takeover — cancelling is just letting the
+	alpha fall, and the fall is already the return half of the motion.
+]]
+local INSPECT_SECONDS = 2.1
+--[[ Fractions of the motion spent coming up and going back. The remainder is the
+     hold, which is the part the player is actually looking at. ]]
+local INSPECT_IN = 0.22
+local INSPECT_OUT = 0.26
+--[[ Where it goes. Z is toward the camera — the pose table's hip Z is negative,
+     which is away — so this brings the weapon closer as well as up, and inboard
+     toward the centre line where there is room to turn it. ]]
+local INSPECT_OFFSET = Vector3.new(-0.22, 0.30, 0.38)
+--[[ And which way it turns. Yaw swings the muzzle across so the receiver's flank
+     faces the camera, roll lays it over, pitch lifts the barrel. ]]
+local INSPECT_PITCH = math.rad(12)
+local INSPECT_YAW = math.rad(48)
+local INSPECT_ROLL = math.rad(-22)
+--[[ A slow extra turn across the hold, so the weapon is still moving while it is
+     being looked at. A pose that arrives and freezes reads as a stuck frame. ]]
+local INSPECT_TURN = math.rad(16)
+
+--[[ Ease in and out of a 0..1 ramp. The motion is a trapezoid and every corner
+     of it goes through here, so nothing in the inspect starts or stops abruptly. ]]
+local function smoothstep(alpha: number): number
+	local a = math.clamp(alpha, 0, 1)
+	return a * a * (3 - 2 * a)
+end
 
 local cameraController: any = nil
 
@@ -1040,6 +1087,11 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	current.definition = definition
 	current.pose = poseFor(weaponId, definition)
 
+	--[[ Nor the previous gun's inspect. The clock is in seconds rather than tied
+	     to a model, so a swap mid-inspect would have carried the remainder onto
+	     whatever was drawn next. ]]
+	current.inspectClock = -1
+
 	-- A weapon swap must not inherit the previous gun's recoil; the springs are
 	-- reset rather than left to settle, which would look like a flinch.
 	kickPosition:reset(Vector3.zero)
@@ -1421,6 +1473,9 @@ end
 
 --[[ One shot: the flash, the punch and the brass, all on this frame. ]]
 function ViewmodelController:onFired(definition: any, _seed: number)
+	-- Shooting ends the inspect. See ViewmodelController.inspect.
+	current.inspectClock = -1
+
 	if not definition then
 		return
 	end
@@ -1495,12 +1550,34 @@ function ViewmodelController:getMuzzlePosition(): Vector3?
 	return muzzle.WorldPosition
 end
 
+--[[
+	Turn the gun over so the player can look at it.
+
+	Reached by re-selecting the weapon slot you are already holding — see
+	InputController.forward, which is where the same "press it again" rule already
+	commits a consumable. Costs nothing, so unlike that one it is not restricted
+	to the schemes with no better option: a desktop player pressing 1 twice gets a
+	look at their rifle, and a phone player tapping the tile they are already on
+	gets the same thing with no ninth button on the pad.
+
+	Re-pressing RESTARTS it rather than being ignored. A player pressing again is
+	asking for another look, and swallowing that reads as the key not working.
+]]
+function ViewmodelController:inspect()
+	if not model or current.hidden or current.aiming or current.reloading then
+		return
+	end
+	current.inspectClock = 0
+end
+
 function ViewmodelController:onDryFire()
 	local speed = kickPosition.speed
 	kickPosition:impulse(Vector3.new(0, -0.05 * speed * IMPULSE_GAIN, 0.02 * speed * IMPULSE_GAIN))
 end
 
 function ViewmodelController:onReloadStarted(_definition: any, _perShell: boolean)
+	current.inspectClock = -1
+
 	dropMagazine()
 	current.reloading = true
 end
@@ -1524,6 +1601,8 @@ function ViewmodelController:onPump()
 end
 
 function ViewmodelController:onMeleeSwing(definition: any)
+	current.inspectClock = -1
+
 	local speed = kickPosition.speed
 	local reach = if definition then definition.kickback else 0.3
 	kickPosition:impulse(
@@ -1546,6 +1625,8 @@ end
 --[[ The shove is a shoulder-and-forearm push. It throws the weapon out of frame
      hard, which is exactly the cost the verb is supposed to have. ]]
 function ViewmodelController:onShove()
+	current.inspectClock = -1
+
 	local speed = kickPosition.speed
 	kickPosition:impulse(
 		Vector3.new(-0.35 * speed * IMPULSE_GAIN, -0.2 * speed * IMPULSE_GAIN, -0.5 * speed * IMPULSE_GAIN)
@@ -1911,6 +1992,43 @@ local function update(deltaTime: number)
 	local kickOffset = kickPosition:update(dt)
 	local kickAngles = kickRotation:update(dt)
 
+	--[[
+		The inspect, as a trapezoid: rise, hold, return. See the INSPECT_ block.
+
+		Cancelled rather than paused by anything that needs the weapon, and
+		cancelling is only clearing the clock — the alpha then falls through the
+		return half on the next frames, so the gun comes back down instead of
+		snapping. Aiming is the one that matters: the aim pose is solved around the
+		model's sight, and an inspect still blended into it would put the sight
+		somewhere the crosshair is not.
+	]]
+	local inspectAlpha = 0
+	local inspectTurn = 0
+	if current.inspectClock >= 0 then
+		if current.aiming or current.reloading or current.hidden then
+			current.inspectClock = -1
+		else
+			current.inspectClock += dt
+			local t = current.inspectClock / INSPECT_SECONDS
+			if t >= 1 then
+				current.inspectClock = -1
+			else
+				if t < INSPECT_IN then
+					inspectAlpha = smoothstep(t / INSPECT_IN)
+				elseif t > 1 - INSPECT_OUT then
+					inspectAlpha = smoothstep((1 - t) / INSPECT_OUT)
+				else
+					inspectAlpha = 1
+				end
+				inspectTurn = math.sin(t * math.pi) * INSPECT_TURN
+			end
+		end
+	end
+	--[[ Aim wins outright. The cancel above already covers the steady state; this
+	     covers the single frame between the aim beginning and the cancel, which is
+	     the frame the sight would visibly jump on. ]]
+	local inspectScale = inspectAlpha * (1 - aimAlpha)
+
 	--[[ Push the pose out by however much the frame narrowed. Same direction from
 	     the camera, so the weapon does not move on screen; further away, so it
 	     keeps the size it has from the hip instead of being magnified into a wall
@@ -1927,6 +2045,17 @@ local function update(deltaTime: number)
 		swayAngles.Y + kickAngles.Y,
 		tilt + bobRoll + swayAngles.Z + kickAngles.Z
 	)
+	--[[ Composed on the RIGHT, so the inspect turns the weapon about its own axes
+	     rather than about the camera's. Multiplied the other way round a gun being
+	     inspected while the player turns would swing out of frame. ]]
+	if inspectScale > 0 then
+		rotation = rotation
+			* CFrame.Angles(
+				INSPECT_PITCH * inspectScale,
+				(INSPECT_YAW + inspectTurn) * inspectScale,
+				INSPECT_ROLL * inspectScale
+			)
+	end
 
 	local aimRest = pose.aim * fovScale
 	--[[ Solve the aim pose around the model's own sight rather than around its
@@ -1940,7 +2069,7 @@ local function update(deltaTime: number)
 	end
 
 	local rest = pose.hip:Lerp(aimRest, aimAlpha)
-	local offset = rest + swayOffset + kickOffset + Vector3.new(bobX, bobY, 0)
+	local offset = rest + swayOffset + kickOffset + Vector3.new(bobX, bobY, 0) + INSPECT_OFFSET * inspectScale
 
 	model:PivotTo(camera.CFrame * CFrame.new(offset) * rotation)
 end

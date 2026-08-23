@@ -218,6 +218,22 @@ GoreConfig.Blood = table.freeze({
 		more violent than forty that do not, and they are the expensive ones — big
 		particles that live a full second are the layer that costs fill rate.
 	]]
+	--[[
+		The second and third beats of a wound.
+
+		A cut artery does not puff once and stop, and one burst is what every wound
+		in this game was: a single frame of spray at the moment of the cut, then a
+		limb tumbling away clean. Two smaller, later bursts at the same point turn
+		that into something that pumps — which is what the eye reads as a body
+		still emptying rather than an effect that has finished playing.
+
+		Only on a body coming APART. A clean kill is a clean kill, and putting an
+		arterial spurt on every Common that falls over would spend the difference
+		this is meant to create.
+	]]
+	SpurtDelays = { 0.22, 0.52 },
+	SpurtFalloff = 0.55,
+
 	GoutParticles = 6,
 	GoutSpeed = 20,
 	GoutSpread = 38,
@@ -261,6 +277,59 @@ GoreConfig.Blood = table.freeze({
 	PoolEnabled = true,
 	PoolGrowTime = 2.5,
 	PoolMaxSize = 6.5,
+
+	--[[
+		How long a stain under a body lasts, as opposed to a mark on a wall.
+
+		Pools used to take DecalLifetime, the full 45 seconds, and that quietly
+		crowded everything else off the level. A pool is created for every body
+		that settles, so during a sustained horde — a kill every 350ms into a
+		48-slot corpse ring — they arrive at nearly three a second, and at 45
+		seconds that is about 130 live pools out of a 160-decal ceiling. Add the
+		gib landing marks and the ring was over-subscribed before the gunfight had
+		put a single splatter on a wall: the floor was a solid carpet of overlapping
+		circles and the walls were clean, which is the opposite of what a room that
+		has been fought through looks like.
+
+		22 seconds holds pools at about 40% of the ring and leaves a third of it
+		free for the fight itself. It is also long enough to outlive the body — the
+		corpse ring recycles at around 16 seconds under that same pressure — so the
+		blood is still there after the body has gone, which is the point.
+	]]
+	PoolLifetime = 22,
+
+	--[[
+		How much a body bleeds, by what was done to it.
+
+		Every corpse used to leave the same stain: a clean headshot and a body torn
+		open at the shoulder produced identical circles of identical size, which is
+		the one place the gore system said the same thing about two events it had
+		spent everything else distinguishing.
+
+		Multiplies the pool only — the grow time is unchanged, so a bigger stain
+		spreads faster rather than lingering half-formed. A burned body pools least
+		of all: cauterised is the whole point of burning, and a charred corpse in a
+		wide red pool reads as the two effects not knowing about each other.
+
+		Gibbing is absent on purpose. A gibbed body is replaced by chunks and never
+		ragdolls, so it never reaches the pool at all; the chunks leave their own
+		marks where they land.
+	]]
+	PoolScale = {
+		Dismember = 1.7,
+		Incinerate = 0.4,
+	},
+
+	--[[ The stain a severed limb leaves where it comes to rest.
+
+	     Small and short-lived, and both of those are budget rather than taste:
+	     marks come out of the same MaxActiveDecals ceiling as the wall splatter
+	     from the gunfight, and forty limbs each holding a full-size, full-length
+	     pool would push that fight off the walls. A limb only lives LimbLifetime
+	     anyway, so a stain that outlasted it by thirty seconds would be a puddle
+	     with nothing in it. ]]
+	LimbPoolScale = 0.32,
+	LimbPoolLifetime = 16,
 })
 
 --[[

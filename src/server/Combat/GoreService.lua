@@ -645,11 +645,11 @@ function GoreService:processKill(model: Model, ctx, result)
 		     second later would jerk a corpse that had finished falling. ]]
 		task.delay(hold, function()
 			if model.Parent then
-				self:ragdoll(model, nil, ctx.region)
+				self:ragdoll(model, nil, ctx.region, level)
 			end
 		end)
 	end
-	local applied = if hold > 0 then 0 else self:ragdoll(model, direction * knockback, ctx.region)
+	local applied = if hold > 0 then 0 else self:ragdoll(model, direction * knockback, ctx.region, level)
 
 	if level == LEVEL.Dismember then
 		severed = severed or self:_pickSeverablePart(model, ctx)
@@ -714,7 +714,7 @@ end
 --[[ `region` is the hit region the kill landed on, and the only thing it decides
      is how long the body stays — see GoreConfig.Corpse. Optional, because plenty
      of callers ragdoll a body no shot was responsible for. ]]
-function GoreService:ragdoll(model: Model, impulse: Vector3?, region: string?): number
+function GoreService:ragdoll(model: Model, impulse: Vector3?, region: string?, level: string?): number
 	if not model or not model.Parent or self._ragdolled[model] then
 		return 0
 	end
@@ -918,6 +918,10 @@ function GoreService:ragdoll(model: Model, impulse: Vector3?, region: string?): 
 		root = root,
 		watch = watch,
 		protected = protected,
+		--[[ How much this body bleeds when it settles. Read here rather than at
+		     settle time because by then the level is long gone — the record is all
+		     that is left of how the body died. ]]
+		poolScale = (level and BLOOD.PoolScale[level]) or 1,
 		expiresAt = now + lifetime,
 		-- Not before this. See RAGDOLL_MIN_FALL.
 		settleFrom = now + RAGDOLL_MIN_FALL,
@@ -1092,7 +1096,14 @@ function GoreService:dismember(
 			end
 		end
 	end
-	table.insert(self._limbs, { parts = freed, expiresAt = os.clock() + LIMBS.LimbLifetime })
+	table.insert(self._limbs, {
+		parts = freed,
+		expiresAt = os.clock() + LIMBS.LimbLifetime,
+		--[[ Whether this limb has already bled where it stopped, and how long it
+		     has been stopped for. See the sweep. ]]
+		pooled = false,
+		stillFor = 0,
+	})
 	for _, part in freed do
 		Debris:AddItem(part, LIMBS.LimbLifetime + DEBRIS_GRACE)
 	end
@@ -1120,6 +1131,41 @@ function GoreService:dismember(
 		timeScale = HITSTOP.TimeScale,
 		attacker = attacker,
 	}, PRIORITY_KILL)
+
+	--[[
+		And then it keeps bleeding.
+
+		One burst at the moment of the cut is what every wound here used to be: a
+		frame of spray, then a limb tumbling away clean. Two smaller, later ones at
+		the same point turn that into something that PUMPS, which is what the eye
+		reads as a body still emptying rather than an effect that has finished.
+
+		Fired from the stump's world position rather than from anything on the
+		body, so it does not matter whether the corpse is still there by the time
+		they land — and at PRIORITY_BLOOD, so a horde throttles these away before
+		it throttles a kill anybody is looking at.
+	]]
+	for beat, delay in BLOOD.SpurtDelays do
+		task.delay(delay, function()
+			self:_emit({
+				model = nil,
+				level = LEVEL.Dismember,
+				part = partName,
+				position = stump,
+				normal = away,
+				direction = away,
+				force = speed * 0.5,
+				scale = BLOOD_SCALE_DISMEMBER * BLOOD.SpurtFalloff ^ beat,
+				seed = random:NextInteger(1, 2 ^ 31 - 1),
+				decal = false,
+				pool = false,
+				kill = false,
+				hitStop = 0,
+				timeScale = HITSTOP.TimeScale,
+				attacker = nil,
+			}, PRIORITY_BLOOD)
+		end)
+	end
 
 	if isHead and LIMBS.DecapitationIsLethal then
 		self:_killByDecapitation(model, direction)
@@ -1487,7 +1533,7 @@ function GoreService:_sweep(deltaTime: number)
 							normal = Vector3.yAxis,
 							direction = Vector3.yAxis * -1,
 							force = 0,
-							scale = BLOOD_SCALE_HIT,
+							scale = record.poolScale or 1,
 							seed = random:NextInteger(1, 2 ^ 31 - 1),
 							decal = false,
 							pool = true,
@@ -1517,6 +1563,52 @@ function GoreService:_sweep(deltaTime: number)
 			table.remove(self._limbs, index)
 			for _, part in record.parts do
 				part:Destroy()
+			end
+			continue
+		end
+
+		--[[
+			A limb that has come to rest bleeds into the floor, once.
+
+			Gibs already mark where they land and a settled corpse already pools, so
+			an arm was the one thing in this system that could tumble to a stop on
+			a clean floor and stay clean — which read as the limb being scenery
+			that had been placed rather than something that had just come off a
+			body.
+
+			Same settle test the corpses use, on the limb ROOT only: the forearm and
+			hand that came away with an upper arm are one object as far as this is
+			concerned, and three stains under one arm is a puddle rather than a
+			limb. Small and short-lived — see GoreConfig.Blood.LimbPoolScale — because
+			marks come out of the same ceiling as the gunfight's own splatter.
+		]]
+		local root = record.parts[1]
+		if not record.pooled and BLOOD.PoolEnabled and root and root.Parent then
+			if root.AssemblyLinearVelocity.Magnitude >= SETTLE_SPEED then
+				record.stillFor = 0
+			else
+				record.stillFor = (record.stillFor or 0) + deltaTime
+				if record.stillFor >= SETTLE_TIME then
+					record.pooled = true
+					self:_emit({
+						model = nil,
+						level = LEVEL.None,
+						part = nil,
+						position = root.Position,
+						normal = Vector3.yAxis,
+						direction = -Vector3.yAxis,
+						force = 0,
+						scale = BLOOD.LimbPoolScale,
+						seed = random:NextInteger(1, 2 ^ 31 - 1),
+						decal = false,
+						pool = true,
+						poolLifetime = BLOOD.LimbPoolLifetime,
+						kill = false,
+						hitStop = 0,
+						timeScale = HITSTOP.TimeScale,
+						attacker = nil,
+					}, PRIORITY_BLOOD)
+				end
 			end
 		end
 	end

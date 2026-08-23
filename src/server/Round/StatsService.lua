@@ -80,10 +80,37 @@ end
 	out. Consistency with what the game says everywhere else is worth more than
 	the more obvious noun.
 ]]
-local LEADERBOARD: { { key: string, title: string } } = {
+--[[ `live` marks a column that is NOT a session counter — it is read straight
+     off whatever already owns the number, every time the board is pushed. See
+     the Dollars entry. ]]
+local LEADERBOARD: { { key: string, title: string, live: boolean? } } = {
 	{ key = "kills", title = "Kills" },
 	{ key = "deaths", title = "Wipeouts" },
+	--[[
+		What is in your wallet right now, not what you have earned all session.
+
+		Deliberately different from the two above it, and worth being explicit
+		about because the difference is the whole design of this file: kills and
+		wipeouts ACCUMULATE, so they are counted here and survive a round reset.
+		Dollars do not accumulate — you spend them — and EconomyService already
+		owns the number and publishes it as an attribute the HUD reads. Counting a
+		second copy here would be a total that drifted from the balance the player
+		can see in their own corner, and the one on the player list would be the
+		wrong one.
+
+		So this column has no counter behind it. It mirrors the attribute, which
+		makes it correct by construction and free to keep correct.
+	]]
+	{ key = "dollars", title = "Dollars", live = true },
 }
+
+--[[ The current value of a live column, or nil for a counted one. ]]
+local function liveValue(player: Player, key: string): number?
+	if key == "dollars" then
+		return Attributes.get(player, Attributes.Player.Dollars, 0)
+	end
+	return nil
+end
 
 local function leaderboardFor(player: Player): Folder?
 	local existing = player:FindFirstChild("leaderstats")
@@ -128,7 +155,13 @@ local function sessionFor(player: Player): { [string]: number }
 	if not record then
 		record = {}
 		for _, column in LEADERBOARD do
-			record[column.key] = 0
+			--[[ Counted columns only. A live column has no counter and giving it a
+			     zero here would be a number that looked authoritative, was never
+			     written to, and would be shown the moment anything read the wrong
+			     branch of pushLeaderboard. ]]
+			if not column.live then
+				record[column.key] = 0
+			end
 		end
 		session[player] = record
 	end
@@ -148,7 +181,8 @@ local function pushLeaderboard(player: Player)
 	for _, column in LEADERBOARD do
 		local value = folder:FindFirstChild(column.title)
 		if value and value:IsA("IntValue") then
-			value.Value = math.floor(record[column.key] or 0)
+			local number = if column.live then liveValue(player, column.key) or 0 else record[column.key] or 0
+			value.Value = math.floor(number)
 		end
 	end
 end
@@ -164,7 +198,10 @@ local function bump(player: Player?, key: string, amount: number)
 	-- Only the two columns the player list shows; every other counter changes
 	-- many times a second and none of them are on it.
 	for _, column in LEADERBOARD do
-		if column.key == key then
+		--[[ Counted columns only. A live column has no counter to add to, so this
+		     would be arithmetic on a nil the first time anybody wired a bump to
+		     one — and the number it was trying to keep is already correct. ]]
+		if column.key == key and not column.live then
 			sessionFor(player)[key] += amount
 			pushLeaderboard(player)
 			break
@@ -283,9 +320,20 @@ function StatsService:start()
 		end))
 	end
 
+	--[[ A live column moves without anything in this file being told, so the
+	     board follows the attribute rather than waiting for the next kill. Every
+	     purchase and every payout writes it, and an IntValue only replicates when
+	     the number actually changes — so this costs a comparison per spend. ]]
+	local function watchWallet(player: Player)
+		serviceTrove:add(player:GetAttributeChangedSignal(Attributes.Player.Dollars):Connect(function()
+			pushLeaderboard(player)
+		end))
+	end
+
 	serviceTrove:connect(Players.PlayerAdded, function(player)
 		recordFor(player)
 		pushLeaderboard(player)
+		watchWallet(player)
 		dirty = true
 	end)
 	for _, player in Players:GetPlayers() do
@@ -294,6 +342,7 @@ function StatsService:start()
 		     test session has no row until their first kill. ]]
 		recordFor(player)
 		pushLeaderboard(player)
+		watchWallet(player)
 	end
 	serviceTrove:connect(Players.PlayerRemoving, function(player)
 		stats[player] = nil

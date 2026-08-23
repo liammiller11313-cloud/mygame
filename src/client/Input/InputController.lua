@@ -432,6 +432,15 @@ local CONSUMABLE_SLOTS: { [string]: boolean } = {
 	[Enums.Slot.Pills] = true,
 }
 
+--[[ The slots holding something you can look at. Melee is here for completeness
+     rather than reachability: the melee key is a toggle and returns above, so it
+     never arrives at the slot branch. ]]
+local WEAPON_SLOTS: { [string]: boolean } = {
+	[Enums.Slot.Primary] = true,
+	[Enums.Slot.Secondary] = true,
+	[Enums.Slot.Melee] = true,
+}
+
 --[[
 	Which slot the player has ASKED for, which is not the same as the one the
 	server has confirmed.
@@ -517,6 +526,28 @@ local function forward(action: string)
 		if pressAgain and CONSUMABLE_SLOTS[binding.slot] and selectedSlot() == binding.slot then
 			Remotes.Event.UseItem:FireServer(binding.slot)
 			lastSelect.slot = ""
+			return
+		end
+
+		--[[
+			Re-selecting the weapon you are already holding turns it over in your
+			hands. The same press-again rule as the line above, on every scheme
+			rather than only the cramped ones.
+
+			The restriction above exists because re-pressing a consumable SPENDS
+			it, so a desktop player double-tapping 4 to make sure it registered
+			would have burned their medkit. Looking at a gun costs nothing and is
+			cancelled by anything that matters, so there is no such trap here and
+			no reason to hide it from the players with a keyboard.
+
+			Purely local: no remote, no server state. It is what the weapon looks
+			like, and nobody else needs to be told.
+		]]
+		if WEAPON_SLOTS[binding.slot] and selectedSlot() == binding.slot then
+			local viewmodel = Registry.find("ViewmodelController")
+			if viewmodel and typeof(viewmodel.inspect) == "function" then
+				pcall(viewmodel.inspect, viewmodel)
+			end
 			return
 		end
 

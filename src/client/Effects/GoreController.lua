@@ -656,13 +656,19 @@ local function projectDecal(
 	placeDisc(slot, result.Position, result.Normal, diameter)
 	slot.growUntil = 0
 	slot.targetSize = diameter
-	slot.expiresAt = os.clock() + (lifetime or BLOOD.DecalLifetime)
+	--[[ A pool's own lifetime, not a wall mark's. See GoreConfig.Blood.PoolLifetime
+	     for why the two differ — at the wall figure, pools alone over-subscribed
+	     the whole decal ring during a horde. ]]
+	slot.expiresAt = os.clock() + (lifetime or BLOOD.PoolLifetime)
 end
 
 --[[ A body that has stopped moving starts bleeding into the floor. It spends a
      decal slot because that is what it is — the ceiling that matters is the
      total number of red marks in the level, not which kind they are. ]]
-local function growPool(position: Vector3)
+--[[ `scale` is how much this body bled — GoreConfig.Blood.PoolScale, decided by
+     what was done to it — and `lifetime` overrides how long the stain lasts.
+     A severed limb passes both: a small stain that goes when the limb does. ]]
+local function growPool(position: Vector3, scale: number?, lifetime: number?)
 	if not BLOOD.PoolEnabled then
 		return
 	end
@@ -673,9 +679,12 @@ local function growPool(position: Vector3)
 
 	local slot = decalSlot()
 	placeDisc(slot, at, normal, BLOOD.DecalSizeMin)
-	slot.targetSize = BLOOD.PoolMaxSize
+	--[[ Floored at the size a mark starts on. A scale small enough to ask for a
+	     pool that never grows past its own seed would animate for two and a half
+	     seconds and visibly do nothing. ]]
+	slot.targetSize = math.max(BLOOD.PoolMaxSize * (scale or 1), BLOOD.DecalSizeMin)
 	slot.growUntil = os.clock() + BLOOD.PoolGrowTime
-	slot.expiresAt = os.clock() + BLOOD.DecalLifetime
+	slot.expiresAt = os.clock() + (lifetime or BLOOD.DecalLifetime)
 end
 
 local function updateDecals(now: number)
@@ -1096,7 +1105,14 @@ local function onGoreEvent(payload: any)
 	--[[ A settled body. No spray, no decal — just the stain spreading under it,
 	     which is what makes a room look fought-in a minute later. ]]
 	if payload.pool == true then
-		growPool(position)
+		--[[ `scale` carries how much this body bled and `poolLifetime` how long the
+		     stain should last — a corpse leaves a full one, a severed limb a small
+		     one that goes when the limb does. ]]
+		growPool(
+			position,
+			scale,
+			if typeof(payload.poolLifetime) == "number" then payload.poolLifetime else nil
+		)
 		return
 	end
 
