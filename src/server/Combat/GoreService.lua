@@ -92,6 +92,12 @@ local GIBS = GoreConfig.Gibs
 local BLOOD = GoreConfig.Blood
 local HITSTOP = GoreConfig.HitStop
 local BUDGET = GoreConfig.Budget
+local CORPSE = GoreConfig.Corpse
+
+--[[ How much of a limb's cross-section its stump cap fills. Under 1 on purpose:
+     a cap as wide as the limb sits proud of the socket and rings the joint
+     instead of filling it. ]]
+local STUMP_FILL = 0.92
 local DEATH_ANIM = GoreConfig.DeathAnimation
 local REGION = Enums.HitRegion
 local LEVEL = Enums.GoreLevel
@@ -639,11 +645,11 @@ function GoreService:processKill(model: Model, ctx, result)
 		     second later would jerk a corpse that had finished falling. ]]
 		task.delay(hold, function()
 			if model.Parent then
-				self:ragdoll(model, nil)
+				self:ragdoll(model, nil, ctx.region)
 			end
 		end)
 	end
-	local applied = if hold > 0 then 0 else self:ragdoll(model, direction * knockback)
+	local applied = if hold > 0 then 0 else self:ragdoll(model, direction * knockback, ctx.region)
 
 	if level == LEVEL.Dismember then
 		severed = severed or self:_pickSeverablePart(model, ctx)
@@ -705,7 +711,10 @@ end
 	to destroy properly and leaves the door open to un-ragdolling a body later —
 	which RigUtil's comments assume is possible.
 ]]
-function GoreService:ragdoll(model: Model, impulse: Vector3?): number
+--[[ `region` is the hit region the kill landed on, and the only thing it decides
+     is how long the body stays — see GoreConfig.Corpse. Optional, because plenty
+     of callers ragdoll a body no shot was responsible for. ]]
+function GoreService:ragdoll(model: Model, impulse: Vector3?, region: string?): number
 	if not model or not model.Parent or self._ragdolled[model] then
 		return 0
 	end
@@ -831,13 +840,54 @@ function GoreService:ragdoll(model: Model, impulse: Vector3?): number
 	end
 
 	local definition = InfectedConfig.get(model:GetAttribute(Attributes.Infected.Kind) or "")
-	local lifetime = if definition then definition.corpseLifetime else FALLBACK_CORPSE_LIFETIME
+	local base = if definition then definition.corpseLifetime else FALLBACK_CORPSE_LIFETIME
+	--[[ A headshot body lies there longer. GoreConfig owns the rule because
+	     InfectedService's fallback Debris timer has to reach the same answer —
+	     two timers watch every corpse and the shorter one wins. ]]
+	local lifetime = GoreConfig.corpseLifetime(base, region)
+	--[[ Every headshot body, not only the ones the floor actually lengthened. The
+	     Tank already lies there for 60 and the Witch for 45, so the clock does
+	     nothing for them — but the FIFO is what really decides how long a body
+	     lasts during a horde, and a Tank you put down with a headshot is the
+	     single corpse most worth keeping. ]]
+	local protected = region == REGION.Head
 
-	-- FIFO recycling. Past the ceiling the OLDEST body goes, never the newest:
-	-- the corpse a player is looking at right now is the one that matters, and
-	-- refusing to make it would read as the gore system being broken.
+	--[[
+		FIFO recycling. Past the ceiling the OLDEST body goes, never the newest:
+		the corpse a player is looking at right now is the one that matters, and
+		refusing to make it would read as the gore system being broken.
+
+		Headshot bodies are passed over while anything else is available. Without
+		that the longer lifetime is decorative — a horde fills all 48 slots in
+		seconds, so the FIFO, not the clock, is what actually decides how long a
+		body lasts, and the one the player earned would go at the same moment as
+		the one that fell over in a doorway.
+
+		Passed over rather than exempt, and only while they are under their share
+		of the ring — GoreConfig.Corpse.ProtectedShare, which exists because an
+		unlimited protection emptied the floor of everything else. Past it this
+		reverts to plain oldest-first, so the worst case is exactly the behaviour
+		it replaced rather than something new to go wrong.
+	]]
 	while #self._ragdolls >= MAX_RAGDOLLS do
-		local oldest = table.remove(self._ragdolls, 1)
+		local held = 0
+		for _, entry in self._ragdolls do
+			if entry.protected then
+				held += 1
+			end
+		end
+		--[[ Index 1 is the oldest body of all, and it is where this starts and
+		     where it stays once protected bodies are over their share. ]]
+		local victim = 1
+		if held <= MAX_RAGDOLLS * CORPSE.ProtectedShare then
+			for index, entry in self._ragdolls do
+				if not entry.protected then
+					victim = index
+					break
+				end
+			end
+		end
+		local oldest = table.remove(self._ragdolls, victim)
 		if oldest and oldest.model then
 			oldest.model:Destroy()
 		end
@@ -867,6 +917,7 @@ function GoreService:ragdoll(model: Model, impulse: Vector3?): number
 		model = model,
 		root = root,
 		watch = watch,
+		protected = protected,
 		expiresAt = now + lifetime,
 		-- Not before this. See RAGDOLL_MIN_FALL.
 		settleFrom = now + RAGDOLL_MIN_FALL,
@@ -993,6 +1044,23 @@ function GoreService:dismember(
 		stale:Destroy()
 	end
 
+	--[[ Both ends of the cut, sized to the limb's own cross-section so a Tank's
+	     shoulder and a Common's wrist each get one that fits. Slightly under the
+	     limb's width: a cap as wide as the socket sits proud of it and rings the
+	     joint rather than filling it.
+
+	     BEFORE the throw below, not after. Welding a part into an assembly is a
+	     change to that assembly, and doing it a line after the velocity was
+	     assigned invites the engine to recompute the body around the new mass and
+	     lose the impulse — a severed arm that dropped straight down instead of
+	     flying. Massless makes that unlikely rather than impossible, and the
+	     ordering makes it moot. ]]
+	local socket = math.min(limbRoot.Size.X, limbRoot.Size.Z) * STUMP_FILL
+	if socket > 0 then
+		self:_capStump(anchorPart, stump, socket)
+		self:_capStump(limbRoot, stump, socket)
+	end
+
 	-- Workspace is the fallback only if init() never ran; a limb parented to nil
 	-- would vanish on the frame it was severed.
 	local folder = self._folder or Workspace
@@ -1058,6 +1126,48 @@ function GoreService:dismember(
 	end
 
 	return true
+end
+
+--[[
+	Fills the hole a severed limb leaves.
+
+	A Roblox part is a shell, so cutting one off a rig exposes the INSIDE of the
+	socket — a decapitated Common had a clean hollow neck with the skybox visible
+	down it, which is the one moment the gore system was drawing attention to
+	being made of boxes. A ball of dark tissue jammed into the opening is the
+	whole fix, and both ends need one: the body keeps a stump and the limb that
+	just left keeps a cut end.
+
+	Massless and non-collidable, so a cap can never change how the limb it rides
+	on tumbles — a severed arm is a physics body a player watches fly, and it has
+	to fly the same way it did before this existed. Parented to the part it caps
+	rather than to the model, so it is destroyed by whatever destroys that part
+	and there is no second lifetime to get wrong.
+]]
+function GoreService:_capStump(host: BasePart, at: Vector3, diameter: number)
+	local cap = Instance.new("Part")
+	cap.Name = "FL_Stump"
+	cap.Shape = Enum.PartType.Ball
+	cap.Size = Vector3.new(diameter, diameter, diameter)
+	cap.Color = BLOOD.DarkColor
+	cap.Material = Enum.Material.SmoothPlastic
+	cap.Reflectance = GIBS.Wetness
+	cap.CanCollide = false
+	--[[ Never queryable, for the same reason a gib is not: a piece of scenery
+	     that stops a bullet meant for the next zombie costs a kill and is
+	     invisible while doing it. ]]
+	cap.CanQuery = false
+	cap.CanTouch = false
+	cap.CastShadow = false
+	cap.Massless = true
+	cap.Locked = true
+	cap.CFrame = CFrame.new(at)
+	cap.Parent = host
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = host
+	weld.Part1 = cap
+	weld.Parent = cap
 end
 
 --[[

@@ -119,6 +119,74 @@ GoreConfig.Gibs = table.freeze({
 	SpinMax = 30,
 	Color = Color3.fromRGB(122, 26, 26),
 	CollideWithPlayers = false, -- gibs are decoration; never let them shove you
+
+	--[[
+		What a chunk of somebody looks like, as opposed to a chunk of anything.
+
+		Every gib used to be the same flat colour in the same box, so a body burst
+		into a handful of identical red dice. Three cheap things fix most of that,
+		and none of them costs a draw call:
+
+		MeshShare   how many chunks are LUMPS rather than boxes. A SpecialMesh set
+		            to Sphere costs nothing — it is a primitive, not an asset — and
+		            since gib sizes already vary per axis it comes out as an
+		            irregular blob rather than a ball. A mix reads best: all boxes
+		            is rubble, all blobs is bubbles, and the two together read as
+		            something torn apart.
+		DarkMixMax  how far toward the dark blood colour a chunk may sit. Deep
+		            tissue is nearly black and surface flesh is bright, and having
+		            both in one burst is most of what makes it look like a body
+		            instead of a colour.
+		Wetness     a little reflectance. Meat is wet; matte chunks read as brick.
+		            Small on purpose — anything higher turns them into mirrors under
+		            a flashlight, which is the lighting these are usually seen in.
+	]]
+	MeshShare = 0.5,
+	DarkMixMax = 0.85,
+	Wetness = 0.08,
+
+	--[[
+		The mark a chunk leaves where it comes to rest.
+
+		Gibs used to fly, land, lie there for twelve seconds and vanish leaving the
+		floor exactly as clean as before — so a room you had gibbed six bodies in
+		looked, a quarter of a minute later, like nowhere anything had happened.
+		Decals already exist for the walls behind a shot; this is the same idea for
+		the ground under the pieces, and it is most of what makes a fought-through
+		room read as fought-through.
+
+		A fraction rather than all of them. Marks come out of the same ceiling as
+		every other red mark in the level — MaxActiveDecals — so a chunk that
+		leaves one is spending the budget a wall splatter would otherwise have, and
+		ninety chunks each claiming a slot would push the actual gunfight off the
+		walls. A third is enough to read as accumulation.
+
+		Small, too: this is a smear under a piece of meat, not the pool a whole body
+		bleeds. The scale multiplies DecalSizeMin..Max, so a third of the smallest
+		wall mark is about right.
+	]]
+	LandMarkChance = 0.33,
+	LandMarkScale = 0.35,
+
+	--[[
+		And they go sooner than a wall mark does, which is what keeps them from
+		taking the level over.
+
+		Decals live 45 seconds and a gib lives 12, so at a saturated gib pool the
+		marks outlive nearly four full turnovers of the chunks that made them:
+		ninety gibs a third of which mark, three and three-quarter times over, is
+		about a hundred and ten marks out of a hundred and sixty. The gunfight
+		would have been pushed off the walls by the debris on the floor.
+
+		Fourteen seconds holds the share at roughly a fifth of the ring — and it
+		holds it there on every device, because the gib pool and the decal ring are
+		scaled by the same device budget, so the arithmetic comes out the same on a
+		phone as on a desktop.
+
+		It is also just correct: this is a smear under one piece of meat, and it has
+		no business outlasting the pool a whole body bled.
+	]]
+	LandMarkLifetime = 14,
 })
 
 --[[ Blood. Split into three layers that read at different distances: a spray you
@@ -194,6 +262,68 @@ GoreConfig.Blood = table.freeze({
 	PoolGrowTime = 2.5,
 	PoolMaxSize = 6.5,
 })
+
+--[[
+	How long a body a player EARNED stays on the floor.
+
+	A headshot is the point of this game — it is why the head multiplier is 4x and
+	why the crosshair exists — and until now it produced exactly the same corpse as
+	a burst into the shins, gone on the same clock. The body is the receipt, so a
+	headshot leaves one that outlasts the fight it happened in.
+
+	A FLOOR, not a replacement. Several archetypes already lie there longer than
+	this — the Tank is 60 and the Witch 45 — and shortening those to make a
+	headshot "special" would be the feature taking something away. It only ever
+	raises: the Jockey's 20 becomes 35, the Tank's 60 stays 60.
+
+	Protected from recycling too, and that is not a detail. MaxRagdolls is 48 and a
+	horde fills it in seconds, so the FIFO is what actually decides how long a body
+	lasts; a lifetime nothing defends is a number in a config file. Headshot bodies
+	are the last to be recycled rather than never — see GoreService.ragdoll for why
+	"never" would be worse.
+]]
+GoreConfig.Corpse = table.freeze({
+	HeadshotLifetime = 35,
+
+	--[[
+		How much of the ragdoll ring headshot bodies may hold before they stop
+		being passed over.
+
+		Without a cap the feature eats the floor. Simulated against a sustained
+		horde — a kill every 350ms into a 48-slot ring — an unlimited protection
+		held headshot bodies for their full 35 seconds and dropped everything else
+		to 1.7, so the room emptied of ordinary corpses to keep the earned ones.
+		That is the gore system getting visibly thinner in exchange for a feature
+		meant to make it richer.
+
+		Past this share the recycling reverts to plain oldest-first — deliberately
+		NOT to recycling protected bodies first, which was the obvious fix and is
+		wrong: at a high headshot rate it INVERTED, holding the ordinary bodies
+		while the earned ones cycled out fastest. Reverting to FIFO instead
+		degrades smoothly to exactly the old behaviour, which is the correct floor.
+
+		At half the ring, with the same simulation:
+
+		  10% headshots   35s earned / 10s ordinary   (was 16s / 16s)
+		  30% headshots   25s earned / 12s ordinary
+		  50% headshots   17s earned / 15s ordinary
+		  90% headshots   16s earned / 17s ordinary   — plain FIFO, as it should be
+	]]
+	ProtectedShare = 0.5,
+})
+
+--[[ The one place that decides it, because two Debris timers watch every corpse
+     — GoreService's and InfectedService's fallback — and the SHORTER one wins.
+     Computed independently in both, the Jockey's 20-second body would have been
+     destroyed by the fallback at 32 while the ragdoll record still believed it
+     had 35, and the feature would have silently not worked on exactly the
+     archetypes it was most visible on. ]]
+function GoreConfig.corpseLifetime(base: number, region: string?): number
+	if region == Enums.HitRegion.Head then
+		return math.max(base, GoreConfig.Corpse.HeadshotLifetime)
+	end
+	return base
+end
 
 --[[ Screen-space feedback for the player who is being hit, not the one shooting.
      Kept restrained; a full-screen red wash every time a Common connects makes

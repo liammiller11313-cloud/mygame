@@ -306,6 +306,9 @@ type GibSlot = {
 	trailUntil: number,
 	-- When this chunk stops being a physics body. 0 while it is still moving.
 	settleAt: number,
+	--[[ Whether this chunk leaves a mark where it lands. Decided when it is
+	     thrown, from the shared seed, and spent once. ]]
+	mark: boolean,
 }
 type DecalSlot = {
 	part: BasePart,
@@ -627,7 +630,17 @@ end
 	agrees on whether this hit left one; the projection raycast is ours because
 	the geometry is identical here and it costs the server nothing.
 ]]
-local function projectDecal(position: Vector3, direction: Vector3, scale: number, body: Instance?)
+--[[ `lifetime` overrides how long the mark lasts. Gib land marks pass a short
+     one: they are small smears under debris, they arrive in far greater numbers
+     than wall splatter, and at the full DecalLifetime they would crowd the
+     gunfight off the walls. Everything else takes the default. ]]
+local function projectDecal(
+	position: Vector3,
+	direction: Vector3,
+	scale: number,
+	body: Instance?,
+	lifetime: number?
+)
 	if not BLOOD.DecalEnabled then
 		return
 	end
@@ -643,7 +656,7 @@ local function projectDecal(position: Vector3, direction: Vector3, scale: number
 	placeDisc(slot, result.Position, result.Normal, diameter)
 	slot.growUntil = 0
 	slot.targetSize = diameter
-	slot.expiresAt = os.clock() + BLOOD.DecalLifetime
+	slot.expiresAt = os.clock() + (lifetime or BLOOD.DecalLifetime)
 end
 
 --[[ A body that has stopped moving starts bleeding into the floor. It spends a
@@ -731,6 +744,29 @@ local function gibSlot(): GibSlot
 	if not slot then
 		local part = newGorePart("FL_Gib")
 		part.Color = GIBS.Color
+		--[[ Meat is wet. A matte chunk reads as brick, and these are usually seen
+		     under a flashlight where the difference is most of the effect. ]]
+		part.Reflectance = GIBS.Wetness
+
+		--[[
+			Some of the pool are LUMPS rather than boxes.
+
+			Rolled once when the slot is BUILT, not per spawn: nothing is created
+			or destroyed at the moment a body bursts, which is the one moment in
+			this system that cannot afford it. The pool is then walked round-robin
+			for the rest of the round, so a burst draws whatever mix the pool holds
+			and every burst gets both.
+
+			A Sphere SpecialMesh is a primitive and needs no asset. Because gib
+			sizes already vary per axis it comes out as an irregular blob rather
+			than a ball, which is what makes the mix read as something torn apart
+			instead of as rubble.
+		]]
+		if math.random() < GIBS.MeshShare then
+			local mesh = Instance.new("SpecialMesh")
+			mesh.MeshType = Enum.MeshType.Sphere
+			mesh.Parent = part
+		end
 		--[[ GoreConfig.Gibs.CollideWithPlayers is false, and the "Gib" group is
 		     exactly that rule: it collides with Default and nothing else, so a
 		     chunk bounces off the floor and never shoves a survivor. ]]
@@ -771,7 +807,7 @@ local function gibSlot(): GibSlot
 		trail.LightEmission = 0
 		trail.Parent = part
 
-		slot = { part = part, expiresAt = 0, trail = trail, trailUntil = 0, settleAt = 0 }
+		slot = { part = part, expiresAt = 0, trail = trail, trailUntil = 0, settleAt = 0, mark = false }
 		gibs[gibCursor] = slot
 	end
 	return slot
@@ -794,6 +830,11 @@ local function spawnGibs(position: Vector3, direction: Vector3, seed: number, co
 	for _ = 1, total do
 		local slot = gibSlot()
 		local part = slot.part
+
+		--[[ Deep tissue is nearly black and surface flesh is bright; a burst
+		     carrying both reads as a body, and one flat colour reads as a colour.
+		     From the shared seed, so four clients tint the same chunk the same. ]]
+		part.Color = GIBS.Color:Lerp(BLOOD.DarkColor, rng:NextNumber(0, GIBS.DarkMixMax))
 
 		local size = rng:NextNumber(GIBS.SizeMin, GIBS.SizeMax)
 		-- Chunks, not dice: unequal sides on every axis.
@@ -837,6 +878,9 @@ local function spawnGibs(position: Vector3, direction: Vector3, seed: number, co
 		     short enough that a chunk which has landed is not still bleeding. ]]
 		slot.trailUntil = now + GIB_TRAIL_SECONDS
 		slot.trail.Enabled = true
+		--[[ From the shared seed, so the same chunks mark the floor on every
+		     client and four players walk through one room rather than four. ]]
+		slot.mark = rng:NextNumber() < GIBS.LandMarkChance
 	end
 end
 
@@ -844,6 +888,9 @@ local function retireGib(slot: GibSlot)
 	slot.expiresAt = 0
 	slot.trailUntil = 0
 	slot.settleAt = 0
+	--[[ Cleared, or a chunk retired in mid-air would hand its unspent mark to
+	     whatever the slot is thrown as next. ]]
+	slot.mark = false
 	slot.trail.Enabled = false
 	local part = slot.part
 	part.Anchored = true
@@ -890,6 +937,20 @@ local function updateGibs(now: number)
 			elseif now >= slot.settleAt then
 				slot.settleAt = 0
 				slot.part.Anchored = true
+				--[[ The moment it stops is the moment it has landed somewhere, and
+				     the only moment worth a raycast: once per chunk, not once per
+				     sweep. Straight down rather than along the shot, because what
+				     is being marked is the floor it came to rest on. ]]
+				if slot.mark then
+					slot.mark = false
+					projectDecal(
+						slot.part.Position,
+						-Vector3.yAxis,
+						GIBS.LandMarkScale,
+						nil,
+						GIBS.LandMarkLifetime
+					)
+				end
 			end
 		end
 	end

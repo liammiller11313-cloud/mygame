@@ -65,6 +65,7 @@ local AnimationConfig = require(Shared.Config.AnimationConfig)
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
+local GoreConfig = require(Shared.Config.GoreConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
@@ -1026,11 +1027,21 @@ function InfectedService:_retire(record: any, ctx: any)
 	self.died:fire(model, kind, ctx)
 	self:_publishCounts()
 
-	-- GoreService owns the corpse and schedules its own removal with a longer
-	-- grace. This only ever fires when it did not get the body at all — gore
-	-- disabled in GoreConfig, or the service erroring — because a level that
-	-- slowly fills with standing corpses is worse than no gore.
-	Debris:AddItem(model, record.definition.corpseLifetime + CORPSE_FALLBACK_GRACE)
+	--[[ GoreService owns the corpse and schedules its own removal with a longer
+	     grace. This only ever fires when it did not get the body at all — gore
+	     disabled in GoreConfig, or the service erroring — because a level that
+	     slowly fills with standing corpses is worse than no gore.
+
+	     Through GoreConfig.corpseLifetime rather than off the definition
+	     directly, because this timer is a CEILING on every corpse and not only on
+	     the ones it was written for: two Debris items watch the same model and the
+	     shorter one wins. A headshot Jockey would have been swept at 32 seconds
+	     while the ragdoll record still believed it had 35. ]]
+	local region = if typeof(ctx) == "table" then ctx.region else nil
+	Debris:AddItem(
+		model,
+		GoreConfig.corpseLifetime(record.definition.corpseLifetime, region) + CORPSE_FALLBACK_GRACE
+	)
 end
 
 --[[ Drops a record out of every live list. Idempotent: death and despawn can
