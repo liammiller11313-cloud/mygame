@@ -261,6 +261,33 @@ function RigUtil.mapMotorChildren(model: Model): { [Motor6D]: BasePart }
 end
 
 --[[
+	Whether this instance is a rigid joint that could pin a pair a Motor6D
+	already drives.
+
+	ONE definition, because there were three and they disagreed. The spawn repair
+	took every JointInstance; the boot report and the Studio script took Weld,
+	WeldConstraint and Snap. So the game cut Glues, Motors and Rotates that
+	neither of the other two would ever mention — a report that reads clean while
+	the game is still repairing something on every spawn, and a REPAIR mode that
+	under-fixes what the report promised. Three answers to one question is worse
+	than any one of them being wrong.
+
+	Motor6D is excluded deliberately: a second one of those is a duplicate JOINT,
+	and clearDuplicateJoints owns it because "which survives" has a different
+	right answer there.
+
+	WeldConstraint is named separately because it is NOT a JointInstance — it
+	descends from Instance directly, which is exactly the sort of detail that
+	makes three hand-written copies of a predicate drift apart.
+]]
+function RigUtil.isRivalJoint(instance: Instance): boolean
+	if instance:IsA("Motor6D") then
+		return false
+	end
+	return instance:IsA("JointInstance") or instance:IsA("WeldConstraint")
+end
+
+--[[
 	Destroys SECOND and subsequent Motor6Ds spanning the same pair of parts, and
 	returns how many, with the pairs it thinned.
 
@@ -444,10 +471,7 @@ function RigUtil.clearRivalJoints(model: Model): (number, { string })
 			JOINT rather than a rival, and clearDuplicateJoints owns that case
 			because "which one survives" has a different right answer there.
 		]]
-		if not descendant:IsA("JointInstance") and not descendant:IsA("WeldConstraint") then
-			continue
-		end
-		if descendant:IsA("Motor6D") then
+		if not RigUtil.isRivalJoint(descendant) then
 			continue
 		end
 		--[[ They carry Part0/Part1 but share no superclass that declares both, so
@@ -1092,11 +1116,10 @@ function RigUtil.diagnose(model: Model): RigReport
 
 	local rivals: { string } = {}
 	for _, descendant in model:GetDescendants() do
-		if
-			not descendant:IsA("Weld")
-			and not descendant:IsA("WeldConstraint")
-			and not descendant:IsA("Snap")
-		then
+		--[[ The SAME predicate the spawn repair uses. These were two hand-written
+		     lists and they disagreed, so the report could call a rig clean while
+		     the game went on cutting a Glue off it at every spawn. ]]
+		if not RigUtil.isRivalJoint(descendant) then
 			continue
 		end
 		local joint: any = descendant

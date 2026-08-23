@@ -333,7 +333,12 @@ local function rivalWelds(model, repair)
 
 	local found = {}
 	for _, d in model:GetDescendants() do
-		if not (d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("Snap")) then
+		--[[ MUST MATCH RigUtil.isRivalJoint. This was Weld/WeldConstraint/Snap
+		     while the game cut every JointInstance, so REPAIR mode under-fixed
+		     what the boot report had promised — a Glue or a legacy Motor pinning
+		     a limb survived the "fix" and went on being cut at every spawn.
+		     WeldConstraint is named separately because it is not a JointInstance. ]]
+		if d:IsA("Motor6D") or not (d:IsA("JointInstance") or d:IsA("WeldConstraint")) then
 			continue
 		end
 		local a, b = d.Part0, d.Part1
