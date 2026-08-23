@@ -1031,6 +1031,56 @@ if _ANIM:
             )
 
 
+# ── 15. The three copies of the R6 joint basis must agree ───────────────────
+#
+# An animation's rotations are applied inside a Motor6D's C0, so they are read in
+# the joint's OWN axes. Roblox's R6 shoulders and hips are turned a quarter-turn
+# about Y and its neck and root are tipped onto their backs; a joint framed any
+# other way holds the limb in a perfect rest pose and then swings it sideways the
+# moment a clip plays — an arm sticking straight out, legs splaying instead of
+# stepping, the body dragging. No rest-pose check can see it.
+#
+# Three files state those constants: RigUtil repairs bodies at spawn with them,
+# RigDoctor repairs the saved models, and ProveAnimation reports on them. This
+# project has already been bitten once by three hand-written copies of one
+# predicate drifting apart — the rival-joint test — where the game went on
+# cutting a joint the report called clean. Same shape, worse failure, so the
+# copies are checked rather than trusted.
+_BASIS_FILES = {
+    "src/shared/Util/RigUtil.lua": ("LEFT_LIMB_BASIS", "RIGHT_LIMB_BASIS", "AXIAL_BASIS"),
+    "studio-scripts/RigDoctor.lua": ("LEFT_LIMB", "RIGHT_LIMB", "AXIAL"),
+    "studio-scripts/ProveAnimation.lua": ("LEFT_LIMB", "RIGHT_LIMB", "AXIAL"),
+}
+_EXPECTED = (
+    "CFrame.Angles(0, -math.pi / 2, 0)",
+    "CFrame.Angles(0, math.pi / 2, 0)",
+    "CFrame.Angles(-math.pi / 2, 0, math.pi)",
+)
+for _path, _names in _BASIS_FILES.items():
+    try:
+        _text = (ROOT / _path).read_text(encoding="utf-8")
+    except OSError:
+        problems.append(f"{_path} is missing — it carries one of the three copies of the R6 joint basis")
+        continue
+    for _name, _want in zip(_names, _EXPECTED):
+        _decl = f"local {_name} = "
+        _at = _text.find(_decl)
+        if _at < 0:
+            problems.append(
+                f"{_path} no longer declares {_name} — it is one of the three copies of the R6 "
+                f"joint basis, and a rig framed on the wrong axes animates sideways while every "
+                f"rest-pose check calls it clean"
+            )
+            continue
+        _got = _text[_at + len(_decl):_text.index("\n", _at)].strip()
+        if _got != _want:
+            problems.append(
+                f"{_path}  {_name} is {_got}, but the R6 joint basis is {_want} — the three "
+                f"copies of this constant have drifted, so a body repaired by one of them will "
+                f"be judged broken by another"
+            )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

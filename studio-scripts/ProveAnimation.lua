@@ -30,6 +30,24 @@
 	                   looks exactly like a broken animation and is really a
 	                   naming mismatch.
 
+	  SKEWED n joints  the clip moves them and moves them the WRONG WAY. See
+	                   below — this is its own answer, not a shade of the other
+	                   two.
+
+	── AND IT NOW CHECKS WHICH WAY, NOT ONLY WHETHER ───────────────────────────
+	The first version of this script asked only whether a Transform CHANGED, and
+	that turned out not to be the question either. A Motor6D applies Transform
+	inside C0, so an animation's rotations are read in the joint's own axes — and
+	Roblox's R6 shoulders and hips are turned a quarter-turn about Y, which is
+	what every R6 clip was keyed against. A joint built from a pivot with no
+	rotation holds the limb in exactly the right place at rest, moves its
+	Transform enthusiastically when the clip plays, and swings the limb SIDEWAYS:
+	the arm sticks straight out left or right, the hips splay instead of stepping,
+	and the body slides along the ground.
+
+	Such a model passes every other test there is, including the moved-joint test
+	this script was written to run. So the axes are now checked too.
+
 	It deliberately does NOT test whether the limb visibly moves. A duplicate
 	joint or a weld across the same pair still lets Transform be written while
 	pinning the part — RigDoctor is what finds those. This isolates one question
@@ -107,6 +125,50 @@ end
 
      The model is CLONED and staged, so nothing in the place is touched and a rig
      left in a mid-animation pose cannot be saved by accident. ]]
+--[[ The direction each standard joint's axes must point, in its parent's space.
+     Must match RigUtil and RigDoctor. R15 is identity throughout and is judged
+     only where a RigAttachment states the frame outright, because an identity is
+     exactly what a legitimately unusual R15 rig would fail to match. ]]
+local LEFT_LIMB = CFrame.Angles(0, -math.pi / 2, 0)
+local RIGHT_LIMB = CFrame.Angles(0, math.pi / 2, 0)
+local AXIAL = CFrame.Angles(-math.pi / 2, 0, math.pi)
+
+local BASIS = {
+	R6 = {
+		Torso = { joint = "RootJoint", parent = "HumanoidRootPart", basis = AXIAL },
+		Head = { joint = "Neck", parent = "Torso", basis = AXIAL },
+		["Left Arm"] = { joint = "Left Shoulder", parent = "Torso", basis = LEFT_LIMB },
+		["Right Arm"] = { joint = "Right Shoulder", parent = "Torso", basis = RIGHT_LIMB },
+		["Left Leg"] = { joint = "Left Hip", parent = "Torso", basis = LEFT_LIMB },
+		["Right Leg"] = { joint = "Right Hip", parent = "Torso", basis = RIGHT_LIMB },
+	},
+	R15 = {},
+}
+
+local function skewedJoints(model, rig)
+	local specs = BASIS[rig]
+	if not specs then
+		return {}
+	end
+	local found = {}
+	for _, d in model:GetDescendants() do
+		if not d:IsA("Motor6D") or not d.Part0 or not d.Part1 then
+			continue
+		end
+		local spec = specs[d.Part1.Name]
+		if not spec or spec.parent ~= d.Part0.Name then
+			continue
+		end
+		--[[ Compared in the PARENT's space, where the constants are stated. ]]
+		local delta = d.C0.Rotation:Inverse() * spec.basis
+		if delta.RightVector:Dot(Vector3.xAxis) < 0.98 or delta.UpVector:Dot(Vector3.yAxis) < 0.98 then
+			table.insert(found, d.Part1.Name)
+		end
+	end
+	table.sort(found)
+	return found
+end
+
 local function measure(source, id, stage)
 	local model = source:Clone()
 	model.Parent = stage
@@ -191,8 +253,11 @@ local function measure(source, id, stage)
 	for _ in before do
 		total += 1
 	end
+	--[[ Read from the same clone the clip was just played on, so the verdict and
+	     the measurement describe one body rather than two. ]]
+	local skewed = skewedJoints(model, rigTypeOf(model))
 	model:Destroy()
-	return { moved = names, joints = total }, nil
+	return { moved = names, joints = total, skewed = skewed }, nil
 end
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -219,7 +284,7 @@ if templates and templates:FindFirstChild("Infected") then
 	table.insert(roots, templates.Infected)
 end
 
-local checked, dead = 0, {}
+local checked, dead, bent = 0, {}, {}
 local okRun, err = pcall(function()
 	for _, infected in roots do
 		for _, kindFolder in infected:GetChildren() do
@@ -261,6 +326,21 @@ local okRun, err = pcall(function()
 							result.joints
 						)
 					)
+				elseif #result.skewed > 0 then
+					table.insert(bent, label)
+					print(
+						string.format(
+							"  SKEW  %-28s %s — moved %d/%d, but %d joint(s) have their AXES turned "
+								.. "the wrong way (%s), so the clip swings them sideways: arm out, "
+								.. "legs splayed, body dragging",
+							label,
+							rig,
+							#result.moved,
+							result.joints,
+							#result.skewed,
+							table.concat(result.skewed, ", ")
+						)
+					)
 				else
 					print(
 						string.format(
@@ -287,17 +367,34 @@ if not okRun then
 	warn("[ProveAnimation] stopped early: " .. tostring(err))
 elseif checked == 0 then
 	print("Found no models under Assets.Infected. Check the folder names.")
-elseif #dead == 0 then
-	print(string.format("All %d model(s) are moved by the clip this game gives them.", checked))
-	print("So the clip and the rig agree, and anything still not animating in play")
-	print("is failing DOWNSTREAM of that — which is a different search entirely.")
+elseif #dead == 0 and #bent == 0 then
+	print(string.format("All %d model(s) are moved by the clip this game gives them,", checked))
+	print("and moved the RIGHT WAY. So the clip, the rig and its joint axes all")
+	print("agree, and anything still not animating in play is failing DOWNSTREAM")
+	print("of that — which is a different search entirely.")
 else
-	warn(string.format("[ProveAnimation] %d of %d model(s) are moved by NOTHING:", #dead, checked))
-	for _, label in dead do
-		warn("    " .. label)
+	if #dead > 0 then
+		warn(string.format("[ProveAnimation] %d of %d model(s) are moved by NOTHING:", #dead, checked))
+		for _, label in dead do
+			warn("    " .. label)
+		end
+		warn("    The clip addresses joints these models do not have. It will load,")
+		warn("    report itself as playing, and stand the procedural gait down while")
+		warn("    moving nothing — which is exactly what a body dragging around looks")
+		warn("    like. Compare their part names against the ones the clip drives.")
 	end
-	warn("    The clip addresses joints these models do not have. It will load,")
-	warn("    report itself as playing, and stand the procedural gait down while")
-	warn("    moving nothing — which is exactly what a body dragging around looks")
-	warn("    like. Compare their part names against the ones the clip drives.")
+	if #bent > 0 then
+		warn(string.format("[ProveAnimation] %d of %d model(s) animate the WRONG WAY ROUND:", #bent, checked))
+		for _, label in bent do
+			warn("    " .. label)
+		end
+		warn("    Their joints move, so every other check calls them healthy — but the")
+		warn("    joint AXES point somewhere the clip was not keyed for, so a shoulder")
+		warn("    swing that should carry the arm forward carries it out sideways. The")
+		warn("    arm sticks out left or right, the legs splay instead of stepping, and")
+		warn("    the body drags along the ground.")
+		warn("    The game already turns these round at spawn, so they are fixed in")
+		warn("    play. To fix them in the MODELS, open studio-scripts/RigDoctor, set")
+		warn("    REPAIR = true, and run it once.")
+	end
 end

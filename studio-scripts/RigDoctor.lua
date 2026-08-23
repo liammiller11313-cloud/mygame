@@ -72,37 +72,163 @@ local Workspace = game:GetService("Workspace")
 --[[ The R6 skeleton, parent -> child, with the pivot expressed in the PARENT's
      own space as fractions of the two parts' sizes. Fractions rather than studs
      so a half-scale Common and a 2.35x Tank both get their shoulder in the right
-     place without a table per size. ]]
+     place without a table per size.
+
+     `basis` is the direction the joint's own axes point, and it is not optional.
+     An animation writes Motor6D.Transform, which is applied INSIDE C0 — so a
+     clip's rotations are read in the joint's axes, and Roblox's R6 shoulders and
+     hips are turned a quarter-turn about Y. A joint built from a pivot with no
+     rotation holds the limb in exactly the right place at rest and then swings
+     it out sideways the moment the clip plays. Must match RigUtil. ]]
+local LEFT_LIMB = CFrame.Angles(0, -math.pi / 2, 0)
+local RIGHT_LIMB = CFrame.Angles(0, math.pi / 2, 0)
+local AXIAL = CFrame.Angles(-math.pi / 2, 0, math.pi)
+
 local R6 = {
-	{ joint = "RootJoint", parent = "HumanoidRootPart", child = "Torso", at = Vector3.new(0, 0, 0) },
-	{ joint = "Neck", parent = "Torso", child = "Head", at = Vector3.new(0, 0.5, 0) },
-	{ joint = "Left Shoulder", parent = "Torso", child = "Left Arm", at = Vector3.new(-0.5, 0.25, 0) },
-	{ joint = "Right Shoulder", parent = "Torso", child = "Right Arm", at = Vector3.new(0.5, 0.25, 0) },
-	{ joint = "Left Hip", parent = "Torso", child = "Left Leg", at = Vector3.new(-0.25, -0.5, 0) },
-	{ joint = "Right Hip", parent = "Torso", child = "Right Leg", at = Vector3.new(0.25, -0.5, 0) },
+	{
+		joint = "RootJoint",
+		parent = "HumanoidRootPart",
+		child = "Torso",
+		at = Vector3.new(0, 0, 0),
+		basis = AXIAL,
+	},
+	{ joint = "Neck", parent = "Torso", child = "Head", at = Vector3.new(0, 0.5, 0), basis = AXIAL },
+	{
+		joint = "Left Shoulder",
+		parent = "Torso",
+		child = "Left Arm",
+		at = Vector3.new(-0.5, 0.25, 0),
+		basis = LEFT_LIMB,
+	},
+	{
+		joint = "Right Shoulder",
+		parent = "Torso",
+		child = "Right Arm",
+		at = Vector3.new(0.5, 0.25, 0),
+		basis = RIGHT_LIMB,
+	},
+	{
+		joint = "Left Hip",
+		parent = "Torso",
+		child = "Left Leg",
+		at = Vector3.new(-0.5, -0.5, 0),
+		basis = LEFT_LIMB,
+	},
+	{
+		joint = "Right Hip",
+		parent = "Torso",
+		child = "Right Leg",
+		at = Vector3.new(0.5, -0.5, 0),
+		basis = RIGHT_LIMB,
+	},
 }
 
 local R15 = {
-	{ joint = "Root", parent = "HumanoidRootPart", child = "LowerTorso", at = Vector3.new(0, 0, 0) },
-	{ joint = "Waist", parent = "LowerTorso", child = "UpperTorso", at = Vector3.new(0, 0.5, 0) },
-	{ joint = "Neck", parent = "UpperTorso", child = "Head", at = Vector3.new(0, 0.5, 0) },
-	{ joint = "LeftShoulder", parent = "UpperTorso", child = "LeftUpperArm", at = Vector3.new(-0.5, 0.4, 0) },
-	{ joint = "LeftElbow", parent = "LeftUpperArm", child = "LeftLowerArm", at = Vector3.new(0, -0.5, 0) },
-	{ joint = "LeftWrist", parent = "LeftLowerArm", child = "LeftHand", at = Vector3.new(0, -0.5, 0) },
+	{
+		joint = "Root",
+		parent = "HumanoidRootPart",
+		child = "LowerTorso",
+		at = Vector3.new(0, 0, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "Waist",
+		parent = "LowerTorso",
+		child = "UpperTorso",
+		at = Vector3.new(0, 0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "Neck",
+		parent = "UpperTorso",
+		child = "Head",
+		at = Vector3.new(0, 0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "LeftShoulder",
+		parent = "UpperTorso",
+		child = "LeftUpperArm",
+		at = Vector3.new(-0.5, 0.4, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "LeftElbow",
+		parent = "LeftUpperArm",
+		child = "LeftLowerArm",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "LeftWrist",
+		parent = "LeftLowerArm",
+		child = "LeftHand",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
 	{
 		joint = "RightShoulder",
 		parent = "UpperTorso",
 		child = "RightUpperArm",
 		at = Vector3.new(0.5, 0.4, 0),
+		basis = CFrame.identity,
 	},
-	{ joint = "RightElbow", parent = "RightUpperArm", child = "RightLowerArm", at = Vector3.new(0, -0.5, 0) },
-	{ joint = "RightWrist", parent = "RightLowerArm", child = "RightHand", at = Vector3.new(0, -0.5, 0) },
-	{ joint = "LeftHip", parent = "LowerTorso", child = "LeftUpperLeg", at = Vector3.new(-0.5, -0.5, 0) },
-	{ joint = "LeftKnee", parent = "LeftUpperLeg", child = "LeftLowerLeg", at = Vector3.new(0, -0.5, 0) },
-	{ joint = "LeftAnkle", parent = "LeftLowerLeg", child = "LeftFoot", at = Vector3.new(0, -0.5, 0) },
-	{ joint = "RightHip", parent = "LowerTorso", child = "RightUpperLeg", at = Vector3.new(0.5, -0.5, 0) },
-	{ joint = "RightKnee", parent = "RightUpperLeg", child = "RightLowerLeg", at = Vector3.new(0, -0.5, 0) },
-	{ joint = "RightAnkle", parent = "RightLowerLeg", child = "RightFoot", at = Vector3.new(0, -0.5, 0) },
+	{
+		joint = "RightElbow",
+		parent = "RightUpperArm",
+		child = "RightLowerArm",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "RightWrist",
+		parent = "RightLowerArm",
+		child = "RightHand",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "LeftHip",
+		parent = "LowerTorso",
+		child = "LeftUpperLeg",
+		at = Vector3.new(-0.5, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "LeftKnee",
+		parent = "LeftUpperLeg",
+		child = "LeftLowerLeg",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "LeftAnkle",
+		parent = "LeftLowerLeg",
+		child = "LeftFoot",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "RightHip",
+		parent = "LowerTorso",
+		child = "RightUpperLeg",
+		at = Vector3.new(0.5, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "RightKnee",
+		parent = "RightUpperLeg",
+		child = "RightLowerLeg",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
+	{
+		joint = "RightAnkle",
+		parent = "RightLowerLeg",
+		child = "RightFoot",
+		at = Vector3.new(0, -0.5, 0),
+		basis = CFrame.identity,
+	},
 }
 
 --[[ The part names Roblox resolves a character's rig by, so the nesting check
@@ -222,22 +348,117 @@ local function mapChildren(model)
 	return children, motors
 end
 
---[[ Builds one joint without moving anything. The pivot is chosen in the
-     parent's space and then BOTH C0 and C1 are measured to it from where the
-     parts currently are, so the limb's world CFrame is unchanged. ]]
-local function buildJoint(spec, parent, child)
-	local offset =
-		Vector3.new(spec.at.X * parent.Size.X, spec.at.Y * parent.Size.Y, spec.at.Z * parent.Size.Z)
-	local pivot = parent.CFrame * CFrame.new(offset)
+--[[ Where a joint's axes belong in the world, and whether the answer came from
+     the rig itself rather than the table. A *RigAttachment on the parent beats
+     the table: it is the rig's own statement of the joint frame and it stays
+     right on a resized R15 body where fractions are approximate. R6 rigs carry
+     no attachment under these names and fall through, which is fine — the R6
+     constants are Roblox's own. `pivot` overrides the POSITION only, for
+     correcting an existing joint whose hinge point is the author's business. ]]
+local function jointFrame(spec, parent, pivot)
+	local attachment = parent:FindFirstChild(spec.joint .. "RigAttachment")
+	if attachment and attachment:IsA("Attachment") then
+		return parent.CFrame * attachment.CFrame, true
+	end
+	if not pivot then
+		local offset =
+			Vector3.new(spec.at.X * parent.Size.X, spec.at.Y * parent.Size.Y, spec.at.Z * parent.Size.Z)
+		pivot = (parent.CFrame * CFrame.new(offset)).Position
+	end
+	return CFrame.new(pivot) * parent.CFrame.Rotation * spec.basis, false
+end
 
+--[[ Writes C0/C1 from a world joint frame. With C0 = parentCF⁻¹ * J and
+     C1 = childCF⁻¹ * J the rest pose evaluates to childCF exactly, for EVERY J —
+     so the joint holds its child in the same place whatever frame is chosen, at
+     any size or proportion. J decides only which way the joint bends when the
+     animation drives it.
+
+     CFrames rather than the two parts because where the child IS and where the
+     joint HOLDS it differ the moment anything animates: Transform is applied
+     after C0, and it is serialized, so a model saved mid-pose arrives that way.
+     Correcting an existing joint passes its REST pose; building a new one has no
+     Transform to discount and passes the child's CFrame. ]]
+local function frameMotor(motor, parentCF, childCF, frame)
+	motor.C0 = parentCF:ToObjectSpace(frame)
+	motor.C1 = childCF:ToObjectSpace(frame)
+end
+
+--[[ Builds one joint without moving anything. ]]
+local function buildJoint(spec, parent, child)
 	local motor = Instance.new("Motor6D")
 	motor.Name = spec.joint
 	motor.Part0 = parent
 	motor.Part1 = child
-	motor.C0 = parent.CFrame:ToObjectSpace(pivot)
-	motor.C1 = child.CFrame:ToObjectSpace(pivot)
+	frameMotor(motor, parent.CFrame, child.CFrame, (jointFrame(spec, parent, nil)))
 	motor.Parent = parent
 	return motor
+end
+
+--[[ Two rotations agreeing to within about a degree, compared through their axes
+     so there is no branch on how a CFrame chose to decompose itself. ]]
+local function basisMatches(a, b)
+	local delta = a.Rotation:ToObjectSpace(b.Rotation)
+	return delta.RightVector:Dot(Vector3.xAxis) > 0.98 and delta.UpVector:Dot(Vector3.yAxis) > 0.98
+end
+
+--[[
+	Joints that hold the limb in the right place and will still animate it the
+	wrong way, because their axes point somewhere the clip was not keyed for.
+
+	THE FAULT NO REST-POSE CHECK CAN SEE. Every other test in this script — is it
+	jointed, duplicated, welded, backwards, disabled, nested — passes on a rig
+	with this. The body sits in a flawless rest pose. Then the clip plays and the
+	shoulder swing that should carry the arm forward carries it out sideways
+	instead: the arm sticks straight out left or right and stays there, the hips
+	splay rather than step, and the body slides along the ground.
+
+	R15 is judged only where a RigAttachment states the intended frame outright.
+	The R15 table here is all identity, and an identity is exactly what a
+	legitimately unusual R15 rig would fail to match, so without an attachment
+	this declines to guess.
+]]
+local function skewedJoints(model, skeleton, rig, repair)
+	local byChild = {}
+	for _, spec in skeleton do
+		byChild[spec.child] = spec
+	end
+
+	local found = {}
+	for _, descendant in model:GetDescendants() do
+		if not descendant:IsA("Motor6D") then
+			continue
+		end
+		local parent, child = descendant.Part0, descendant.Part1
+		if not parent or not child or parent == child then
+			continue
+		end
+		local spec = byChild[child.Name]
+		if not spec or spec.parent ~= parent.Name then
+			continue
+		end
+		local frame, authoritative = jointFrame(spec, parent, (parent.CFrame * descendant.C0).Position)
+		if not authoritative and rig == "R15" then
+			continue
+		end
+		if basisMatches(parent.CFrame * descendant.C0, frame) then
+			continue
+		end
+		table.insert(found, child.Name)
+		if repair then
+			--[[ The joint's REST pose rather than where the child currently is. In
+			     Edit mode they are the same; on a live body caught mid-clip they are
+			     not, and baking the pose of the moment in would deform it. ]]
+			frameMotor(
+				descendant,
+				parent.CFrame,
+				parent.CFrame * descendant.C0 * descendant.C1:Inverse(),
+				frame
+			)
+		end
+	end
+	table.sort(found)
+	return found
 end
 
 --[[ Welds between two rig parts are the usual reason a model has no joints: it
@@ -506,6 +727,19 @@ local function inspect(model, label)
 		table.insert(if REPAIR then fixes else notes, line)
 	end
 
+	--[[ AXES LAST, so it judges the rig every repair above has finished with. See
+	     skewedJoints: this is the one fault a rest pose cannot show you. ]]
+	local skewed = skewedJoints(model, skeleton, detected, REPAIR)
+	if #skewed > 0 then
+		local line = string.format(
+			"%d joint(s) with their axes turned the wrong way (%s) — rest pose is correct, so the "
+				.. "clip swings those limbs sideways instead of forward",
+			#skewed,
+			table.concat(skewed, ", ")
+		)
+		table.insert(if REPAIR then fixes else notes, if REPAIR then "turned round: " .. line else line)
+	end
+
 	--[[ NO ANIMATOR. Roblox makes one for a player's character and for nothing
 	     else, so a rig assembled in Studio has one only if whatever it was copied
 	     from happened to ship with it. Without it not a single track loads, and
@@ -599,7 +833,7 @@ local function inspect(model, label)
 		table.insert(notes, "NO PART NAMED " .. table.concat(absent, ", ") .. " — rename in Studio")
 	end
 
-	local issues = #missing + #backwards + #rivals + #dupes + #disabled + #nested
+	local issues = #missing + #backwards + #rivals + #dupes + #disabled + #nested + #skewed
 	if #notes == 0 and #fixes == 0 then
 		print(string.format("  OK    %-28s %s, fully jointed", label, rig))
 		return 0, 0

@@ -857,6 +857,45 @@ function InfectedService:_boltTogether(model: Model, kind: string)
 	local built, unbuildable = RigUtil.buildMissingJoints(model)
 
 	--[[
+		AXES LAST, so it judges the rig every repair above has finished with:
+		duplicates thinned, backwards joints turned round, missing ones built.
+
+		This is the fault none of the others could see. An animation's rotations
+		are applied INSIDE a Motor6D's C0, so they are read in the joint's own
+		axes — and Roblox's R6 shoulders and hips are turned a quarter-turn about
+		Y, which is what every R6 clip was keyed against. A joint built from a
+		pivot with no rotation puts the limb in EXACTLY the right place at rest
+		and then reads the clip in the wrong axes: the shoulder swing that should
+		carry the arm forward carries it out sideways instead, so the arm sticks
+		out left or right and stays there while the hips splay rather than step
+		and the body slides along the floor.
+
+		Every check in this sequence passed on those bodies. The rig is jointed,
+		nothing is duplicated, welded, backwards or disabled, and it sits in a
+		flawless rest pose — the fault only exists while the clip is playing, and
+		no rest-pose diagnostic can see it. It is why "some of the Commons just
+		drag around with an arm out" survived every fix before this one.
+	]]
+	local reframed, skewed = RigUtil.reframeJoints(model)
+	if reframed > 0 then
+		warnOnce(
+			"skewed:" .. variant,
+			string.format(
+				"%s variant %q had %d joint(s) whose axes pointed the wrong way (%s). The rest pose "
+					.. "was perfect, so every other check called the rig clean — but an animation is "
+					.. "read in the joint's own axes, so those limbs swung sideways instead of "
+					.. "forward and the body dragged with an arm sticking out. Turned round at "
+					.. "spawn, which fixes the body and not the model: run studio-scripts/RigDoctor "
+					.. "once in Studio to fix it where it saves.",
+				kind,
+				variant,
+				reframed,
+				RigUtil.tally(skewed)
+			)
+		)
+	end
+
+	--[[
 		Joints that could not be built because the PART is not there.
 
 		Reported separately and first, because it is the one failure that no
