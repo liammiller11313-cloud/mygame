@@ -1,0 +1,35 @@
+# selene — the undefined-name checker that check.sh runs.
+#
+# `undefined_variable` is the whole reason this is here and is the one lint that
+# denies. Everything below it is turned off deliberately, with a reason each.
+std = "roblox"
+
+[lints]
+# The point. A name that does not resolve is nil in Lua, and nil throws only
+# when the line runs — which for a weapon sound is the first shot fired.
+undefined_variable = "deny"
+
+# Worth seeing, not worth failing a build over: a parameter kept for symmetry or
+# an instance assigned to a local only to be parented is not a defect.
+unused_variable = "warn"
+
+# Deliberate throughout this codebase. `local function select(id)` in the shop
+# shadows Lua's `select`, and renaming it would be churn for a name that is only
+# ever called with one argument.
+shadowing = "allow"
+
+# roblox.yml is hand-written (the generator needs network access), so it cannot
+# know which stdlib functions return values that must be used. With `select`
+# shadowed, this lint fires on the shop's own function three times.
+must_use = "allow"
+
+# Three sites reach the same branch by different routes on purpose — a versus
+# side picked by two different tie-breaks, a gamepad release for two different
+# reasons. Collapsing them would hide why each exists.
+if_same_then_else = "allow"
+
+# Roblox tables are routinely mixed array/hash, and `global_usage` fires on the
+# `shared` table the engine itself provides.
+mixed_table = "allow"
+global_usage = "allow"
+multiple_statements = "allow"

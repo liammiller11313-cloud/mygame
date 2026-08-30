@@ -1,0 +1,7 @@
+{
+  "name": "brickbattle-luau-wasm",
+  "private": true,
+  "type": "module",
+  "description": "Fallback Luau formatter/checker. StyLua's WASM build, used when the rokit-managed native binary is unavailable (a sandbox with no access to GitHub releases, for instance). Same parser — full-moon — so a file that passes here passes there.",
+  "dependencies": { "@johnnymorganz/stylua": "2.5.2" }
+}

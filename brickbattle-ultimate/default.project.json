@@ -1,0 +1,83 @@
+{
+  "name": "BrickbattleUltimate",
+  "globIgnorePaths": ["**/*.spec.lua", "**/.DS_Store"],
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": { "$path": "src/shared" }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Server": { "$path": "src/server" }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$properties": {
+        "CharacterWalkSpeed": 16,
+        "CharacterJumpPower": 50,
+        "EnableMouseLockOption": true,
+        "LoadCharacterAppearance": true
+      },
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Client": { "$path": "src/client" }
+      },
+      "StarterCharacterScripts": { "$className": "StarterCharacterScripts" }
+    },
+
+    "StarterGui": {
+      "$className": "StarterGui",
+      "$properties": {
+        "ResetPlayerGuiOnSpawn": false,
+        "ShowDevelopmentGui": true
+      }
+    },
+
+    "StarterPack": { "$className": "StarterPack" },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "FilteringEnabled": true,
+        "Gravity": 196.2,
+        "StreamingEnabled": false
+      },
+      "Terrain": { "$className": "Terrain" }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Ambient": [0.4705, 0.4705, 0.4901],
+        "OutdoorAmbient": [0.7058, 0.7058, 0.7254],
+        "Brightness": 3,
+        "ClockTime": 14,
+        "GeographicLatitude": 41.6,
+        "GlobalShadows": true,
+        "Technology": "ShadowMap",
+        "FogColor": [0.7529, 0.7529, 0.7529],
+        "FogEnd": 100000,
+        "FogStart": 50000
+      }
+    },
+
+    "SoundService": {
+      "$className": "SoundService",
+      "$properties": { "RespectFilteringEnabled": true }
+    },
+
+    "Players": {
+      "$className": "Players",
+      "$properties": {
+        "CharacterAutoLoads": false,
+        "RespawnTime": 5
+      }
+    },
+
+    "Teams": { "$className": "Teams" }
+  }
+}

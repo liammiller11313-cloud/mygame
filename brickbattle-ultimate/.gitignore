@@ -1,0 +1,13 @@
+# Rojo / Roblox build output
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+build/
+# The old-place export is an INPUT, not output — but it is also large, so it
+# stays out of git. Its EXTRACTED form (old-place/extracted/) is plain text,
+# is what we actually read, and is tracked by the rules above not matching it.
+# Tooling
+.rokit/
+.DS_Store
+*.log
