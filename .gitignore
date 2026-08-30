@@ -4,6 +4,9 @@
 *.rbxl.lock
 *.rbxlx.lock
 build/
+# ...but an old place we are studying is an input, not output.
+!old-place/*.rbxlx
+!old-place/*.rbxmx
 # Tooling
 ~/.rokit
 .DS_Store
