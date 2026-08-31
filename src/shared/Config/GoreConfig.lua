@@ -432,6 +432,23 @@ GoreConfig.ScreenBlood = table.freeze({
 GoreConfig.HitStop = table.freeze({
 	Enabled = true,
 	NormalHitSeconds = 0.0,
+	--[[
+		A melee blow that CONNECTS, which is the one impact in the game that had no
+		freeze at all.
+
+		A gun's feedback is its recoil, its muzzle flash and its report — three
+		things that fire whether or not the bullet found anything. A machete has
+		none of that: the swing looks identical in an empty corridor and buried in
+		a Common's chest, so without a freeze on contact there is nothing anywhere
+		telling the player the difference. That is most of why melee reads as
+		weightless next to shooting.
+
+		Shorter than a kill freeze, because a machete swings two and a half times a
+		second and a kill-length hold on each would be a slideshow. Only on a hit
+		that does NOT kill — a lethal one already gets the bigger freeze through
+		GoreService, and stacking them would double the longest one.
+	]]
+	MeleeHitSeconds = 0.045,
 	KillSeconds = 0.035,
 	HeadshotKillSeconds = 0.06,
 	GibSeconds = 0.09,

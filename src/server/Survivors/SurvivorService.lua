@@ -75,7 +75,12 @@ local INTERACT = table.freeze({
 
 --[[ Stamina hysteresis: without it, a survivor who empties the bar stutters
      between sprint and walk speed every single frame. ]]
-local SPRINT_RECOVER_FRACTION = 0.25
+--[[ How much of the bar has to come back before sprint is granted again.
+     0.25 was most of why movement sawtoothed: a survivor recovered a quarter of a
+     tank, spent it in a second and a half, and did that all round. At 0.8 the
+     cycle is roughly seven seconds of sprint bought back over three — see the
+     simulated figures on GameConfig.Survivor's speeds. ]]
+local SPRINT_RECOVER_FRACTION = 0.8
 
 --[[ A survivor is judged to be sprinting when they actually outrun their own
      walk speed by this much. The server owns WalkSpeed, so this needs no extra
@@ -1668,6 +1673,21 @@ function SurvivorService:_stepRecord(record, dt: number, now: number)
 		local velocity = root.AssemblyLinearVelocity
 		local planar = math.sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z)
 		local walking = self:_effective(record) < S.HurtThreshold and S.LimpWalkSpeed or S.NormalWalkSpeed
+		--[[
+			The baseline has to carry every multiplier _computeWalkSpeed applied,
+			or the test is comparing a real speed against an imaginary one.
+
+			Adrenaline was the case that proved it. It multiplies the FINAL speed by
+			1.25, so a stimmed survivor merely walking moved at 22.5 against a
+			baseline of 18 + 1.5 — read as sprinting, drained to zero, set
+			sprintLocked, and then could never recover, because walking still
+			outran the baseline and the detector never went false. Adrenaline, the
+			thing you take to move faster, deleted your sprint for its whole
+			duration and left you slower than when you drank it.
+		]]
+		if self:_hasAdrenaline(record) then
+			walking *= S.AdrenalineSpeedBonus
+		end
 		sprinting = planar > walking + SPRINT_DETECT_MARGIN
 	end
 	if sprinting then

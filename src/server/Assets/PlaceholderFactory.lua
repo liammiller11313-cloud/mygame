@@ -260,14 +260,56 @@ end
 	So the search keeps going until it finds something it can actually use, and
 	an empty folder is just a folder waiting for a model.
 ]]
+--[[ "Pipe Bomb", "pipe_bomb" and "PipeBomb" are the same answer to everyone
+     except FindFirstChild. Folded to lowercase alphanumerics so a supplied model
+     only has to be named RIGHT, not spelled the way an enum happens to. ]]
+local function foldName(name: string): string
+	return (string.gsub(string.lower(name), "[^%w]", ""))
+end
+
 local function suppliedEntry(category: string, names: { string }): Instance?
+	local function usable(entry: Instance): boolean
+		return (isSupplyContainer(entry) or entry:IsA("Folder")) and #modelsIn(entry) > 0
+	end
+
 	for _, name in names do
 		for _, root in { ReplicatedStorage, ServerStorage } do
 			local assets = root:FindFirstChild(ASSETS_FOLDER)
 			local folder = assets and assets:FindFirstChild(category)
 			local entry = folder and folder:FindFirstChild(name)
-			if entry and (isSupplyContainer(entry) or entry:IsA("Folder")) and #modelsIn(entry) > 0 then
+			if entry and usable(entry) then
 				return entry
+			end
+		end
+	end
+
+	--[[
+		Second pass, and only after an exact match failed: the same names compared
+		loosely.
+
+		The enum id for a pipe bomb is "PipeBomb"; the obvious thing to call the
+		model you built is "Pipe Bomb". Those are the same answer to every person
+		who has ever looked at them and different answers to FindFirstChild — so
+		this grey-boxed a model sitting in the correct folder under a perfectly
+		reasonable name, and said nothing about why.
+
+		A scan rather than another FindFirstChild, because the entire point is that
+		we do not know how they spelled it. One walk of one folder, only on a miss,
+		and the result is cached in a template like everything else here.
+	]]
+	for _, name in names do
+		if name and name ~= "" then
+			local wanted = foldName(name)
+			for _, root in { ReplicatedStorage, ServerStorage } do
+				local assets = root:FindFirstChild(ASSETS_FOLDER)
+				local folder = assets and assets:FindFirstChild(category)
+				if folder then
+					for _, child in folder:GetChildren() do
+						if foldName(child.Name) == wanted and usable(child) then
+							return child
+						end
+					end
+				end
 			end
 		end
 	end
@@ -2012,7 +2054,33 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 	end
 
 	local viewmodel = category == "Viewmodels"
-	local supplied = suppliedEntry(category, { definition.modelName, definition.id, definition.displayName })
+	local names = { definition.modelName, definition.id, definition.displayName }
+	local supplied = suppliedEntry(category, names)
+
+	--[[
+		A first-person model falls back to the world model.
+
+		Somebody who has built a machete has built ONE machete. Asking them to put
+		the same model in two folders before either hand can hold it is exactly the
+		friction this module exists to remove — and the failure was silent: the
+		world model was theirs, the first-person one grey-boxed, and nothing said
+		why. "I gave you my melee models and I still cannot see them" is that bug
+		reported from the only seat it is visible from.
+
+		One direction only. A Viewmodels entry is somebody deliberately authoring a
+		separate first-person model — usually lower-poly, or posed for a hand — and
+		using that as the WORLD model everyone else sees would be substituting a
+		prop built for a different camera.
+
+		adoptWeapon already does the rest: it takes the same model and treats it
+		differently per category, anchoring a viewmodel's Handle because it is
+		driven by a CFrame every frame and leaving a world model loose to be welded
+		to a hand.
+	]]
+	if not supplied and viewmodel then
+		supplied = suppliedEntry("Weapons", names)
+	end
+
 	local prepared: Model? = nil
 
 	if supplied then

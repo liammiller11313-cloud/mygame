@@ -33,6 +33,8 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AudioConfig = require(Shared.Config.AudioConfig)
+local Enums = require(Shared.Enums)
+local GoreConfig = require(Shared.Config.GoreConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -44,6 +46,7 @@ local UiSound = require(script.Parent.UiSound)
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local KILL = UITheme.KillFeedback
+local HITSTOP = GoreConfig.HitStop
 local MARK = UITheme.Hitmarker
 local TEXT = UITheme.TextSize
 
@@ -481,6 +484,24 @@ function HitmarkerController:start()
 			if typeof(payload.position) == "Vector3" then payload.position else nil,
 			if typeof(payload.kind) == "string" then payload.kind else nil
 		)
+
+		--[[
+			A melee blow that connects gets a short freeze. See
+			GoreConfig.HitStop.MeleeHitSeconds for why melee needs one and gunfire
+			does not.
+
+			Not on a kill: GoreService already emits the bigger freeze for that, and
+			two would only extend the longer one. A cleave through three bodies
+			sends three of these, and CameraController.hitStop takes the LATER
+			finish rather than adding them up — so the freeze covers the whole arc
+			instead of compounding into a stall.
+		]]
+		if HITSTOP.Enabled and payload.killed ~= true and payload.damageType == Enums.DamageType.Melee then
+			local camera = Registry.find("CameraController")
+			if camera and typeof(camera.hitStop) == "function" then
+				pcall(camera.hitStop, camera, HITSTOP.MeleeHitSeconds, HITSTOP.TimeScale)
+			end
+		end
 	end)
 
 	trove:connect(RunService.RenderStepped, update)

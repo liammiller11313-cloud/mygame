@@ -576,6 +576,10 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 			killed = result.killed,
 			isHeadshot = isHeadshot,
 			position = ctx.hitPosition,
+			--[[ What did it, so the client can give a melee connect its own weight.
+			     A bullet's feedback is the recoil and the report; a swing has
+			     nothing that distinguishes hitting from missing. ]]
+			damageType = ctx.damageType,
 			kind = if result.killed and not isSurvivor
 				then target:GetAttribute(Attributes.Infected.Kind)
 				else nil,

@@ -332,6 +332,8 @@ local current = {
 	reloading = false,
 	--[[ Seconds into the inspect, or -1 when it is not running. See INSPECT_*. ]]
 	inspectClock = -1,
+	--[[ Which way the next melee stroke travels. See onMeleeSwing. ]]
+	swingSign = 1,
 }
 
 --[[
@@ -1091,6 +1093,9 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	     to a model, so a swap mid-inspect would have carried the remainder onto
 	     whatever was drawn next. ]]
 	current.inspectClock = -1
+	--[[ Nor which way the last weapon was mid-swing. Drawing a machete should
+	     always open with the same stroke. ]]
+	current.swingSign = 1
 
 	-- A weapon swap must not inherit the previous gun's recoil; the springs are
 	-- reset rather than left to settle, which would look like a flinch.
@@ -1600,14 +1605,34 @@ function ViewmodelController:onPump()
 	kickRotation:impulse(Vector3.new(math.rad(4) * rotationSpeed * IMPULSE_GAIN, 0, 0))
 end
 
+--[[
+	A swing, and the next one comes back the other way.
+
+	Every stroke used to be the identical impulse on all six axes, so a knife at
+	two and a half swings a second was the same frame played over and over — which
+	does not read as swinging, it reads as the viewmodel stuttering. A person
+	swinging a machete alternates, because the arm has to come back before it can
+	go again.
+
+	Only the LATERAL terms flip. The downward pitch and the pull toward the body
+	stay as they are: a swing always comes down and always comes in, and mirroring
+	those would turn every second stroke into an uppercut thrown backwards.
+
+	The sign is stored per weapon rather than globally, and reset on a swap, so
+	drawing a machete always opens with the same stroke instead of inheriting
+	whichever way the last knife happened to leave it.
+]]
 function ViewmodelController:onMeleeSwing(definition: any)
 	current.inspectClock = -1
+
+	local sign = current.swingSign
+	current.swingSign = -sign
 
 	local speed = kickPosition.speed
 	local reach = if definition then definition.kickback else 0.3
 	kickPosition:impulse(
 		Vector3.new(
-			-reach * 1.6 * speed * IMPULSE_GAIN,
+			-reach * 1.6 * speed * IMPULSE_GAIN * sign,
 			-reach * 0.8 * speed * IMPULSE_GAIN,
 			-reach * 1.2 * speed * IMPULSE_GAIN
 		)
@@ -1616,8 +1641,8 @@ function ViewmodelController:onMeleeSwing(definition: any)
 	kickRotation:impulse(
 		Vector3.new(
 			math.rad(-18) * rotationSpeed * IMPULSE_GAIN,
-			math.rad(26) * rotationSpeed * IMPULSE_GAIN,
-			math.rad(-30) * rotationSpeed * IMPULSE_GAIN
+			math.rad(26) * rotationSpeed * IMPULSE_GAIN * sign,
+			math.rad(-30) * rotationSpeed * IMPULSE_GAIN * sign
 		)
 	)
 end
