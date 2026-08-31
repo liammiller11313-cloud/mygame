@@ -1395,7 +1395,14 @@ end
      rebalance — there is one path into being infected and one path out. ]]
 function VersusService:_applyRoles()
 	local round = Registry.find("RoundService")
-	local running = round ~= nil and typeof(round.isRunning) == "function" and round:isRunning()
+	--[[ Running AND Versus, for the same reason _slowStep tests both: `active`
+	     outlives a match by design, so any path that can hand out a ghost has to
+	     check the mode or it hands one out in a Classic round. ]]
+	local running = round ~= nil
+		and typeof(round.isRunning) == "function"
+		and round:isRunning()
+		and typeof(round.getMode) == "function"
+		and round:getMode() == GameModeConfig.Modes.Versus
 	local survivors = Registry.find("SurvivorService")
 
 	for _, player in order do
@@ -1405,7 +1412,24 @@ function VersusService:_applyRoles()
 		end
 
 		if roleOf[slot.side] == Enums.Team.Infected then
-			if not slot.ghost or not slot.ghost.Parent then
+			--[[
+				Only while a round is actually running.
+
+				swapTeams runs at HALF TIME, from _onRoundEnded, and _publishRoundState
+				has already set the round state to its outcome by then — so this branch
+				fired with the round over and took the characters off the four players
+				who had just finished as survivors, for the whole 30-second scoreboard.
+
+				They then sat behind a spawn picker that is invisible and live: it draws
+				at DisplayOrder 41, under the results screen at 80, but the results
+				scrim is a Frame and a Frame does not block input in Roblox. Every click
+				played a confirm sound the server refused, and the gamepad focus was
+				stolen off the Continue button. Worse, the ghost built here is never
+				torn down, so the incoming infected half entered the next half with its
+				ghost timer already spent and could materialise at t=0 on a team that
+				had only just been spawned together.
+			]]
+			if running and (not slot.ghost or not slot.ghost.Parent) then
 				self:_beginGhost(slot, VERSUS.InfectedGhostTime)
 			end
 			continue
@@ -1591,7 +1615,28 @@ end
      times a second buys nothing but traffic. ]]
 function VersusService:_slowStep()
 	local round = Registry.find("RoundService")
-	local running = round ~= nil and typeof(round.isRunning) == "function" and round:isRunning()
+	--[[
+		RUNNING **AND VERSUS**. The mode half of that test was missing, and it let
+		this service poison every round that came after a match.
+
+		`active` is deliberately never cleared when a match ends — the comment in
+		_onRoundEnded says so, "a fresh match on the same server, sides kept" — and
+		stopVersus, the only thing that would clear it, has exactly one caller
+		(destroy) which is itself never called. That is fine as long as nothing
+		acts on `active` outside a Versus round. This did: with `running` derived
+		from isRunning() alone, the next CLASSIC round on the same server found
+		active true and roleOf still mapping one side to Infected, and handed half
+		the lobby a ghost. requestSpawnAs has no mode guard either, so those
+		players could then materialise Tanks into a co-op round.
+
+		Guarding here rather than clearing `active` keeps the documented behaviour
+		— the sides survive to the next match — and costs one comparison at 5Hz.
+	]]
+	local running = round ~= nil
+		and typeof(round.isRunning) == "function"
+		and round:isRunning()
+		and typeof(round.getMode) == "function"
+		and round:getMode() == GameModeConfig.Modes.Versus
 
 	if wanted and not active then
 		if #Players:GetPlayers() >= VERSUS.MinPlayersToStart then
