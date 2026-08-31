@@ -1520,45 +1520,70 @@ local function buildLobby()
 	panel.Position = UDim2.new(1 - COLUMN_X, 0, 0.15, 0)
 	panel.Size = UDim2.new(0.3, 0, 0, 260)
 
+	--[[
+		A running cursor, not seven hand-summed offsets.
+
+		Every row here used to carry its own copy of the sum of every row above it
+		— "TEXT.Body + ElementGap * 3 + TITLE_LINE + TEXT.Body + TEXT.Large + 8" —
+		and the map line, added last, was given that same sum with an 8 where the
+		players line has a 6. Two pixels apart, same size, same right alignment: the
+		map name and the survivor count were printed on top of each other, which is
+		what "MAP ⟨garbage⟩ SURVIVORS" on screen actually was.
+
+		A cursor cannot make that mistake. Each row advances it by its own height,
+		so inserting or reordering a line is one statement rather than a rewrite of
+		every constant below it.
+	]]
+	local y = 0
+	local function advance(height: number, gap: number?)
+		y += height + (gap or LAYOUT.ElementGap)
+	end
+
 	local heading = Widgets.label(panel, "Heading", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	heading.Position = UDim2.fromOffset(0, y)
 	heading.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	heading.TextXAlignment = Enum.TextXAlignment.Right
 	heading.Text = tracked("LOBBY")
+	advance(TEXT.Body)
 
 	local rule = Widgets.rule(panel, "Rule", COLOR.Border)
-	rule.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap)
+	rule.Position = UDim2.fromOffset(0, y)
+	advance(1)
 
 	lobbyBig = Widgets.label(panel, "Countdown", FONT.Display, TEXT.Title, COLOR.Accent)
-	lobbyBig.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 2)
+	lobbyBig.Position = UDim2.fromOffset(0, y)
 	lobbyBig.Size = UDim2.new(1, 0, 0, TITLE_LINE)
 	lobbyBig.TextXAlignment = Enum.TextXAlignment.Right
 	lobbyBig.Text = "—"
+	advance(TITLE_LINE, 0)
 
 	lobbyCaption = Widgets.label(panel, "Caption", FONT.Body, TEXT.Small, COLOR.TextSecondary)
-	lobbyCaption.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 2 + TITLE_LINE)
+	lobbyCaption.Position = UDim2.fromOffset(0, y)
 	lobbyCaption.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	lobbyCaption.TextXAlignment = Enum.TextXAlignment.Right
+	advance(TEXT.Body)
 
 	lobbyMode = Widgets.label(panel, "Mode", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
-	lobbyMode.Position = UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body)
+	lobbyMode.Position = UDim2.fromOffset(0, y)
 	lobbyMode.Size = UDim2.new(1, 0, 0, TEXT.Large + 4)
 	lobbyMode.TextXAlignment = Enum.TextXAlignment.Right
+	advance(TEXT.Large + 4)
+
+	lobbyPlayers = Widgets.label(panel, "Players", FONT.Body, TEXT.Small, COLOR.TextSecondary)
+	lobbyPlayers.Position = UDim2.fromOffset(0, y)
+	lobbyPlayers.Size = UDim2.new(1, 0, 0, TEXT.Body)
+	lobbyPlayers.TextXAlignment = Enum.TextXAlignment.Right
+	advance(TEXT.Body)
 
 	--[[ Which map is actually loaded. Worth a line of its own: with a map vote
 	     between rounds, "what am I about to play" stops being obvious, and a
 	     player deciding whether to join a round in progress wants to know. ]]
 	lobbyMap = Widgets.label(panel, "Map", FONT.Body, TEXT.Small, COLOR.TextDim)
-	lobbyMap.Position =
-		UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body + TEXT.Large + 8)
+	lobbyMap.Position = UDim2.fromOffset(0, y)
 	lobbyMap.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	lobbyMap.TextXAlignment = Enum.TextXAlignment.Right
 	lobbyMap.Text = ""
-
-	lobbyPlayers = Widgets.label(panel, "Players", FONT.Body, TEXT.Small, COLOR.TextSecondary)
-	lobbyPlayers.Position =
-		UDim2.fromOffset(0, TEXT.Body + LAYOUT.ElementGap * 3 + TITLE_LINE + TEXT.Body + TEXT.Large + 6)
-	lobbyPlayers.Size = UDim2.new(1, 0, 0, TEXT.Body)
-	lobbyPlayers.TextXAlignment = Enum.TextXAlignment.Right
+	advance(TEXT.Body)
 
 	lobbyMessage = Widgets.label(panel, "Message", FONT.Body, TEXT.Small, COLOR.Accent)
 	lobbyMessage.AnchorPoint = Vector2.new(1, 0)
