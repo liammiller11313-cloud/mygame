@@ -1353,18 +1353,107 @@ end
 	heading bar. It is reference material, not an advertisement, and the mode
 	buttons must stay the loudest thing on the screen.
 ]]
+--[[
+	The controls card, resolved from the REAL bindings rather than typed out.
+
+	It used to be a hand-written list and it had drifted into teaching keys that
+	do nothing: it promised "F — Shove" when shove is middle-mouse and F is bound
+	to nothing anywhere in the game, so the first time a teammate got pinned the
+	rescuer hammered a dead key. It also promised "SHIFT — Sprint", and sprint is
+	not a key at all — a survivor sprints automatically whenever they have wind.
+
+	Both of those are the same failure: a list of controls maintained separately
+	from the controls. `action` rows now ask InputController what the verb is
+	actually bound to, so the card cannot say a key the keymap does not have.
+
+	Rows without an `action` are structural — a movement stick has no binding to
+	look up — and carry their own text per scheme.
+]]
 local BRIEFING = {
-	{ key = "WASD", text = "Move" },
-	{ key = "SHIFT", text = "Sprint — costs stamina" },
-	{ key = "LMB", text = "Fire" },
-	{ key = "RMB", text = "Aim" },
-	{ key = "R", text = "Reload" },
-	{ key = "F", text = "Shove — frees a pinned teammate" },
-	{ key = "E", text = "Hold to revive, heal, or take a crate" },
-	{ key = "G", text = "Throw" },
-	{ key = "Q", text = "Call out what you are looking at" },
-	{ key = "1-5", text = "Weapons and items" },
+	{ desktop = "WASD", touch = "STICK", gamepad = "L STICK", text = "Move" },
+	{ action = "Fire", text = "Fire" },
+	{ action = "Aim", text = "Aim" },
+	{ action = "Reload", text = "Reload" },
+	{ action = "Shove", text = "Shove — frees a pinned teammate" },
+	{ action = "Interact", text = "Hold to revive, heal, or take a crate" },
+	{ action = "Melee", text = "Draw your melee weapon" },
+	{ action = "Crouch", text = "Crouch — steadies your aim" },
+	{ action = "Ping", text = "Call out what you are looking at" },
+	{
+		desktop = "1-5",
+		touch = "TILES",
+		gamepad = "D-PAD",
+		text = "Weapons and items. Tap the one you hold to look at it",
+	},
+	{ desktop = "AUTO", touch = "AUTO", gamepad = "AUTO", text = "You sprint whenever you have wind" },
 }
+
+--[[ Short names for the keys whose EnumItem name is not what a player calls it.
+     Anything absent falls through to the uppercased name, which is already right
+     for letters. Covers both KeyCode and UserInputType, because a binding list
+     holds both — shove is Enum.UserInputType.MouseButton3. ]]
+local KEY_LABELS: { [string]: string } = {
+	MouseButton1 = "LMB",
+	MouseButton2 = "RMB",
+	MouseButton3 = "MMB",
+	LeftShift = "SHIFT",
+	RightShift = "SHIFT",
+	LeftControl = "CTRL",
+	RightControl = "CTRL",
+	LeftAlt = "ALT",
+	Space = "SPACE",
+	One = "1",
+	Two = "2",
+	Three = "3",
+	Four = "4",
+	Five = "5",
+	ButtonR1 = "RB",
+	ButtonL1 = "LB",
+	ButtonR2 = "RT",
+	ButtonL2 = "LT",
+	ButtonA = "A",
+	ButtonB = "B",
+	ButtonX = "X",
+	ButtonY = "Y",
+	ButtonL3 = "L3",
+	ButtonR3 = "R3",
+	DPadUp = "D-UP",
+	DPadDown = "D-DOWN",
+	DPadLeft = "D-LEFT",
+	DPadRight = "D-RIGHT",
+}
+
+--[[ What to print for a row, on the scheme the player is actually using. Touch
+     gets the pad's own button label — telling a phone player to press R is worse
+     than telling them nothing. ]]
+local function briefingGlyph(entry: any, bindings: { any }, scheme: string): string
+	if not entry.action then
+		return if scheme == "Touch"
+			then entry.touch
+			elseif scheme == "Gamepad" then entry.gamepad
+			else entry.desktop
+	end
+	for _, binding in bindings do
+		if binding.action ~= entry.action then
+			continue
+		end
+		if scheme == "Touch" then
+			return binding.touch or "—"
+		end
+		for _, key in binding.keys do
+			if typeof(key) ~= "EnumItem" then
+				continue
+			end
+			local isGamepadKey = string.sub(key.Name, 1, 6) == "Button"
+				or string.sub(key.Name, 1, 5) == "DPad"
+			if (scheme == "Gamepad") == isGamepadKey then
+				return KEY_LABELS[key.Name] or string.upper(key.Name)
+			end
+		end
+		return "—"
+	end
+	return "—"
+end
 
 local RULES = {
 	"HEADSHOTS KILL ANYTHING COMMON, WITH ANY GUN.",
@@ -1386,17 +1475,23 @@ local function buildBriefing()
 	heading.TextXAlignment = Enum.TextXAlignment.Right
 	heading.Text = tracked("CONTROLS")
 
-	local y = TEXT.Body + 8
-	for _, entry in BRIEFING do
-		local key = Widgets.label(column, "K_" .. entry.key, FONT.Stencil, TEXT.Small, COLOR.Accent)
-		key.Position = UDim2.fromOffset(0, y)
-		key.Size = UDim2.fromOffset(64, TEXT.Body + 2)
-		key.TextXAlignment = Enum.TextXAlignment.Right
-		key.Text = entry.key
+	local input = Registry.find("InputController")
+	local bindings = if input and typeof(input.getBindings) == "function" then input:getBindings() else {}
+	local scheme = if input and typeof(input.getScheme) == "function" then input:getScheme() else "Desktop"
 
-		local text = Widgets.label(column, "T_" .. entry.key, FONT.Body, TEXT.Small, COLOR.TextSecondary)
-		text.Position = UDim2.fromOffset(74, y)
-		text.Size = UDim2.new(1, -74, 0, TEXT.Body + 2)
+	local y = TEXT.Body + 8
+	for index, entry in BRIEFING do
+		local key = Widgets.label(column, "K_" .. index, FONT.Stencil, TEXT.Small, COLOR.Accent)
+		key.Position = UDim2.fromOffset(0, y)
+		--[[ Wider than the old 64. A touch label is a word ("RELOAD"), not a
+		     letter, and at 64 every one of them clipped. ]]
+		key.Size = UDim2.fromOffset(84, TEXT.Body + 2)
+		key.TextXAlignment = Enum.TextXAlignment.Right
+		key.Text = briefingGlyph(entry, bindings, scheme)
+
+		local text = Widgets.label(column, "T_" .. index, FONT.Body, TEXT.Small, COLOR.TextSecondary)
+		text.Position = UDim2.fromOffset(94, y)
+		text.Size = UDim2.new(1, -94, 0, TEXT.Body + 2)
 		text.Text = entry.text
 
 		y += TEXT.Body + 6

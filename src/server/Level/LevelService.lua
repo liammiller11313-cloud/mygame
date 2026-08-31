@@ -477,6 +477,35 @@ end
 
 	Returns the number of sections offered to ItemPlacer.
 ]]
+--[[
+	Re-arms every panic trigger for a new round.
+
+	Each one fires once and then latches, which is correct inside a round. Nothing
+	ever un-latched them: rebuildPanicTriggers only initialises entries it has
+	never seen (`== nil`), MapService deliberately does not reload a map that has
+	not changed, so the parts survive the round boundary carrying their fired
+	flag — and the level's only authored set piece worked on the first round after
+	a server booted and never again.
+
+	Deliberately NOT folded into rebuildPanicTriggers. That function's preserve
+	behaviour is load-bearing: it runs whenever the tag set changes, including mid
+	round, and re-arming there would hand a second crescendo to anybody who edited
+	a tag while the round was live.
+
+	Mirrors AmmoCrateService.resetAll, and is called from the same place for the
+	same reason: a new round must not open with half the level still spent.
+]]
+function LevelService:resetTriggers(): number
+	local rearmed = 0
+	for part, fired in panicTriggers do
+		if fired then
+			panicTriggers[part] = false
+			rearmed += 1
+		end
+	end
+	return rearmed
+end
+
 function LevelService:restockItems(): number
 	if sectionsDirty then
 		rebuildSections()
@@ -811,8 +840,10 @@ function LevelService:_checkPanic()
 			continue
 		end
 
-		-- Armed once and once only. A crescendo that re-fires every time somebody
-		-- walks back over the generator is not a crescendo, it is a spawn tap.
+		--[[ Armed once and once only WITHIN A ROUND. A crescendo that re-fires
+		     every time somebody walks back over the generator is not a crescendo,
+		     it is a spawn tap — but see resetTriggers: "once" used to mean once
+		     per SERVER, because nothing ever put this back. ]]
 		panicTriggers[part] = true
 
 		-- find(), not get(): a level with a panic trigger and no Director should

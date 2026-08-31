@@ -248,6 +248,24 @@ UITheme.Hitmarker = table.freeze({
 	NormalColor = Color3.fromRGB(238, 234, 226),
 	HeadshotColor = Color3.fromRGB(255, 176, 66),
 	KillColor = Color3.fromRGB(206, 46, 32),
+	--[[
+		A headshot that KILLS, which is the one outcome the game had no mark for.
+
+		The kill mark is red and the headshot mark is orange, and until now a
+		headshot kill drew the red one — so the single most rewarded act in the
+		game, the one the main menu teaches and the one the 4x multiplier exists
+		for, produced exactly the same feedback as a body shot that happened to
+		finish something off.
+
+		Worse, it was not merely rare: Commons have headshotAlwaysKills, so a head
+		hit on the enemy you shoot three hundred times a round is ALWAYS lethal and
+		therefore ALWAYS took the kill branch. The orange headshot mark was
+		mathematically unreachable on 95% of the things in the level.
+
+		Bright gold rather than a blend of the two: this is the good outcome, and
+		it should not read as a shade of either half.
+	]]
+	HeadshotKillColor = Color3.fromRGB(255, 214, 92),
 	RotationOnKill = 45, -- the kill mark is an X, not a cross
 	ScalePunch = 1.5,
 })

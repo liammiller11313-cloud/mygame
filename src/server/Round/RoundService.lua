@@ -706,6 +706,14 @@ function RoundService:startRound(requestedMode: string?)
 		crates:resetAll()
 	end
 
+	--[[ And every crescendo back, for exactly the same reason. A panic trigger
+	     latches when it fires and nothing used to put it back, so the map's only
+	     set piece ran on the first round after a server booted and never again. ]]
+	local level = Registry.find("LevelService")
+	if level and typeof(level.resetTriggers) == "function" then
+		level:resetTriggers()
+	end
+
 	setGameAttribute(Attributes.Game.Mode, mode)
 	setGameAttribute(Attributes.Game.RoundEndsAt, roundEndsAt)
 

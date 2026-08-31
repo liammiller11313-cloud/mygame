@@ -208,6 +208,12 @@ local function build()
 	marks.Kill.baseDuration = MARK.KillDuration
 	marks.Kill.duration = MARK.KillDuration
 
+	--[[ Same X, same size, same duration as a kill — it IS a kill. Only the
+	     colour says which kind. See UITheme.Hitmarker.HeadshotKillColor. ]]
+	marks.HeadshotKill = buildMark("HeadshotKill", MARK.KillSize, MARK.HeadshotKillColor, MARK.RotationOnKill)
+	marks.HeadshotKill.baseDuration = MARK.KillDuration
+	marks.HeadshotKill.duration = MARK.KillDuration
+
 	--[[ The run counter. Centred under the crosshair, where a player already
 	     looks, and clear of the "+$" line the HUD draws just above it. It is a
 	     reward rather than a readout, so it never appears for the first two
@@ -424,14 +430,26 @@ function HitmarkerController:mark(
 )
 	if killed then
 		local weight = killWeight(kind)
-		punch(marks.Kill, weight)
+		--[[ isHeadshot was passed all the way down here and then read only in the
+		     branch for hits that DID NOT kill — so the one outcome worth marking
+		     most was the one outcome with no mark of its own. ]]
+		punch(if isHeadshot then marks.HeadshotKill else marks.Kill, weight)
 		bumpStreak(os.clock())
 		--[[ A kill sounds like a kill. It used to sound exactly like a hit, which
 		     meant the single most important fact in the game — did that thing die
 		     — had to be READ off the crosshair, and in a horde the crosshair is
 		     covered in bodies. The boss cue is a separate, lower band again: a
 		     Tank going down is the loudest thing that happens in a round. ]]
-		UiSound.play(if weight >= 1 then AudioConfig.UI.BossKillMarker else AudioConfig.UI.KillMarker)
+		--[[ And it sounds like one. The boss cue still outranks everything — a Tank
+		     going down is the loudest thing in a round however it died — but below
+		     that a headshot kill gets the headshot cue rather than the plain one,
+		     which is the sound the player has been trained to want. ]]
+		UiSound.play(
+			if weight >= 1
+				then AudioConfig.UI.BossKillMarker
+				elseif isHeadshot then AudioConfig.UI.HeadshotMarker
+				else AudioConfig.UI.KillMarker
+		)
 		--[[ And the camera. A Common kill is deliberately zero trauma — they die
 		     three hundred times a round and anything that moves the screen for
 		     them is motion sickness by wave four. ]]

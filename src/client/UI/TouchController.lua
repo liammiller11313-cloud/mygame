@@ -134,8 +134,34 @@ local BOTTOM_INSET = LAYOUT.ScreenMargin
      for something that is relevant for maybe fifteen seconds a round, and the
      button appearing IS the affordance — it says "there is something here"
      better than the prompt does. ]]
+--[[
+	The context button: USE when there is something to use, PING otherwise.
+
+	It was USE alone, hidden whenever PromptController had no target — on the
+	reasoning that a permanent USE button is a permanent hole in the screen for
+	something relevant maybe fifteen seconds a round. That reasoning was right and
+	the hole was real; the answer is to put something in it rather than to leave
+	it empty.
+
+	PING is what goes there, because a phone player could not communicate AT ALL.
+	Ping has no pad button and no slot tile, the pad is already eight buttons wide
+	on a five-inch screen, and typing in Roblox chat mid-horde is not a thing
+	anybody does with two thumbs occupied. In a co-op game whose own briefing ends
+	"NOBODY SURVIVES ALONE", the mobile half of the server was mute.
+
+	The two never compete: PromptController only reports a verb when the player is
+	looking at something they can act on, and in that moment USE is unambiguously
+	what the button is for. Every other moment it is a callout.
+]]
 local CONTEXTUAL: { [string]: boolean } = {
 	Interact = true,
+}
+
+--[[ What the context button becomes when its primary verb has no target, and
+     what to call it. Nil for a contextual button with no fallback — that one
+     still simply hides. ]]
+local CONTEXT_FALLBACK: { [string]: { action: string, label: string } } = {
+	Interact = { action = "Ping", label = "PING" },
 }
 
 local TouchController = {}
@@ -188,6 +214,10 @@ type PadButton = {
 	lit: boolean,
 	-- The touch currently holding this button down. See newButton's InputBegan.
 	held: InputObject?,
+	--[[ For a contextual button: the verb it is when its target exists, and that
+	     verb's label. `action` swaps between this and CONTEXT_FALLBACK. ]]
+	primary: string?,
+	primaryLabel: string?,
 }
 
 local buttons: { PadButton } = {}
@@ -354,7 +384,9 @@ local function newButton(action: string, label: string, size: number, prominent:
 			return
 		end
 		local input_ = Registry.find("InputController")
-		if input_ and input_:raise(action, true) then
+		--[[ entry.action, not the captured `action`: the contextual button changes
+		     which verb it is at runtime. See CONTEXTUAL below. ]]
+		if input_ and input_:raise(entry.action, true) then
 			entry.held = input
 			paint(entry, true)
 		end
@@ -404,7 +436,19 @@ local function build()
 			entry.frame.Position = UDim2.new(1, -place.x, 1, -place.y)
 			entry.contextual = CONTEXTUAL[binding.action] == true
 			if entry.contextual then
-				entry.frame.Visible = false
+				--[[ What this button is when its verb HAS a target. `entry.action`
+				     moves between this and the fallback; these two do not. ]]
+				entry.primary = binding.action
+				entry.primaryLabel = binding.touch
+				--[[ A button with a fallback starts on the fallback rather than
+				     hidden: there is always something to ping. ]]
+				local fallback = CONTEXT_FALLBACK[binding.action]
+				if fallback then
+					entry.action = fallback.action
+					entry.label.Text = fallback.label
+				else
+					entry.frame.Visible = false
+				end
 			end
 		end
 	end
@@ -471,13 +515,32 @@ local function refreshState()
 				paint(entry, lit)
 			end
 		end
-		if entry.contextual and entry.frame.Visible ~= live then
-			entry.frame.Visible = live
-			if not live then
-				--[[ Released on the way out. A finger still down on a button that
-				     vanishes never delivers its InputEnded, and the verb would
-				     stay held for the rest of the round. ]]
-				releaseEntry(entry)
+		if entry.contextual then
+			local fallback = CONTEXT_FALLBACK[entry.primary or entry.action]
+			if fallback then
+				--[[ Never hidden — it swaps verb instead. See CONTEXT_FALLBACK. ]]
+				local wanted = if live then entry.primary else fallback.action
+				local wantedLabel = if live then entry.primaryLabel else fallback.label
+				if entry.action ~= wanted then
+					--[[ Let go of the OLD verb before becoming the new one. A finger
+					     down on USE at the instant the target goes out of range would
+					     otherwise leave Interact held for the rest of the round, and
+					     the release would be sent for Ping instead. ]]
+					releaseEntry(entry)
+					entry.action = wanted
+					entry.label.Text = wantedLabel
+				end
+				if not entry.frame.Visible then
+					entry.frame.Visible = true
+				end
+			elseif entry.frame.Visible ~= live then
+				entry.frame.Visible = live
+				if not live then
+					--[[ Released on the way out. A finger still down on a button that
+					     vanishes never delivers its InputEnded, and the verb would
+					     stay held for the rest of the round. ]]
+					releaseEntry(entry)
+				end
 			end
 		end
 	end
