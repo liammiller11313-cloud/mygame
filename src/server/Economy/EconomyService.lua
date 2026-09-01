@@ -181,8 +181,30 @@ local function onRoundEnded(outcome: string)
 	local waves = Attributes.get(Workspace, GA.WaveIndex, 0)
 	waves = if typeof(waves) == "number" then math.max(math.floor(waves), 0) else 0
 
-	local base = if victory then EconomyConfig.VictoryBonus else EconomyConfig.DefeatBonus
-	local total = base + EconomyConfig.WaveBonus * waves
+	--[[
+		In Versus the outcome is only half the answer.
+
+		`outcome` describes the SURVIVOR half. Paying every player against it hands
+		the infected half the winning purse for having failed to stop anybody —
+		and VictoryBonus is 5.5x DefeatBonus, so that is not a rounding error, it
+		is the whole round's reward going to the losing team.
+
+		VersusService records who actually won before it swaps the roles at half
+		time; nil from it means "no opinion", which is every Classic round and any
+		player who was not in the match. See VersusService.wonLastRound.
+	]]
+	local versus = Registry.find("VersusService")
+	local wonFor = if versus and typeof(versus.wonLastRound) == "function"
+		then function(player: Player): boolean
+			local ok, won = pcall(versus.wonLastRound, versus, player)
+			if ok and typeof(won) == "boolean" then
+				return won
+			end
+			return victory
+		end
+		else function(_player: Player): boolean
+			return victory
+		end
 
 	local profiles = Registry.find("ProfileService")
 	for _, player in Players:GetPlayers() do
@@ -193,13 +215,19 @@ local function onRoundEnded(outcome: string)
 			continue
 		end
 		local entry = tallyFor(player)
+		local base = if wonFor(player) then EconomyConfig.VictoryBonus else EconomyConfig.DefeatBonus
+		local total = base + EconomyConfig.WaveBonus * waves
 		pay(player, total, "bonus")
 
 		Remotes.Event.RoundPayout:FireClient(player, {
 			kills = entry.kills,
 			bonus = entry.bonus,
 			waves = waves,
-			victory = victory,
+			--[[ THIS player's result, not the round's. In Versus they differ for
+			     half the server — see wonFor above. Nothing on the client reads
+			     it yet; it is sent correct rather than sent wrong and waiting to
+			     be discovered by whatever reads it first. ]]
+			victory = wonFor(player),
 			total = earnedThisRound(entry),
 			balance = if profiles then profiles:getDollars(player) else 0,
 		})

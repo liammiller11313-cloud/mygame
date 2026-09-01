@@ -112,6 +112,15 @@ local MODULES = {
 	     thing in the game that persists, and a purchase or a spawn that happened
 	     before it finished loading would be made against an empty profile. ]]
 	"Economy/ProfileService",
+	--[[ AFTER Round/VersusService, and that is load-bearing rather than tidy.
+
+	     Both of these pay on RoundService.roundEnded, and in Versus what a player
+	     is owed depends on which team they were on — which VersusService records
+	     in its own roundEnded handler, before it swaps the roles for the next
+	     half. Signal handlers fire in connection order and connection order is
+	     this list, so Versus writes the answer before either of these reads it.
+	     Move either one above Versus and half the server gets paid for losing.
+	     See VersusService.wonLastRound. ]]
 	"Economy/EconomyService",
 	-- Reads what ProfileService loaded and what StatsService counted; registers
 	-- before either is asked for anything, and only listens once started.

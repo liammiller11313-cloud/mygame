@@ -165,6 +165,11 @@ VersusService.matchEnded = Signal.new()
 
 local serviceTrove = Trove.new()
 
+--[[ Who won the half that just finished, by player. Written once in _scoreHalf
+     and read by the payout services; see wonLastRound. Weak-keyed so a player
+     who leaves during the scoreboard does not pin their Player instance. ]]
+local lastRoundWon: { [Player]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+
 -- ── match state ─────────────────────────────────────────────────────────────
 local active = false -- a versus match is being managed
 local wanted = false -- startVersus was asked for and is waiting on players
@@ -1379,7 +1384,51 @@ function VersusService:_scoreHalf(outcome: string)
 		addScore(side, standing * VERSUS.ScorePerSurvivorAlive)
 	end
 
+	--[[
+		Who actually won this half, recorded BEFORE anything swaps.
+
+		RoundService's outcome describes the SURVIVOR half and nothing else. In
+		Versus that is half the server: a survivor Victory is an infected defeat,
+		and every service that read the outcome directly paid the infected half
+		for losing. EconomyService's VictoryBonus is 5.5x its DefeatBonus, so a
+		team that failed to stop anybody banked the winning purse — and the XP
+		table hands out its single largest award, Victory, on the same test.
+
+		Captured here rather than derived later because `swapTeams` runs a few
+		lines after this and reverses every role in the match. Anything asking
+		"which team was this player on" after that point gets the answer for the
+		half they are about to play, not the one they were just paid for.
+	]]
+	local survivorsWon = outcome == Enums.RoundState.Victory
+	table.clear(lastRoundWon)
+	for _, player in order do
+		lastRoundWon[player] = if roleFor(player) == Enums.Team.Infected
+			then not survivorsWon
+			else survivorsWon
+	end
+
 	self.halfScored:fire(self:getScores(), half)
+end
+
+--[[
+	Whether this player won the round that just ended, or nil when Versus has no
+	opinion — no match running, or somebody who was not in one.
+
+	Every round-end payout goes through this rather than testing the outcome
+	itself. nil means "use the outcome", which is the right answer for Classic
+	and for a player who joined while the scoreboard was up.
+
+	ORDERING: this is written by _scoreHalf, which runs from this service's own
+	roundEnded handler. Callers must therefore be connected to roundEnded AFTER
+	this service — which they are, because Signal fires in connection order and
+	connection order is the MODULES list in init.server.lua, where both payout
+	services sit below Round/VersusService. That comment says so too.
+]]
+function VersusService:wonLastRound(player: Player): boolean?
+	if not active then
+		return nil
+	end
+	return lastRoundWon[player]
 end
 
 function VersusService:getScores(): { [string]: number }

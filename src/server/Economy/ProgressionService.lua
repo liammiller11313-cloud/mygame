@@ -321,6 +321,27 @@ local function awardRound(player: Player, row: any, waveReached: number, victory
 	end
 end
 
+--[[
+	Whether THIS player won, which in Versus is not what the outcome says.
+
+	`outcome` describes the survivor half. Without this the infected half is paid
+	the Victory award — the single largest number in the XP table — for having
+	lost, and a player learns that the fastest way to level is to be on the team
+	that gives up. VersusService captures the real answer before it swaps roles
+	at half time; nil means it has no opinion, which is every Classic round.
+]]
+local function wonFor(player: Player, victory: boolean): boolean
+	local versus = Registry.find("VersusService")
+	if not versus or typeof(versus.wonLastRound) ~= "function" then
+		return victory
+	end
+	local ok, won = pcall(versus.wonLastRound, versus, player)
+	if ok and typeof(won) == "boolean" then
+		return won
+	end
+	return victory
+end
+
 local function onRoundEnded(outcome: string)
 	local victory = outcome == Enums.RoundState.Victory
 	local waveReached = currentWave()
@@ -345,7 +366,7 @@ local function onRoundEnded(outcome: string)
 		     count against the day it ends in, and the counters it is about to
 		     write have to be the right day's counters. ]]
 		rollDay(player)
-		awardRound(player, rows[player.Name], waveReached, victory)
+		awardRound(player, rows[player.Name], waveReached, wonFor(player, victory))
 	end
 
 	table.clear(present)
