@@ -69,6 +69,79 @@ UITheme.Color = table.freeze({
 	still reads as one system: orange, white, gold, and a hot vermillion. Assigned
 	in join order, stable for the whole round.
 ]]
+--[[
+	── THE GENRE PASS ──────────────────────────────────────────────────────────
+
+	Everything below exists because the interface was too clean. A near-black
+	panel, a one-pixel border and an orange hairline is a good modern layout and
+	it is the wrong ONE for this game: nothing about it says the lights are going
+	out, and a player reads that before they read a word of it.
+
+	The fix is deliberately structural rather than chromatic. The palette above
+	is already warm and already dark, and pushing it browner would only make the
+	type harder to read in the dark rooms this game ends in. What was missing is
+	the vocabulary a wartime or industrial surface has — corners that are braced,
+	edges that are marked as dangerous, and surfaces that are not perfectly flat.
+
+	All of it is procedural. This project ships no marketplace image assets, so
+	every one of these is frames, strokes and gradients, which also means they
+	cost nothing to load and cannot 404 in a live game.
+]]
+
+--[[
+	Hazard striping: diagonal yellow and black, the way a loading bay is painted.
+
+	Genre shorthand nothing else carries. A hairline says "a division"; this says
+	"do not cross", and it is the single cheapest thing that makes a panel look
+	like it belongs in a quarantine zone rather than in a phone.
+
+	Angle is a shear rather than a rotation so the stripes stay the same width
+	whatever the bar's height is, and the width is in pixels rather than a scale
+	so a short strip and a long one are painted at the same pitch.
+]]
+UITheme.Hazard = table.freeze({
+	Warning = Color3.fromRGB(214, 168, 40),
+	Dark = Color3.fromRGB(16, 15, 13),
+	StripeWidth = 13,
+	--[[ Studs of horizontal shear per stud of height. 0.6 is about 31 degrees,
+	     which is the angle every real hazard tape is printed at and reads as
+	     deliberate where 45 reads as a pattern. ]]
+	Shear = 0.6,
+	Height = 7,
+	Transparency = 0.15,
+})
+
+--[[
+	Corner brackets: four Ls at the corners of a panel instead of a closed box.
+
+	A complete one-pixel rectangle is the most neutral shape an interface has. The
+	same rectangle with its edges left open and its corners braced is a crate, a
+	sight, a stencilled marking on a shipping container — and it costs eight small
+	frames.
+]]
+UITheme.Bracket = table.freeze({
+	Length = 16,
+	Thickness = 2,
+})
+
+--[[
+	Grime: a vertical gradient that stops a panel being one flat value.
+
+	Real surfaces are darker where they meet the floor and lighter where the
+	light hits them. One gradient per panel is the whole difference between
+	"a rectangle of #0D0C0B" and "a surface", and Roblox interpolates it on the
+	GPU for nothing.
+
+	Deliberately subtle. The temptation with a texture pass is to make it
+	visible; the point of this one is that a player never notices it and would
+	notice its absence.
+]]
+UITheme.Grime = table.freeze({
+	TopTransparency = 0.0,
+	BottomTransparency = 0.22,
+	Rotation = 90,
+})
+
 UITheme.SurvivorColors = table.freeze({
 	Color3.fromRGB(226, 148, 44), -- orange
 	Color3.fromRGB(240, 236, 228), -- white
@@ -100,6 +173,22 @@ UITheme.Font = table.freeze({
 	Body = Enum.Font.RobotoCondensed,
 	Numeric = Enum.Font.RobotoCondensed,
 	Stencil = Enum.Font.SpecialElite,
+
+	--[[
+		What a PANEL is titled in, as distinct from what a chapter card is.
+
+		The interface read as a clean modern app rather than as a game about a
+		city that has stopped working, and type was most of the reason: every
+		heading in it was the same condensed grotesque, set small, on a hairline.
+		That is the house style of a settings screen.
+
+		Stencil is the answer and it cannot be the answer everywhere — a battered
+		typewriter face is unreadable at body sizes and exhausting in quantity.
+		So it is scoped to the one place per screen that says what the screen IS.
+		Everything below the title stays Oswald, which is what keeps the panel
+		legible while the header carries the genre.
+	]]
+	Sign = Enum.Font.SpecialElite,
 })
 
 UITheme.TextSize = table.freeze({

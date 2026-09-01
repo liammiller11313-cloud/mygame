@@ -1161,7 +1161,17 @@ end
 local function updateFlicker(now: number)
 	local alpha = flicker:alphaAt(now)
 	titleLight.TextTransparency = alpha
-	titleRule.BackgroundTransparency = alpha
+	--[[ The whole strip, not just its background. The rule used to be one Frame
+	     and one transparency; hazard tape is a dark bar with stripes drawn on it,
+	     and fading only the bar would leave the stripes hanging in mid-air at the
+	     bottom of the flicker — which is exactly when the effect is most
+	     visible. ]]
+	titleRule.BackgroundTransparency = math.max(alpha, UITheme.Hazard.Transparency)
+	for _, stripe in titleRule:GetChildren() do
+		if stripe:IsA("Frame") then
+			stripe.BackgroundTransparency = math.max(alpha, UITheme.Hazard.Transparency)
+		end
+	end
 end
 
 --[[ The countdown is rendered from an absolute server-time stamp, so it stays
@@ -1268,10 +1278,14 @@ local function buildTitle()
 	titleLight.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	titleLight.Text = "LIGHT"
 
-	titleRule = Widgets.rule(menuLayer, "TitleRule", COLOR.Accent)
+	--[[ Hazard tape rather than an accent hairline. This is the first thing on
+	     the first screen and it was a one-pixel orange line, which is the most
+	     neutral mark an interface has — it said "a title was here" and nothing
+	     about what kind of game follows it. ]]
+	titleRule = Widgets.hazard(menuLayer, "TitleRule", TITLE_RULE_WIDTH)
 	titleRule.Position =
 		UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE * 2 + LAYOUT.PanelPadding)
-	titleRule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
+	titleRule.Size = UDim2.fromOffset(TITLE_RULE_WIDTH, UITheme.Hazard.Height)
 end
 
 --[[
@@ -1312,6 +1326,10 @@ local function buildPlay()
 	local bar = Widgets.frame(button, "Bar", COLOR.Accent, 0)
 	bar.Position = UDim2.fromOffset(0, LAYOUT.BorderThickness)
 	bar.Size = UDim2.new(0, ENTRY_BAR_WIDTH, 1, -LAYOUT.BorderThickness)
+
+	--[[ Braced corners. PLAY is the largest single element in the game and it was
+	     a rule, a bar and a word — the same shape as a row in a list. ]]
+	Widgets.brackets(button, COLOR.Accent)
 
 	local label = Widgets.label(button, "Label", FONT.Display, TEXT.Title, COLOR.TextPrimary)
 	label.Position = UDim2.fromOffset(ENTRY_TEXT_INSET, LAYOUT.PanelPadding)
