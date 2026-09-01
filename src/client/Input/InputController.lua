@@ -279,6 +279,29 @@ end
      the game says. ]]
 local crouchToggle = false
 
+--[[
+	Sprint, which until now was not a control at all — the server granted sprint
+	speed to anybody with stamina, so the key was bound, drawn on the controls
+	card, and did nothing.
+
+	The wish is tracked here rather than read back from an attribute (as crouch
+	is) because the server publishes nothing for it: sprinting changes nothing
+	anybody else can see, so there is no reason to spend a replicated property on
+	it. That does mean this side owns the truth, which is why the default matches
+	the server's and why assertSprintWish exists to re-state it whenever the rule
+	changes underneath it.
+]]
+local sprintToggle = false
+local sprintWish = true
+
+local function setSprintWish(value: boolean)
+	if sprintWish == value then
+		return
+	end
+	sprintWish = value
+	Remotes.Event.SetSprintState:FireServer(value)
+end
+
 local function isCrouching(): boolean
 	return Attributes.get(player, Attributes.Player.IsCrouching, false) == true
 end
@@ -301,6 +324,18 @@ local function setDown(action: string, isDown: boolean)
 	     server drops crouch on its own whenever the body stops being upright, so
 	     a client keeping its own flag would come back from a jump believing it
 	     was still crouched and spend the next tap standing up from a stand. ]]
+	--[[ Sprint, on the same down/up edge as crouch. In toggle mode only the press
+	     speaks, and it says the opposite of what we are currently asking for. ]]
+	if action == Action.Sprint then
+		if sprintToggle then
+			if isDown then
+				setSprintWish(not sprintWish)
+			end
+		else
+			setSprintWish(isDown)
+		end
+	end
+
 	if action == Action.Crouch then
 		if not crouchToggle then
 			Remotes.Event.SetCrouchState:FireServer(isDown)
@@ -753,6 +788,37 @@ end
      rule while crouched would otherwise leave a held-mode player crouched with
      nothing holding the key, and the release edge that would have freed them
      already happened. ]]
+--[[
+	Re-states what this client is asking for, whenever the rule underneath it
+	changes: at start-up, when the scheme moves, and when the toggle setting does.
+
+	TOUCH ALWAYS SPRINTS. The pad is eight buttons wide on a five-inch screen and
+	there is no room for a ninth, so a phone keeps the behaviour the whole game
+	had before sprint became a key. That is not a concession — it is the reason
+	the server's default is true: nobody loses a control they had.
+
+	Hold mode restates from the key, because the default is true and a desktop
+	player who has not touched Shift should be walking. Toggle mode is left alone:
+	it is a choice the player made and re-asserting it would undo it.
+]]
+local function assertSprintWish()
+	if scheme == Scheme.Touch then
+		setSprintWish(true)
+	elseif not sprintToggle then
+		setSprintWish(down[Action.Sprint] == true)
+	end
+end
+
+--[[ Set from the settings panel. Re-states the wish, because the meaning of the
+     key just changed under the player's hand. ]]
+function InputController:setSprintToggle(value: boolean)
+	if sprintToggle == value then
+		return
+	end
+	sprintToggle = value == true
+	assertSprintWish()
+end
+
 function InputController:setCrouchToggle(value: boolean)
 	if crouchToggle == value then
 		return
@@ -798,10 +864,17 @@ function InputController:start()
 	     rather than polling: it fires exactly when the answer changes, and the
 	     answer changes about as often as somebody puts a controller down. ]]
 	setScheme(initialScheme())
+	--[[ And say what we want out of sprint, now that the scheme is known. Without
+	     this a desktop player spawns sprinting — the server default is true, and
+	     in hold mode nothing would contradict it until the first press. ]]
+	assertSprintWish()
 	trove:connect(UserInputService.LastInputTypeChanged, function(inputType: Enum.UserInputType)
 		local implied = schemeFor(inputType)
 		if implied then
 			setScheme(implied)
+			--[[ A player who picks up a controller or puts down a phone changes
+			     which rule applies to them mid-round. ]]
+			assertSprintWish()
 		end
 	end)
 end

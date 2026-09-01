@@ -213,6 +213,14 @@ SettingsConfig.Definitions = table.freeze({
 		action = "Crouch",
 	},
 	{
+		key = "toggleSprint",
+		label = "TOGGLE SPRINT",
+		category = "CONTROLS",
+		kind = "toggle",
+		default = false,
+		blurb = "Tap to sprint and tap again to stop, instead of holding the key.",
+	},
+	{
 		key = "toggleCrouch",
 		label = "TOGGLE CROUCH",
 		category = "CONTROLS",

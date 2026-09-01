@@ -245,6 +245,182 @@ WeaponConfig.Definitions = {
 		knockback = 38,
 	},
 
+	--[[ Two magazines' worth without a reload, and it is the reason the pair
+	     exists: the 1911 places shots and this one keeps firing. Nine millimetre
+	     means three body shots on a Common where the .45 takes two, so the
+	     fifteen rounds are not free — they are the same total damage spread over
+	     more trigger pulls and more time upright. ]]
+	[Enums.Weapon.DualBerettas] = {
+		id = Enums.Weapon.DualBerettas,
+		displayName = "Dual Berettas",
+		modelName = "Dual Berettas",
+		slot = Enums.Slot.Secondary,
+		class = "Pistol",
+		fireMode = "Semi",
+
+		damage = 19,
+		rpm = 620,
+		pellets = 1,
+		magSize = 15,
+		reserveMax = -1,
+		penetration = 1,
+		penetrationFalloff = 0.5,
+
+		falloffStart = 90,
+		falloffEnd = 340,
+		falloffMin = 0.5,
+		maxRange = 800,
+
+		spreadHip = 2.1,
+		spreadAim = 0.55,
+		spreadMoving = 1.1,
+		spreadMax = 6.0,
+		bloomPerShot = 0.5,
+		bloomRecovery = 5.6,
+
+		recoilVertical = 0.9,
+		recoilHorizontal = 0.55,
+		recoilRecovery = 10.5,
+		kickback = 0.12,
+
+		reloadTime = 2.2,
+		reloadPerShell = 0,
+		drawTime = 0.35,
+		aimTime = 0.2,
+
+		walkSpeedScale = 1.0,
+		aimWalkSpeedScale = 0.74,
+		aimFov = 64,
+
+		shakeMagnitude = 0.45,
+		shakeRoughness = 8,
+		tracerWidth = 0.05,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 0.95,
+		shellEject = true,
+
+		gibPower = 0.05,
+		dismemberPower = 0.2,
+		knockback = 10,
+	},
+
+	--[[ The panic button. Full auto out of a pistol frame, which means the
+	     magazine is gone in under two seconds and the cone opens faster than you
+	     can correct — it is not a weapon you aim, it is a weapon you use to buy
+	     the two steps back that let you draw something else. ]]
+	[Enums.Weapon.Glock18] = {
+		id = Enums.Weapon.Glock18,
+		displayName = "Glock 18",
+		modelName = "Glock 18",
+		slot = Enums.Slot.Secondary,
+		class = "Pistol",
+		fireMode = "Auto",
+
+		damage = 17,
+		rpm = 1100,
+		pellets = 1,
+		magSize = 18,
+		reserveMax = -1,
+		penetration = 1,
+		penetrationFalloff = 0.5,
+
+		falloffStart = 70,
+		falloffEnd = 280,
+		falloffMin = 0.45,
+		maxRange = 700,
+
+		spreadHip = 2.8,
+		spreadAim = 0.9,
+		spreadMoving = 1.4,
+		spreadMax = 8.5,
+		bloomPerShot = 0.85,
+		bloomRecovery = 5.0,
+
+		recoilVertical = 1.05,
+		recoilHorizontal = 0.75,
+		recoilRecovery = 9.5,
+		kickback = 0.13,
+
+		reloadTime = 1.9,
+		reloadPerShell = 0,
+		drawTime = 0.32,
+		aimTime = 0.18,
+
+		walkSpeedScale = 1.0,
+		aimWalkSpeedScale = 0.76,
+		aimFov = 66,
+
+		shakeMagnitude = 0.5,
+		shakeRoughness = 9,
+		tracerWidth = 0.05,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 1.0,
+		shellEject = true,
+
+		gibPower = 0.04,
+		dismemberPower = 0.18,
+		knockback = 8,
+	},
+
+	--[[ Two barrels, both of them yours, and then two and a half seconds of
+	     being unarmed. It is the only secondary that gibs, and the only one that
+	     asks a real question — because the reload is longer than a Hunter needs
+	     to cross a room, firing the second barrel is a decision rather than a
+	     reflex. ]]
+	[Enums.Weapon.SawnOff] = {
+		id = Enums.Weapon.SawnOff,
+		displayName = "Sawn-Off",
+		modelName = "Sawn-Off",
+		slot = Enums.Slot.Secondary,
+		class = "Shotgun",
+		fireMode = "Semi",
+
+		damage = 21,
+		rpm = 220,
+		pellets = 8,
+		magSize = 2,
+		reserveMax = -1,
+		penetration = 2,
+		penetrationFalloff = 0.75,
+
+		falloffStart = 22,
+		falloffEnd = 95,
+		falloffMin = 0.16,
+		maxRange = 300,
+
+		spreadHip = 7.5,
+		spreadAim = 5.4,
+		spreadMoving = 1.2,
+		spreadMax = 11.0,
+		bloomPerShot = 0.7,
+		bloomRecovery = 4.0,
+
+		recoilVertical = 3.4,
+		recoilHorizontal = 0.9,
+		recoilRecovery = 6.5,
+		kickback = 0.4,
+
+		reloadTime = 2.5,
+		reloadPerShell = 0,
+		drawTime = 0.42,
+		aimTime = 0.26,
+
+		walkSpeedScale = 1.0,
+		aimWalkSpeedScale = 0.7,
+		aimFov = 68,
+
+		shakeMagnitude = 1.5,
+		shakeRoughness = 11,
+		tracerWidth = 0.06,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 1.5,
+		shellEject = true,
+
+		gibPower = 0.85,
+		dismemberPower = 0.9,
+		knockback = 46,
+	},
+
 	--[[ The gore weapon. Ten pellets at contact range does not kill a Common,
 	     it disassembles one. Falls off to almost nothing past a corridor's
 	     length, which is exactly the trade it should make. Reloads shell by

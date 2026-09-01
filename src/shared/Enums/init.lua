@@ -15,9 +15,15 @@ local Enums = {}
 -- ReplicatedStorage.Assets is named by WeaponConfig's `modelName` field, because
 -- "Mk 18 CQBR" and "(71 Mag) PPSh-41" are not valid Luau identifiers.
 Enums.Weapon = table.freeze({
-	-- Secondary
+	--[[ Secondary. Five, and the shape of the set is the point: the sidearm is
+	     what you have when the primary runs dry and the only thing you have while
+	     you are on the floor, so each one answers "twenty zombies, eight rounds"
+	     differently — place it, spray it, or put both barrels through it. ]]
 	M1911A1 = "M1911A1",
 	Magnum357 = "Magnum357",
+	DualBerettas = "DualBerettas",
+	Glock18 = "Glock18",
+	SawnOff = "SawnOff",
 
 	--[[ Melee. Five, each with a different reason to carry it: reach, speed,
 	     damage, how many bodies one swing goes through. Every one of them has a

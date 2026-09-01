@@ -1385,7 +1385,7 @@ local BRIEFING = {
 		gamepad = "D-PAD",
 		text = "Weapons and items. Tap the one you hold to look at it",
 	},
-	{ desktop = "AUTO", touch = "AUTO", gamepad = "AUTO", text = "You sprint whenever you have wind" },
+	{ action = "Sprint", text = "Sprint — costs stamina. Automatic on touch" },
 }
 
 --[[ Short names for the keys whose EnumItem name is not what a player calls it.

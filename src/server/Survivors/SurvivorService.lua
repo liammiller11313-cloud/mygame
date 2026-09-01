@@ -174,6 +174,9 @@ function SurvivorService:_ensureRecord(player: Player)
 		stamina = S.MaxStamina,
 		sprintLocked = false,
 		crouching = false,
+		--[[ Whether this player is asking to sprint. True by default: see
+		     _computeWalkSpeed for why a silent client must keep sprinting. ]]
+		sprinting = true,
 		ledgeRemaining = 0,
 
 		pinnedBy = nil,
@@ -455,7 +458,20 @@ function SurvivorService:_computeWalkSpeed(record): number
 
 	-- A limping survivor cannot break into a run; adrenaline's temp health is the
 	-- intended way back over the threshold, not an exception carved out here.
-	if not hurt and not record.sprintLocked and record.stamina > 0 then
+	--[[
+		Sprint is now ASKED FOR rather than assumed.
+
+		This granted SprintSpeed to anybody with stamina, so every survivor ran
+		flat out for seventeen minutes and the bar emptied whether or not they
+		wanted it spent. You could not move quietly, could not bank wind before a
+		Charger lane, and could not tell why you had slowed down.
+
+		`record.sprinting` defaults to TRUE so a client that never sends the remote
+		— a phone, which has no room on the pad for a ninth button — behaves
+		exactly as the whole game did before this line existed. Nobody loses a
+		control they had; desktop and gamepad gain one.
+	]]
+	if not hurt and record.sprinting and not record.sprintLocked and record.stamina > 0 then
 		speed = math.max(speed, S.SprintSpeed)
 	end
 
@@ -1805,6 +1821,19 @@ function SurvivorService:start()
 		end
 		record.crouching = crouching
 		Attributes.set(player, Attributes.Player.IsCrouching, crouching)
+	end)
+
+	--[[ Sprint, asked for the same way. NOT throttled and NOT published as an
+	     attribute: it changes nothing anybody else can see, it is read only by
+	     _computeWalkSpeed on this side, and a dropped release here would pin a
+	     player at sprint speed with no key held — the same failure the crouch
+	     handler above refuses to allow. ]]
+	serviceTrove:connect(Remotes.Event.SetSprintState.OnServerEvent, function(player, wanted)
+		local record = records[player]
+		if not record then
+			return
+		end
+		record.sprinting = wanted == true
 	end)
 
 	--[[

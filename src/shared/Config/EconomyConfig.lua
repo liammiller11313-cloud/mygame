@@ -12,10 +12,18 @@
 	A decent player should own the whole roster after roughly 30-40 rounds. That
 	is the number every other number here is derived from:
 
-	  a round pays  ~$1,000 in kills + $800 for a win + $60 a wave survived
-	                ≈ $2,200 for a won round, ~$1,000 for a deep loss
-	  the roster    ≈ $83,600 of purchasable weapons
-	  therefore     ≈ 37 winning rounds, and a loss still moves you forward
+	  a round pays  ~$1,000 in kills + $1,100 for a win + $60 a wave survived
+	                ≈ $2,500 for a won round, ~$1,000 for a deep loss
+	  the roster    ≈ $98,900 of purchasable weapons
+	  therefore     ≈ 39 winning rounds, and a loss still moves you forward
+
+	  ── HEADROOM: NONE. 39 of a 40 ceiling. ──
+	  Three secondaries went in at $8,500 and took this from 35 rounds to 39. The
+	  NEXT priced thing added to the catalogue fails scripts/economy.py, and the
+	  fix at that point is the income side — as it was when the melee roster went
+	  in — but it cannot be the win bonus alone: raising VictoryBonus to 1250 buys
+	  36 rounds and drags the kill share to 37%, against the 45% the section below
+	  calls the number to protect. Raise kill rewards, or raise both.
 
 	`scripts/economy.py` recomputes that from this table and fails if it has
 	drifted out of the 30-40 band. The paragraph above is only true because
@@ -29,9 +37,11 @@
 	shallow one, which is the actual thing being rewarded.
 
 	── WHY FINISHING PAYS MORE THAN KILLING ─────────────────────────────────────
-	Roughly 55% of a won round is the completion bonus and 45% is the four hundred
+	Roughly 60% of a won round is the completion bonus and 40% is the four hundred
 	things you shot. That split is deliberate and it is the number to protect if
-	these are ever retuned.
+	these are ever retuned. (It reads 55/45 in older copies of this comment; the
+	number moved when VictoryBonus went to 1100 and the prose did not follow.
+	scripts/economy.py prints the live figure — trust that over this paragraph.)
 
 	Money that comes mostly from kills means the incentive is to leave your team
 	and go farming, which is the exact behaviour that loses rounds in a co-op
@@ -198,6 +208,13 @@ EconomyConfig.Catalogue = table.freeze({
 	-- things here, because a sidearm you can fall back on that kills in one hit
 	-- removes the pressure the primary is supposed to create.
 	{ id = Enums.Weapon.M1911A1, category = "GUNS", price = 0 },
+	--[[ Priced under the Magnum on purpose, and the ladder is the point: the
+	     Berettas are the first thing a new player can afford, the Glock is a
+	     sidegrade rather than an upgrade, and the Sawn-Off is the only secondary
+	     that changes how you fight rather than how long you last. ]]
+	{ id = Enums.Weapon.DualBerettas, category = "GUNS", price = 1500 },
+	{ id = Enums.Weapon.Glock18, category = "GUNS", price = 2800 },
+	{ id = Enums.Weapon.SawnOff, category = "GUNS", price = 4200 },
 	{ id = Enums.Weapon.Magnum357, category = "GUNS", price = 6000 },
 
 	-- Shotgun. Cheap because it is the most conditional weapon in the game.

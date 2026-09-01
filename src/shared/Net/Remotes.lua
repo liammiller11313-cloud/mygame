@@ -48,6 +48,12 @@ local EVENTS: { string } = {
 	     nothing about a crouched body is visible in its motion, so the client
 	     asks and the server decides. ]]
 	"SetCrouchState", -- (isCrouching: boolean)
+	--[[ Sprint is asked for the same way crouch is, and for a related reason:
+	     the server INFERS sprinting from velocity for the stamina clock, but
+	     inference cannot tell "running because I want to" from "running because
+	     the game never stopped" — which is exactly what it could not tell before
+	     this existed. See SurvivorService._computeWalkSpeed. ]]
+	"SetSprintState", -- (isSprinting: boolean)
 	--[[ The player's own comfort setting. Sent from the options panel, validated
 	     against SettingsConfig on arrival, and applied only to damage that
 	     reaches the sender. ]]

@@ -374,6 +374,33 @@ local INSPECT_ROLL = math.rad(-22)
      being looked at. A pose that arrives and freezes reads as a stuck frame. ]]
 local INSPECT_TURN = math.rad(16)
 
+--[[
+	The reload, which the viewmodel has never shown.
+
+	`reloadRoll` has been declared in `current` since the file was written, with
+	the comment "eased target for the reload lean", and nothing has ever read it.
+	So everyone else watches you reload — CarryVisualService animates the
+	third-person model — and the one person who cannot see it is you. In a
+	first-person shooter the reload is the second most-performed animation there
+	is, and this one was a number counting down behind a gun that did not move.
+
+	── ROLLED, NOT PULLED IN ───────────────────────────────────────────────────
+	The obvious version drags the weapon toward the chest, and it is wrong: those
+	2.6 seconds are the most vulnerable in the game, and taking away the middle of
+	the screen while a Hunter is closing is punishing the player for a mechanic
+	they did not choose to be in. Rolling the weapon about its own long axis turns
+	the receiver toward the camera — which is what selling a reload actually
+	needs — while leaving the view down the barrel clear.
+
+	Scaled by (1 - aimAlpha) as well: the aim pose is solved around the model's
+	own sight so the glass lands on the crosshair, and rolling it while aiming
+	would peel the sight off the centre line.
+]]
+local RELOAD_SECONDS = 0.16 -- how fast the lean eases in and out
+local RELOAD_ROLL = math.rad(34)
+local RELOAD_PITCH = math.rad(-11)
+local RELOAD_DROP = Vector3.new(0.04, -0.10, 0.06)
+
 --[[ Ease in and out of a 0..1 ramp. The motion is a trapezoid and every corner
      of it goes through here, so nothing in the inspect starts or stops abruptly. ]]
 local function smoothstep(alpha: number): number
@@ -2054,6 +2081,12 @@ local function update(deltaTime: number)
 	     the frame the sight would visibly jump on. ]]
 	local inspectScale = inspectAlpha * (1 - aimAlpha)
 
+	--[[ The reload lean, eased both ways so a cancelled reload settles rather
+	     than snapping. See the RELOAD_ block. ]]
+	local wantedRoll = if current.reloading then 1 else 0
+	current.reloadRoll += (wantedRoll - current.reloadRoll) * math.min(dt / RELOAD_SECONDS, 1)
+	local reloadScale = current.reloadRoll * (1 - aimAlpha)
+
 	--[[ Push the pose out by however much the frame narrowed. Same direction from
 	     the camera, so the weapon does not move on screen; further away, so it
 	     keeps the size it has from the hip instead of being magnified into a wall
@@ -2081,6 +2114,11 @@ local function update(deltaTime: number)
 				INSPECT_ROLL * inspectScale
 			)
 	end
+	--[[ Composed on the right like the inspect, so the roll is about the weapon's
+	     own long axis rather than about the camera's. ]]
+	if reloadScale > 0 then
+		rotation = rotation * CFrame.Angles(RELOAD_PITCH * reloadScale, 0, RELOAD_ROLL * reloadScale)
+	end
 
 	local aimRest = pose.aim * fovScale
 	--[[ Solve the aim pose around the model's own sight rather than around its
@@ -2094,7 +2132,12 @@ local function update(deltaTime: number)
 	end
 
 	local rest = pose.hip:Lerp(aimRest, aimAlpha)
-	local offset = rest + swayOffset + kickOffset + Vector3.new(bobX, bobY, 0) + INSPECT_OFFSET * inspectScale
+	local offset = rest
+		+ swayOffset
+		+ kickOffset
+		+ Vector3.new(bobX, bobY, 0)
+		+ INSPECT_OFFSET * inspectScale
+		+ RELOAD_DROP * reloadScale
 
 	model:PivotTo(camera.CFrame * CFrame.new(offset) * rotation)
 end
