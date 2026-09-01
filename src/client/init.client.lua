@@ -91,6 +91,9 @@ local CONTROLLERS = {
 	-- A panel like the shop and the loadout screen, opened from the same nav row,
 	-- so it loads with them and before the menu that opens it.
 	"UI/CareerController",
+	-- The PLAY flow: quick play, private lobbies, and the server browser. Loaded
+	-- with the other panels and before the menu that opens it.
+	"UI/PlayController",
 	-- Reads ProgressionController the same way; draws over the results card
 	-- rather than inside it, so neither has to wait for the other.
 	"UI/AwardController",

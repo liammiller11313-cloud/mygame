@@ -89,6 +89,18 @@ local EVENTS: { string } = {
 	"WaveChanged", -- {index, name, announcement, isBreather, endsAt}
 	"RoundEnded", -- {outcome, waveReached, elapsed, scores}
 	"RequestMode", -- C->S (mode: string) — main menu mode selection
+
+	-- ── Lobbies and the server browser ──────────────────────────────────────
+	--[[ Three ways to end up in a round with other people, and they are genuinely
+	     different questions. RequestMode above is "put me somewhere"; these are
+	     "put me with THESE people" (a code) and "let me choose" (the browser). ]]
+	"CreateLobby", -- C->S (mode: string)
+	"JoinLobby", -- C->S (code: string)
+	--[[ The answer to any of the three. `code` is set only on a create, and only
+	     the creator ever receives it — a lobby code is a password. ]]
+	"LobbyResult", -- {action, ok: boolean, reason: string, code: string?}
+	"RequestServerList", -- C->S (mode: string)
+	"ServerListUpdated", -- {mode, servers: {{jobId, mode, state, players, waveIndex}}}
 	"LobbyStateChanged", -- {mode, countdown, players, canStart}
 	"VersusTeamChanged", -- {player, team}
 	"RequestInfectedSpawn", -- C->S (kind: string) — versus class pick

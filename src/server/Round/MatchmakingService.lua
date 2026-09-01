@@ -876,6 +876,19 @@ end
 
 --[[ What the lobby looks like right now. Safe to call from anywhere: it reads
      state and allocates one table, and never touches the network. ]]
+--[[ The joinable servers this one can see, for a player who would rather choose
+     than be sorted. `browse` is this file's own local and stays that way — the
+     sort direction and the joinability rule are matchmaking's to own, and a
+     second caller reimplementing either is how the browser and the auto-join
+     start disagreeing about which servers exist. See LobbyService. ]]
+function MatchmakingService:browseServers(mode: string): { any }
+	local wanted = normalizeMode(mode)
+	if not wanted then
+		return {}
+	end
+	return browse(wanted)
+end
+
 function MatchmakingService:getLobbyState(): { [string]: any }
 	return buildPayload()
 end

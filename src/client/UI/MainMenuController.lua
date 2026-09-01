@@ -1078,6 +1078,14 @@ function MainMenuController:close()
 	refreshVisibility()
 end
 
+--[[ The mode page, opened from outside. PlayController's QUICK PLAY hands the
+     player back here rather than reimplementing mode selection: this page
+     already owns the pending state, the refusal messages and the countdown, and
+     a second copy of any of them would be a second thing to keep in step. ]]
+function MainMenuController:showModes()
+	setPage("Modes")
+end
+
 function MainMenuController:isOpen(): boolean
 	return state.open or state.results
 end
@@ -1323,7 +1331,12 @@ local function buildPlay()
 	end)
 	trove:connect(button.Activated, function()
 		UiSound.play(AudioConfig.UI.MenuConfirm)
-		setPage("Modes")
+		--[[ PLAY now asks HOW rather than assuming. The mode page is still one
+		     press away — PlayController's QUICK PLAY calls showModes below, which
+		     is this exact line — but "with these four people" and "with whoever
+		     the matchmaker finds" are different questions and only one of them
+		     used to have an answer. See UI/PlayController. ]]
+		callController("PlayController", "open")
 	end)
 
 	backButton = Widgets.button(menuLayer, "Back")

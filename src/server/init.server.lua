@@ -100,6 +100,9 @@ local MODULES = {
 	"Round/RoundService",
 	"Round/VersusService",
 	"Round/MatchmakingService",
+	-- After it: LobbyService asks MatchmakingService for the browser rows rather
+	-- than keeping a second copy of the joinability rule.
+	"Round/LobbyService",
 
 	"Audio/AudioService",
 	"Assets/PlaceholderFactory",

@@ -245,6 +245,49 @@ GameModeConfig.Matchmaking = table.freeze({
 	MemoryStoreTtl = 90, -- seconds; a server must re-advertise inside this window
 	AdvertiseInterval = 30,
 	TeleportRetries = 3,
+
+	--[[
+		PRIVATE LOBBIES.
+
+		A different thing from the browser above, and the difference is worth
+		naming: the browser is how strangers end up in the same round, and these
+		are how people who already know each other do. One is a sort, the other is
+		a password.
+
+		The code lives in its own MemoryStore hash map — code -> the reserved
+		server's access code — rather than in the sorted map, which is keyed by
+		JobId and ordered by player count and is the wrong shape for a lookup by
+		a string somebody typed.
+	]]
+	LobbyMapName = "FL_Lobbies",
+
+	--[[ Two hours. Long enough that a lobby made before dinner still works
+	     after it, short enough that codes are recycled rather than accumulating
+	     for the life of the game. A code outliving its server is harmless — the
+	     join fails and says so — but a code that expires while its lobby is
+	     still being played in is a group that cannot be rejoined. ]]
+	LobbyTtl = 7200,
+
+	--[[
+		Six characters, from an alphabet with no O, 0, I, 1, S or 5.
+
+		A lobby code gets read aloud, typed on a phone, and screenshotted. Every
+		pair removed here is a pair somebody would otherwise mistype and blame the
+		game for — and the cost is nothing, because 30^6 is 729 million codes
+		against a collision check that already exists.
+	]]
+	LobbyCodeLength = 6,
+	LobbyCodeAlphabet = "ABCDEFGHJKLMNPQRTUVWXYZ2346789",
+
+	--[[ How many times a code is re-rolled before giving up. Each attempt is one
+	     conditional write; three collisions in a row against 729 million codes
+	     means the store is refusing writes, not that we were unlucky. ]]
+	LobbyCodeAttempts = 3,
+
+	--[[ How often one client may ask to create a lobby, find servers, or join a
+	     code. All three are network calls to a rate-limited backend, and all
+	     three are one button press — anything faster is not a person. ]]
+	LobbyRequestCooldown = 2.0,
 })
 
 --[[ The wave at a given index, clamped so a bad index can never crash a round. ]]
