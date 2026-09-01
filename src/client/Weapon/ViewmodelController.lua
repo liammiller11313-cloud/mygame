@@ -140,6 +140,24 @@ local CLASS_POSE: { [string]: Pose } = {
 		tilt = math.rad(-2),
 		length = 2.0,
 	},
+	--[[ Longer and heavier than a rifle, and held lower to say so. A belt-fed gun
+	     is carried rather than shouldered — dropping the hip pose and pulling it
+	     further out is what reads as weight before the player has fired it. ]]
+	LMG = {
+		hip = Vector3.new(0.92, -0.86, -1.85),
+		aim = Vector3.new(0, -0.34, -1.15),
+		tilt = math.rad(-3),
+		length = 2.3,
+	},
+	--[[ On the shoulder, not in front of the chest. Well right of centre and
+	     tilted hard, because the tube has to clear the head — a launcher posed
+	     like a rifle puts its own body through the camera. ]]
+	Launcher = {
+		hip = Vector3.new(1.05, -0.55, -1.7),
+		aim = Vector3.new(0.42, -0.3, -1.1),
+		tilt = math.rad(-8),
+		length = 2.6,
+	},
 	Melee = {
 		hip = Vector3.new(0.95, -0.9, -1.3),
 		aim = Vector3.new(0.75, -0.7, -1.2),

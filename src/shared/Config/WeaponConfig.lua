@@ -109,6 +109,15 @@ export type WeaponDefinition = {
 	     arithmetic above assumes. ]]
 	blastRadius: number?,
 	blastDamage: number?,
+
+	--[[ Whether the Director may put this on the floor. nil means yes, which is
+	     every weapon but one — the default has to be "placeable" or adding a gun
+	     would silently mean adding a gun nobody ever finds.
+
+	     False is for a weapon whose PRICE is the design. See the RPG-7: it costs
+	     ten won rounds, and a Director that hands one out free on a shelf has not
+	     made it a bit cheaper, it has made the price meaningless. ]]
+	placeable: boolean?,
 }
 
 local WHITE_HOT = Color3.fromRGB(255, 236, 190)
@@ -594,6 +603,16 @@ WeaponConfig.Definitions = {
 		gibPower = 0.0,
 		dismemberPower = 0.0,
 		knockback = 70,
+
+		--[[ The only weapon in the game the Director may not place.
+
+		     ItemPlacer discovers its classes from this file — "a new class is
+		     placeable the moment it is defined", says its header — so adding a
+		     Launcher class handed the Secondary deck a second entry, and a deck
+		     of {Pistol, Launcher} dealt without replacement puts an RPG on every
+		     other secondary pad. Free, on a map, against a shop price of ten won
+		     rounds. ]]
+		placeable = false,
 	},
 
 	--[[ The gore weapon. Ten pellets at contact range does not kill a Common,

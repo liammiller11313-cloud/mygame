@@ -179,7 +179,21 @@ AudioConfig.Id = ID
 AudioConfig.WeaponFire = {
 	[Enums.Weapon.M1911A1] = sound(ID.PistolShot, 0.72, 0.97, 1.05, 320, 4),
 	[Enums.Weapon.Magnum357] = sound(ID.RevolverShot, 1.0, 0.94, 1.02, 560, 5),
+	--[[ These four shipped with no row and this table is indexed directly — no
+	     fallback, no warning — so all four fired in silence. The Berettas and the
+	     Glock are the pistol sample pitched up for 9mm; the Sawn-Off is a shotgun
+	     with both barrels, which is the loudest thing a sidearm does. ]]
+	[Enums.Weapon.M9] = sound(ID.PistolShot, 0.68, 1.06, 1.14, 300, 4),
+	[Enums.Weapon.DualBerettas] = sound(ID.PistolShot, 0.66, 1.08, 1.18, 300, 4),
+	[Enums.Weapon.Glock18] = sound(ID.PistolShot, 0.62, 1.12, 1.22, 290, 4),
+	[Enums.Weapon.SawnOff] = sound(ID.ShotgunBlast, 1.0, 1.02, 1.1, 480, 5),
 	[Enums.Weapon.Shotgun] = sound(ID.ShotgunBlast, 1.0, 0.96, 1.04, 500, 5),
+	--[[ One shotgun sample, four guns, pitched apart. The DAO-12 sits highest
+	     because twelve rapid shells reading as twelve of the same boom is a wall
+	     of noise; the Tactical is the heaviest of the pumps. ]]
+	[Enums.Weapon.TacticalShotty] = sound(ID.ShotgunBlast, 1.0, 0.93, 1.0, 510, 5),
+	[Enums.Weapon.M1014] = sound(ID.ShotgunBlast, 0.92, 1.0, 1.08, 470, 5),
+	[Enums.Weapon.DAO12] = sound(ID.ShotgunBlast, 0.86, 1.06, 1.14, 450, 4),
 
 	-- Submachine guns: pitched up and quieter the smaller the round.
 	[Enums.Weapon.PPSh41] = sound(ID.SmgFire, 0.58, 1.04, 1.14, 340, 4),
@@ -194,10 +208,31 @@ AudioConfig.WeaponFire = {
 	[Enums.Weapon.Mk18CQBR] = sound(ID.M4Shot, 0.86, 1.05, 1.12, 460, 4),
 	[Enums.Weapon.AK12] = sound(ID.AkShot, 0.82, 0.99, 1.05, 440, 4),
 	[Enums.Weapon.AKM] = sound(ID.AkShot, 0.9, 0.9, 0.97, 480, 5),
+	-- The rest of the AR-15 family on the M4 sample, and the 7.62 rifle pitched
+	-- down onto the AK one because that is what a heavier round sounds like.
+	[Enums.Weapon.M16A4] = sound(ID.M4Shot, 0.84, 0.96, 1.02, 440, 4),
+	[Enums.Weapon.HK416D] = sound(ID.M4Shot, 0.8, 1.0, 1.06, 420, 4),
+	[Enums.Weapon.HK417] = sound(ID.AkShot, 0.94, 0.86, 0.93, 520, 5),
+
+	--[[ Machine guns. Loudest and furthest-carrying things in the roster short of
+	     the launcher — an LMG opening up is meant to be audible from wherever the
+	     rest of the team is standing, because it tells them where the line is. ]]
+	[Enums.Weapon.M249] = sound(ID.M4Shot, 0.92, 0.92, 0.98, 560, 5),
+	[Enums.Weapon.M60E4] = sound(ID.AkShot, 1.0, 0.82, 0.89, 620, 5),
 
 	-- Marksman: slower, louder, and they carry.
 	[Enums.Weapon.ScopedMk18] = sound(ID.SniperShot, 0.9, 1.02, 1.06, 620, 5),
 	[Enums.Weapon.M1AEBR] = sound(ID.SniperShot, 1.0, 0.94, 1.0, 700, 5),
+	[Enums.Weapon.MK11] = sound(ID.SniperShot, 0.95, 0.98, 1.04, 680, 5),
+	--[[ The bolt gun carries furthest of anything that is not an explosion. One
+	     shot a second from across a map should be a landmark rather than a
+	     texture. ]]
+	[Enums.Weapon.M24] = sound(ID.SniperShot, 1.0, 0.88, 0.94, 780, 5),
+
+	--[[ The launch, not the blast — ProjectileService plays Impact.Explosion at
+	     the far end when the rocket lands. Without a row here the loudest weapon
+	     in the game left the tube in total silence. ]]
+	[Enums.Weapon.RPG7] = sound(ID.ShotgunBlast, 1.0, 0.7, 0.76, 900, 6),
 
 	--[[
 		Melee swings — one sample each.

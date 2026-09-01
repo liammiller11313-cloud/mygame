@@ -291,7 +291,30 @@ local hotbarHolder: Frame? = nil
 local killFeedHolder: Frame
 
 local panels: { [Player]: any } = {}
-local slotIndices: { [Player]: number } = {}
+
+--[[
+	Two different numbers, and conflating them was the bug.
+
+	`joinSeq` is the order a player arrived, assigned once and never reused. It is
+	a tiebreak, nothing more — it decides who gets a panel when there are more
+	candidates than panels, and it keeps that answer stable so the stack does not
+	reshuffle every time somebody's health changes.
+
+	`rosterIndex` is which of the four bars a player IS, recomputed by relayout
+	from who is actually playing. It drives the panel's position AND their
+	identity colour everywhere else in the interface — see getSurvivorColor.
+
+	These used to be one sticky number handed out on join, which is wrong the
+	moment the people in the server are not the people playing. In Versus that is
+	always: eight players join, the first four take the four panels, and the
+	half-time swap does not move them — so half your team is invisible on the HUD
+	and half the enemy team is on it, with their health. It is wrong in Classic
+	too, one leaver at a time: player 1 leaving freed slot 1, but player 5 kept
+	slot 5, so four people in the server drew three bars.
+]]
+local joinSeq: { [Player]: number } = {}
+local rosterIndex: { [Player]: number } = {}
+local nextJoinSeq = 0
 local killFeed: { { label: TextLabel, age: number } } = {}
 local killFeedPool: { TextLabel } = {}
 -- UIListLayout ties on equal LayoutOrder, so entries carry a running number and
@@ -436,37 +459,34 @@ end
 	their own, because a teammate whose outline and HUD panel disagree about
 	which one they are is worse than no colour at all.
 ]]
-local function assignIndex(target: Player): number
-	local existing = slotIndices[target]
+--[[ Arrival order, once, never reused. Only a tiebreak — see the note on the
+     two tables above. ]]
+local function assignJoinSeq(target: Player): number
+	local existing = joinSeq[target]
 	if existing then
 		return existing
 	end
+	nextJoinSeq += 1
+	joinSeq[target] = nextJoinSeq
+	return nextJoinSeq
+end
 
-	local used: { [number]: boolean } = {}
-	for _, index in slotIndices do
-		used[index] = true
-	end
-	for index = 1, MAX_SURVIVORS do
-		if not used[index] then
-			slotIndices[target] = index
-			return index
-		end
-	end
+--[[ Whether this player is one of the ones actually playing right now.
 
-	-- Past MaxSurvivors there is no panel, but there is still a colour: a
-	-- spectator or a fifth player must not crash the roster.
-	local overflow = MAX_SURVIVORS + 1
-	for _, index in slotIndices do
-		if index >= overflow then
-			overflow = index + 1
-		end
-	end
-	slotIndices[target] = overflow
-	return overflow
+     Spectating is the single test, and it covers both cases that broke the old
+     roster: a fifth player waiting for a slot, and the infected half of a Versus
+     match, who have no character for the same reason. Dead and Incapacitated are
+     deliberately NOT excluded — a downed teammate's bar saying HELP! is the most
+     important thing on this HUD. ]]
+local function isPlaying(record: any): boolean
+	return record.state ~= STATE.Spectating
 end
 
 local function createPanel(target: Player)
-	local index = assignIndex(target)
+	--[[ A provisional position and colour. relayout, which runs on the next line
+	     of addPlayer and on every state change after it, is what actually decides
+	     both — this is only so the frame is not built with a nil colour. ]]
+	local index = assignJoinSeq(target)
 	local identity = UITheme.getSurvivorColor(index)
 
 	local frame = Widgets.frame(panelHolder, "Survivor_" .. target.Name, COLOR.Panel, 0.12)
@@ -557,13 +577,42 @@ end
      stacks above them in slot order, so "mine is the bottom one" is true for
      the whole round and nobody has to hunt for their own health. ]]
 local function relayout()
-	local order: { any } = {}
+	--[[
+		The roster is recomputed here rather than remembered, because who is
+		playing changes and who joined first does not.
+
+		Everybody is ranked, not filtered: players who are actually playing sort
+		ahead of spectators, and arrival order breaks the tie. Taking the first
+		four of THAT is one rule covering every case — a full Versus half, a
+		Classic server with a spectator in it, and the moment at a round start
+		when nobody has spawned yet and every player is briefly Spectating. A
+		filter would have blanked the whole HUD for that moment.
+	]]
+	local ranked: { any } = {}
 	for _, record in panels do
-		-- A fifth player (or a spectator) keeps a colour but gets no panel: four
-		-- bars is the layout, and a stack that grows past it is not the L4D HUD.
-		local onRoster = record.index <= MAX_SURVIVORS
+		table.insert(ranked, record)
+	end
+	table.sort(ranked, function(a, b)
+		if isPlaying(a) ~= isPlaying(b) then
+			return isPlaying(a)
+		end
+		return joinSeq[a.player] < joinSeq[b.player]
+	end)
+
+	local order: { any } = {}
+	table.clear(rosterIndex)
+	for rank, record in ranked do
+		local onRoster = rank <= MAX_SURVIVORS
 		record.frame.Visible = onRoster
 		if onRoster then
+			record.index = rank
+			rosterIndex[record.player] = rank
+			--[[ The colour follows the roster POSITION, not the player. With four
+			     colours and up to eight players, a colour tied to arrival wraps —
+			     so in Versus two of the four survivors on screen could be drawn in
+			     the same orange, on their panels and on their outlines through
+			     walls, which is the one thing this colour exists to prevent. ]]
+			record.stripe.BackgroundColor3 = UITheme.getSurvivorColor(rank)
 			table.insert(order, record)
 		end
 	end
@@ -656,6 +705,12 @@ local function watchPanel(record)
 	do
 		record.trove:connect(target:GetAttributeChangedSignal(attribute), refresh)
 	end
+	--[[ State is the one that can change WHO is on the roster, not just what
+	     their bar says — a Versus swap moves four people out of Spectating and
+	     four into it without anybody joining or leaving. ]]
+	record.trove:connect(target:GetAttributeChangedSignal(PA.State), function()
+		relayout()
+	end)
 	refresh()
 end
 
@@ -676,7 +731,8 @@ local function removePlayer(target: Player)
 		record.frame:Destroy()
 		panels[target] = nil
 	end
-	slotIndices[target] = nil
+	joinSeq[target] = nil
+	rosterIndex[target] = nil
 	relayout()
 end
 
@@ -1864,15 +1920,25 @@ end
 
 -- ── public API ──────────────────────────────────────────────────────────────
 
---[[ The stable colour slot for a player, 1-based and assigned on join. ]]
-function HudController:getSurvivorIndex(target: Player): number
-	return assignIndex(target)
+--[[ Which of the four bars this player is, 1-4, or nil for somebody who is not
+     on the roster — a spectator, or the infected half of a Versus match. Not
+     "assigned on join" any more, and the difference is the whole reason the
+     roster is recomputed: see relayout. ]]
+function HudController:getSurvivorIndex(target: Player): number?
+	return rosterIndex[target]
 end
 
 --[[ The colour that identifies a player everywhere in the interface: their HUD
-     stripe, their outline through a wall, and their name on a callout. ]]
+     stripe, their outline through a wall, and their name on a callout.
+     Roster position first, arrival order as a fallback for somebody who has no
+     panel — a spectator still gets a stable colour on a callout, it is simply
+     not one of the four the survivors are wearing. ]]
 function HudController:getSurvivorColor(target: Player): Color3
-	return UITheme.getSurvivorColor(assignIndex(target))
+	local rank = rosterIndex[target]
+	if rank then
+		return UITheme.getSurvivorColor(rank)
+	end
+	return UITheme.getSurvivorColor(assignJoinSeq(target))
 end
 
 function HudController:setVisible(value: boolean)

@@ -1137,6 +1137,61 @@ for _path, _names in _BASIS_FILES.items():
             )
 
 
+# ── 16. A weapon must be complete before it is a weapon ─────────────────────
+# The bug this exists for: fifteen of thirty-one weapons fired in total silence.
+# AudioConfig.WeaponFire is indexed directly — `AudioConfig.WeaponFire[weaponId]`
+# — with no fallback and no warning, so a weapon added to WeaponConfig without a
+# row there is simply silent, and nothing anywhere says so. The same shape of
+# mistake leaves a gun with no price (unbuyable), no ammo row (no casing, no
+# magazine on reload), or a class with no viewmodel pose (held at the generic
+# length, which on a machine gun is through the player's own chest).
+#
+# Every one of those is a table somebody has to remember to update, which is
+# exactly the kind of thing that should not depend on remembering.
+_wc = read(SRC / "shared/Config/WeaponConfig.lua")
+_ac = read(SRC / "shared/Config/AudioConfig.lua")
+_mc = read(SRC / "shared/Config/AmmoConfig.lua")
+_ec = read(SRC / "shared/Config/EconomyConfig.lua")
+_vm = read(SRC / "client/Weapon/ViewmodelController.lua")
+
+_weapons = {
+    m.group(1): re.search(r'class = "(\w+)"', m.group(2)).group(1)
+    for m in re.finditer(r"\[Enums\.Weapon\.(\w+)\]\s*=\s*\{(.*?)\n\t\},", _wc, re.S)
+    if re.search(r'class = "(\w+)"', m.group(2))
+}
+if _weapons:
+    _fire_block = _ac[_ac.index("AudioConfig.WeaponFire"):_ac.index("AudioConfig.WeaponReload")]
+    _fire = set(re.findall(r"\[Enums\.Weapon\.(\w+)\] = sound", _fire_block))
+    _ammo = set(re.findall(r"\[Enums\.Weapon\.(\w+)\] = \{ casing", _mc))
+    _shop = set(re.findall(r"id = Enums\.Weapon\.(\w+),", _ec))
+    _pose_block = _vm[_vm.index("local CLASS_POSE"):_vm.index("local WEAPON_POSE")]
+    _poses = set(re.findall(r"^\t(\w+) = \{", _pose_block, re.M))
+
+    for _id, _class in sorted(_weapons.items()):
+        if _id not in _fire:
+            problems.append(
+                f"{_id} has no AudioConfig.WeaponFire row — that table is indexed directly, "
+                f"so this weapon fires in silence and nothing warns about it"
+            )
+        if _id not in _ammo:
+            problems.append(
+                f"{_id} has no AmmoConfig.Weapons row — it will eject no casing and drop no "
+                f'magazine. A weapon that genuinely has neither still needs the row, as '
+                f'{{ casing = "", magazine = "" }}, so "has none" is distinguishable from '
+                f"\"was forgotten\""
+            )
+        if _id not in _shop:
+            problems.append(
+                f"{_id} is in WeaponConfig but not in EconomyConfig.Catalogue — there is no way "
+                f"to own it, so nothing can ever equip it"
+            )
+        if _class not in _poses:
+            problems.append(
+                f"{_id} is class {_class!r}, which has no ViewmodelController CLASS_POSE — it "
+                f"falls back to the generic long-gun pose, which is the wrong length for any "
+                f"class that needed its own"
+            )
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

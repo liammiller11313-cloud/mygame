@@ -114,6 +114,13 @@ local idsBySlotClass: { [string]: { [string]: { string } } } = {}
 do
 	local seen: { [string]: { [string]: boolean } } = {}
 	for _, definition in WeaponConfig.all() do
+		--[[ Skipped before its class is even registered. A class whose only
+		     member is unplaceable must not enter the deck at all — a dealt class
+		     with no ids behind it is a placement that silently produces nothing,
+		     and the pad it was for stays empty for the rest of the level. ]]
+		if definition.placeable == false then
+			continue
+		end
 		local slot = definition.slot
 		local slotSeen = seen[slot]
 		if not slotSeen then
@@ -134,7 +141,7 @@ do
 		local ids = {}
 		for _, id in WeaponConfig.idsForClass(definition.class) do
 			local candidate = WeaponConfig.get(id)
-			if candidate and candidate.slot == slot then
+			if candidate and candidate.slot == slot and candidate.placeable ~= false then
 				table.insert(ids, id)
 			end
 		end

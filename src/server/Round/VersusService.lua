@@ -1164,7 +1164,21 @@ function VersusService:requestSpawnAs(player: Player, kind: string): boolean
 		ghostRoot.AssemblyLinearVelocity = Vector3.zero
 	end
 
-	if VERSUS.TankIsRotated then
+	--[[
+		Only the HOLDER's spawn moves the token.
+
+		The rule this implements is written above passTankToken and was not what
+		the code did: it advanced on any infected player's materialisation, so
+		with four on the team the cursor ran four times as fast as intended. A
+		player would be handed the Tank and lose it a second later because a
+		teammate respawned as a Hunter — the token spent its whole life being
+		shuffled by people who could not have used it, and whether you ever got a
+		Tank came down to how often your teammates happened to die.
+
+		Evaluated after the spawn, which is safe: tankHolder() reads tankCursor
+		and the infected roster, and this player materialising changed neither.
+	]]
+	if VERSUS.TankIsRotated and tankHolder() == player then
 		passTankToken()
 	end
 

@@ -270,7 +270,16 @@ AmmoConfig.Weapons = {
 	[Enums.Weapon.MK11] = { casing = "762", magazine = "MarksmanMag" },
 	[Enums.Weapon.M24] = { casing = "762", magazine = "MarksmanMag" },
 
+	--[[ Melee. Nothing on either side, said explicitly for all five rather than
+	     left absent for four of them — `forWeapon` returns nil either way, so the
+	     only difference these rows make is to the next person reading the table,
+	     who can now tell "has none" from "was forgotten". audit.py check 16
+	     enforces exactly that. ]]
 	[Enums.Weapon.Machete] = { casing = "", magazine = "" },
+	[Enums.Weapon.FireAxe] = { casing = "", magazine = "" },
+	[Enums.Weapon.BaseballBat] = { casing = "", magazine = "" },
+	[Enums.Weapon.LeadPipe] = { casing = "", magazine = "" },
+	[Enums.Weapon.Knife] = { casing = "", magazine = "" },
 } :: { [string]: { casing: string, magazine: string } }
 
 --[[ Ammo pickups on the floor. `AmmoPile` is the shared refill every survivor
