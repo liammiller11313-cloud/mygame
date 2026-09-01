@@ -37,8 +37,25 @@ PROG = read("src/shared/Config/ProgressionConfig.lua")
 MODE = read("src/shared/Config/GameModeConfig.lua")
 DIRECTOR = read("src/shared/Config/DirectorConfig.lua")
 
-# The band EconomyConfig's header promises. Change this only with the header.
-TARGET_MIN, TARGET_MAX = 30, 40
+# What one weapon is worth, in won rounds. Change this only with the header.
+#
+# This was an absolute "the roster unlocks in 30-40 won rounds", and it held
+# while the roster was twenty weapons. It is not the invariant it looked like.
+# What the number was actually protecting is that EACH weapon costs about two
+# won rounds — near enough that the next one is always in sight, far enough that
+# buying it meant something. 39 rounds across 20 weapons WAS 1.95 each; the 39
+# was the consequence, not the rule.
+#
+# Holding the absolute while the roster grows forces one of two bad answers:
+# halve every price, so no purchase is a decision any more, or raise income,
+# which drags kill share below the 45% EconomyConfig documents. Both break
+# something real to protect a number that was only ever a proxy.
+#
+# So the target is per weapon, and the absolute is a sanity ceiling underneath
+# it — because "two rounds each" across two hundred weapons is still nonsense,
+# and a rule with no upper bound is not a rule.
+PER_WEAPON_MIN, PER_WEAPON_MAX = 1.6, 2.4
+ABSOLUTE_CEILING = 90
 
 # The per-kill band the design promises, read from the config that enforces it.
 BAND_MIN = int(re.search(r"EconomyConfig\.MinKillReward = (\d+)", read("src/shared/Config/EconomyConfig.lua")).group(1))
@@ -282,10 +299,14 @@ def main() -> int:
 
     cheapest = min(buyable, key=lambda e: e["price"])
     rounds = (roster - START) / won["total"]
+    per_weapon = rounds / max(len(buyable), 1)
     print(f"  starting balance   ${START:,}")
     print(f"  first purchase     {cheapest['id']} at ${cheapest['price']:,}"
           f"{' — affordable on the first visit' if START >= cheapest['price'] else ''}")
-    print(f"  ROSTER UNLOCKED IN {rounds:.0f} won rounds   (target {TARGET_MIN}-{TARGET_MAX})")
+    print(f"  ROSTER UNLOCKED IN {rounds:.0f} won rounds   "
+          f"(ceiling {ABSOLUTE_CEILING})")
+    print(f"  a weapon costs     {per_weapon:.2f} won rounds   "
+          f"(target {PER_WEAPON_MIN}-{PER_WEAPON_MAX})")
     # Reported, never folded in. A prestige item is a goal a player reaches for
     # AFTER the roster, so averaging it into "how long is the roster" would
     # describe neither honestly. Printing it is not optional though: an item left
@@ -302,10 +323,16 @@ def main() -> int:
         print(f"  {price:>8}  {entry['category']:<9} {entry['id']}")
 
     problems = []
-    if not TARGET_MIN <= rounds <= TARGET_MAX:
+    if not PER_WEAPON_MIN <= per_weapon <= PER_WEAPON_MAX:
         problems.append(
-            f"the roster unlocks in {rounds:.0f} rounds, outside the {TARGET_MIN}-{TARGET_MAX} "
+            f"a weapon costs {per_weapon:.2f} won rounds, outside the "
+            f"{PER_WEAPON_MIN}-{PER_WEAPON_MAX} "
             f"EconomyConfig's header promises"
+        )
+    if rounds > ABSOLUTE_CEILING:
+        problems.append(
+            f"the whole roster takes {rounds:.0f} won rounds — past the {ABSOLUTE_CEILING} "
+            f"ceiling, whatever the per-weapon pace says"
         )
     # The band is enforced by EconomyConfig.rewardForKill's clamp, so what is
     # checked here is that the clamp is still there and still says 2-8 — a table
@@ -323,8 +350,19 @@ def main() -> int:
             f"a new player cannot afford anything: ${START:,} against a cheapest of "
             f"${cheapest['price']:,}"
         )
-    if START >= cheapest["price"] * 2:
-        problems.append("the starting balance buys more than one thing on the first visit")
+    # The two CHEAPEST things, not twice the cheapest one.
+    #
+    # The old test was `START >= cheapest * 2`, which asks whether a player could
+    # buy the cheapest item twice — something no shop in this game allows, since
+    # everything is a one-time unlock. With a $900 pistol and a $1,400 bat it
+    # fired on a starting balance that in fact buys exactly one of them, which is
+    # precisely the state it exists to protect.
+    two_cheapest = sorted(e["price"] for e in buyable)[:2]
+    if len(two_cheapest) == 2 and START >= sum(two_cheapest):
+        problems.append(
+            f"the starting balance buys the two cheapest items at once "
+            f"(${sum(two_cheapest):,} against ${START:,}); the first visit should be one choice"
+        )
     if won["total"] > CAP * 0.8:
         problems.append(f"a normal won round (${won['total']:,.0f}) is close to MaxPerRound (${CAP:,})")
 

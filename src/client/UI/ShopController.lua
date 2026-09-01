@@ -23,6 +23,22 @@
 	arbitrary number I hit". Recoil and spread are INVERTED — less is better, and
 	a bar that grew as a gun got worse would read backwards.
 
+	── THE RELOAD BAR IS FLATTER THAN IT WAS, ON PURPOSE ────────────────────────
+	Adding the two machine guns took the reload range from 0.7-3.0 seconds to
+	0.7-5.0, so every other gun now draws inside the top half of that bar — an
+	existing weapon keeps about 53% of the span it used to have.
+
+	That is the honest result rather than a regression to fix. A five-second belt
+	change IS the slowest reload in the game, and against a roster that contains
+	one, a 2.5-second rifle reload genuinely is fast. The alternative was trimming
+	the M60E4's reload to protect a bar, which is designing the weapon around the
+	readout instead of the other way round.
+
+	Worth knowing if the roster ever grows a weapon slower still: past about seven
+	seconds this bar stops distinguishing anything that is not a machine gun, and
+	the answer then is a separate family, the way melee and the launcher already
+	are — not a shorter reload.
+
 	── WHY COMING-SOON ENTRIES ARE SHOWN ────────────────────────────────────────
 	The three specials have no model, no stats and no behaviour. They are drawn
 	anyway, greyed and unbuyable, because a SPECIALS tab that is empty reads as

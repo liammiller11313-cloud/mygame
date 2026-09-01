@@ -29,6 +29,9 @@ Enums.Weapon = table.freeze({
 	     working". It is a secondary by slot only — priced, loaded and reloaded so
 	     that carrying it means giving up the fallback the slot exists for. ]]
 	RPG7 = "RPG7",
+	--[[ The seventh, from the supplied models. Capacity rather than punch — see
+	     WeaponConfig. ]]
+	M9 = "M9",
 
 	--[[ Melee. Five, each with a different reason to carry it: reach, speed,
 	     damage, how many bodies one swing goes through. Every one of them has a
@@ -39,8 +42,12 @@ Enums.Weapon = table.freeze({
 	LeadPipe = "LeadPipe",
 	Knife = "Knife",
 
-	-- Primary: shotgun
+	--[[ Primary: shotguns. Four now, and they differ by how they FEED rather
+	     than by damage: two pumps, a semi-auto, and a drum. ]]
 	Shotgun = "Shotgun",
+	TacticalShotty = "TacticalShotty",
+	M1014 = "M1014",
+	DAO12 = "DAO12",
 
 	-- Primary: submachine guns
 	PPSh41 = "PPSh41",
@@ -55,10 +62,20 @@ Enums.Weapon = table.freeze({
 	Mk18CQBR = "Mk18CQBR",
 	AK12 = "AK12",
 	AKM = "AKM",
+	M16A4 = "M16A4",
+	HK416D = "HK416D",
+	HK417 = "HK417",
+
+	--[[ Primary: light machine guns. A new shape rather than more of the same —
+	     a hundred rounds is the only answer to a horde that does not stop. ]]
+	M249 = "M249",
+	M60E4 = "M60E4",
 
 	-- Primary: marksman
 	ScopedMk18 = "ScopedMk18",
 	M1AEBR = "M1AEBR",
+	MK11 = "MK11",
+	M24 = "M24",
 })
 
 -- Inventory slot. A survivor holds exactly one item per slot, L4D2 style.

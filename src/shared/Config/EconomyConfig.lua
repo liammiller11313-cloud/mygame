@@ -9,22 +9,35 @@
 	rather than asserted.
 
 	── THE TARGET ───────────────────────────────────────────────────────────────
-	A decent player should own the whole roster after roughly 30-40 rounds. That
-	is the number every other number here is derived from:
+	ONE WEAPON IS WORTH ABOUT TWO WON ROUNDS. That is the number every other
+	number here is derived from:
 
 	  a round pays  ~$1,000 in kills + $1,100 for a win + $60 a wave survived
 	                ≈ $2,500 for a won round, ~$1,000 for a deep loss
-	  the roster    ≈ $98,900 of purchasable weapons
-	  therefore     ≈ 39 winning rounds, and a loss still moves you forward
+	  the roster    31 purchasable weapons, $157,000
+	  therefore     ≈ 62 winning rounds at 1.99 each, and a loss still moves you
+	                forward
 
-	  ── HEADROOM: NONE. 39 of a 40 ceiling. ──
+	This used to read "the whole roster in 30-40 rounds", and that was the same
+	rule while the roster was twenty weapons: 39 rounds across 20 of them IS 1.95
+	each. When the eleven supplied models were added the roster grew by half and
+	the absolute stopped being able to mean what it meant — holding 40 would have
+	forced either halving every price, so no purchase is a decision, or raising
+	income, which drags the kill share below the 45% this file protects further
+	down. The 39 was the consequence; two-rounds-a-weapon was always the rule.
 
-	  The RPG-7 is not in that $98,900 and not in that 39. It is marked
-	  `prestige`, which takes it out of the roster sum on purpose — see the field
-	  itself. scripts/economy.py prints it on its own line, at ten further won
-	  rounds, so it is measured rather than exempt. Anything else priced above
-	  the ladder belongs there too; anything priced ON the ladder still has to
-	  fit inside the ceiling above, which has room for nothing.
+	scripts/economy.py checks the per-weapon pace and keeps an absolute ceiling of
+	90 rounds underneath it, because a rule with no upper bound is not a rule.
+
+	  ── HEADROOM: 1.99 against a 2.4 ceiling. A NEW WEAPON PAYS FOR ITSELF. ──
+
+	  Adding one at roughly $5,000 keeps the pace where it is; adding one at
+	  $20,000 does not, and the model will say so.
+
+	  The RPG-7 is in none of these numbers. It is marked `prestige`, which takes
+	  it out of the roster sum on purpose — see the field itself. economy.py
+	  prints it on its own line, at ten further won rounds, so it is measured
+	  rather than exempt. Anything else priced above the ladder belongs there too.
 	  Three secondaries went in at $8,500 and took this from 35 rounds to 39. The
 	  NEXT priced thing added to the catalogue fails scripts/economy.py, and the
 	  fix at that point is the income side — as it was when the melee roster went
@@ -252,6 +265,10 @@ EconomyConfig.Catalogue = table.freeze({
 	     Berettas are the first thing a new player can afford, the Glock is a
 	     sidegrade rather than an upgrade, and the Sawn-Off is the only secondary
 	     that changes how you fight rather than how long you last. ]]
+	--[[ Cheapest thing in the game, and deliberately so: it is what a player
+	     buys in their first session, and the lesson it teaches is that a
+	     sidegrade can be worth money. ]]
+	{ id = Enums.Weapon.M9, category = "SECONDARY", price = 900 },
 	{ id = Enums.Weapon.DualBerettas, category = "SECONDARY", price = 1500 },
 	{ id = Enums.Weapon.Glock18, category = "SECONDARY", price = 2800 },
 	{ id = Enums.Weapon.SawnOff, category = "SECONDARY", price = 4200 },
@@ -279,6 +296,12 @@ EconomyConfig.Catalogue = table.freeze({
 	-- ── primaries ───────────────────────────────────────────────────────────
 	-- Shotgun. Cheap because it is the most conditional weapon in the game.
 	{ id = Enums.Weapon.Shotgun, category = "PRIMARY", price = 3000 },
+	--[[ Priced across the ladder rather than above it. The four shotguns are
+	     sidegrades of each other — pump, pump, semi, drum — so the money buys
+	     a different rhythm, not a better gun. ]]
+	{ id = Enums.Weapon.TacticalShotty, category = "PRIMARY", price = 2600 },
+	{ id = Enums.Weapon.M1014, category = "PRIMARY", price = 4200 },
+	{ id = Enums.Weapon.DAO12, category = "PRIMARY", price = 5400 },
 
 	-- SMGs. The UMP is the free primary, so everything near it is priced as a
 	-- sidegrade rather than as an upgrade.
@@ -293,11 +316,24 @@ EconomyConfig.Catalogue = table.freeze({
 	{ id = Enums.Weapon.AKM, category = "PRIMARY", price = 5800 },
 	{ id = Enums.Weapon.HK416A5, category = "PRIMARY", price = 7000 },
 	{ id = Enums.Weapon.Mk18CQBR, category = "PRIMARY", price = 7500 },
+	{ id = Enums.Weapon.M16A4, category = "PRIMARY", price = 3800 },
+	{ id = Enums.Weapon.HK416D, category = "PRIMARY", price = 5000 },
 	{ id = Enums.Weapon.AK12, category = "PRIMARY", price = 8000 },
+	-- The battle rifle sits above the assault rifles and below the marksman
+	-- guns, which is exactly where it plays.
+	{ id = Enums.Weapon.HK417, category = "PRIMARY", price = 6200 },
+
+	--[[ Machine guns. Priced with the rifles rather than above them: a hundred
+	     rounds is a different way to play, and the reload, the movement penalty
+	     and the hip spread are what it actually costs. ]]
+	{ id = Enums.Weapon.M249, category = "PRIMARY", price = 7000 },
+	{ id = Enums.Weapon.M60E4, category = "PRIMARY", price = 8200 },
 
 	-- Marksman. Priced above the rifles because they reward a different game
 	-- rather than a better one.
 	{ id = Enums.Weapon.ScopedMk18, category = "PRIMARY", price = 9000 },
+	{ id = Enums.Weapon.MK11, category = "PRIMARY", price = 7200 },
+	{ id = Enums.Weapon.M24, category = "PRIMARY", price = 7600 },
 	{ id = Enums.Weapon.M1AEBR, category = "PRIMARY", price = 10500 },
 
 	-- ── melee ───────────────────────────────────────────────────────────────

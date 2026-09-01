@@ -237,7 +237,12 @@ AmmoConfig.Weapons = {
 	     difference between "has none" and "was forgotten", which is exactly the
 	     distinction the three rows above got wrong. ]]
 	[Enums.Weapon.RPG7] = { casing = "", magazine = "" },
+	[Enums.Weapon.M9] = { casing = "9mm", magazine = "PistolMag" },
 	[Enums.Weapon.Shotgun] = { casing = "12ga", magazine = "ShotgunShell" },
+	[Enums.Weapon.TacticalShotty] = { casing = "12ga", magazine = "ShotgunShell" },
+	[Enums.Weapon.M1014] = { casing = "12ga", magazine = "ShotgunShell" },
+	--[[ The only shotgun that drops a drum rather than feeding shells. ]]
+	[Enums.Weapon.DAO12] = { casing = "12ga", magazine = "DrumMag" },
 
 	[Enums.Weapon.PPSh41] = { casing = "762", magazine = "DrumMag" },
 	[Enums.Weapon.KrissVector] = { casing = "45acp", magazine = "SmgMag" },
@@ -250,9 +255,20 @@ AmmoConfig.Weapons = {
 	[Enums.Weapon.Mk18CQBR] = { casing = "556", magazine = "StanagMag" },
 	[Enums.Weapon.AK12] = { casing = "556", magazine = "AkMag" },
 	[Enums.Weapon.AKM] = { casing = "762", magazine = "AkMag" },
+	[Enums.Weapon.M16A4] = { casing = "556", magazine = "StanagMag" },
+	[Enums.Weapon.HK416D] = { casing = "556", magazine = "StanagMag" },
+	[Enums.Weapon.HK417] = { casing = "762", magazine = "MarksmanMag" },
+
+	--[[ Belt-fed, and there is no belt model. The drum is the closest thing in
+	     the folder to a hundred rounds coming out of a box, and a wrong magazine
+	     that exists reads better than a right one that grey-boxes. ]]
+	[Enums.Weapon.M249] = { casing = "556", magazine = "DrumMag" },
+	[Enums.Weapon.M60E4] = { casing = "762", magazine = "DrumMag" },
 
 	[Enums.Weapon.ScopedMk18] = { casing = "556", magazine = "StanagMag" },
 	[Enums.Weapon.M1AEBR] = { casing = "762", magazine = "MarksmanMag" },
+	[Enums.Weapon.MK11] = { casing = "762", magazine = "MarksmanMag" },
+	[Enums.Weapon.M24] = { casing = "762", magazine = "MarksmanMag" },
 
 	[Enums.Weapon.Machete] = { casing = "", magazine = "" },
 } :: { [string]: { casing: string, magazine: string } }

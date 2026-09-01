@@ -47,7 +47,7 @@
 local Enums = require(script.Parent.Parent.Enums)
 
 export type FireMode = "Semi" | "Auto" | "Pump" | "Melee"
-export type WeaponClass = "Pistol" | "SMG" | "Rifle" | "Marksman" | "Shotgun" | "Melee" | "Launcher"
+export type WeaponClass = "Pistol" | "SMG" | "Rifle" | "LMG" | "Marksman" | "Shotgun" | "Melee" | "Launcher"
 
 export type WeaponDefinition = {
 	id: string,
@@ -145,7 +145,12 @@ WeaponConfig.Definitions = {
 	[Enums.Weapon.M1911A1] = {
 		id = Enums.Weapon.M1911A1,
 		displayName = "M1911A1",
-		modelName = "M1911A1",
+		--[[ "M1911" rather than "M1911A1", because that is what the supplied model
+		     is called. The loader tries modelName, then id, then displayName — the
+		     last two are still M1911A1 — so a folder holding either name resolves,
+		     and this one was grey-boxing a perfectly good model sitting in the
+		     right place under a perfectly reasonable name. ]]
+		modelName = "M1911",
 		slot = Enums.Slot.Secondary,
 		class = "Pistol",
 		fireMode = "Semi",
@@ -194,6 +199,65 @@ WeaponConfig.Definitions = {
 		gibPower = 0.08,
 		dismemberPower = 0.3,
 		knockback = 14,
+	},
+
+	--[[ Beretta's answer to the same question the M1911 asks, and the reason to
+	     carry it is capacity rather than punch. Fifteen rounds against seven, at
+	     rather less per round — the 1911 ends an argument, this one has a longer
+	     argument. Free-adjacent on purpose: it is the first thing a new player can
+	     buy, and it should teach that a cheap sidegrade is a real choice. ]]
+	[Enums.Weapon.M9] = {
+		id = Enums.Weapon.M9,
+		displayName = "M9",
+		modelName = "M9",
+		slot = Enums.Slot.Secondary,
+		class = "Pistol",
+		fireMode = "Semi",
+
+		damage = 18,
+		rpm = 450,
+		pellets = 1,
+		magSize = 15,
+		reserveMax = -1,
+		penetration = 1,
+		penetrationFalloff = 0.55,
+
+		falloffStart = 60,
+		falloffEnd = 220,
+		falloffMin = 0.42,
+		maxRange = 500,
+
+		spreadHip = 1.7,
+		spreadAim = 0.45,
+		spreadMoving = 1.1,
+		spreadMax = 5.5,
+		bloomPerShot = 0.5,
+		bloomRecovery = 6.0,
+
+		recoilVertical = 0.9,
+		recoilHorizontal = 0.32,
+		recoilRecovery = 11.0,
+		kickback = 0.11,
+
+		reloadTime = 1.7,
+		reloadPerShell = 0,
+		drawTime = 0.3,
+		aimTime = 0.16,
+
+		walkSpeedScale = 1.0,
+		aimWalkSpeedScale = 0.78,
+		aimFov = 66,
+
+		shakeMagnitude = 0.45,
+		shakeRoughness = 9,
+		tracerWidth = 0.05,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 0.95,
+		shellEject = true,
+
+		gibPower = 0.03,
+		dismemberPower = 0.15,
+		knockback = 7,
 	},
 
 	--[[ Six rounds, and every one of them removes a Common from the world.
@@ -589,6 +653,181 @@ WeaponConfig.Definitions = {
 		gibPower = 1.0,
 		dismemberPower = 1.0,
 		knockback = 64,
+	},
+
+	--[[ The pump gun with two more shells and a shorter reach than the Shotgun it
+	     sits beside. Same rhythm, more of it before the reload — which is the
+	     whole difference in a corridor, and nothing at all in the open. ]]
+	[Enums.Weapon.TacticalShotty] = {
+		id = Enums.Weapon.TacticalShotty,
+		displayName = "Tactical Shotty",
+		modelName = "Tactical Shotty",
+		slot = Enums.Slot.Primary,
+		class = "Shotgun",
+		fireMode = "Pump",
+
+		damage = 20,
+		rpm = 75,
+		pellets = 8,
+		magSize = 6,
+		reserveMax = 60,
+		penetration = 2,
+		penetrationFalloff = 0.7,
+
+		falloffStart = 26,
+		falloffEnd = 110,
+		falloffMin = 0.18,
+		maxRange = 320,
+
+		spreadHip = 6.2,
+		spreadAim = 4.2,
+		spreadMoving = 1.3,
+		spreadMax = 10.0,
+		bloomPerShot = 0.6,
+		bloomRecovery = 4.2,
+
+		recoilVertical = 3.9,
+		recoilHorizontal = 0.85,
+		recoilRecovery = 6.8,
+		kickback = 0.36,
+
+		reloadTime = 0.75,
+		reloadPerShell = 0.42,
+		drawTime = 0.55,
+		aimTime = 0.28,
+
+		walkSpeedScale = 0.94,
+		aimWalkSpeedScale = 0.66,
+		aimFov = 64,
+
+		shakeMagnitude = 1.4,
+		shakeRoughness = 11,
+		tracerWidth = 0.06,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 1.5,
+		shellEject = true,
+
+		gibPower = 0.55,
+		dismemberPower = 0.7,
+		knockback = 40,
+	},
+
+	--[[ Semi-automatic, which changes what a shotgun IS here. The pump guns make
+	     you decide between each shell; this one lets you empty eight into a
+	     Charger and asks for eight seconds back afterwards. Less per pellet to pay
+	     for it. ]]
+	[Enums.Weapon.M1014] = {
+		id = Enums.Weapon.M1014,
+		displayName = "M1014",
+		modelName = "M1014",
+		slot = Enums.Slot.Primary,
+		class = "Shotgun",
+		fireMode = "Semi",
+
+		damage = 17,
+		rpm = 200,
+		pellets = 8,
+		magSize = 8,
+		reserveMax = 64,
+		penetration = 2,
+		penetrationFalloff = 0.68,
+
+		falloffStart = 24,
+		falloffEnd = 105,
+		falloffMin = 0.17,
+		maxRange = 310,
+
+		spreadHip = 5.8,
+		spreadAim = 4.0,
+		spreadMoving = 1.35,
+		spreadMax = 10.5,
+		bloomPerShot = 0.75,
+		bloomRecovery = 4.0,
+
+		recoilVertical = 2.9,
+		recoilHorizontal = 0.8,
+		recoilRecovery = 7.5,
+		kickback = 0.3,
+
+		reloadTime = 0.7,
+		reloadPerShell = 0.38,
+		drawTime = 0.55,
+		aimTime = 0.28,
+
+		walkSpeedScale = 0.94,
+		aimWalkSpeedScale = 0.66,
+		aimFov = 64,
+
+		shakeMagnitude = 1.25,
+		shakeRoughness = 11,
+		tracerWidth = 0.06,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 1.45,
+		shellEject = true,
+
+		gibPower = 0.45,
+		dismemberPower = 0.62,
+		knockback = 34,
+	},
+
+	--[[ Twelve shells in a drum, and the only shotgun that reloads as one piece
+	     rather than shell by shell. That is the trade in both directions: nothing
+	     else in the game holds a horde off for twelve continuous shots, and
+	     nothing else leaves you standing there for three whole seconds when it
+	     runs out. Weakest pellets of the four, because twelve of them is already
+	     the strongest thing about it. ]]
+	[Enums.Weapon.DAO12] = {
+		id = Enums.Weapon.DAO12,
+		displayName = "DAO-12",
+		modelName = "DAO-12",
+		slot = Enums.Slot.Primary,
+		class = "Shotgun",
+		fireMode = "Semi",
+
+		damage = 15,
+		rpm = 240,
+		pellets = 8,
+		magSize = 12,
+		reserveMax = 72,
+		penetration = 2,
+		penetrationFalloff = 0.65,
+
+		falloffStart = 22,
+		falloffEnd = 100,
+		falloffMin = 0.15,
+		maxRange = 300,
+
+		spreadHip = 6.6,
+		spreadAim = 4.8,
+		spreadMoving = 1.5,
+		spreadMax = 11.0,
+		bloomPerShot = 0.8,
+		bloomRecovery = 3.8,
+
+		recoilVertical = 2.6,
+		recoilHorizontal = 0.9,
+		recoilRecovery = 7.2,
+		kickback = 0.28,
+
+		reloadTime = 3.0,
+		reloadPerShell = 0,
+		drawTime = 0.65,
+		aimTime = 0.3,
+
+		walkSpeedScale = 0.92,
+		aimWalkSpeedScale = 0.64,
+		aimFov = 64,
+
+		shakeMagnitude = 1.2,
+		shakeRoughness = 11,
+		tracerWidth = 0.06,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 1.4,
+		shellEject = true,
+
+		gibPower = 0.4,
+		dismemberPower = 0.55,
+		knockback = 30,
 	},
 
 	--[[ Seventy-one rounds at a thousand a minute. It empties in four seconds
@@ -1164,6 +1403,303 @@ WeaponConfig.Definitions = {
 		knockback = 24,
 	},
 
+	--[[ The only semi-automatic rifle in the roster, and that is the point of it
+	     rather than a limitation. Every round is aimed, hits harder than the M4's,
+	     and costs nothing in bloom because you cannot hold the trigger anyway. A
+	     player who lands headshots is better served by this than by anything
+	     automatic; a player who panics is not. ]]
+	[Enums.Weapon.M16A4] = {
+		id = Enums.Weapon.M16A4,
+		displayName = "M16A4",
+		modelName = "M16A4",
+		slot = Enums.Slot.Primary,
+		class = "Rifle",
+		fireMode = "Semi",
+
+		damage = 34,
+		rpm = 800,
+		pellets = 1,
+		magSize = 30,
+		reserveMax = 300,
+		penetration = 2,
+		penetrationFalloff = 0.62,
+
+		falloffStart = 220,
+		falloffEnd = 650,
+		falloffMin = 0.64,
+		maxRange = 1300,
+
+		spreadHip = 2.4,
+		spreadAim = 0.32,
+		spreadMoving = 1.45,
+		spreadMax = 6.0,
+		bloomPerShot = 0.45,
+		bloomRecovery = 7.0,
+
+		recoilVertical = 1.05,
+		recoilHorizontal = 0.34,
+		recoilRecovery = 11.0,
+		kickback = 0.18,
+
+		reloadTime = 2.4,
+		reloadPerShell = 0,
+		drawTime = 0.5,
+		aimTime = 0.22,
+
+		walkSpeedScale = 0.96,
+		aimWalkSpeedScale = 0.68,
+		aimFov = 58,
+
+		shakeMagnitude = 0.9,
+		shakeRoughness = 12,
+		tracerWidth = 0.06,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 1.25,
+		shellEject = true,
+
+		gibPower = 0.14,
+		dismemberPower = 0.48,
+		knockback = 18,
+	},
+
+	--[[ The 416 with the barrel cut down: everything the HK416A5 does, half a
+	     step quicker to bring up and aim, half a step worse past a courtyard. It
+	     is a sidegrade and priced as one — the roster is meant to have weapons you
+	     pick because they suit you, not only weapons that are better. ]]
+	[Enums.Weapon.HK416D] = {
+		id = Enums.Weapon.HK416D,
+		displayName = "HK416D",
+		modelName = "HK416D",
+		slot = Enums.Slot.Primary,
+		class = "Rifle",
+		fireMode = "Auto",
+
+		damage = 30,
+		rpm = 800,
+		pellets = 1,
+		magSize = 30,
+		reserveMax = 330,
+		penetration = 2,
+		penetrationFalloff = 0.62,
+
+		falloffStart = 210,
+		falloffEnd = 630,
+		falloffMin = 0.63,
+		maxRange = 1250,
+
+		spreadHip = 2.45,
+		spreadAim = 0.36,
+		spreadMoving = 1.5,
+		spreadMax = 6.4,
+		bloomPerShot = 0.42,
+		bloomRecovery = 6.8,
+
+		recoilVertical = 1.0,
+		recoilHorizontal = 0.36,
+		recoilRecovery = 10.8,
+		kickback = 0.17,
+
+		reloadTime = 2.45,
+		reloadPerShell = 0,
+		drawTime = 0.5,
+		aimTime = 0.22,
+
+		walkSpeedScale = 0.96,
+		aimWalkSpeedScale = 0.68,
+		aimFov = 60,
+
+		shakeMagnitude = 0.88,
+		shakeRoughness = 12,
+		tracerWidth = 0.06,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 1.25,
+		shellEject = true,
+
+		gibPower = 0.13,
+		dismemberPower = 0.46,
+		knockback = 17,
+	},
+
+	--[[ A 7.62 battle rifle: the bridge between the assault rifles and the
+	     marksman guns, and the only automatic weapon that punches through three
+	     bodies. Twenty rounds and real climb are what it pays for that — it is not
+	     a rifle you spray, it is one you fire in threes down a corridor full of
+	     them. ]]
+	[Enums.Weapon.HK417] = {
+		id = Enums.Weapon.HK417,
+		displayName = "HK417",
+		modelName = "HK417",
+		slot = Enums.Slot.Primary,
+		class = "Rifle",
+		fireMode = "Auto",
+
+		damage = 46,
+		rpm = 600,
+		pellets = 1,
+		magSize = 20,
+		reserveMax = 220,
+		penetration = 3,
+		penetrationFalloff = 0.7,
+
+		falloffStart = 260,
+		falloffEnd = 800,
+		falloffMin = 0.7,
+		maxRange = 1600,
+
+		spreadHip = 2.8,
+		spreadAim = 0.4,
+		spreadMoving = 1.7,
+		spreadMax = 7.0,
+		bloomPerShot = 0.6,
+		bloomRecovery = 6.0,
+
+		recoilVertical = 1.9,
+		recoilHorizontal = 0.5,
+		recoilRecovery = 9.0,
+		kickback = 0.26,
+
+		reloadTime = 2.7,
+		reloadPerShell = 0,
+		drawTime = 0.58,
+		aimTime = 0.26,
+
+		walkSpeedScale = 0.94,
+		aimWalkSpeedScale = 0.65,
+		aimFov = 56,
+
+		shakeMagnitude = 1.15,
+		shakeRoughness = 12,
+		tracerWidth = 0.07,
+		tracerColor = AMBER,
+		muzzleFlashSize = 1.4,
+		shellEject = true,
+
+		gibPower = 0.2,
+		dismemberPower = 0.6,
+		knockback = 24,
+	},
+
+	--[[ The first of two light machine guns, and a genuinely new shape in the
+	     roster: a hundred rounds means you do not stop, and not stopping is the
+	     only answer to a horde that does not stop either. Everything else about it
+	     is the bill for that. It is the least accurate thing you can carry from
+	     the hip, the slowest to bring up, and when it finally runs dry you are
+	     unarmed for four and a half seconds — which is longer than a Hunter needs
+	     to cross a room. ]]
+	[Enums.Weapon.M249] = {
+		id = Enums.Weapon.M249,
+		displayName = "M249",
+		modelName = "M249",
+		slot = Enums.Slot.Primary,
+		class = "LMG",
+		fireMode = "Auto",
+
+		damage = 28,
+		rpm = 800,
+		pellets = 1,
+		magSize = 100,
+		reserveMax = 400,
+		penetration = 3,
+		penetrationFalloff = 0.68,
+
+		falloffStart = 200,
+		falloffEnd = 700,
+		falloffMin = 0.6,
+		maxRange = 1400,
+
+		spreadHip = 3.6,
+		spreadAim = 0.9,
+		spreadMoving = 2.4,
+		spreadMax = 8.5,
+		bloomPerShot = 0.35,
+		bloomRecovery = 5.0,
+
+		recoilVertical = 1.15,
+		recoilHorizontal = 0.55,
+		recoilRecovery = 8.5,
+		kickback = 0.2,
+
+		reloadTime = 4.6,
+		reloadPerShell = 0,
+		drawTime = 0.8,
+		aimTime = 0.34,
+
+		walkSpeedScale = 0.9,
+		aimWalkSpeedScale = 0.58,
+		aimFov = 62,
+
+		shakeMagnitude = 1.0,
+		shakeRoughness = 13,
+		tracerWidth = 0.065,
+		tracerColor = AMBER,
+		muzzleFlashSize = 1.5,
+		shellEject = true,
+
+		gibPower = 0.15,
+		dismemberPower = 0.5,
+		knockback = 20,
+	},
+
+	--[[ The other one, and the heavier answer: 7.62 at two thirds the rate. Where
+	     the M249 wins by never stopping, this wins by what each round does on the
+	     way through — thirty-eight a hit through three bodies is a wall of fire
+	     that a horde walks into rather than through. Slowest weapon in the game to
+	     raise, aim, move with and reload; there is no version of carrying it that
+	     is not a commitment. ]]
+	[Enums.Weapon.M60E4] = {
+		id = Enums.Weapon.M60E4,
+		displayName = "M60E4",
+		modelName = "M60E4",
+		slot = Enums.Slot.Primary,
+		class = "LMG",
+		fireMode = "Auto",
+
+		damage = 38,
+		rpm = 550,
+		pellets = 1,
+		magSize = 100,
+		reserveMax = 400,
+		penetration = 3,
+		penetrationFalloff = 0.72,
+
+		falloffStart = 220,
+		falloffEnd = 750,
+		falloffMin = 0.65,
+		maxRange = 1500,
+
+		spreadHip = 3.9,
+		spreadAim = 1.0,
+		spreadMoving = 2.6,
+		spreadMax = 9.0,
+		bloomPerShot = 0.4,
+		bloomRecovery = 4.6,
+
+		recoilVertical = 1.7,
+		recoilHorizontal = 0.65,
+		recoilRecovery = 7.8,
+		kickback = 0.28,
+
+		reloadTime = 5.0,
+		reloadPerShell = 0,
+		drawTime = 0.9,
+		aimTime = 0.38,
+
+		walkSpeedScale = 0.88,
+		aimWalkSpeedScale = 0.55,
+		aimFov = 62,
+
+		shakeMagnitude = 1.3,
+		shakeRoughness = 13,
+		tracerWidth = 0.07,
+		tracerColor = AMBER,
+		muzzleFlashSize = 1.7,
+		shellEject = true,
+
+		gibPower = 0.22,
+		dismemberPower = 0.62,
+		knockback = 26,
+	},
+
 	--[[ A Mk 18 with glass on it. Semi-automatic, punches through two bodies,
 	     and the scope pulls in far enough to make headshots across the map a
 	     genuine option for someone holding the back of the group. ]]
@@ -1276,6 +1812,129 @@ WeaponConfig.Definitions = {
 		gibPower = 0.45,
 		dismemberPower = 0.95,
 		knockback = 32,
+	},
+
+	--[[ Twenty rounds of marksman rifle, which is the whole argument against the
+	     M1A beside it: slightly less per shot, and you can miss twice without it
+	     mattering. The one marksman weapon that can hold a lane on its own. ]]
+	[Enums.Weapon.MK11] = {
+		id = Enums.Weapon.MK11,
+		displayName = "MK11 Mod 0",
+		modelName = "MK11 Mod 0",
+		slot = Enums.Slot.Primary,
+		class = "Marksman",
+		fireMode = "Semi",
+
+		damage = 78,
+		rpm = 260,
+		pellets = 1,
+		magSize = 20,
+		reserveMax = 180,
+		penetration = 3,
+		penetrationFalloff = 0.78,
+
+		falloffStart = 300,
+		falloffEnd = 1000,
+		falloffMin = 0.78,
+		maxRange = 2000,
+
+		spreadHip = 3.2,
+		spreadAim = 0.16,
+		spreadMoving = 2.2,
+		spreadMax = 7.5,
+		bloomPerShot = 0.9,
+		bloomRecovery = 5.5,
+
+		recoilVertical = 2.4,
+		recoilHorizontal = 0.5,
+		recoilRecovery = 8.0,
+		kickback = 0.32,
+
+		reloadTime = 2.8,
+		reloadPerShell = 0,
+		drawTime = 0.62,
+		aimTime = 0.3,
+
+		walkSpeedScale = 0.93,
+		aimWalkSpeedScale = 0.6,
+		aimFov = 44,
+
+		shakeMagnitude = 1.4,
+		shakeRoughness = 12,
+		tracerWidth = 0.08,
+		tracerColor = AMBER,
+		muzzleFlashSize = 1.6,
+		shellEject = true,
+
+		gibPower = 0.3,
+		dismemberPower = 0.75,
+		knockback = 30,
+	},
+
+	--[[ Bolt-action, in a game about being surrounded — which sounds like a joke
+	     and is the most demanding weapon here. Fifty rounds a minute is one shot
+	     roughly every second and a bit, and it has five before a reload. What it
+	     buys is the hardest hit in the game and the tightest cone: at 95 a body
+	     shot and 380 a head, it removes a Special from across a street before the
+	     Special has decided who to jump.
+
+	     Fifty RPM is the fire mode. There is no "Bolt" in FireMode and there does
+	     not need to be — a Semi that can only be fired once a second IS a bolt
+	     gun from the player's side of the screen, and inventing a fourth mode
+	     would mean every service that switches on one growing a branch that
+	     behaves exactly like Semi. ]]
+	[Enums.Weapon.M24] = {
+		id = Enums.Weapon.M24,
+		displayName = "M24 Sniper",
+		modelName = "M24 Sniper",
+		slot = Enums.Slot.Primary,
+		class = "Marksman",
+		fireMode = "Semi",
+
+		damage = 95,
+		rpm = 50,
+		pellets = 1,
+		magSize = 5,
+		reserveMax = 60,
+		penetration = 3,
+		penetrationFalloff = 0.85,
+
+		falloffStart = 350,
+		falloffEnd = 1200,
+		falloffMin = 0.85,
+		maxRange = 2400,
+
+		spreadHip = 4.2,
+		spreadAim = 0.1,
+		spreadMoving = 3.0,
+		spreadMax = 8.0,
+		bloomPerShot = 1.2,
+		bloomRecovery = 4.0,
+
+		recoilVertical = 3.2,
+		recoilHorizontal = 0.5,
+		recoilRecovery = 6.5,
+		kickback = 0.45,
+
+		reloadTime = 3.2,
+		reloadPerShell = 0,
+		drawTime = 0.75,
+		aimTime = 0.38,
+
+		walkSpeedScale = 0.92,
+		aimWalkSpeedScale = 0.55,
+		aimFov = 36,
+
+		shakeMagnitude = 1.8,
+		shakeRoughness = 12,
+		tracerWidth = 0.09,
+		tracerColor = AMBER,
+		muzzleFlashSize = 1.8,
+		shellEject = true,
+
+		gibPower = 0.35,
+		dismemberPower = 0.85,
+		knockback = 36,
 	},
 
 	--[[ Costs no ammo and never runs dry, takes heads off cleanly, and moves
