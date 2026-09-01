@@ -111,6 +111,30 @@ function ProgressionController:getWorn(): (string, string)
 	return state.callsign, state.accent
 end
 
+--[[
+	What a named player is wearing: their accent colour and their callsign.
+
+	Any player, not just this one — which is the whole point of the pass. The
+	four progression facts ride Player attributes precisely so that every client
+	already has everybody else's, and a scoreboard can draw a teammate's callsign
+	without a remote, a cache, or a round trip.
+
+	Returns nil and "" for somebody who has claimed nothing, who has left, or
+	whose saved reward is no longer on the track. A caller that draws whatever it
+	gets is correct in all three cases.
+]]
+function ProgressionController:describe(name: string): (Color3?, string)
+	local other = Players:FindFirstChild(name)
+	if not other or not other:IsA("Player") then
+		return nil, ""
+	end
+	local accentId = tostring(other:GetAttribute(PA.Accent) or "")
+	local callsignId = tostring(other:GetAttribute(PA.Callsign) or "")
+	local accent = if accentId ~= "" then ProgressionConfig.getReward("Accent", accentId) else nil
+	local callsign = if callsignId ~= "" then ProgressionConfig.getReward("Callsign", callsignId) else nil
+	return (if accent then accent.color else nil), (if callsign then callsign.label else "")
+end
+
 --[[ The one-line readout the main menu puts under CAREER. Built here rather
      than there because the currency's name and symbol belong to
      ProgressionConfig, and MainMenuController is close enough to Luau's

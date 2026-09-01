@@ -26,6 +26,15 @@ export type DamageContext = {
 	hitPart: BasePart?,
 	hitPosition: Vector3,
 	hitNormal: Vector3,
+	--[[ Where the damage came FROM, when that is a place rather than a person.
+
+	     Fire and explosions have an origin the victim can walk away from, and it
+	     is not where the thrower is standing. Without this, DamageService falls
+	     back to the attacker, and a molotov a teammate lobbed from forty studs
+	     away points the damage arrow at the teammate — away from the fire the
+	     player is actually standing in. Optional: a bullet has no origin worth
+	     naming that the shooter's position does not already give. ]]
+	sourcePosition: Vector3?,
 	direction: Vector3, -- unit vector along the shot's travel
 	distance: number,
 	piercedCount: number, -- how many bodies this round already passed through
@@ -92,6 +101,7 @@ function Types.newDamageContext(overrides: { [string]: any }?): DamageContext
 		hitPart = nil,
 		hitPosition = Vector3.zero,
 		hitNormal = Vector3.yAxis,
+		sourcePosition = nil,
 		direction = Vector3.zero,
 		distance = 0,
 		piercedCount = 0,

@@ -491,6 +491,32 @@ local function setSuppressed(value: boolean)
 
 	pushSuppression(value)
 
+	--[[
+		Roblox's own player list goes away while this screen is up.
+
+		It draws in the top-right corner of the real screen, which is where the
+		Dollars readout is, and it is not a small element: StatsService puts four
+		columns in it — Level, Kills, Wipeouts, Dollars — so it reaches a long way
+		in from the edge. Two things claiming that corner is not a layout that can
+		be tuned; one of them has to go.
+
+		This one, because the menu already answers what it would tell you. The
+		lobby panel says how many survivors are here and the results screen names
+		every one of them with their numbers, so the platform list on top of that
+		is a second, worse copy. It comes straight back for the round, which is
+		where it is actually read.
+
+		pcall'd because SetCoreGuiEnabled throws if the CoreGui is not up yet, and
+		a player list that stayed visible is not worth failing a menu open over.
+	]]
+	--[[ GetService inline rather than as a file-level local, which is not a
+	     style choice: audit.py reports this file at 182 of Luau's 200
+	     top-level locals and one more require is a real cost. GetService is a
+	     cached lookup and this runs twice per menu open. ]]
+	pcall(function()
+		game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, not value)
+	end)
+
 	state.blurTarget = if value then BLUR_SIZE else 0
 
 	if value then
@@ -871,8 +897,46 @@ local function fillRows(scores: any)
 		end
 		local isLocal = entry.name == player.Name
 		row.frame.Visible = true
-		row.name.Text = string.upper(entry.name)
-		row.name.TextColor3 = if isLocal then COLOR.Accent else COLOR.TextPrimary
+
+		--[[
+			The pass, worn where other people can see it.
+
+			A cosmetic only its owner can look at is not a reward, and until this
+			line the accent and the callsign were visible on exactly one screen:
+			the CAREER panel belonging to the person who bought them. This is the
+			screen every player reads at the end of every round.
+
+			The accent takes over the name's colour, which used to be how "you"
+			was marked — so the row's own hairline carries that instead. A cue
+			that does not depend on colour is the right one anyway: it still says
+			which row is yours when your accent happens to be the same orange.
+		]]
+		local career = Registry.find("ProgressionController")
+		local accent, callsign = nil, ""
+		if career and typeof(career.describe) == "function" then
+			local ok = nil
+			ok, accent, callsign = pcall(career.describe, career, entry.name)
+			if not ok then
+				accent, callsign = nil, ""
+			end
+		end
+
+		row.rule.BackgroundColor3 = if isLocal then COLOR.BorderBright else COLOR.Border
+		row.rule.BackgroundTransparency = if isLocal then 0.2 else 0.55
+
+		local shown = string.upper(entry.name)
+		if callsign ~= "" then
+			shown ..= string.format(
+				'  <font size="%d" color="rgb(%d,%d,%d)">%s</font>',
+				TEXT.Small,
+				math.round(COLOR.TextDim.R * 255),
+				math.round(COLOR.TextDim.G * 255),
+				math.round(COLOR.TextDim.B * 255),
+				callsign
+			)
+		end
+		row.name.Text = shown
+		row.name.TextColor3 = accent or (if isLocal then COLOR.Accent else COLOR.TextPrimary)
 		row.status.Text = if entry.alive then "STANDING" else "DIED"
 		row.status.TextColor3 = if entry.alive then COLOR.TextSecondary else COLOR.Danger
 		for _, cell in row.cells do
@@ -1786,6 +1850,12 @@ local function buildResultRow(index: number): any
 
 	local name = Widgets.label(frame, "Name", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
 	name.Size = UDim2.new(NAME_WIDTH, 0, 1, 0)
+	--[[ So a callsign can be set smaller and dimmer on the same line as the name,
+	     in one label. A second label would have to be positioned after text whose
+	     width Roblox will not tell you until it has drawn it. Safe here because
+	     the key is a Roblox username — letters, digits and underscores — and
+	     never anything RichText would try to parse. ]]
+	name.RichText = true
 
 	local cells = {}
 	for column, definition in STAT_COLUMNS do
@@ -1805,7 +1875,7 @@ local function buildResultRow(index: number): any
 	rule.Position = UDim2.new(0, 0, 1, -LAYOUT.BorderThickness)
 	rule.BackgroundTransparency = 0.55
 
-	return { frame = frame, name = name, status = status, cells = cells }
+	return { frame = frame, name = name, status = status, cells = cells, rule = rule }
 end
 
 local function buildResults()

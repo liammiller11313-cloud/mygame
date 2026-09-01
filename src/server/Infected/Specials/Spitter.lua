@@ -250,6 +250,13 @@ local function sweepPools(now: number)
 						region = Enums.HitRegion.Torso,
 						hitPosition = root.Position,
 						hitNormal = Vector3.yAxis,
+						--[[ The pool, not the survivor standing in it. Without
+						     this the source resolves to the victim's own
+						     position — there is no attacker on an acid tick —
+						     and an arrow pointing at where you already are draws
+						     dead ahead, telling a player the threat is in front
+						     of them while they burn. ]]
+						sourcePosition = centre,
 						direction = -Vector3.yAxis,
 						distance = 0,
 					})

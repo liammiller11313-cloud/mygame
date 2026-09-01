@@ -796,6 +796,7 @@ function ProjectileService:_explode(owner: Player?, position: Vector3)
 				region = Enums.HitRegion.Torso,
 				hitPosition = position,
 				hitNormal = Vector3.yAxis,
+				sourcePosition = position,
 				direction = Vector3.yAxis,
 			})
 		)
@@ -1032,6 +1033,9 @@ function ProjectileService:_stepFire(record: any, index: number, now: number, el
 					region = Enums.HitRegion.Torso,
 					hitPosition = entry.position,
 					hitNormal = Vector3.yAxis,
+					--[[ The pool, not the person who threw it. The arrow has to
+					     point at the thing you can step out of. ]]
+					sourcePosition = record.origin,
 					direction = Vector3.yAxis,
 				})
 			)

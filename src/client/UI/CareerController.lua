@@ -37,6 +37,7 @@ local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local FreeCursor = require(script.Parent.FreeCursor)
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local UiSound = require(script.Parent.UiSound)
@@ -105,8 +106,19 @@ local hint: TextLabel
 
 local state = {
 	open = false,
+	suppressed = false,
 	messageUntil = 0,
 	firstRow = nil :: GuiButton?,
+}
+
+--[[ Owned here rather than shared, because these screens nest: this one opens
+     over a live round from the pause menu, and a shared slot would have the
+     inner screen hand back the outer screen's camera. Written by FreeCursor. ]]
+local restore = {
+	cameraMode = nil :: any,
+	cameraZoom = nil :: any,
+	cameraMinZoom = nil :: any,
+	mouseIcon = nil :: any,
 }
 
 --[[ Rebuilt on every refresh — three of them, once a screen opens or a round
@@ -125,6 +137,39 @@ local function callController(name: string, method: string, ...: any)
 	local controller = Registry.find(name)
 	if controller and typeof(controller[method]) == "function" then
 		pcall(controller[method], controller, ...)
+	end
+end
+
+--[[
+	Everything this panel has to take off the game while it is up.
+
+	It did not need any of this when it only opened from the main menu — the menu
+	had already suppressed the round, exactly as the shop relies on. The pause
+	menu changed that: CAREER now opens over a live first-person round, where the
+	mouse is locked to the middle of the screen and nothing on this panel can be
+	clicked. Modelled on SettingsController, which has opened over a round from
+	the start and got this right.
+]]
+local function setSuppressed(value: boolean)
+	if state.suppressed == value then
+		return
+	end
+	state.suppressed = value
+	callController("InputController", "setEnabled", not value)
+	callController("CrosshairController", "setVisible", not value)
+	callController("PromptController", "setEnabled", not value)
+	callController("TouchController", "setVisible", not value)
+end
+
+--[[ The cursor, unconditionally — NOT conditional on the menu being open the way
+     suppression is. The menu can close underneath this panel, which hands the
+     camera back to a live survivor and pins the cursor to the middle of a screen
+     that is still up. ]]
+local function claimCursor(value: boolean)
+	if value then
+		FreeCursor.take(restore)
+	else
+		FreeCursor.giveBack(restore)
 	end
 end
 
@@ -648,6 +693,8 @@ function CareerController:open()
 	     today's three without rejoining. ]]
 	buildQuests()
 	refresh()
+	setSuppressed(not menuIsOpen())
+	claimCursor(true)
 	GamepadFocus.capture(state.firstRow)
 	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
@@ -659,8 +706,12 @@ function CareerController:close()
 	state.open = false
 	gui.Enabled = false
 	GamepadFocus.release(state.firstRow)
-	--[[ The menu can have been open underneath the whole time. It puts input and
-	     the HUD back the way the shop and the settings panel do. ]]
+	setSuppressed(false)
+	claimCursor(false)
+	--[[ The menu can have been open underneath the whole time, or have opened
+	     while this was up — a round ending is the obvious way. Either way the
+	     release above has just handed input and the HUD back over a menu that is
+	     still on screen. The menu puts both right. ]]
 	if menuIsOpen() then
 		callController("MainMenuController", "reassertSuppression")
 	end

@@ -335,6 +335,13 @@ UITheme.DamageIndicator = table.freeze({
 	Duration = 1.1,
 	Color = Color3.fromRGB(206, 46, 32),
 	MaxSimultaneous = 6,
+
+	--[[ How far away, on the flat, a source has to be before it counts as a
+	     direction at all. Below this the arrow is suppressed: atan2 of nothing is
+	     zero, zero is straight ahead, and an arrow pointing confidently at the
+	     horizon because a Spitter's pool is under your feet is worse than no
+	     arrow. Two studs is inside a body. ]]
+	MinDistance = 2,
 })
 
 UITheme.Vignette = table.freeze({

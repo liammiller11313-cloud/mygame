@@ -752,6 +752,25 @@ local function updateIndicators(dt: number)
 				     that stays where it was drawn while the player spins to face
 				     the thing hitting them is worse than no arrow. ]]
 				local relative = cframe:PointToObjectSpace(entry.position)
+				--[[
+					A source that is effectively AT the camera has no direction.
+
+					atan2(0, 0) is zero, and zero is straight ahead — so damage
+					from something standing on top of you drew a confident arrow
+					at the horizon in front of you. That is not a missing arrow,
+					it is a wrong one, and a player turns to face it.
+
+					Hidden instead. The horizontal magnitude is what matters:
+					vertical distance is not a direction anything on this ring can
+					express, so a Spitter's pool directly underfoot should say
+					nothing rather than point north.
+				]]
+				local flat = Vector2.new(relative.X, relative.Z)
+				if flat.Magnitude < INDICATOR.MinDistance then
+					entry.frame.Visible = false
+					continue
+				end
+				entry.frame.Visible = true
 				local angle = math.atan2(relative.X, -relative.Z)
 				entry.frame.Position = UDim2.new(
 					0.5,

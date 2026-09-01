@@ -78,6 +78,12 @@ local ENTRY_GAP = 8
 
 local ENTRIES = {
 	{ id = "Resume", title = "RESUME", line = "Back to it." },
+	--[[ Above SETTINGS because it is about the round you are in the middle of.
+	     Today's orders are things you do DURING a round — "revive four teammates"
+	     is a decision you make at wave three, not one you plan in a menu — and
+	     making a player leave the round to find out how close they are is how a
+	     quest system stops being part of the game. ]]
+	{ id = "Career", title = "CAREER", line = "Level, orders, the pass." },
 	{ id = "Settings", title = "SETTINGS", line = "Graphics, audio, controls, difficulty." },
 	{ id = "Menu", title = "RETURN TO MAIN MENU", line = "The round keeps going without you." },
 }
@@ -201,6 +207,10 @@ end
 local function activate(id: string)
 	if id == "Resume" then
 		PauseController:close()
+	elseif id == "Career" then
+		-- Closed first, for the same reason SETTINGS is. See below.
+		PauseController:close()
+		callController("CareerController", "open")
 	elseif id == "Settings" then
 		--[[ Closed first. The settings panel does its own suppression and its
 		     own gamepad capture, and two overlays holding both at once is how a

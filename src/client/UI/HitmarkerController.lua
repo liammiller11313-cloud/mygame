@@ -514,10 +514,35 @@ function HitmarkerController:start()
 			finish rather than adding them up — so the freeze covers the whole arc
 			instead of compounding into a stall.
 		]]
-		if HITSTOP.Enabled and payload.killed ~= true and payload.damageType == Enums.DamageType.Melee then
-			local camera = Registry.find("CameraController")
-			if camera and typeof(camera.hitStop) == "function" then
-				pcall(camera.hitStop, camera, HITSTOP.MeleeHitSeconds, HITSTOP.TimeScale)
+		--[[
+			And a hit on a BOSS gets one too, whatever it was made with.
+
+			The reason is the opposite of melee's. Melee needs a freeze because a
+			swing has nothing that distinguishes hitting from missing; a Tank
+			needs one because fifty rounds into something that does not flinch
+			feels like shooting a wall. Shorter than the melee freeze — this fires
+			on every round of an automatic weapon, and a melee-length hold at 750
+			RPM is not weight, it is a stutter.
+
+			Taken as the LARGER of the two rather than fired twice, so a machete
+			into a Tank is one freeze of the right length. CameraController.hitStop
+			would survive both calls — it takes the later finish rather than
+			adding them — but asking for one freeze is clearer than relying on
+			that.
+		]]
+		if HITSTOP.Enabled and payload.killed ~= true then
+			local seconds = 0
+			if payload.damageType == Enums.DamageType.Melee then
+				seconds = HITSTOP.MeleeHitSeconds
+			end
+			if payload.isBoss == true then
+				seconds = math.max(seconds, HITSTOP.BossHitSeconds)
+			end
+			if seconds > 0 then
+				local camera = Registry.find("CameraController")
+				if camera and typeof(camera.hitStop) == "function" then
+					pcall(camera.hitStop, camera, seconds, HITSTOP.TimeScale)
+				end
 			end
 		end
 	end)

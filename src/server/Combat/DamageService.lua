@@ -124,6 +124,13 @@ end
      Falls back to walking back up the shot line, which is exact for anything
      hitscan and still points at the right half of the room for everything else. ]]
 local function sourcePositionFor(ctx: DamageContext): Vector3
+	--[[ First, because it is the only field that means "this damage came from a
+	     PLACE". Everything below answers "who did it", and for a fire or a blast
+	     those are different questions with different answers — see the field's
+	     note in Shared/Types. ]]
+	if ctx.sourcePosition then
+		return ctx.sourcePosition
+	end
 	if ctx.attackerModel then
 		local root = RigUtil.getRoot(ctx.attackerModel)
 		if root then
@@ -580,6 +587,15 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 			     A bullet's feedback is the recoil and the report; a swing has
 			     nothing that distinguishes hitting from missing. ]]
 			damageType = ctx.damageType,
+			--[[ Unlike `kind`, this rides on EVERY hit, not only a kill.
+
+			     A Tank takes fifty rounds before it dies, and all fifty of them
+			     currently feel exactly like shooting a Common — the one fight in
+			     the game built around a body that does not go down has no
+			     feedback that says so until the moment it does. The client turns
+			     this into GoreConfig.HitStop.BossHitSeconds, which was in the
+			     config with nothing reading it. ]]
+			isBoss = infectedDefinition ~= nil and infectedDefinition.isBoss == true,
 			kind = if result.killed and not isSurvivor
 				then target:GetAttribute(Attributes.Infected.Kind)
 				else nil,
