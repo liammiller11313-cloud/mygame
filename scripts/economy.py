@@ -33,6 +33,7 @@ def read(rel):
 
 
 ECON = read("src/shared/Config/EconomyConfig.lua")
+PROG = read("src/shared/Config/ProgressionConfig.lua")
 MODE = read("src/shared/Config/GameModeConfig.lua")
 DIRECTOR = read("src/shared/Config/DirectorConfig.lua")
 
@@ -149,6 +150,95 @@ def round_income(waves_reached: int, won: bool) -> dict:
     }
 
 
+def prog_scalar(name):
+    """A plain number off ProgressionConfig, the way scalar() reads EconomyConfig."""
+    m = re.search(rf"^ProgressionConfig\.{name} = ([0-9_]+)$", PROG, re.M)
+    assert m, f"ProgressionConfig.{name} not found"
+    return int(m.group(1).replace("_", ""))
+
+
+def xp_table():
+    block = PROG.split("ProgressionConfig.Xp = table.freeze({")[1].split("})")[0]
+    return {k: int(v) for k, v in re.findall(r"^\t(\w+) = (\d+),", block, re.M)}
+
+
+def pass_costs():
+    """Every tier's price, from the track's length and the same linear rule the
+    config uses. Counted rather than assumed: the track is a list somebody adds
+    to, and a hard-coded 20 here would go stale the first time they do."""
+    block = PROG.split("local PASS_TRACK: { PassTier } = table.freeze({")[1].split("\n})")[0]
+    tiers = len(re.findall(r"kind = \"", block))
+    base, step = prog_scalar("PassCostBase"), prog_scalar("PassCostStep")
+    return [base + step * (t - 1) for t in range(1, tiers + 1)]
+
+
+def round_xp(r: dict, won: bool, waves_reached: int, revives: float = 1.0) -> float:
+    """What ONE player's round is worth in experience.
+
+    Commons are the remainder, exactly as ProgressionService computes them:
+    StatsService's `kills` is the total, so paying the flat Common rate on it
+    would pay a Tank at the Common rate on top of the Boss rate it already got.
+    """
+    xp = xp_table()
+    kills = r["commons"] + r["specials"] + r["bosses"]
+    return (
+        r["commons"] * xp["Common"]
+        + r["specials"] * xp["Special"]
+        + r["bosses"] * xp["Boss"]
+        + kills * HEADSHOT_RATE * xp["Headshot"]
+        + revives * xp["Revive"]
+        + waves_reached * xp["WaveReached"]
+        + (xp["Victory"] if won else 0)
+    )
+
+
+def level_cost(level: int) -> int:
+    base, step = prog_scalar("XpBase"), prog_scalar("XpStep")
+    return 0 if level >= prog_scalar("MaxLevel") else base + step * (level - 1)
+
+
+def scrip_through(level: int) -> int:
+    per, milestone, every = (
+        prog_scalar("ScripPerLevel"),
+        prog_scalar("ScripMilestone"),
+        prog_scalar("MilestoneEvery"),
+    )
+    return sum(per + (milestone if k % every == 0 else 0) for k in range(1, level))
+
+
+def progression(won: dict) -> None:
+    """The second axis, printed against the same round as the first.
+
+    Informational, not a gate. The Dollars checks below fail the build because
+    an unaffordable roster is a broken game; a progression curve that has
+    drifted is a design call somebody should SEE, and failing on it would only
+    teach whoever is tuning it to edit the threshold.
+    """
+    per_round = round_xp(won, True, len(WAVES))
+    print(f"  a won round is worth {per_round:,.0f} XP\n")
+
+    print(f"  {'':<12}{'total XP':>11}{'won rounds':>12}{'that level':>12}{'scrip':>9}")
+    for level in (5, 10, 20, 50):
+        total = sum(level_cost(k) for k in range(1, level))
+        print(
+            f"  level {level:<6}{total:>11,}{total / per_round:>12.1f}"
+            f"{level_cost(level) / per_round:>12.2f}{scrip_through(level):>9,}"
+        )
+
+    costs = pass_costs()
+    track = sum(costs)
+    on_levels = next(
+        (lv for lv in range(1, prog_scalar("MaxLevel")) if scrip_through(lv) >= track), None
+    )
+    daily = prog_scalar("DailyQuests")
+    quest_scrip = [int(m) for m in re.findall(r"^\t\tscrip = (\d+),", PROG, re.M)]
+    per_day = daily * (sum(quest_scrip) / len(quest_scrip)) if quest_scrip else 0
+    print(f"\n  the pass is {len(costs)} tiers, {track:,} scrip in total")
+    print(f"  levelling alone pays for it by level {on_levels}")
+    if per_day:
+        print(f"  {daily} dailies a day pays for it in {track / per_day:.0f} days\n")
+
+
 def main() -> int:
     buyable = [e for e in CATALOGUE if not e["soon"] and e["price"] > 0]
     free = [e for e in CATALOGUE if not e["soon"] and e["price"] == 0]
@@ -173,6 +263,10 @@ def main() -> int:
               f"{r['commons']:.0f} commons, {r['specials']:.0f} specials, {r['bosses']:.1f} bosses")
     print(f"\n  a deep loss is worth {deep['total'] / early['total']:.1f}x a shallow one")
     print(f"  kills are {won['kills'] / won['total']:.0%} of a won round — the rest is finishing it\n")
+
+    print(f"{bar}\n  PROGRESSION — the axis that does not reset\n{bar}\n")
+    progression(won)
+    print(f"{bar}\n")
 
     print(f"  free at the start  {len(free)}: {', '.join(e['id'] for e in free)}")
     print(f"  purchasable        {len(buyable)}, ${roster:,} in total")

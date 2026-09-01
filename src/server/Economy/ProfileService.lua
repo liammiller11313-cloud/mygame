@@ -43,11 +43,24 @@
 	              weapon removed from the game does not haunt a save forever
 	    loadouts  three, each sanitised against `owned` by LoadoutConfig
 	    active    which of the three you spawn with
+	    xp        lifetime experience; the level is DERIVED from it, never stored
+	    scrip     the pass currency, spent on the pass and nothing else
+	    quests    { [questId] = progress } for today's set, and the day it is for
+	    passTier  how far along the pass track has been claimed
+	    callsign  which two rewards are being worn, by id
+	    accent
 	    lock      the session lock above; never handed to the rest of the game
 
-	Nothing else. Stats, cosmetics and settings are deliberately absent: this key
-	is read and written on every join and leave, and every field added to it is
+	Nothing else. Round stats and settings are deliberately absent: this key is
+	read and written on every join and leave, and every field added to it is
 	weight on the one operation a player waits for.
+
+	── WHY THE LEVEL IS NOT A FIELD ─────────────────────────────────────────────
+	It would be a second copy of something `xp` already says, and the only thing
+	two copies of a number can do that one cannot is disagree. Every reader calls
+	ProgressionConfig.resolve, so the bar on a client and the level on the server
+	are the same arithmetic on the same input. A stored level is also the field an
+	exploit or a bad migration would want to write.
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -59,6 +72,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local LoadoutConfig = require(Shared.Config.LoadoutConfig)
+local ProgressionConfig = require(Shared.Config.ProgressionConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
@@ -120,6 +134,17 @@ export type Profile = {
 	owned: { [string]: boolean },
 	loadouts: { LoadoutConfig.Loadout },
 	active: number,
+	xp: number,
+	scrip: number,
+	--[[ Today's quest progress, keyed by quest id, and the day number it belongs
+	     to. Kept together because one without the other is a set of counters
+	     with no way to know whether they are stale. See ProgressionService,
+	     which rolls the day on load. ]]
+	quests: { [string]: number },
+	questDay: number,
+	passTier: number,
+	callsign: string,
+	accent: string,
 	--[[ Not persisted. True when this profile could not be read and must never
 	     be written — see THE ONE RULE. ]]
 	degraded: boolean,
@@ -170,9 +195,31 @@ local function blankProfile(): Profile
 		owned = EconomyConfig.defaultOwned(),
 		loadouts = LoadoutConfig.sanitiseAll(nil, nil),
 		active = 1,
+		xp = 0,
+		scrip = 0,
+		quests = {},
+		questDay = 0,
+		passTier = 0,
+		callsign = "",
+		accent = "",
 		degraded = false,
 		dirty = false,
 	}
+end
+
+--[[ Far enough out that no real clock reaches it, near enough that a corrupted
+     value is obviously corrupt: day 4,000,000 is the year 12,920. ]]
+local MAX_QUEST_DAY = 4_000_000
+
+--[[ A number out of a DataStore, made safe. Not paranoia about players — they
+     cannot write here — but about what an older version of this game wrote, and
+     about the one value JSON can hold that arithmetic cannot survive: NaN, which
+     compares false against itself and poisons every clamp downstream. ]]
+local function storedNumber(value: any, ceiling: number): number
+	if typeof(value) ~= "number" or value ~= value then
+		return 0
+	end
+	return math.clamp(math.floor(value), 0, ceiling)
 end
 
 --[[
@@ -214,6 +261,42 @@ local function migrate(stored: any): Profile
 
 	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, profile.owned)
 	profile.active = LoadoutConfig.clampIndex(stored.active)
+
+	profile.xp = storedNumber(stored.xp, ProgressionConfig.MaxXp)
+	profile.scrip = storedNumber(stored.scrip, ProgressionConfig.MaxScrip)
+	profile.passTier = storedNumber(stored.passTier, #ProgressionConfig.PassTrack)
+
+	--[[ Quest ids are dropped if the pool no longer carries them, for the same
+	     reason an unknown weapon id is dropped from `owned`: the alternative is
+	     a table that grows by three keys a day forever and is parsed on every
+	     join for the rest of the game's life. ]]
+	if typeof(stored.quests) == "table" then
+		for id, value in stored.quests do
+			if typeof(id) == "string" and ProgressionConfig.getQuest(id) then
+				profile.quests[id] = storedNumber(value, ProgressionConfig.MaxXp)
+			end
+		end
+	end
+	--[[ Ceiling is its own number rather than a borrowed one: this is a day
+	     count (os.time() // 86400, about 20,700 today), and clamping it against
+	     an experience ceiling would only read as though the two were related. ]]
+	profile.questDay = storedNumber(stored.questDay, MAX_QUEST_DAY)
+
+	--[[ A worn reward is kept only if the track still has it AND the tier it
+	     sits at has actually been claimed. The second half matters: without it,
+	     a profile whose passTier was clamped down by a shortened track would go
+	     on wearing something it no longer owns. ]]
+	for _, field in { "callsign", "accent" } do
+		local kind = if field == "accent" then "Accent" else "Callsign"
+		local id = stored[field]
+		if typeof(id) == "string" and id ~= "" then
+			local tier = ProgressionConfig.rewardTier(kind, id)
+			if tier > 0 and tier <= profile.passTier then
+				profile[field] = id
+			end
+		end
+	end
+
 	return profile
 end
 
@@ -228,6 +311,13 @@ local function serialise(profile: Profile, lock: any): any
 		owned = profile.owned,
 		loadouts = profile.loadouts,
 		active = profile.active,
+		xp = math.clamp(math.floor(profile.xp), 0, ProgressionConfig.MaxXp),
+		scrip = math.clamp(math.floor(profile.scrip), 0, ProgressionConfig.MaxScrip),
+		quests = profile.quests,
+		questDay = profile.questDay,
+		passTier = profile.passTier,
+		callsign = profile.callsign,
+		accent = profile.accent,
 		lock = lock,
 	}
 end
@@ -290,6 +380,32 @@ local function publish(player: Player, profile: Profile)
 		return
 	end
 	player:SetAttribute(PA.Dollars, profile.dollars)
+end
+
+--[[
+	The four progression attributes. Deliberately NOT part of `publish`.
+
+	`publish` runs from `markChanged`, which runs on every kill — three hundred
+	times a round, four players. Deriving the level in there means walking the
+	level curve, up to two hundred steps of it, three hundred times a round to
+	re-publish a number that only moves when a round ends. None of that would be
+	visible in a profile and all of it is waste.
+
+	So this is called by the things that actually move these numbers, and by the
+	load that first sets them. See the progression section below.
+]]
+local function publishProgression(player: Player, profile: Profile)
+	if not player.Parent then
+		return
+	end
+	--[[ Derived rather than stored, so there is exactly one place that turns XP
+	     into a level and every screen in the game reads its output. See the
+	     header. ]]
+	local level = ProgressionConfig.resolve(profile.xp)
+	player:SetAttribute(PA.Level, level)
+	player:SetAttribute(PA.Scrip, profile.scrip)
+	player:SetAttribute(PA.Callsign, profile.callsign)
+	player:SetAttribute(PA.Accent, profile.accent)
 end
 
 --[[ The whole profile, to the one client it belongs to. Sent on load and after
@@ -419,6 +535,7 @@ local function loadProfile(player: Player)
 		     which is what spreads four players' writes apart. ]]
 		dueAt[player] = os.clock() + AUTOSAVE_INTERVAL
 		publish(player, profile)
+		publishProgression(player, profile)
 		ProfileService:sync(player)
 		ProfileService.loaded:fire(player, profile)
 	end)
@@ -532,6 +649,226 @@ function ProfileService:trySpend(player: Player, amount: number): boolean
 		return false
 	end
 	profile.dollars -= math.floor(amount)
+	markChanged(player, profile, false)
+	return true
+end
+
+-- ── progression ─────────────────────────────────────────────────────────────
+
+--[[
+	The second axis. See ProgressionConfig for why it is separate from Dollars.
+
+	None of these fire a full ProfileSynced. XP moves once a round and quest
+	progress moves on every kill, and pushing the unlock set and three loadouts
+	at a client to say a quest counter went from 41 to 42 is exactly the mistake
+	`markChanged` was written to stop. Level, Scrip and the two worn rewards ride
+	attributes; ProgressionService owns the one remote that carries the rest.
+]]
+
+function ProfileService:getXp(player: Player): number
+	local profile = profiles[player]
+	return if profile then profile.xp else 0
+end
+
+--[[ The level, derived. Deliberately not cached anywhere: `resolve` walks at
+     most MaxLevel steps of integer arithmetic, and a cached level is a level
+     that can be stale. ]]
+function ProfileService:getLevel(player: Player): number
+	local profile = profiles[player]
+	if not profile then
+		return 1
+	end
+	local level = ProgressionConfig.resolve(profile.xp)
+	return level
+end
+
+--[[ Adds experience. Returns the new total AND how many levels it crossed,
+     because the caller has to pay Scrip per level crossed and counting them
+     again on its side would be the same loop with a second chance to be wrong.
+
+	Never negative: XP is a record of what happened, and there is no event in
+	this game that un-happens. A negative amount is a bug at the call site and is
+	refused rather than quietly clamped into a no-op that looks like it worked.
+]]
+function ProfileService:addXp(player: Player, amount: number): (number, number)
+	local profile = profiles[player]
+	if not profile then
+		return 0, 0
+	end
+	if typeof(amount) ~= "number" or amount ~= amount or amount <= 0 then
+		return profile.xp, 0
+	end
+
+	local before = ProgressionConfig.resolve(profile.xp)
+	profile.xp = math.clamp(math.floor(profile.xp + amount), 0, ProgressionConfig.MaxXp)
+	local after = ProgressionConfig.resolve(profile.xp)
+
+	publishProgression(player, profile)
+	markChanged(player, profile, false)
+	return profile.xp, math.max(after - before, 0)
+end
+
+function ProfileService:getScrip(player: Player): number
+	local profile = profiles[player]
+	return if profile then profile.scrip else 0
+end
+
+function ProfileService:addScrip(player: Player, amount: number): number
+	local profile = profiles[player]
+	if not profile then
+		return 0
+	end
+	if typeof(amount) ~= "number" or amount ~= amount or amount == 0 then
+		return profile.scrip
+	end
+	profile.scrip = math.clamp(math.floor(profile.scrip + amount), 0, ProgressionConfig.MaxScrip)
+	publishProgression(player, profile)
+	markChanged(player, profile, false)
+	return profile.scrip
+end
+
+--[[ Today's counters, and the day they are for. Handed out by reference on
+     purpose — every caller is on the server and reads it to draw or to compare;
+     a clone per HUD update would be a table per kill. ]]
+function ProfileService:getQuests(player: Player): ({ [string]: number }, number)
+	local profile = profiles[player]
+	if not profile then
+		return {}, 0
+	end
+	return profile.quests, profile.questDay
+end
+
+--[[ Wipes the counters and stamps the new day. Called by ProgressionService when
+     it notices the profile's day is not today — which is on load, and again if a
+     server outlives a day boundary. ]]
+function ProfileService:rollQuests(player: Player, day: number)
+	local profile = profiles[player]
+	if not profile or typeof(day) ~= "number" or day ~= day then
+		return
+	end
+	local clean = math.max(math.floor(day), 0)
+	if profile.questDay == clean then
+		return
+	end
+	profile.quests = {}
+	profile.questDay = clean
+	markChanged(player, profile, false)
+end
+
+--[[
+	Adds to one quest counter. Returns the new progress and whether THIS call is
+	the one that finished it.
+
+	The second return is the whole reason this is a method rather than a table
+	write. A quest pays once, and "did it just cross the target" is the only
+	question with an answer that cannot be re-derived later: once the counter is
+	saved above the target, a server that restarts cannot tell whether the reward
+	was ever paid. Crossing is detected here, at the one moment it is knowable.
+]]
+function ProfileService:addQuestProgress(player: Player, id: string, amount: number): (number, boolean)
+	local profile = profiles[player]
+	if not profile or typeof(id) ~= "string" then
+		return 0, false
+	end
+	local quest = ProgressionConfig.getQuest(id)
+	if not quest then
+		return 0, false
+	end
+	if typeof(amount) ~= "number" or amount ~= amount or amount <= 0 then
+		return profile.quests[id] or 0, false
+	end
+
+	local before = profile.quests[id] or 0
+	if before >= quest.target then
+		--[[ Already finished and already paid. Not clamped-and-written: a write
+		     here would mark the profile dirty on every kill for the rest of a
+		     round in which nothing about it changed. ]]
+		return before, false
+	end
+
+	local after = math.min(before + math.floor(amount), quest.target)
+	profile.quests[id] = after
+	markChanged(player, profile, false)
+	return after, after >= quest.target
+end
+
+function ProfileService:getPassTier(player: Player): number
+	local profile = profiles[player]
+	return if profile then profile.passTier else 0
+end
+
+--[[
+	Buys the NEXT tier, or refuses.
+
+	Takes no tier argument, which is the point: the caller cannot ask for tier 12
+	while sitting on tier 3. The track is sequential (see ProgressionConfig) and
+	the only way to express that safely is to make "next" the only thing that can
+	be bought — a tier number crossing a remote is a tier number somebody will
+	try to set to 20.
+]]
+function ProfileService:claimNextPassTier(player: Player): (boolean, string)
+	local profile = profiles[player]
+	if not profile then
+		return false, "notready"
+	end
+	local wanted = profile.passTier + 1
+	if wanted > #ProgressionConfig.PassTrack then
+		return false, "complete"
+	end
+	local cost = ProgressionConfig.passCost(wanted)
+	if profile.scrip < cost then
+		return false, "cost"
+	end
+	profile.scrip -= cost
+	profile.passTier = wanted
+
+	--[[ Worn immediately. A reward that has to be bought and THEN equipped from
+	     a second screen is a reward half the players never wear, and the menu
+	     still offers every earlier one — see `setWorn`. ]]
+	local reward = ProgressionConfig.PassTrack[wanted]
+	if reward.kind == "Accent" then
+		profile.accent = reward.id
+	else
+		profile.callsign = reward.id
+	end
+
+	publishProgression(player, profile)
+	markChanged(player, profile, false)
+	return true, "ok"
+end
+
+--[[ Wears a reward that has already been claimed, or takes one off with an empty
+     id. Checked against `passTier` rather than against a list of what was
+     granted, because the track IS the list and a second one would be a second
+     thing to keep in step. ]]
+function ProfileService:setWorn(player: Player, kind: string, id: string): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+	if kind ~= "Callsign" and kind ~= "Accent" then
+		return false
+	end
+	local field = if kind == "Accent" then "accent" else "callsign"
+	if typeof(id) ~= "string" then
+		return false
+	end
+	if id ~= "" then
+		--[[ Both halves matter. `tier == 0` is an id the track has never carried
+		     — a stale client, or a crafted one — and `tier > passTier` is a real
+		     reward that has not been paid for yet. Testing only the second lets
+		     an unknown id through, because an unknown id scores 0 and 0 is not
+		     greater than anything. ]]
+		local tier = ProgressionConfig.rewardTier(kind, id)
+		if tier <= 0 or tier > profile.passTier then
+			return false
+		end
+	end
+	if profile[field] == id then
+		return false
+	end
+	profile[field] = id
+	publishProgression(player, profile)
 	markChanged(player, profile, false)
 	return true
 end

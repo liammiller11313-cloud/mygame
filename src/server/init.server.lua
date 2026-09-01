@@ -113,6 +113,9 @@ local MODULES = {
 	     before it finished loading would be made against an empty profile. ]]
 	"Economy/ProfileService",
 	"Economy/EconomyService",
+	-- Reads what ProfileService loaded and what StatsService counted; registers
+	-- before either is asked for anything, and only listens once started.
+	"Economy/ProgressionService",
 	"Survivors/LoadoutService",
 	"Survivors/SurvivorService",
 	"Survivors/InventoryService",

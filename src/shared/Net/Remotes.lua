@@ -117,6 +117,26 @@ local EVENTS: { string } = {
 	     see the bonus arithmetic and should not be inventing it. ]]
 	"RoundPayout", -- {kills, bonus, waves, total, balance}
 
+	-- ── Progression, quests and the pass ────────────────────────────────────
+	--[[ Level, Scrip and the two worn rewards ride Attributes.Player, because
+	     every OTHER player's screen wants them — see Shared/Net/Attributes. These
+	     three carry what only the owner needs: today's quest counters, how far
+	     the pass has been claimed, and what a round just paid. ]]
+	"ProgressionSynced", -- {xp, level, into, cost, scrip, passTier, quests: {{id, progress}}}
+	--[[ The client asking for that push, for the same reason RequestProfile
+	     exists: progression can finish loading before the client is listening. ]]
+	"RequestProgression", -- C->S ()
+	--[[ One event per thing worth a toast: a level crossed, a quest finished, a
+	     round's XP totalled. Sent rather than derived from the sync, because
+	     "your level changed" and "here is your level" are different messages and
+	     a client cannot tell a level-up from a fresh join by comparing numbers. ]]
+	"ProgressionAwarded", -- {kind: "Level"|"Quest"|"Round", ...}
+	--[[ Buys the NEXT pass tier. Carries no tier number on purpose — the track is
+	     sequential and a tier that crosses the wire is a tier somebody sets to
+	     20. See ProfileService.claimNextPassTier. ]]
+	"ClaimPassTier", -- C->S ()
+	"SetWornReward", -- C->S (kind: "Callsign"|"Accent", id: string)
+
 	-- ── Maps, crates and the map vote ───────────────────────────────────────
 	"MapVoteStarted", -- {options: {{id, displayName, blurb}}, endsAt: number}
 	"CastMapVote", -- C->S (mapId: string)

@@ -84,6 +84,12 @@ end
      off whatever already owns the number, every time the board is pushed. See
      the Dollars entry. ]]
 local LEADERBOARD: { { key: string, title: string, live: boolean? } } = {
+	--[[ First, because it is the one column that is about the player rather than
+	     about this round — and because a player list is the only place in the
+	     game where you see what everybody else has done. Live for the same reason
+	     Dollars is: ProfileService derives it from XP and publishes it as an
+	     attribute, and a counted copy here would be a second answer. ]]
+	{ key = "level", title = "Level", live = true },
 	{ key = "kills", title = "Kills" },
 	{ key = "deaths", title = "Wipeouts" },
 	--[[
@@ -108,6 +114,12 @@ local LEADERBOARD: { { key: string, title: string, live: boolean? } } = {
 local function liveValue(player: Player, key: string): number?
 	if key == "dollars" then
 		return Attributes.get(player, Attributes.Player.Dollars, 0)
+	end
+	if key == "level" then
+		--[[ Defaults to 1, not 0. Level 0 does not exist — ProgressionConfig
+		     starts everybody at 1 — and a player list showing it during the
+		     second before the profile lands reads as a bug. ]]
+		return Attributes.get(player, Attributes.Player.Level, 1)
 	end
 	return nil
 end
@@ -228,6 +240,13 @@ end
 
 function StatsService:get(player: Player): { [string]: number }
 	return recordFor(player)
+end
+
+--[[ Redraws one player's row now. For the live columns: they have no counter to
+     bump, so nothing else would notice they moved until the next kill — and a
+     level earned at a round end would sit unseen until the next round. ]]
+function StatsService:refresh(player: Player)
+	pushLeaderboard(player)
 end
 
 --[[ Wipes the board. Called by RoundService when a round starts, so a scoreboard

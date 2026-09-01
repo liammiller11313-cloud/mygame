@@ -83,8 +83,17 @@ local CONTROLLERS = {
 	     two read; both of them look it up at start(), so it has to have connected
 	     its remotes first or the first sync lands in nothing. ]]
 	"UI/ProfileController",
+	-- Beside ProfileController and for the same reason: a mirror of server state
+	-- that several screens read, loaded before any of them.
+	"UI/ProgressionController",
 	"UI/ShopController",
 	"UI/LoadoutController",
+	-- A panel like the shop and the loadout screen, opened from the same nav row,
+	-- so it loads with them and before the menu that opens it.
+	"UI/CareerController",
+	-- Reads ProgressionController the same way; draws over the results card
+	-- rather than inside it, so neither has to wait for the other.
+	"UI/AwardController",
 	--[[ After the screens it can open, and after the HUD whose corner it shares. ]]
 	"UI/PauseController",
 	"UI/MainMenuController",

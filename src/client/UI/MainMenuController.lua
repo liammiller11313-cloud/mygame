@@ -61,12 +61,13 @@
 	and nothing here would be clickable.
 
 	── KNOWN GAPS (deliberate, not oversights) ─────────────────────────────────
-	  * Nothing on the server tallies per-player kills, headshots, damage taken
-	    or revives. `StatsUpdated` is in the manifest with no sender. This screen
-	    reads it and `RoundEnded.scores` first and falls back to what the client
-	    can honestly observe about ITSELF; anything it cannot know renders as a
-	    dash rather than as a zero, because a fabricated zero is worse than an
-	    admitted blank.
+	  * This screen reads `StatsUpdated` and `RoundEnded.scores` first and falls
+	    back to what the client can honestly observe about ITSELF; anything it
+	    cannot know renders as a dash rather than as a zero, because a fabricated
+	    zero is worse than an admitted blank. The fallback is no longer the usual
+	    path — Round/StatsService tallies kills, headshots, damage and revives and
+	    broadcasts them — but it is kept, because a client that joined mid-round
+	    has still seen only its own half of one.
 	  * Master volume drives a SoundGroup this controller owns and adopts every
 	    client-side Sound under SoundService. World sounds are created by the
 	    server on parts in Workspace and are out of its reach until AudioService
@@ -1611,8 +1612,12 @@ end
 	small phone at any scale floor — and these are not modes anyway. A mode is a
 	thing you commit to; these are places you visit first.
 
-	GUNSMITH is drawn and does nothing, on purpose. An entry that is visibly
-	coming reads as a plan; one that is absent reads as an idea nobody had.
+	CAREER took the slot GUNSMITH was holding. A coming-soon entry reads as a
+	plan and was worth drawing while there were four things and only three of
+	them existed; it is not worth a quarter of this row now that there is a real
+	panel to put there. Its line is the one entry here that changes — it carries
+	the level and the Scrip balance, so the number sits on the button that opens
+	the screen explaining it rather than in a fifth corner of the menu.
 ]]
 local NAV_ENTRIES = {
 	{ id = "Shop", title = "SHOP", line = "GUNS  MELEE  SPECIALS", controller = "ShopController" },
@@ -1622,7 +1627,7 @@ local NAV_ENTRIES = {
 		line = "THREE KITS  ONE ACTIVE",
 		controller = "LoadoutController",
 	},
-	{ id = "Gunsmith", title = "GUNSMITH", line = "COMING SOON", soon = true },
+	{ id = "Career", title = "CAREER", line = "LEVEL  QUESTS  PASS", controller = "CareerController" },
 	{
 		id = "Settings",
 		title = "SETTINGS",
@@ -1663,7 +1668,10 @@ local function buildNav()
 		line.Size = UDim2.new(1, 0, 0, TEXT.Body)
 		line.Text = tracked(definition.line)
 
-		table.insert(navEntries, { button = holder, label = label, line = line })
+		--[[ The id rides along so `refreshBalance` can find the one entry whose
+		     line is live without a second top-level local — this file is already
+		     at 182 of Luau's 200-per-scope limit, which audit.py calls out. ]]
+		table.insert(navEntries, { button = holder, label = label, line = line, id = definition.id })
 
 		--[[ Reachable without a cursor: the mode entries take selection when the
 		     menu opens, and this row is what a pad walks down to from them.
@@ -1715,6 +1723,29 @@ local function refreshBalance()
 	end
 	local ok, dollars = pcall(store.getDollars, store)
 	balanceLabel.Text = if ok then EconomyConfig.format(dollars) else ""
+
+	--[[ The CAREER entry's second line, which is the only one on this row that
+	     is not a fixed string. Silently left as its built default if progression
+	     has not synced yet: "LEVEL 0" for the second before a profile lands would
+	     be a worse first impression than the words it replaces. ]]
+	local career = Registry.find("ProgressionController")
+	if not career or typeof(career.summaryLine) ~= "function" then
+		return
+	end
+	--[[ The string is built over there rather than here, so this file needs no
+	     require of its own: it is at 182 of Luau's 200 top-level locals and
+	     audit.py already flags it. It also keeps the currency's name and symbol
+	     in the one config that owns them. ]]
+	local gotLine, summary = pcall(career.summaryLine, career)
+	if not gotLine or summary == "" then
+		return
+	end
+	for _, entry in navEntries do
+		if entry.id == "Career" then
+			entry.line.Text = tracked(summary)
+			break
+		end
+	end
 end
 
 local function buildTeleport()
@@ -2226,6 +2257,15 @@ function MainMenuController:start()
 		adopt(instance)
 	end
 	trove:connect(SoundService.DescendantAdded, adopt)
+
+	--[[ The CAREER line lives inside refreshBalance, and progression does NOT
+	     move on ProfileController's signal — XP and Scrip ride their own remote
+	     and their own attributes. Without this the level under CAREER would be
+	     right only until the round that changed it. ]]
+	local career = Registry.find("ProgressionController")
+	if career and career.changed then
+		trove:add(career.changed:connect(refreshBalance))
+	end
 
 	local store = Registry.find("ProfileController")
 	if store then

@@ -384,6 +384,11 @@ UITheme.DisplayOrder = table.freeze({
 	     drawn through it is a settings panel nobody can read. The shop and the
 	     loadout screen share this layer: they are the same kind of thing and
 	     they are never open at the same time. ]]
+	--[[ Between the vote and the panels. Above the end-of-round card and the
+	     vote because it is a reward for the round both of those are about, and
+	     BELOW the shop and the settings panel because those are things the
+	     player opened on purpose and a toast must never land on top of one. ]]
+	Award = 86,
 	Settings = 88,
 	--[[ Above the shop and the loadout screen, because the lobby countdown has to
 	     be readable from INSIDE them. The lobby waits for somebody to pick a mode

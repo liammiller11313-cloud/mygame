@@ -48,6 +48,19 @@ Attributes.Player = table.freeze({
 	     at all. Public, like everything on a Player: a teammate seeing your
 	     balance costs nothing and the end-of-round screen wants it. ]]
 	Dollars = "FL_Dollars", -- number, server-owned, see EconomyService
+	--[[ The four progression facts, for the same reason Dollars is here: they
+	     belong to one player, they are read by every OTHER player's screen, and
+	     Roblox replicates a Player attribute to everybody for free. The player
+	     list draws Level off this, and the scoreboard draws a name in Accent
+	     with Callsign under it without asking the server anything.
+
+	     ProgressionSynced carries the rest — quest progress, the pass track,
+	     what is claimed — to the one client it belongs to. Nobody else's screen
+	     needs to know how far through today's quests you are. ]]
+	Level = "FL_Level", -- number, server-owned, see ProgressionService
+	Scrip = "FL_Scrip", -- number, the pass currency
+	Callsign = "FL_Callsign", -- string, a ProgressionConfig reward id or ""
+	Accent = "FL_Accent", -- string, a ProgressionConfig reward id or ""
 })
 
 -- Written on the Player instance, read by the ammo counter.
