@@ -140,6 +140,27 @@ local function isMelee(definition: any): boolean
 	return definition ~= nil and definition.class == "Melee"
 end
 
+--[[
+	A launcher is not a gun for the purposes of this screen.
+
+	Not a style call — it is the same bug the header describes, arriving from the
+	other direction. The RPG-7's numbers are outliers in every column: 6.5 recoil
+	against a roster whose worst was 3.4, a 4.5-second reload against 2.5, 40 RPM
+	against 220, a magazine of one. Left in the gun family it would have widened
+	every range it touched and squashed eighteen real guns' CONTROL, RELOAD and
+	FIRE RATE bars into the top of a scale it alone occupies the bottom of.
+
+	So it is excluded from the extremes and still DRAWN against them. Its own bars
+	then clamp empty, which is not a bug and is not a shrug: it genuinely has the
+	worst control, the slowest reload and the lowest rate of fire of anything in
+	the game. What the bars cannot say is why anybody would buy it — the blast is
+	not one of these six numbers — so it is the one real weapon in the catalogue
+	that carries a blurb.
+]]
+local function isLauncher(definition: any): boolean
+	return definition ~= nil and definition.class == "Launcher"
+end
+
 local function statsFor(definition: any)
 	return if isMelee(definition) then MELEE_STATS else GUN_STATS
 end
@@ -210,7 +231,9 @@ local function extremesOf(stats: any, wantMelee: boolean): { [string]: { min: nu
 		out[stat.key] = { min = math.huge, max = -math.huge }
 	end
 	for _, definition in WeaponConfig.all() do
-		if isMelee(definition) == wantMelee then
+		--[[ Neither family. A weapon that sets a range nothing else can approach
+		     is a weapon that has redefined the scale for everybody else. ]]
+		if not isLauncher(definition) and isMelee(definition) == wantMelee then
 			for _, stat in stats do
 				local value = definition[stat.key]
 				if typeof(value) == "number" then
@@ -235,7 +258,10 @@ local function statFraction(definition: any, stat: any): number
 	if typeof(value) ~= "number" or not range or range.max <= range.min then
 		return 0
 	end
-	local alpha = (value - range.min) / (range.max - range.min)
+	--[[ Clamped, because a weapon can now sit OUTSIDE the range it is drawn
+	     against — see isLauncher. Without this an inverted stat past the maximum
+	     produces a negative fraction and a bar with a negative size. ]]
+	local alpha = math.clamp((value - range.min) / (range.max - range.min), 0, 1)
 	return if stat.invert then 1 - alpha else alpha
 end
 
@@ -714,7 +740,7 @@ end
 	panel entirely. It was invisible on every desktop and every tablet.
 
 	So the fixed content is measured, the preview gets whatever is left, and
-	below COMPACT the least useful rows go: the blurb (which is empty for every
+	below COMPACT the least useful rows go: the blurb (which is empty for all but
 	real weapon anyway — only placeholders carry one) and then the stat rows
 	shrink. The preview never goes below PREVIEW_MIN, because a shop with no
 	picture of the thing is not a shop.

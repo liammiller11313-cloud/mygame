@@ -47,7 +47,7 @@
 local Enums = require(script.Parent.Parent.Enums)
 
 export type FireMode = "Semi" | "Auto" | "Pump" | "Melee"
-export type WeaponClass = "Pistol" | "SMG" | "Rifle" | "Marksman" | "Shotgun" | "Melee"
+export type WeaponClass = "Pistol" | "SMG" | "Rifle" | "Marksman" | "Shotgun" | "Melee" | "Launcher"
 
 export type WeaponDefinition = {
 	id: string,
@@ -101,6 +101,14 @@ export type WeaponDefinition = {
 	gibPower: number,
 	dismemberPower: number,
 	knockback: number,
+
+	--[[ Optional, and set together or not at all. A weapon with a blast radius
+	     detonates where its shot lands, on top of whatever that shot already did
+	     to the thing it hit — see BallisticsService. Absent on every weapon but
+	     the RPG-7, and absent means "an ordinary gun", which is what all the
+	     arithmetic above assumes. ]]
+	blastRadius: number?,
+	blastDamage: number?,
 }
 
 local WHITE_HOT = Color3.fromRGB(255, 236, 190)
@@ -419,6 +427,109 @@ WeaponConfig.Definitions = {
 		gibPower = 0.85,
 		dismemberPower = 0.9,
 		knockback = 46,
+	},
+
+	--[[
+		The RPG-7. A secondary by slot and by nothing else.
+
+		Everything about it is arranged so that taking it is a real cost rather
+		than an upgrade. The other five secondaries exist to answer "the primary
+		is dry and there are twenty of them"; this one cannot answer that at all —
+		one rocket, four in total, four and a half seconds to reload, and a blast
+		that will kill YOU at the range a Common gets to. Carry it and you have
+		given up the fallback the slot is for, in exchange for the one thing no
+		other weapon in the game does: deleting a Tank, or a whole horde, once.
+
+		The direct hit is deliberately small. Sixty is less than the M1911 does to
+		a head, and that is the point — the damage is the explosion, so a rocket
+		that lands at somebody's feet is worth the same as one that hits them in
+		the chest, and there is no reward for sniping with it. See
+		BallisticsService, which detonates at wherever the shot lands.
+
+		Not a Marksman and not a Shotgun: "Launcher" is its own class so the shop's
+		stat bars do not normalise a 400-damage blast against a rifle roster and
+		flatten every other gun's damage bar into nothing. That is the exact bug
+		the melee/gun split in ShopController was written to fix.
+	]]
+	[Enums.Weapon.RPG7] = {
+		id = Enums.Weapon.RPG7,
+		displayName = "RPG-7",
+		modelName = "RPG-7",
+		slot = Enums.Slot.Secondary,
+		class = "Launcher",
+		fireMode = "Semi",
+
+		damage = 60,
+		--[[ The blast, which is the weapon. Radius is under the pipe bomb's 34
+		     and damage under its 480, because a pipe bomb has to be thrown, has to
+		     be found, and gathers the crowd before it goes off — this arrives on
+		     demand and hits whatever you were already looking at. ]]
+		blastRadius = 26,
+		blastDamage = 400,
+
+		rpm = 40,
+		pellets = 1,
+		magSize = 1,
+		--[[ Three spare, four in total, and the ONLY secondary that is not
+		     infinite — every other one is reserveMax -1, because the sidearm is the
+		     promise that you are never truly empty. This one is not that promise.
+
+		     A weapon that deletes a Tank has to run out, or the Tank stops being
+		     an event. Ammo crates do refill it, on the same rule as any primary
+		     (InventoryService gives a share of reserveMax), so the scarcity is
+		     four shots BETWEEN crates rather than four a life. ]]
+		reserveMax = 3,
+		penetration = 1,
+		penetrationFalloff = 1.0,
+
+		--[[ No falloff at all. A rocket does not lose energy on the way, and
+		     falloff on a blast weapon would be a rule the player cannot see: the
+		     explosion is at the impact point either way. ]]
+		falloffStart = 900,
+		falloffEnd = 900,
+		falloffMin = 1.0,
+		maxRange = 900,
+
+		spreadHip = 2.2,
+		spreadAim = 0.4,
+		spreadMoving = 2.0,
+		spreadMax = 4.0,
+		bloomPerShot = 0.0,
+		bloomRecovery = 6.0,
+
+		recoilVertical = 6.5,
+		recoilHorizontal = 1.6,
+		recoilRecovery = 4.5,
+		kickback = 0.7,
+
+		reloadTime = 4.5,
+		reloadPerShell = 0,
+		drawTime = 0.85,
+		aimTime = 0.4,
+
+		--[[ Slower carrying it, slower still aiming it. It is a tube on a
+		     shoulder and the movement should say so before the player has fired
+		     it once. ]]
+		walkSpeedScale = 0.88,
+		aimWalkSpeedScale = 0.55,
+		aimFov = 60,
+
+		shakeMagnitude = 2.6,
+		shakeRoughness = 12,
+		tracerWidth = 0.14,
+		tracerColor = AMBER,
+		muzzleFlashSize = 3.0,
+		--[[ No casing. Nothing about an RPG ejects anything, and AmmoFactory would
+		     otherwise throw a rifle shell out of the side of it. ]]
+		shellEject = false,
+
+		--[[ Zero, and not because it is gentle. GoreConfig.ExplosiveAlwaysGibs
+		     means the blast already takes apart everything it kills; these fields
+		     drive the DIRECT hit, and a rocket that dismembered on contact and
+		     then gibbed the same body a frame later would be fighting itself. ]]
+		gibPower = 0.0,
+		dismemberPower = 0.0,
+		knockback = 70,
 	},
 
 	--[[ The gore weapon. Ten pellets at contact range does not kill a Common,

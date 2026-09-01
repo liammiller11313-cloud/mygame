@@ -18,6 +18,13 @@
 	  therefore     ≈ 39 winning rounds, and a loss still moves you forward
 
 	  ── HEADROOM: NONE. 39 of a 40 ceiling. ──
+
+	  The RPG-7 is not in that $98,900 and not in that 39. It is marked
+	  `prestige`, which takes it out of the roster sum on purpose — see the field
+	  itself. scripts/economy.py prints it on its own line, at ten further won
+	  rounds, so it is measured rather than exempt. Anything else priced above
+	  the ladder belongs there too; anything priced ON the ladder still has to
+	  fit inside the ceiling above, which has room for nothing.
 	  Three secondaries went in at $8,500 and took this from 35 rounds to 39. The
 	  NEXT priced thing added to the catalogue fails scripts/economy.py, and the
 	  fix at that point is the income side — as it was when the melee roster went
@@ -164,9 +171,21 @@ EconomyConfig.MaxPerRound = 8_000
 
 -- ── what is for sale ────────────────────────────────────────────────────────
 
---[[ The shop's three tabs, in the order they are drawn. Strings rather than an
-     enum because they are also the tab labels. ]]
-EconomyConfig.Categories = table.freeze({ "GUNS", "MELEE", "SPECIALS" })
+--[[
+	The shop's tabs, in the order they are drawn. Strings rather than an enum
+	because they are also the tab labels.
+
+	Split out of a single GUNS tab, which held eighteen weapons across two slots.
+	A player opening the shop is not browsing — they have a slot in mind and a
+	balance, and "everything that shoots" made them scroll a rifle list to find a
+	pistol. The tabs now match Enums.Slot, so what you are looking at and what you
+	are buying it for are the same question.
+
+	SPECIALS stays as its own tab rather than folding into the slot it would
+	occupy: what is in it is a plan, not a slot, and burying two coming-soon rows
+	among real primaries would read as two primaries that are broken.
+]]
+EconomyConfig.Categories = table.freeze({ "PRIMARY", "SECONDARY", "MELEE", "SPECIALS" })
 
 --[[
 	Every purchasable thing, and every thing that will be.
@@ -199,46 +218,87 @@ export type ShopEntry = {
 	     WeaponConfig, because two copies of a weapon's name is one copy too
 	     many. ]]
 	displayName: string?,
+	--[[ Placeholder-only WAS true of this one too, and is not any more. The
+	     RPG-7 is the one real weapon whose reason to exist is not among the six
+	     stat bars the shop draws — see ShopController.isLauncher — so it says so
+	     in words instead. Any other real entry should still leave this nil and
+	     let its numbers speak. ]]
 	blurb: string?,
+	--[[
+		Outside the roster the pacing target is written about.
+
+		scripts/economy.py asks "how many won rounds to unlock the roster" and
+		holds the answer to 30-40. That question is about the set a player works
+		through — the ladder where each rung is a real choice against the one below
+		it. A single item priced far above the whole ladder is not part of it; it
+		is what somebody buys after, and folding its price into that sum would say
+		the roster takes fifty rounds when the roster still takes thirty-nine.
+
+		Marked rather than inferred from price, because "expensive" is a spectrum
+		and this is a category. The model still reports it — separately, with its
+		own round count — so nothing is hidden, it is just not averaged into an
+		answer it would make meaningless.
+	]]
+	prestige: boolean?,
 }
 
 EconomyConfig.Catalogue = table.freeze({
-	-- ── guns ────────────────────────────────────────────────────────────────
+	-- ── secondaries ─────────────────────────────────────────────────────────
 	-- Sidearms. The pistol is free; the Magnum is one of the most expensive
 	-- things here, because a sidearm you can fall back on that kills in one hit
 	-- removes the pressure the primary is supposed to create.
-	{ id = Enums.Weapon.M1911A1, category = "GUNS", price = 0 },
+	{ id = Enums.Weapon.M1911A1, category = "SECONDARY", price = 0 },
 	--[[ Priced under the Magnum on purpose, and the ladder is the point: the
 	     Berettas are the first thing a new player can afford, the Glock is a
 	     sidegrade rather than an upgrade, and the Sawn-Off is the only secondary
 	     that changes how you fight rather than how long you last. ]]
-	{ id = Enums.Weapon.DualBerettas, category = "GUNS", price = 1500 },
-	{ id = Enums.Weapon.Glock18, category = "GUNS", price = 2800 },
-	{ id = Enums.Weapon.SawnOff, category = "GUNS", price = 4200 },
-	{ id = Enums.Weapon.Magnum357, category = "GUNS", price = 6000 },
+	{ id = Enums.Weapon.DualBerettas, category = "SECONDARY", price = 1500 },
+	{ id = Enums.Weapon.Glock18, category = "SECONDARY", price = 2800 },
+	{ id = Enums.Weapon.SawnOff, category = "SECONDARY", price = 4200 },
+	{ id = Enums.Weapon.Magnum357, category = "SECONDARY", price = 6000 },
+	--[[
+		The RPG-7, and the most expensive thing in the game by a factor of two.
 
+		Priced as a goal rather than as a rung. Every other secondary is something
+		a player buys on the way to somewhere; this is the somewhere — roughly ten
+		won rounds on its own, on top of a roster that already takes thirty-nine.
+
+		`prestige` keeps it out of the roster pacing sum for the reason on the
+		field itself. It is not an exemption from the economy: scripts/economy.py
+		prints what it costs in rounds, next to the roster, where anybody tuning
+		either can see both.
+	]]
+	{
+		id = Enums.Weapon.RPG7,
+		category = "SECONDARY",
+		price = 24000,
+		prestige = true,
+		blurb = "Four rockets. Kills the Tank, the horde, and you.",
+	},
+
+	-- ── primaries ───────────────────────────────────────────────────────────
 	-- Shotgun. Cheap because it is the most conditional weapon in the game.
-	{ id = Enums.Weapon.Shotgun, category = "GUNS", price = 3000 },
+	{ id = Enums.Weapon.Shotgun, category = "PRIMARY", price = 3000 },
 
 	-- SMGs. The UMP is the free primary, so everything near it is priced as a
 	-- sidegrade rather than as an upgrade.
-	{ id = Enums.Weapon.UMP45, category = "GUNS", price = 0 },
-	{ id = Enums.Weapon.PPSh41, category = "GUNS", price = 3500 },
-	{ id = Enums.Weapon.MP7A1, category = "GUNS", price = 4500 },
-	{ id = Enums.Weapon.AKS74U, category = "GUNS", price = 4800 },
-	{ id = Enums.Weapon.KrissVector, category = "GUNS", price = 6500 },
+	{ id = Enums.Weapon.UMP45, category = "PRIMARY", price = 0 },
+	{ id = Enums.Weapon.PPSh41, category = "PRIMARY", price = 3500 },
+	{ id = Enums.Weapon.MP7A1, category = "PRIMARY", price = 4500 },
+	{ id = Enums.Weapon.AKS74U, category = "PRIMARY", price = 4800 },
+	{ id = Enums.Weapon.KrissVector, category = "PRIMARY", price = 6500 },
 
 	-- Rifles. The middle and top of the roster.
-	{ id = Enums.Weapon.M4A1, category = "GUNS", price = 5500 },
-	{ id = Enums.Weapon.AKM, category = "GUNS", price = 5800 },
-	{ id = Enums.Weapon.HK416A5, category = "GUNS", price = 7000 },
-	{ id = Enums.Weapon.Mk18CQBR, category = "GUNS", price = 7500 },
-	{ id = Enums.Weapon.AK12, category = "GUNS", price = 8000 },
+	{ id = Enums.Weapon.M4A1, category = "PRIMARY", price = 5500 },
+	{ id = Enums.Weapon.AKM, category = "PRIMARY", price = 5800 },
+	{ id = Enums.Weapon.HK416A5, category = "PRIMARY", price = 7000 },
+	{ id = Enums.Weapon.Mk18CQBR, category = "PRIMARY", price = 7500 },
+	{ id = Enums.Weapon.AK12, category = "PRIMARY", price = 8000 },
 
 	-- Marksman. Priced above the rifles because they reward a different game
 	-- rather than a better one.
-	{ id = Enums.Weapon.ScopedMk18, category = "GUNS", price = 9000 },
-	{ id = Enums.Weapon.M1AEBR, category = "GUNS", price = 10500 },
+	{ id = Enums.Weapon.ScopedMk18, category = "PRIMARY", price = 9000 },
+	{ id = Enums.Weapon.M1AEBR, category = "PRIMARY", price = 10500 },
 
 	-- ── melee ───────────────────────────────────────────────────────────────
 	--[[ All five are real now: model, WeaponConfig row, and a slot of their own.
@@ -258,14 +318,6 @@ EconomyConfig.Catalogue = table.freeze({
 	-- ── specials ────────────────────────────────────────────────────────────
 	-- None of these exist yet: no model, no WeaponConfig row, no behaviour.
 	-- They are here so the category reads as a plan rather than as an empty tab.
-	{
-		id = "RPG",
-		category = "SPECIALS",
-		price = 0,
-		soon = true,
-		displayName = "RPG-7",
-		blurb = "One rocket. Bring it out for the Tank.",
-	},
 	{
 		id = "Flamethrower",
 		category = "SPECIALS",

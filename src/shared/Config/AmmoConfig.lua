@@ -225,6 +225,18 @@ AmmoConfig.Magazines = {
 AmmoConfig.Weapons = {
 	[Enums.Weapon.M1911A1] = { casing = "45acp", magazine = "PistolMag" },
 	[Enums.Weapon.Magnum357] = { casing = "357", magazine = "RevolverSpeedloader" },
+	--[[ These three shipped without a row here, so they ejected nothing and
+	     reloaded nothing visible — the one piece of feedback that says a pistol
+	     is a pistol, missing on three of the five. ]]
+	[Enums.Weapon.DualBerettas] = { casing = "9mm", magazine = "PistolMag" },
+	[Enums.Weapon.Glock18] = { casing = "9mm", magazine = "PistolMag" },
+	[Enums.Weapon.SawnOff] = { casing = "12ga", magazine = "ShotgunShell" },
+	--[[ Nothing on either side. An RPG ejects no case and takes no magazine — it
+	     takes a rocket, which is a model nobody has built. Named explicitly rather
+	     than left absent so the next person to read this table can tell the
+	     difference between "has none" and "was forgotten", which is exactly the
+	     distinction the three rows above got wrong. ]]
+	[Enums.Weapon.RPG7] = { casing = "", magazine = "" },
 	[Enums.Weapon.Shotgun] = { casing = "12ga", magazine = "ShotgunShell" },
 
 	[Enums.Weapon.PPSh41] = { casing = "762", magazine = "DrumMag" },

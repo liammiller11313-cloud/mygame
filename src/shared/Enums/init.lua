@@ -24,6 +24,11 @@ Enums.Weapon = table.freeze({
 	DualBerettas = "DualBerettas",
 	Glock18 = "Glock18",
 	SawnOff = "SawnOff",
+	--[[ The sixth, and not part of that set. The five above answer "twenty
+	     zombies, eight rounds"; this answers "a Tank, and nothing else is
+	     working". It is a secondary by slot only — priced, loaded and reloaded so
+	     that carrying it means giving up the fallback the slot exists for. ]]
+	RPG7 = "RPG7",
 
 	--[[ Melee. Five, each with a different reason to carry it: reach, speed,
 	     damage, how many bodies one swing goes through. Every one of them has a

@@ -780,18 +780,52 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 function ProjectileService:_explode(owner: Player?, position: Vector3)
-	local damage = Registry.find("DamageService")
-	if damage then
+	self:detonate(owner, position, PIPE_BLAST_RADIUS, PIPE_BLAST_DAMAGE, THROWABLE.PipeBomb)
+end
+
+--[[
+	An explosion, anywhere, from anything.
+
+	The pipe bomb was the only thing in the game that exploded, so its blast and
+	its numbers were the same eighty lines. The RPG-7 needs the same blast with
+	different numbers, and the wrong way to get it is a second copy that drifts —
+	the camera falloff, the atmosphere flash and the gib rule are the parts that
+	make an explosion read as one, and they are not per-weapon decisions.
+
+	So the numbers are arguments and everything else is shared. `_explode` is now
+	one line calling this with the pipe bomb's radius and damage.
+
+	The SHAKE is deliberately not parameterised. A blast twenty studs away and one
+	eighty studs away already differ by the falloff below; making a big explosion
+	also shake harder per stud would mean the two weapons taught the player
+	different things about the same distance.
+]]
+function ProjectileService:detonate(
+	owner: Player?,
+	position: Vector3,
+	radius: number,
+	damage: number,
+	weaponId: string
+)
+	if typeof(position) ~= "Vector3" or typeof(radius) ~= "number" or typeof(damage) ~= "number" then
+		return
+	end
+	if radius <= 0 or damage <= 0 then
+		return
+	end
+
+	local damageService = Registry.find("DamageService")
+	if damageService then
 		--[[ Straight through the funnel, which is what makes GoreConfig's
-		     ExplosiveAlwaysGibs true here: everything a pipe bomb kills comes
+		     ExplosiveAlwaysGibs true here: everything an explosion kills comes
 		     apart, and the crowd it just gathered comes apart all at once. ]]
-		damage:applyExplosion(
+		damageService:applyExplosion(
 			position,
-			PIPE_BLAST_RADIUS,
-			PIPE_BLAST_DAMAGE,
+			radius,
+			damage,
 			Types.newDamageContext({
 				attacker = owner,
-				weaponId = THROWABLE.PipeBomb,
+				weaponId = weaponId,
 				damageType = Enums.DamageType.Explosive,
 				region = Enums.HitRegion.Torso,
 				hitPosition = position,

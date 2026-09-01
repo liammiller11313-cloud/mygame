@@ -72,7 +72,7 @@ def catalogue():
     out = []
     for m in re.finditer(
         r"id = (Enums\.Weapon\.\w+|\"\w+\"),\s*\n?\s*category = \"(\w+)\",\s*\n?\s*price = (\d+),?"
-        r"(\s*\n?\s*soon = true)?",
+        r"(\s*\n?\s*soon = true)?(\s*,?\s*prestige = true)?",
         block,
     ):
         out.append(
@@ -81,6 +81,9 @@ def catalogue():
                 "category": m.group(2),
                 "price": int(m.group(3)),
                 "soon": bool(m.group(4)),
+                # Priced far above the ladder and deliberately outside the
+                # pacing target. See the field's own note in EconomyConfig.
+                "prestige": bool(m.group(5)),
             }
         )
     return out
@@ -240,9 +243,10 @@ def progression(won: dict) -> None:
 
 
 def main() -> int:
-    buyable = [e for e in CATALOGUE if not e["soon"] and e["price"] > 0]
+    buyable = [e for e in CATALOGUE if not e["soon"] and e["price"] > 0 and not e["prestige"]]
     free = [e for e in CATALOGUE if not e["soon"] and e["price"] == 0]
     soon = [e for e in CATALOGUE if e["soon"]]
+    prestige = [e for e in CATALOGUE if e["prestige"] and not e["soon"]]
     roster = sum(e["price"] for e in buyable)
 
     bar = "─" * 68
@@ -270,14 +274,27 @@ def main() -> int:
 
     print(f"  free at the start  {len(free)}: {', '.join(e['id'] for e in free)}")
     print(f"  purchasable        {len(buyable)}, ${roster:,} in total")
-    print(f"  coming soon        {len(soon)}: {', '.join(e['id'] for e in soon)}\n")
+    print(f"  coming soon        {len(soon)}: {', '.join(e['id'] for e in soon)}")
+    if prestige:
+        print(f"  outside the roster {len(prestige)}: "
+              f"{', '.join(e['id'] for e in prestige)}")
+    print()
 
     cheapest = min(buyable, key=lambda e: e["price"])
     rounds = (roster - START) / won["total"]
     print(f"  starting balance   ${START:,}")
     print(f"  first purchase     {cheapest['id']} at ${cheapest['price']:,}"
           f"{' — affordable on the first visit' if START >= cheapest['price'] else ''}")
-    print(f"  ROSTER UNLOCKED IN {rounds:.0f} won rounds   (target {TARGET_MIN}-{TARGET_MAX})\n")
+    print(f"  ROSTER UNLOCKED IN {rounds:.0f} won rounds   (target {TARGET_MIN}-{TARGET_MAX})")
+    # Reported, never folded in. A prestige item is a goal a player reaches for
+    # AFTER the roster, so averaging it into "how long is the roster" would
+    # describe neither honestly. Printing it is not optional though: an item left
+    # out of the model entirely is how one ends up costing a hundred rounds with
+    # nobody noticing.
+    for entry in prestige:
+        print(f"  then {entry['id']} at ${entry['price']:,} — "
+              f"{entry['price'] / won['total']:.0f} more won rounds on top")
+    print()
 
     print(f"  {'price':>8}  {'category':<9} id")
     for entry in sorted(CATALOGUE, key=lambda e: (e["category"], e["soon"], e["price"], e["id"])):

@@ -611,6 +611,39 @@ function BallisticsService:resolveShot(
 				weaponId = weaponId,
 			})
 		end
+
+		--[[
+			A blast weapon detonates where its shot lands.
+
+			After the pellet's own damage, not instead of it: a rocket that hits a
+			Tank in the chest does its direct hit AND its explosion, which is the
+			difference between a good shot and a panicked one. `endPosition` is
+			already the right point — the last thing the pierce hit, or the end of
+			the ray if it hit nothing, which is a rocket sailing past and going off
+			on the wall behind.
+
+			Inside the pellet loop rather than after it, so a hypothetical
+			multi-pellet launcher would explode once per pellet rather than once
+			for the volley. Nothing in the roster does that today; the alternative
+			reads as if it could not.
+
+			ProjectileService owns explosions — the camera falloff, the atmosphere
+			flash and the gib rule are what make one read as an explosion, and they
+			are not per-weapon decisions. Absent, the shot is simply a bullet: this
+			must never be the reason a round fails to fire.
+		]]
+		if definition.blastRadius and definition.blastDamage then
+			local projectiles = Registry.find("ProjectileService")
+			if projectiles and typeof(projectiles.detonate) == "function" then
+				projectiles:detonate(
+					shooter,
+					endPosition,
+					definition.blastRadius,
+					definition.blastDamage,
+					weaponId
+				)
+			end
+		end
 	end
 
 	return records
