@@ -593,20 +593,52 @@ local function forward(action: string)
 	end
 
 	--[[
-		Jump and crouch, forwarded here because a touch button cannot reach the
-		control script the way a key can.
+		Jump, forwarded here because a touch button cannot reach the control
+		script the way a key can.
 
 		On a keyboard, Space is handled by Roblox's own controls and this binding
 		only observes it — which is why the row is marked `pass`. A finger on an
-		on-screen button has no such path, so the jump has to be performed. Doing
-		it for every scheme is harmless: pressing Space raises this too, and
-		setting Jump on a humanoid that is already jumping is a no-op.
+		on-screen button has no such path, so the jump has to be performed here.
+
+		── WHY THIS IS NOT `humanoid.Jump = true` ──────────────────────────────
+		It was, and on a phone it did nothing at all.
+
+		Roblox's ControlModule WRITES that property every frame, from whatever its
+		own controller thinks the player is asking for — `humanoid.Jump =
+		controller:GetIsJumping()`. On a phone that controller is TouchJump, whose
+		button this game hides (see TouchController.suppressRobloxJump), so it
+		reports false forever. Our `true` was set between two frames and
+		overwritten by the control loop before the physics step could ever consume
+		it. On a keyboard nobody noticed, because there Space never reached this
+		branch for real — Roblox's own controller was doing the jumping.
+
+		ChangeState drives the humanoid's state machine directly, which is not a
+		property the ControlModule assigns, so nothing stomps it.
+
+		── AND WHY IT NEEDS A GROUND CHECK ─────────────────────────────────────
+		That directness is also the hazard. `Jump = true` was quietly safe because
+		the state machine ignores it in mid-air; ChangeState does not ask, so
+		without this guard the button becomes an infinite air-jump — hold it and
+		walk over the map. FloorMaterial is Air exactly when there is nothing
+		underfoot, and Climbing is the one grounded-enough state that has no
+		floor.
 	]]
 	if action == Action.Jump then
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.Jump = true
+		if not humanoid or humanoid.Health <= 0 then
+			return
+		end
+		--[[ Zero while a survivor is pinned or downed — SurvivorService drops both
+		     to immobilise them — and a state change would jump them out of a
+		     Hunter's grip. ]]
+		if humanoid.JumpPower <= 0 and humanoid.JumpHeight <= 0 then
+			return
+		end
+		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+			or humanoid:GetState() == Enum.HumanoidStateType.Climbing
+		if grounded then
+			humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 		end
 		return
 	end

@@ -176,6 +176,44 @@ for cat in ("WeaponFire", "WeaponReload", "Impact", "Gore", "Infected", "Survivo
             if m.group(1) not in keys:
                 problems.append(f"{rel(p)}:{lineno(text, m.start())}  AudioConfig.{cat}.{m.group(1)} does not exist")
 
+# ── 5b. GameConfig keys, through an alias ───────────────────────────────────
+# The bug this exists for, caught the hard way: ShotPattern was edited to read
+# GameConfig.Recoil.FirstShotScale and friends in the same change that was
+# supposed to add them — and the half that added them silently did not apply.
+# Every one of those reads was nil, every arithmetic on them would have thrown
+# on the first shot fired, and the whole toolchain said the file was clean:
+# stylua parses it, selene sees a table index on a defined name, and check 5
+# only knows about AudioConfig.
+#
+# Aliased on purpose, because that is how these are actually used — nobody
+# writes GameConfig.Recoil.ViewScale at the call site, they write
+# `local RECOIL = GameConfig.Recoil` once and RECOIL.ViewScale after. Check 3
+# learned the same lesson for Attributes.
+_game_text = strip_comments(read(SRC / "shared/Config/GameConfig.lua"))
+_game_groups = {}
+for _group in re.findall(r"^GameConfig\.(\w+) = table\.freeze\(\{", _game_text, re.M):
+    _keys = table_keys(_game_text, f"GameConfig.{_group}")
+    if _keys:
+        _game_groups[_group] = _keys
+
+for p, text in sources.items():
+    _aliases = dict(re.findall(r"local\s+(\w+)\s*=\s*GameConfig\.(\w+)\b", text))
+    for _alias, _group in _aliases.items():
+        if _group not in _game_groups:
+            continue
+        for m in re.finditer(rf"\b{_alias}\.(\w+)", text):
+            if m.group(1) not in _game_groups[_group]:
+                problems.append(
+                    f"{rel(p)}:{lineno(text, m.start())}  {_alias}.{m.group(1)} "
+                    f"(GameConfig.{_group}) does not exist"
+                )
+    for _group, _keys in _game_groups.items():
+        for m in re.finditer(rf"GameConfig\.{_group}\.(\w+)", text):
+            if m.group(1) not in _keys:
+                problems.append(
+                    f"{rel(p)}:{lineno(text, m.start())}  GameConfig.{_group}.{m.group(1)} does not exist"
+                )
+
 # ── 6. Module hygiene ───────────────────────────────────────────────────────
 for p, text in raw.items():
     name = p.name

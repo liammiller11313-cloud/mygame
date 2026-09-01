@@ -2160,6 +2160,25 @@ function HudController:start()
 	if inputController and inputController.schemeChanged then
 		trove:add(inputController.schemeChanged:connect(bindItemKeys))
 	end
+	--[[
+		And once now, which is the whole difference on a phone.
+
+		bindItemKeys is what switches the hotbar tiles from inert Frames into tap
+		targets — `entry.tap.Active = touch`. Connected to schemeChanged alone it
+		only ever ran when the scheme CHANGED, and on a phone it never does: the
+		scheme is already Touch before this controller has built anything, and
+		InputController fires that signal during its own start(), which runs
+		before ours.
+
+		So every tile stayed inert for the whole session, and since the hotbar tap
+		is the ONLY way a touch player can select a slot — there is no slot button
+		on the pad, and the D-pad path is a controller's — a phone could not use a
+		medkit, take pills, or ready a throwable at all. Not "awkwardly": at all.
+
+		The same one-line omission that ProfileController's start() calls out for
+		the balance attribute, with a much larger blast radius.
+	]]
+	bindItemKeys()
 
 	local weapons = Registry.find("WeaponController")
 	if weapons then

@@ -18,6 +18,10 @@
 	go, only which of the deterministic patterns it gets.
 ]]
 
+local GameConfig = require(script.Parent.Parent.Config.GameConfig)
+
+local RECOIL = GameConfig.Recoil
+
 local ShotPattern = {}
 
 --[[ A seed the client generates per shot. Bounded to stay well inside the range
@@ -97,10 +101,32 @@ function ShotPattern.generateRecoil(
 	horizontal: number
 ): (number, number)
 	local random = Random.new(seed + shotIndex * 7919)
-	-- Vertical kick is mostly consistent so the pattern is learnable; horizontal
-	-- is symmetric noise so it cannot simply be counter-strafed.
-	local verticalKick = vertical * random:NextNumber(0.82, 1.18)
-	local horizontalKick = horizontal * random:NextNumber(-1, 1)
+
+	--[[ Where in the burst this shot is. WeaponController resets the index after
+	     0.35s of not firing, so "shot 1" means "the first round of this burst"
+	     rather than "the first round since you spawned". A melee swing passes 0
+	     and is floored to 1. ]]
+	local index = math.max(math.floor(shotIndex), 1)
+
+	--[[ The ramp. See GameConfig.Recoil: this is what makes a burst a shape and
+	     tapping worth doing, and it is the piece that was missing — the index was
+	     being passed in and thrown away on the seed. ]]
+	local climb = RECOIL.FirstShotScale
+		+ (1 - RECOIL.FirstShotScale) * math.min((index - 1) / RECOIL.ClimbShots, 1)
+
+	--[[ Vertical is mostly consistent so the pattern can be countered. The window
+	     is tighter than it was because the climb now carries the character, and
+	     wide per-shot noise on top of a ramp reads as the sight rattling rather
+	     than as the gun pulling. ]]
+	local verticalKick = vertical * climb * random:NextNumber(0.88, 1.12)
+
+	--[[ Horizontal is a slow sweep plus noise. The sweep is a pure function of the
+	     burst index, so it is identical every burst and a player can learn to ride
+	     it; the noise is what stops it being pre-aimable. ]]
+	local drift = math.sin((index - 1) * (math.pi * 2 / RECOIL.DriftPeriod))
+	local horizontalKick = horizontal
+		* climb
+		* (RECOIL.HorizontalDrift * drift + (1 - RECOIL.HorizontalDrift) * random:NextNumber(-1, 1))
 	return verticalKick, horizontalKick
 end
 

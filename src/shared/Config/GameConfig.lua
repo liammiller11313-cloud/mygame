@@ -26,7 +26,7 @@ local GameConfig = {}
 	none. If it is stale, the log says so honestly: the code in Studio is at least
 	as new as this date, and no newer than the push that set it.
 ]]
-GameConfig.BuildStamp = "2026-08-23p"
+GameConfig.BuildStamp = "2026-08-23q"
 
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true
@@ -360,6 +360,45 @@ GameConfig.Recoil = table.freeze({
 	     what makes an automatic weapon a decision rather than a button. A third
 	     leaves the mechanic intact and takes the shove out of it. ]]
 	AimFollow = 0.35,
+
+	--[[
+		THE SHAPE OF A BURST.
+
+		Every shot used to kick the same amount. WeaponController counts a burst
+		index and resets it after 0.35s of not firing, ShotPattern takes that
+		index, CameraController's own header promises "the vertical climb is
+		consistent enough to counter" — and none of it did anything: the index
+		only stirred the random seed, so the first round of a burst and the
+		twentieth kicked identically. Tapping was not more accurate than holding,
+		which is the one thing recoil is for.
+
+		Now the kick RAMPS. The first shot is FirstShotScale of the weapon's
+		number and reaches full over ClimbShots, so every weapon's recoilVertical
+		becomes a curve instead of a constant.
+
+		Deliberately ramping UP TO the old value rather than past it: sustained
+		fire kicks exactly as hard as it did before, and short bursts kick less.
+		Nothing in the roster got harder to shoot.
+	]]
+	FirstShotScale = 0.5,
+	ClimbShots = 7,
+
+	--[[
+		How much of the horizontal is a SHAPE rather than noise.
+
+		It was NextNumber(-1, 1) — uniform, unbiased, unlearnable. That reads as
+		the sight rattling rather than as the gun pulling, and it made
+		recoilHorizontal a measure of how RANDOM a weapon is instead of how it
+		behaves. Half of it is now a slow sweep keyed to the burst index, which is
+		identical every burst and therefore counterable; the rest is still noise so
+		it cannot simply be pre-aimed.
+
+		DriftPeriod is in SHOTS, not seconds, so the sweep is a property of the
+		pattern rather than of the fire rate — a 1100rpm Vector and a 550rpm M60
+		trace the same shape, just at different speeds.
+	]]
+	HorizontalDrift = 0.55,
+	DriftPeriod = 9,
 })
 
 GameConfig.Corpses = table.freeze({
