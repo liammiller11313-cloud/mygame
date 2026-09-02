@@ -5,8 +5,9 @@
 	Two screens in one file because they are two views of one thing:
 
 	  THE PANEL   opened from the main menu. Three loadouts down the left, the
-	              selected one's two slots on the right, and a weapon picker that
-	              takes over the right-hand side when you change a slot.
+	              selected one's three slots on the right — primary, sidearm and
+	              melee — and a weapon picker that takes over the right-hand side
+	              when you change one.
 	  THE PICKER  a strip along the bottom while a round is starting. Three
 	              buttons, no editing. It is the answer to "which one am I taking
 	              in" asked at the only moment it matters.
@@ -82,7 +83,23 @@ local BADGE_WIDTH = 46
 
 local SLOT_HEIGHT = 52
 local PICK_ROW_HEIGHT = 38
-local PICK_ROW_HEIGHT_TOUCH = 50
+--[[
+	The touch sizes on this screen, measured rather than guessed.
+
+	The whole panel is drawn at ScaleLayer's 0.75 floor on a phone, so a
+	reference pixel is three quarters of a real one and PANEL.RowHeightTouch —
+	the standard four other panels use — works out to 42 real pixels.
+
+	Editing a loadout means hitting four controls in sequence, and only the
+	loadout card cleared that. 50 was already a touch size somebody had thought
+	about; it is 38 real and still short. BACK was never given one at all: at 22
+	reference pixels it is SIXTEEN real, so a player could open the weapon picker
+	on a phone and then struggle to get out of it.
+]]
+local PICK_ROW_HEIGHT_TOUCH = PANEL.RowHeightTouch
+local SLOT_HEIGHT_TOUCH = PANEL.RowHeightTouch
+local BACK_HEIGHT_TOUCH = PANEL.RowHeightTouch
+local ACTIVE_HEIGHT_TOUCH = PANEL.RowHeightTouch
 
 --[[
 	How tall the weapon preview is, as a fraction of the right-hand column.
@@ -464,9 +481,34 @@ function LoadoutController:_openPicker(slot: string)
 		row.button.Visible = false
 	end
 	activeButton.Visible = false
+
+	--[[
+		The pad has to be sent somewhere, because where it WAS just disappeared.
+
+		Opening the picker hides every slot row, and the row the player pressed to
+		get here is the one the controller had selected. Roblox does not rehome a
+		selection off a hidden button — it simply stops being anywhere, and the
+		panel becomes answerable only with a mouse, which on a console is the same
+		as not being answerable at all.
+
+		That is the exact failure the round-start picker's own comment describes
+		and fixes. The panel had the same hole and did not.
+
+		The first OWNED weapon, not the first row: an unowned one is Selectable =
+		false, so landing on it would be landing on nothing.
+	]]
+	for _, child in pickList:GetChildren() do
+		if child:IsA("TextButton") and child.Selectable then
+			GamepadFocus.capture(child)
+			break
+		end
+	end
 end
 
 function LoadoutController:_closePicker()
+	--[[ Read before it is cleared: the slot we were editing is where the pad goes
+	     back to, and `state.choosing` is the only record of which one that was. ]]
+	local leaving = state.choosing
 	state.choosing = ""
 	releasePickRows()
 	pickList.Visible = false
@@ -476,6 +518,22 @@ function LoadoutController:_closePicker()
 		row.button.Visible = true
 	end
 	activeButton.Visible = true
+
+	--[[ And back again, to the slot that was being edited rather than to nowhere.
+	     Backing out of the picker with B and finding the selection gone is the
+	     same dead end as arriving with it gone. ]]
+	local landing = nil
+	for _, row in slotRows do
+		if row.slot == leaving then
+			landing = row.button
+			break
+		end
+		landing = landing or row.button
+	end
+	if landing then
+		GamepadFocus.capture(landing)
+	end
+
 	refreshSlots()
 	refreshCards()
 end
@@ -692,7 +750,7 @@ end
 local function buildSlotRow(index: number, slot: string)
 	local button = Widgets.button(right, "Slot" .. slot)
 	button.Position = UDim2.new(0, 0, PREVIEW_HEIGHT, (index - 1) * (SLOT_HEIGHT + 6))
-	button.Size = UDim2.new(1, 0, 0, SLOT_HEIGHT)
+	button.Size = UDim2.new(1, 0, 0, if isTouch() then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT)
 	button.BackgroundColor3 = COLOR.PanelRaised
 	button.BackgroundTransparency = PANEL.RaisedFill
 	local stroke = Widgets.stroke(button, COLOR.Border)
@@ -715,7 +773,7 @@ local function buildSlotRow(index: number, slot: string)
 	local chevron = Widgets.label(button, "Chevron", FONT.Heading, TEXT.Large, COLOR.TextDim)
 	chevron.AnchorPoint = Vector2.new(1, 0.5)
 	chevron.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0.5, 0)
-	chevron.Size = UDim2.fromOffset(16, SLOT_HEIGHT)
+	chevron.Size = UDim2.fromOffset(16, if isTouch() then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT)
 	chevron.TextXAlignment = Enum.TextXAlignment.Right
 	chevron.Text = ">"
 
@@ -768,7 +826,7 @@ local function buildPanel(layer: Frame)
 	activeButton = Widgets.button(right, "SetActive")
 	activeButton.AnchorPoint = Vector2.new(1, 1)
 	activeButton.Position = UDim2.new(1, 0, 1, 0)
-	activeButton.Size = UDim2.fromOffset(230, 38)
+	activeButton.Size = UDim2.fromOffset(230, if isTouch() then ACTIVE_HEIGHT_TOUCH else 38)
 	activeButton.BackgroundColor3 = COLOR.PanelRaised
 	activeButton.BackgroundTransparency = PANEL.ActionFill
 	Widgets.stroke(activeButton, COLOR.Border)
@@ -793,7 +851,12 @@ local function buildPanel(layer: Frame)
 	pickBack = Widgets.button(right, "PickBack")
 	pickBack.AnchorPoint = Vector2.new(1, 0)
 	pickBack.Position = UDim2.new(1, 0, PREVIEW_HEIGHT, 0)
-	pickBack.Size = UDim2.fromOffset(70, TEXT.Large)
+	--[[ Wider as well as taller on a phone. This is the way out of the picker and
+	     the only one a finger has — a controller presses B and a keyboard presses
+	     Escape, but touch has neither. ]]
+	pickBack.Size = if isTouch()
+		then UDim2.fromOffset(120, BACK_HEIGHT_TOUCH)
+		else UDim2.fromOffset(70, TEXT.Large)
 	pickBack.Visible = false
 	local backLabel = Widgets.label(pickBack, "Label", FONT.Heading, TEXT.Small, COLOR.TextSecondary)
 	backLabel.Size = UDim2.fromScale(1, 1)
@@ -1137,6 +1200,29 @@ end
 
 -- ── public API ──────────────────────────────────────────────────────────────
 
+--[[ Re-sizes the controls that are built once, for the scheme in use right now.
+     The picker's rows already adapt because _openPicker rebuilds them; these
+     three do not, so a player who picks the game up on a phone after playing it
+     on a desktop would otherwise get desktop-sized targets until they rejoin. ]]
+local function applyTouchSizing()
+	local touch = isTouch()
+	for _, row in slotRows do
+		row.button.Size = UDim2.new(1, 0, 0, if touch then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT)
+		local chevron = row.button:FindFirstChild("Chevron")
+		if chevron and chevron:IsA("GuiObject") then
+			chevron.Size = UDim2.fromOffset(16, if touch then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT)
+		end
+	end
+	if activeButton then
+		activeButton.Size = UDim2.fromOffset(230, if touch then ACTIVE_HEIGHT_TOUCH else 38)
+	end
+	if pickBack then
+		pickBack.Size = if touch
+			then UDim2.fromOffset(120, BACK_HEIGHT_TOUCH)
+			else UDim2.fromOffset(70, TEXT.Large)
+	end
+end
+
 function LoadoutController:isOpen(): boolean
 	return state.open
 end
@@ -1148,6 +1234,7 @@ function LoadoutController:open()
 	state.open = true
 	gui.Enabled = true
 	refreshPanelSize()
+	applyTouchSizing()
 
 	local store = profile()
 	state.editing = if store then store:getActiveIndex() else 1
