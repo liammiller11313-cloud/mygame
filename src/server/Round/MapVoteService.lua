@@ -168,6 +168,10 @@ function MapVoteService:beginVote(): string
 			id = id,
 			displayName = if definition then definition.displayName else string.upper(id),
 			blurb = if definition then definition.blurb else "",
+			--[[ nil for a map with no picture, which the card handles by drawing
+			     the plain panel it always did. Sent rather than looked up on the
+			     client so a map the client has never heard of still shows one. ]]
+			image = if definition then definition.image else nil,
 		})
 	end
 

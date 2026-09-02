@@ -21,6 +21,17 @@ export type MapDefinition = {
 	id: string, -- must match the model name in ServerStorage.Maps
 	displayName: string,
 	blurb: string, -- one line, shown on the vote card
+	--[[
+		The vote card's picture. Optional, and a map without one is not broken —
+		it draws exactly the card it drew before there were any, which is what
+		makes adding the second and third safe to do one at a time.
+
+		A rbxassetid the uploader owns, or the game does. Roblox refuses to render
+		an image belonging to somebody else, and it refuses SILENTLY: the card
+		comes up empty with nothing in the output to say why. If a picture is
+		blank in-game and the id is right, that is the first thing to check.
+	]]
+	image: string?,
 }
 
 MapConfig.Maps = {
@@ -28,11 +39,17 @@ MapConfig.Maps = {
 		id = "Zombieville",
 		displayName = "ZOMBIEVILLE",
 		blurb = "Open streets. Long sightlines. Nowhere to hide.",
+		--[[ NOTE: this is the same id as Clinton's below, because that is what was
+		     supplied for both. Almost certainly one was pasted twice — if the two
+		     maps do not in fact share a picture, this is the line to correct, and
+		     nothing else needs to change. ]]
+		image = "rbxassetid://83650761275509",
 	},
 	{
 		id = "Clinton",
 		displayName = "CLINTON",
 		blurb = "Tight corridors. Close quarters. Bring the shotgun.",
+		image = "rbxassetid://83650761275509",
 	},
 } :: { MapDefinition }
 

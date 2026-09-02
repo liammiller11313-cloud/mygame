@@ -222,6 +222,63 @@ local function buildCard(option: any, index: number, _total: number)
 	stroke.Thickness = LAYOUT.BorderThickness
 	stroke.Parent = frame
 
+	--[[
+		The map's picture, and the scrim that keeps the words on top of it legible.
+
+		Built FIRST and never given a ZIndex. This ScreenGui is Sibling-ordered, so
+		siblings at the same ZIndex draw in creation order — which means everything
+		below this point lands on top of the picture for free, and no existing
+		element on the card had to be renumbered to make room for it.
+
+		A card whose map has no image skips both and is byte-for-byte the card it
+		was before, which is what makes adding pictures one map at a time safe.
+
+		── WHY THE SCRIM IS NOT OPTIONAL, AND WHY IT IS NEARLY EVEN ─────────────
+		The blurb is TextSecondary on a near-black panel. Over a photograph it is
+		grey text on whatever happens to be behind it — a bright road surface, a
+		wall, a sky — and the one thing you cannot do is know in advance.
+
+		The obvious scrim is a poster gradient: clear at the top so the picture
+		reads, opaque at the bottom where the words are. That is wrong for THIS
+		card, because there is no bottom band of words — the name is at the top,
+		the blurb fills the middle and the tally sits under it. Type covers the
+		whole tile, so a gradient that clears at the top just puts the largest
+		text on the card over an undimmed photograph.
+
+		So it only leans: dark enough at the top to hold a display-size name, a
+		little lighter through the middle, darkest under the tally. With the
+		picture already dimmed below, the map reads as a backdrop rather than as
+		the subject — which on a 320x146 tile mostly full of words is the only
+		thing it can honestly be.
+	]]
+	if typeof(option.image) == "string" and option.image ~= "" then
+		local picture = Instance.new("ImageLabel")
+		picture.Name = "Picture"
+		picture.BackgroundTransparency = 1
+		picture.BorderSizePixel = 0
+		picture.Size = UDim2.fromScale(1, 1)
+		--[[ Crop, not Stretch. These are 320x146 cards and a screenshot is not,
+		     so stretching would show every map through a squashed lens. ]]
+		picture.ScaleType = Enum.ScaleType.Crop
+		picture.Image = option.image
+		--[[ Dimmed a little even before the scrim. A full-brightness photograph
+		     under this interface's type reads as a web banner; this game is set
+		     at dusk and the card should look like it belongs to it. ]]
+		picture.ImageColor3 = Color3.fromRGB(168, 162, 152)
+		picture.Parent = frame
+
+		local scrim = newFrame(frame, "Scrim", COLOR.Background, 0)
+		scrim.Size = UDim2.fromScale(1, 1)
+		local shade = Instance.new("UIGradient")
+		shade.Rotation = 90
+		shade.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.34),
+			NumberSequenceKeypoint.new(0.55, 0.2),
+			NumberSequenceKeypoint.new(1, 0.08),
+		})
+		shade.Parent = scrim
+	end
+
 	local name = newLabel(frame, "Name", FONT.Display, TEXT.Heading, COLOR.TextPrimary)
 	name.Position = UDim2.fromOffset(LAYOUT.PanelPadding, LAYOUT.PanelPadding)
 	name.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Heading + 4)

@@ -150,7 +150,7 @@ local EVENTS: { string } = {
 	"SetWornReward", -- C->S (kind: "Callsign"|"Accent", id: string)
 
 	-- ── Maps, crates and the map vote ───────────────────────────────────────
-	"MapVoteStarted", -- {options: {{id, displayName, blurb}}, endsAt: number}
+	"MapVoteStarted", -- {options: {{id, displayName, blurb, image?}}, endsAt: number}
 	"CastMapVote", -- C->S (mapId: string)
 	"MapVoteUpdated", -- {tally: {[string]: number}, voters: number}
 	"MapVoteResult", -- {winner: string, tally: {[string]: number}}
