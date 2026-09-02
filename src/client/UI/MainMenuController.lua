@@ -1161,17 +1161,7 @@ end
 local function updateFlicker(now: number)
 	local alpha = flicker:alphaAt(now)
 	titleLight.TextTransparency = alpha
-	--[[ The whole strip, not just its background. The rule used to be one Frame
-	     and one transparency; hazard tape is a dark bar with stripes drawn on it,
-	     and fading only the bar would leave the stripes hanging in mid-air at the
-	     bottom of the flicker — which is exactly when the effect is most
-	     visible. ]]
-	titleRule.BackgroundTransparency = math.max(alpha, UITheme.Hazard.Transparency)
-	for _, stripe in titleRule:GetChildren() do
-		if stripe:IsA("Frame") then
-			stripe.BackgroundTransparency = math.max(alpha, UITheme.Hazard.Transparency)
-		end
-	end
+	titleRule.BackgroundTransparency = alpha
 end
 
 --[[ The countdown is rendered from an absolute server-time stamp, so it stays
@@ -1278,14 +1268,10 @@ local function buildTitle()
 	titleLight.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	titleLight.Text = "LIGHT"
 
-	--[[ Hazard tape rather than an accent hairline. This is the first thing on
-	     the first screen and it was a one-pixel orange line, which is the most
-	     neutral mark an interface has — it said "a title was here" and nothing
-	     about what kind of game follows it. ]]
-	titleRule = Widgets.hazard(menuLayer, "TitleRule", TITLE_RULE_WIDTH)
+	titleRule = Widgets.rule(menuLayer, "TitleRule", COLOR.Accent)
 	titleRule.Position =
 		UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE * 2 + LAYOUT.PanelPadding)
-	titleRule.Size = UDim2.fromOffset(TITLE_RULE_WIDTH, UITheme.Hazard.Height)
+	titleRule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 end
 
 --[[

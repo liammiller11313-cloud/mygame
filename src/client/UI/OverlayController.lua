@@ -57,7 +57,6 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
 local ScaleLayer = require(script.Parent.ScaleLayer)
-local Widgets = require(script.Parent.Widgets)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -411,25 +410,9 @@ local function buildStatus()
 	statusPanel.Size = UDim2.fromOffset(760, 120)
 	statusPanel.Visible = false
 
-	--[[
-		Hazard tape above and below the words, and the words in the stencil face.
-
-		YOU ARE DEAD is the most dramatic thing this interface ever says and it was
-		set in the same grotesque as a settings row, floating on nothing. Two
-		strips and a typeface is the whole difference between a status message and
-		a stencil sprayed on the wall of a place that has stopped working.
-
-		Drawn as part of the panel rather than toggled with the state, so the
-		strips inherit statusPanel.Visible and there is nothing extra to remember
-		to hide — which is how the old bile layer got left on screen.
-	]]
-	local topTape = Widgets.hazard(statusPanel, "TapeTop", 760)
-	topTape.AnchorPoint = Vector2.new(0, 1)
-	topTape.Position = UDim2.new(0, 0, 0, -LAYOUT.ElementGap)
-
-	local bottomTape = Widgets.hazard(statusPanel, "TapeBottom", 760)
-	bottomTape.Position = UDim2.new(0, 0, 1, LAYOUT.ElementGap)
-
+	--[[ The stencil face, scoped to the one line that says what has happened.
+	     YOU ARE DEAD is the most dramatic thing this interface ever says and it
+	     was set in the same grotesque as a settings row. ]]
 	statusTitle = newLabel(statusPanel, "Title", FONT.Sign, TEXT.Heading, COLOR.TextPrimary)
 	statusTitle.Position = UDim2.fromScale(0, 0)
 	statusTitle.Size = UDim2.new(1, 0, 0, 38)

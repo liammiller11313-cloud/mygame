@@ -80,36 +80,28 @@ UITheme.Color = table.freeze({
 	The fix is deliberately structural rather than chromatic. The palette above
 	is already warm and already dark, and pushing it browner would only make the
 	type harder to read in the dark rooms this game ends in. What was missing is
-	the vocabulary a wartime or industrial surface has — corners that are braced,
-	edges that are marked as dangerous, and surfaces that are not perfectly flat.
+	the vocabulary an industrial surface has — corners that are braced, and
+	surfaces that are not perfectly flat.
 
 	All of it is procedural. This project ships no marketplace image assets, so
 	every one of these is frames, strokes and gradients, which also means they
 	cost nothing to load and cannot 404 in a live game.
+
+	── WHAT IS NOT HERE, AND WHY ───────────────────────────────────────────────
+	There was a third one: diagonal yellow-and-black hazard tape, under the menu
+	title, under every panel header, and above and below the downed card. It is
+	the right idea and Roblox cannot draw it this way.
+
+	Each stripe was a thin bar rotated 31 degrees inside a seven-pixel strip with
+	ClipsDescendants on. Clipping does not apply to a ROTATED descendant, so
+	nothing was sliced into a diagonal band — every stripe drew as a whole tilted
+	rectangle standing well clear of the strip it was supposed to be inside, and
+	the effect on screen was a row of yellow squares floating over the title.
+
+	Doing it properly needs the stripes drawn as an image, and this project has
+	no image assets on purpose. If one is ever added, that is the way to do it —
+	not another attempt at rotating frames inside a clip.
 ]]
-
---[[
-	Hazard striping: diagonal yellow and black, the way a loading bay is painted.
-
-	Genre shorthand nothing else carries. A hairline says "a division"; this says
-	"do not cross", and it is the single cheapest thing that makes a panel look
-	like it belongs in a quarantine zone rather than in a phone.
-
-	Angle is a shear rather than a rotation so the stripes stay the same width
-	whatever the bar's height is, and the width is in pixels rather than a scale
-	so a short strip and a long one are painted at the same pitch.
-]]
-UITheme.Hazard = table.freeze({
-	Warning = Color3.fromRGB(214, 168, 40),
-	Dark = Color3.fromRGB(16, 15, 13),
-	StripeWidth = 13,
-	--[[ Studs of horizontal shear per stud of height. 0.6 is about 31 degrees,
-	     which is the angle every real hazard tape is printed at and reads as
-	     deliberate where 45 reads as a pattern. ]]
-	Shear = 0.6,
-	Height = 7,
-	Transparency = 0.15,
-})
 
 --[[
 	Corner brackets: four Ls at the corners of a panel instead of a closed box.

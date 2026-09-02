@@ -39,7 +39,6 @@ local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
 local PANEL = UITheme.Panel
-local HAZARD = UITheme.Hazard
 local BRACKET = UITheme.Bracket
 local GRIME = UITheme.Grime
 local TEXT = UITheme.TextSize
@@ -153,61 +152,6 @@ end
 	imposed from here would only be overwritten a frame later.
 ]]
 --[[
-	A strip of diagonal hazard tape.
-
-	Built as sheared parallelograms inside a clipping frame rather than as a
-	repeating image, because this project ships no marketplace assets — and the
-	frames are cheaper anyway: a dozen quads with no texture fetch.
-
-	The shear is applied by drawing each stripe as a tall thin frame ROTATED about
-	its own centre, which Roblox does on the GPU. The strip clips, so the parts
-	that hang past the ends simply do not draw and nothing has to be measured.
-
-	`width` is in reference pixels and is only ever a hint: the stripe count is
-	derived from it, so a strip that is later resized keeps its pitch instead of
-	stretching into a different pattern.
-]]
-function Widgets.hazard(parent: Instance, name: string, width: number, height: number?): Frame
-	local strip = Widgets.frame(parent, name, HAZARD.Dark, HAZARD.Transparency)
-	strip.Size = UDim2.new(1, 0, 0, height or HAZARD.Height)
-	strip.ClipsDescendants = true
-
-	local thickness = height or HAZARD.Height
-	local tall = thickness * 2.4
-	local radians = math.atan(HAZARD.Shear)
-
-	--[[
-		The pitch has to account for the ROTATION, not just the stripe width.
-
-		A 13px bar tilted 31 degrees does not occupy 13 pixels of the strip — it
-		occupies its width across the tilt PLUS its height along it, which for a
-		bar taller than it is wide is most of the answer: 19.8px, not 13. Spacing
-		them at twice the declared width therefore paints 76% yellow and 24% dark,
-		which is not hazard tape, it is a yellow bar with scratches. Twice the real
-		extent is what gives equal bands.
-
-		It is also three times fewer frames — 24 across a full-width panel header
-		instead of 69 — because the old spacing drew two stripes into the space one
-		of them already filled.
-	]]
-	local extent = HAZARD.StripeWidth * math.cos(radians) + tall * math.sin(radians)
-	local pitch = extent * 2
-	--[[ One extra stripe at each end. A stripe rotated about its centre reaches
-	     outside the strip at the top and bottom, so the first and last visible
-	     ones have to be drawn from off the edge or the tape appears to start late
-	     and stop early. ]]
-	local count = math.max(math.ceil(width / pitch) + 2, 3)
-	for index = 0, count do
-		local stripe = Widgets.frame(strip, "S" .. index, HAZARD.Warning, HAZARD.Transparency)
-		stripe.AnchorPoint = Vector2.new(0.5, 0.5)
-		stripe.Position = UDim2.fromOffset((index - 1) * pitch, thickness * 0.5)
-		stripe.Size = UDim2.fromOffset(HAZARD.StripeWidth, tall)
-		stripe.Rotation = math.deg(radians)
-	end
-	return strip
-end
-
---[[
 	Four corner brackets on an existing frame.
 
 	Parented to the frame and sized in offsets, so they follow it through every
@@ -304,12 +248,9 @@ function Widgets.panel(parent: Instance, trove: any, titleText: string, onClose:
 	Widgets.hover(trove, close, closeLabel)
 	trove:connect(close.Activated, onClose)
 
-	--[[ Hazard tape under the header instead of an accent hairline. The hairline
-	     said "a division"; this says "past this line is the part of the game that
-	     can kill you", which is the same information in the language of the
-	     building the game is set in. ]]
-	local rule = Widgets.hazard(frame, "HeadRule", 900)
+	local rule = Widgets.frame(frame, "HeadRule", COLOR.BorderBright, 0)
 	rule.Position = UDim2.fromOffset(0, PANEL.HeaderHeight)
+	rule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
 
 	return { scrim = scrim, frame = frame, title = title, close = close, rule = rule }
 end
