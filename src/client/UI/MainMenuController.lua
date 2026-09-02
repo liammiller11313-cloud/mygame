@@ -1467,6 +1467,17 @@ local BRIEFING = {
 		gamepad = "D-PAD",
 		text = "Weapons and items. Tap the one you hold to look at it",
 	},
+	--[[ The row this card was missing, and its absence was half of "you cannot
+	     heal yourself": nothing anywhere told a player the key existed. The
+	     literals cover the two schemes where the verb has no key of its own —
+	     there you press the item again, which is the same rule the row above
+	     describes for looking at a gun. ]]
+	{
+		action = "UseItem",
+		touch = "TAP AGAIN",
+		gamepad = "PRESS AGAIN",
+		text = "Use your medkit or pills on yourself",
+	},
 	{ action = "Sprint", text = "Sprint — costs stamina. Automatic on touch" },
 }
 
@@ -1509,11 +1520,25 @@ local KEY_LABELS: { [string]: string } = {
      gets the pad's own button label — telling a phone player to press R is worse
      than telling them nothing. ]]
 local function briefingGlyph(entry: any, bindings: { any }, scheme: string): string
-	if not entry.action then
-		return if scheme == "Touch"
+	--[[ The explicit per-scheme label, for a row that has one — and the fallback
+	     for a row that has an action with no key on THIS scheme. A verb bound
+	     only on a keyboard still happens on a phone, it just happens by a
+	     different gesture, and answering "—" there tells a touch player the game
+	     will not let them do it at all.
+
+	     Nested rather than a file-level local because all three of its callers
+	     are in this function, and audit.py reports this file at 182 of Luau's
+	     200-per-scope limit. ]]
+	local function literal(): string?
+		local text = if scheme == "Touch"
 			then entry.touch
 			elseif scheme == "Gamepad" then entry.gamepad
 			else entry.desktop
+		return if typeof(text) == "string" and text ~= "" then text else nil
+	end
+
+	if not entry.action then
+		return literal() or "—"
 	end
 	for _, binding in bindings do
 		if binding.action ~= entry.action then
@@ -1532,9 +1557,9 @@ local function briefingGlyph(entry: any, bindings: { any }, scheme: string): str
 				return KEY_LABELS[key.Name] or string.upper(key.Name)
 			end
 		end
-		return "—"
+		return literal() or "—"
 	end
-	return "—"
+	return literal() or "—"
 end
 
 local RULES = {

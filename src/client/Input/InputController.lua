@@ -427,6 +427,21 @@ local function activeSlot(): string
 	return Attributes.get(player, Attributes.Loadout.ActiveSlot, Enums.Slot.Secondary)
 end
 
+--[[ Whether there is anything in a slot to use. Read off the loadout attributes
+     the HUD already draws from, so this cannot disagree with the tile the player
+     is looking at. ]]
+local function slotHolds(slot: string): boolean
+	local attribute = if slot == Enums.Slot.Health
+		then Attributes.Loadout.HealthItemId
+		elseif slot == Enums.Slot.Pills then Attributes.Loadout.PillItemId
+		elseif slot == Enums.Slot.Throwable then Attributes.Loadout.ThrowableId
+		else nil
+	if not attribute then
+		return false
+	end
+	return Attributes.get(player, attribute, "") ~= ""
+end
+
 --[[
 	A ping is a position plus what was standing at it. Resolving `kind` here
 	rather than server-side keeps the remote to one round trip and costs a single
@@ -656,13 +671,37 @@ local function forward(action: string)
 	end
 
 	if action == Action.UseItem then
-		--[[ selectedSlot, not activeSlot. LA.ActiveSlot only moves once SwitchSlot
-		     has been to the server and back, so "4 then H" quickly enough — which
-		     is how anyone actually heals — sent the slot the player was on BEFORE
-		     they selected the kit, and the server used that instead. The memory
-		     right above exists for precisely this race and every other consumable
-		     path already reads it; this one was reading past it. ]]
-		Remotes.Event.UseItem:FireServer(selectedSlot())
+		--[[
+			THE HEAL KEY MEANS HEAL.
+
+			It used to send selectedSlot() and nothing else, which is the slot you
+			are HOLDING — so pressing it with a rifle out sent "Primary", the
+			server found no consumable in that slot and returned false, and
+			absolutely nothing happened. No sound, no message, no heal. The only
+			way to use a medkit was to press 4 first and then this, and a player
+			who does not know that reasonably concludes the game will not let them
+			heal at all.
+
+			So the selected slot is honoured only when it is something this key
+			could actually spend; otherwise it falls back to what the key is
+			named after. Health before Pills, because a medkit is the deliberate
+			choice and pills are the panic one — and because spending pills by
+			accident while a medkit sits unused is the one wrong answer here.
+
+			selectedSlot rather than activeSlot for the first test, still, and for
+			the original reason: LA.ActiveSlot only moves once SwitchSlot has been
+			to the server and back, so "4 then H" quickly enough would otherwise
+			read the slot the player was on BEFORE they selected the kit.
+		]]
+		local slot = selectedSlot()
+		if not CONSUMABLE_SLOTS[slot] or not slotHolds(slot) then
+			if slotHolds(Enums.Slot.Health) then
+				slot = Enums.Slot.Health
+			elseif slotHolds(Enums.Slot.Pills) then
+				slot = Enums.Slot.Pills
+			end
+		end
+		Remotes.Event.UseItem:FireServer(slot)
 	elseif action == Action.Throw then
 		local origin, direction = cameraRay()
 		Remotes.Event.ThrowItem:FireServer({ origin = origin, direction = direction, power = 1 })
