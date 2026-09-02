@@ -195,14 +195,14 @@ local function startRefill(spot: Spot)
 	spot.refillAt = serverNow() + KIT.RespawnSeconds
 end
 
---[[ Case-insensitive and space-insensitive, exactly like the crate lookup:
-     "Medkits", "medkits" and "Med Kits" all find the folder, because the
-     alternative is somebody losing an hour to a capital letter. ]]
+--[[ Through MapConfig.folderMatches, exactly like the crate lookup — and now
+     literally the same function rather than a second copy of the same idea.
+     "Medkits", "medkits", "Med Kits" and "Medkit" all find the folder, because
+     the alternative is somebody losing an hour to a capital letter. ]]
 local function findFolder(root: Instance): Instance?
-	local wanted = string.lower(string.gsub(KIT.FolderName, "%s+", ""))
 	for _, descendant in root:GetDescendants() do
 		if descendant:IsA("Folder") or descendant:IsA("Model") then
-			if string.lower(string.gsub(descendant.Name, "%s+", "")) == wanted then
+			if MapConfig.folderMatches(descendant.Name, KIT.FolderName) then
 				return descendant
 			end
 		end
@@ -242,10 +242,12 @@ function MedkitService:rebuild(): number
 		warn(
 			string.format(
 				"[MedkitService] no %q folder in the live map — there will be no medkits to find. "
-					.. "Add one holding models named %q through %q.",
+					.. "Add one holding models named %q through %q. "
+					.. "The map's top-level folders are: %s",
 				KIT.FolderName,
 				"Medkit 1",
-				"Medkit " .. KIT.ExpectedCount
+				"Medkit " .. KIT.ExpectedCount,
+				MapConfig.folderNamesIn(root)
 			)
 		)
 		return 0

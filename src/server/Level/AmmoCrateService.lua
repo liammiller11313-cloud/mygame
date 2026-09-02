@@ -112,16 +112,20 @@ end
 --[[
 	Finds the crates in whatever map is live.
 
-	Deliberately forgiving about naming: the folder is matched case-insensitively
-	with spaces stripped, and a crate's index is read from any trailing digits in
-	its name. "Ammo Crate 3", "AmmoCrate3" and "ammo crate 3" all work, because
-	the alternative is a level designer losing an hour to a missing space.
+	Deliberately forgiving about naming: the folder goes through
+	MapConfig.folderMatches, which folds case, spaces, punctuation AND a trailing
+	plural, and a crate's index is read from any trailing digits in its name.
+	"Ammo Crate 3", "AmmoCrate3" and "ammo crate 3" all work, because the
+	alternative is a level designer losing an hour to a missing space.
+
+	The plural is the part this used to get wrong, and it cost a whole map its
+	resupply: the config says "Ammo Crate", a folder holding six of them gets
+	called "Ammo Crates" by anybody naming it, and the two did not match.
 ]]
 local function findCrateFolder(root: Instance): Instance?
-	local wanted = string.lower(string.gsub(CRATE.FolderName, "%s+", ""))
 	for _, descendant in root:GetDescendants() do
 		if descendant:IsA("Folder") or descendant:IsA("Model") then
-			if string.lower(string.gsub(descendant.Name, "%s+", "")) == wanted then
+			if MapConfig.folderMatches(descendant.Name, CRATE.FolderName) then
 				return descendant
 			end
 		end
@@ -144,10 +148,12 @@ function AmmoCrateService:rebuild()
 		warn(
 			string.format(
 				"[AmmoCrateService] no %q folder in the live map — there will be no resupply. "
-					.. "Add one holding models named %q through %q.",
+					.. "Add one holding models named %q through %q. "
+					.. "The map's top-level folders are: %s",
 				CRATE.FolderName,
 				CRATE.FolderName .. " 1",
-				CRATE.FolderName .. " 6"
+				CRATE.FolderName .. " 6",
+				MapConfig.folderNamesIn(root)
 			)
 		)
 		return 0

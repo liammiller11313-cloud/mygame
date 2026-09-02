@@ -59,6 +59,67 @@ MapConfig.Maps = {
 	},
 } :: { MapDefinition }
 
+--[[
+	Whether a folder somebody put in their map is the one a system is looking for.
+
+	Two services had a copy of this each, and both copies folded case and stripped
+	spaces — which handles "ammocrate" and "Ammo Crate" and does NOT handle
+	"Ammo Crates". A trailing S is the single most likely way a hand-typed folder
+	name differs from a config one, because the folder holds six of the thing and
+	naming it in the plural is what a person does. The config says "Ammo Crate";
+	the map said "Ammo Crates"; nothing matched, and the map ran with no resupply
+	at all and one warning nobody was looking at.
+
+	So: case, whitespace and punctuation folded away, and a single trailing S
+	dropped from BOTH sides so it does not matter which one is plural. Living here
+	rather than in either service because this file owns the FolderName constants
+	— a rule about how those are compared belongs with them, and one copy cannot
+	drift from the other.
+]]
+local function foldFolderName(name: string): string
+	local folded = string.lower(string.gsub(name, "[^%w]", ""))
+	--[[ Only a trailing one, and only when something is left. "s" itself folds to
+	     "s" rather than to nothing, so a folder actually called that still
+	     compares as itself. ]]
+	if #folded > 1 and string.sub(folded, -1) == "s" then
+		folded = string.sub(folded, 1, -2)
+	end
+	return folded
+end
+
+function MapConfig.folderMatches(name: string, wanted: string): boolean
+	if typeof(name) ~= "string" or typeof(wanted) ~= "string" then
+		return false
+	end
+	return foldFolderName(name) == foldFolderName(wanted)
+end
+
+--[[
+	The folder names a map actually contains, for a warning that has to say why it
+	found nothing.
+
+	"No 'Ammo Crate' folder in the live map" is true and useless: it does not say
+	whether the folder is missing, misspelled, nested somewhere unexpected, or
+	named in the plural — which is what it actually was. Listing what IS there
+	turns that into one glance. Top level only, because a designer's own folders
+	are at the top and the hundreds nested inside props are noise.
+]]
+function MapConfig.folderNamesIn(root: Instance?): string
+	if not root then
+		return "nothing"
+	end
+	local names: { string } = {}
+	for _, child in root:GetChildren() do
+		if (child:IsA("Folder") or child:IsA("Model")) and #names < 12 then
+			table.insert(names, string.format("%q", child.Name))
+		end
+	end
+	if #names == 0 then
+		return "no folders at all"
+	end
+	return table.concat(names, ", ")
+end
+
 MapConfig.DefaultMap = "Zombieville"
 
 --[[
