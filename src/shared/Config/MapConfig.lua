@@ -39,11 +39,7 @@ MapConfig.Maps = {
 		id = "Zombieville",
 		displayName = "ZOMBIEVILLE",
 		blurb = "Open streets. Long sightlines. Nowhere to hide.",
-		--[[ NOTE: this is the same id as Clinton's below, because that is what was
-		     supplied for both. Almost certainly one was pasted twice — if the two
-		     maps do not in fact share a picture, this is the line to correct, and
-		     nothing else needs to change. ]]
-		image = "rbxassetid://83650761275509",
+		image = "rbxassetid://133615664807337",
 	},
 	{
 		id = "Clinton",
