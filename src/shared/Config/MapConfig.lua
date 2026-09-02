@@ -47,6 +47,17 @@ MapConfig.Maps = {
 		blurb = "Tight corridors. Close quarters. Bring the shotgun.",
 		image = "rbxassetid://83650761275509",
 	},
+	{
+		id = "Crossroads",
+		displayName = "CROSSROADS",
+		--[[ Written blind — nobody has described this map to the code yet. It says
+		     something true of anywhere called a crossroads and nothing that could
+		     be wrong about the geometry; replace it once the map has been played,
+		     the way the other two blurbs name what you should bring. ]]
+		blurb = "Four ways in. Four ways out. Watch all of them.",
+		--[[ No picture yet, which is why `image` is optional: this draws the plain
+		     card the other two drew before they had one. ]]
+	},
 } :: { MapDefinition }
 
 MapConfig.DefaultMap = "Zombieville"

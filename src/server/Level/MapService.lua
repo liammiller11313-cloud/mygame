@@ -23,8 +23,10 @@
 	spawn nodes, the ammo crates — rebuilds from tags after `mapChanged` fires.
 ]]
 
+local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
+local SoundService = game:GetService("SoundService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -45,6 +47,44 @@ local currentRoot: Model? = nil
 local prewarmed: { [string]: Model } = {}
 
 local PREWARM_FOLDER = "FL_Prewarm"
+
+--[[
+	A map's own sky and its own music.
+
+	Both are things a level author naturally drops INSIDE their map model, and
+	both do absolutely nothing there:
+
+	  * Roblox only renders a Sky parented to Lighting. One sitting in a Model in
+	    Workspace is inert — no error, no warning, no sky. It is the single most
+	    confusing thing about authoring a map, because everything looks right in
+	    the explorer.
+	  * A Sound plays, but a Sound in Workspace is not a descendant of
+	    SoundService, and the master volume slider is a SoundGroup that adopts
+	    SoundService's descendants. Music left in the map would ignore the volume
+	    setting entirely — including when it is set to zero.
+
+	So both are lifted out on load and put where the engine expects them, and
+	both are put back exactly as they were on unload.
+
+	── HOW ONE IS RECOGNISED ───────────────────────────────────────────────────
+	A DIRECT child of the map model, and nothing deeper. That is not a shortcut,
+	it is the distinction itself: a Sound attached to a part is positional
+	ambience that belongs to that part and must stay there, and a Sound hanging
+	off the model root is 2D by definition — it is already global, so it can only
+	have been authored as the map's own track. Same for a Sky, which has nowhere
+	else meaningful to be.
+
+	No naming convention, deliberately. "CrossroadsSky" and "Crossroads Music"
+	are perfectly good names and so is anything else somebody picks; a rule that
+	depended on the words would fail silently the first time it did not.
+]]
+local AMBIENCE_STASH = "FL_DisplacedSky"
+
+--[[ What we put into Lighting and SoundService, so unload can take it back out
+     again. The map clone is destroyed wholesale, and these two are no longer
+     inside it by then — without holding them they would simply leak. ]]
+local installedSky: Sky? = nil
+local installedMusic: Sound? = nil
 
 local warned: { [string]: boolean } = {}
 local function warnOnce(key: string, message: string)
@@ -224,7 +264,75 @@ function MapService:getAvailableIds(): { string }
 	return available
 end
 
+--[[ Where a sky that was already in Lighting waits out the round. Parked rather
+     than destroyed: it is the place's own sky, not ours, and a map that borrows
+     the view has to give it back. ]]
+local function skyStash(): Folder
+	local existing = ServerStorage:FindFirstChild(AMBIENCE_STASH)
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = AMBIENCE_STASH
+	folder.Parent = ServerStorage
+	return folder
+end
+
+--[[ Lifts a map's sky and music out of the model and into the services that can
+     actually use them. See the note on AMBIENCE_STASH for why either has to
+     move at all. ]]
+local function installAmbience(clone: Model)
+	for _, child in clone:GetChildren() do
+		if child:IsA("Sky") and not installedSky then
+			--[[ Anything already up there steps aside first. Two Skies in Lighting
+			     is not a blend, it is a coin toss — and the one that wins is not
+			     the map's. ]]
+			for _, existing in Lighting:GetChildren() do
+				if existing:IsA("Sky") then
+					existing.Parent = skyStash()
+				end
+			end
+			child.Parent = Lighting
+			installedSky = child
+		elseif child:IsA("Sound") and not installedMusic then
+			--[[ Looped without asking. A background track that plays once and
+			     stops leaves the rest of a seventeen-minute round in silence,
+			     which is never what a map's music was for. Volume is left exactly
+			     as authored — that is a mix decision and it is theirs. ]]
+			child.Looped = true
+			child.Parent = SoundService
+			child:Play()
+			installedMusic = child
+		end
+	end
+end
+
+--[[ Puts the view and the mixer back the way they were. Called before the map
+     clone is destroyed, though the order does not matter: neither instance is
+     inside the clone any more, which is exactly why this has to exist. ]]
+local function removeAmbience()
+	if installedSky then
+		installedSky:Destroy()
+		installedSky = nil
+	end
+	if installedMusic then
+		installedMusic:Destroy()
+		installedMusic = nil
+	end
+	local stash = ServerStorage:FindFirstChild(AMBIENCE_STASH)
+	if stash then
+		for _, sky in stash:GetChildren() do
+			sky.Parent = Lighting
+		end
+	end
+end
+
 function MapService:unload()
+	--[[ Before the early return, not after. A map can install a sky and then fail
+	     to leave a currentRoot behind — and a game running the last map's sky over
+	     no map at all is a bug that survives every subsequent round. ]]
+	removeAmbience()
+
 	if not currentRoot then
 		currentId = ""
 		return
@@ -272,6 +380,9 @@ function MapService:load(mapId: string): boolean
 	     world, so stripping afterwards is a race this would sometimes lose. ]]
 	sanitise(clone, mapId)
 	clone.Parent = liveFolder()
+	--[[ After parenting, so the sky and the music are lifted out of a model that
+	     is already live rather than out of one still being assembled. ]]
+	installAmbience(clone)
 
 	currentRoot = clone
 	currentId = mapId

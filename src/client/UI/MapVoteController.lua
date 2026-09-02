@@ -283,6 +283,23 @@ local function buildCard(option: any, index: number, _total: number)
 	name.Position = UDim2.fromOffset(LAYOUT.PanelPadding, LAYOUT.PanelPadding)
 	name.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Heading + 4)
 	name.Text = option.displayName
+	--[[
+		Shrinks to fit, up to the size it already was.
+
+		layoutPanel narrows the cards when the roster does not fit the screen, and
+		it narrows the FRAME only — the type stayed at Heading whatever happened
+		around it. Two maps never reached the point where that mattered; three on
+		a 480-pixel viewport puts a 132-pixel card under a 30-pixel word, and
+		"CROSSROADS" simply ran off the side of it.
+
+		The constraint is what keeps this from being a downgrade everywhere else:
+		TextScaled on its own would GROW the name to fill a desktop card, which is
+		a different card than the one this screen was designed as.
+	]]
+	name.TextScaled = true
+	local nameSize = Instance.new("UITextSizeConstraint")
+	nameSize.MaxTextSize = TEXT.Heading
+	nameSize.Parent = name
 
 	local blurb = newLabel(frame, "Blurb", FONT.Body, TEXT.Small, COLOR.TextSecondary)
 	blurb.Position = UDim2.fromOffset(LAYOUT.PanelPadding, LAYOUT.PanelPadding + TEXT.Heading + 6)
