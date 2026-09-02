@@ -75,7 +75,37 @@ local COLUMN_GAP = 14
 local SECTION_LABEL_HEIGHT = 20
 
 local QUEST_ROW_HEIGHT = 62
+
+--[[
+	A pass tier row, and the same row on a phone.
+
+	34 was chosen against a mouse and is a real defect with a finger: the whole
+	panel is drawn at ScaleLayer's 0.75 floor on a phone, so 34 reference pixels
+	is 26 REAL ones — well under the 42 that PANEL.RowHeightTouch works out to,
+	and these rows are stacked touching each other, so a mis-tap does not miss,
+	it wears the wrong reward.
+
+	Four panels in this interface already made this distinction. This one and the
+	play panel did not, which is what happens when a screen is built without a
+	phone in front of it.
+]]
 local TIER_ROW_HEIGHT = 34
+local TIER_ROW_HEIGHT_TOUCH = PANEL.RowHeightTouch
+
+--[[ The footer has to grow with the button in it. A CLAIM button that stayed
+     30 reference pixels tall would be 22 real ones — half the standard, on the
+     one control that spends a currency it took days to earn. ]]
+--[[ Tall enough to HOLD a full-size button plus its inset, not merely to
+     equal one. A 56-pixel footer with a button inset inside it yields a
+     46-pixel button, which is 34 real pixels and still under the standard
+     the footer grew for. ]]
+local FOOTER_HEIGHT_TOUCH = PANEL.RowHeightTouch + 8
+
+--[[ Where the two columns begin, under the header and the banner. A constant
+     because every term in it is one — and because build() and applyTouchSizing
+     both need it, and two copies of this sum would drift the moment the banner
+     changed height. ]]
+local BODY_TOP = HEADER_HEIGHT + LAYOUT.PanelPadding + BANNER_HEIGHT + LAYOUT.PanelPadding
 
 --[[ How thick the XP and quest bars are. One number for both: they mean the same
      thing — how far through something you are — and drawing them at two weights
@@ -102,6 +132,7 @@ local questHolder: Frame
 local tierList: ScrollingFrame
 local claimButton: TextButton
 local claimLabel: TextLabel
+local footRule: Frame
 local hint: TextLabel
 
 local state = {
@@ -171,6 +202,23 @@ local function claimCursor(value: boolean)
 	else
 		FreeCursor.giveBack(restore)
 	end
+end
+
+--[[ The scheme, asked at layout time rather than remembered. A player who picks
+     up a phone-sized window or plugs in a keyboard mid-session gets the right
+     targets on the next open — SettingsController rebuilds its rows for exactly
+     this reason. ]]
+local function isTouch(): boolean
+	local input = Registry.find("InputController")
+	if not input or typeof(input.isTouchScheme) ~= "function" then
+		return false
+	end
+	local ok, touch = pcall(input.isTouchScheme, input)
+	return ok and touch == true
+end
+
+local function footerHeight(): number
+	return if isTouch() then FOOTER_HEIGHT_TOUCH else FOOTER_HEIGHT
 end
 
 local function menuIsOpen(): boolean
@@ -357,6 +405,45 @@ local function refreshClaim()
 	local affordable = store:getScrip() >= cost
 	claimLabel.TextColor3 = if affordable then COLOR.TextPrimary else COLOR.TextDim
 	claimButton.Active = affordable
+end
+
+--[[ Everything whose size depends on the input scheme, applied together. Called
+     from build so the first frame is right, and from open so a scheme change
+     between two openings is picked up. ]]
+local function applyTouchSizing()
+	local rowHeight = if isTouch() then TIER_ROW_HEIGHT_TOUCH else TIER_ROW_HEIGHT
+	for _, row in tierRows do
+		row.button.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, rowHeight)
+	end
+
+	local foot = footerHeight()
+	if footRule then
+		footRule.Position = UDim2.new(0, 0, 1, -foot)
+	end
+	if hint then
+		hint.Size = UDim2.new(0.58, 0, 0, foot)
+	end
+	if claimButton then
+		--[[ The full touch height on a phone, inset only on a desktop where the
+		     pointer is exact. ]]
+		claimButton.Size = UDim2.fromOffset(200, if isTouch() then PANEL.RowHeightTouch else foot - 10)
+	end
+	if tierList then
+		tierList.Size = UDim2.new(
+			1 - QUEST_WIDTH,
+			-(LAYOUT.PanelPadding * 2 + COLUMN_GAP),
+			1,
+			-(BODY_TOP + foot + LAYOUT.PanelPadding + SECTION_LABEL_HEIGHT)
+		)
+	end
+	if questHolder then
+		questHolder.Size = UDim2.new(
+			QUEST_WIDTH,
+			-LAYOUT.PanelPadding,
+			1,
+			-(BODY_TOP + foot + LAYOUT.PanelPadding + SECTION_LABEL_HEIGHT)
+		)
+	end
 end
 
 local function refresh()
@@ -583,7 +670,7 @@ local function build()
 
 	buildBanner()
 
-	local top = HEADER_HEIGHT + LAYOUT.PanelPadding + BANNER_HEIGHT + LAYOUT.PanelPadding
+	local top = BODY_TOP
 	local bodyHeight = -(top + FOOTER_HEIGHT + LAYOUT.PanelPadding)
 
 	local questCaption = Widgets.label(panel, "QuestCaption", FONT.Heading, TEXT.Small, COLOR.TextDim)
@@ -616,7 +703,7 @@ local function build()
 		buildTierRow(index, reward)
 	end
 
-	local footRule = Widgets.frame(panel, "FootRule", COLOR.Border, 0)
+	footRule = Widgets.frame(panel, "FootRule", COLOR.Border, 0)
 	footRule.AnchorPoint = Vector2.new(0, 1)
 	footRule.Position = UDim2.new(0, 0, 1, -FOOTER_HEIGHT)
 	footRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
@@ -672,6 +759,7 @@ local function build()
 		refresh()
 	end)
 
+	applyTouchSizing()
 	refreshPanelSize()
 end
 
@@ -692,6 +780,9 @@ function CareerController:open()
 	     midnight, and a player who left the game running through it should get
 	     today's three without rejoining. ]]
 	buildQuests()
+	--[[ Before refresh, so the first frame after an open is already at the right
+	     size rather than resizing under the player's thumb. ]]
+	applyTouchSizing()
 	refresh()
 	setSuppressed(not menuIsOpen())
 	claimCursor(true)

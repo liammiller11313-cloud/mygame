@@ -70,6 +70,34 @@ local ACTION_WIDTH = 0.36
 local COLUMN_GAP = 14
 local ACTION_HEIGHT = 62
 
+--[[ Where the per-action control (mode row, code box or server list) begins.
+     A constant for the same reason CareerController's BODY_TOP is one: build
+     and applyTouchSizing both need it, and two copies of the sum drift. ]]
+local CONTROL_TOP = HEADER_HEIGHT + LAYOUT.PanelPadding + TEXT.Heading + 8 + 104
+
+--[[
+	The three sizes a finger changes, and why.
+
+	This panel is drawn at ScaleLayer's 0.75 floor on a phone, so a reference
+	pixel is three quarters of a real one. A 34-pixel server row is 26 real —
+	well under the 42 that PANEL.RowHeightTouch works out to — and the rows are
+	stacked touching, so a mis-tap does not miss, it joins the wrong server. The
+	commit button was worse at 22 real pixels, on the control that creates a
+	lobby.
+
+	The code box grows too. It is the one thing on this screen a player types
+	into, and a text field you have to hit twice before the keyboard opens is the
+	most annoying possible version of that.
+]]
+local SERVER_ROW_HEIGHT = 34
+local MODE_ROW_HEIGHT = 34
+local CODE_BOX_HEIGHT = 44
+local TOUCH_HEIGHT = PANEL.RowHeightTouch
+--[[ Tall enough to HOLD a full-size button plus its inset, not merely to
+     equal one — an inset button inside a 56-pixel footer is 46, which is 34
+     real pixels and still under the standard the footer grew for. ]]
+local FOOTER_HEIGHT_TOUCH = TOUCH_HEIGHT + 8
+
 local MESSAGE_SECONDS = 5.0
 
 --[[ How long a request may sit unanswered before the button comes back. Every
@@ -139,6 +167,7 @@ local codeLabel: TextLabel
 local codeBox: TextBox
 local modeRow: Frame
 local serverList: ScrollingFrame
+local footRule: Frame
 local actionButton: TextButton
 local actionLabel: TextLabel
 local hint: TextLabel
@@ -169,6 +198,21 @@ local function callController(name: string, method: string, ...: any)
 	if controller and typeof(controller[method]) == "function" then
 		pcall(controller[method], controller, ...)
 	end
+end
+
+--[[ Asked at layout time rather than remembered, so a scheme change between two
+     openings is picked up on the next one. ]]
+local function isTouch(): boolean
+	local input = Registry.find("InputController")
+	if not input or typeof(input.isTouchScheme) ~= "function" then
+		return false
+	end
+	local ok, touch = pcall(input.isTouchScheme, input)
+	return ok and touch == true
+end
+
+local function footerHeight(): number
+	return if isTouch() then FOOTER_HEIGHT_TOUCH else FOOTER_HEIGHT
 end
 
 local function menuIsOpen(): boolean
@@ -214,6 +258,64 @@ local function currentAction(): any
 		end
 	end
 	return ACTIONS[1]
+end
+
+--[[ Everything whose size depends on the input scheme, in one place. Run at
+     build so the first frame is right, and again on every open so a scheme
+     change between two openings is picked up. The server rows and the mode
+     buttons size themselves as they are created — both are rebuilt after this
+     runs, so they read the same answer. ]]
+--[[
+	Moves the panel clear of the on-screen keyboard, and back again.
+
+	The size is asked for in REAL pixels and the panel lives inside a ScaleLayer,
+	so it has to be divided by the factor before it means anything here — the
+	same conversion ScaleLayer.getFactor exists for. Half the keyboard is enough:
+	the panel only has to clear the field, not the whole thing, and lifting by
+	the full height would push the header off the top of a short phone.
+]]
+local function liftForKeyboard(active: boolean)
+	if not panel then
+		return
+	end
+	local lift = 0
+	if active and isTouch() then
+		local factor = ScaleLayer.getFactor()
+		local keyboard = UserInputService.OnScreenKeyboardSize.Y
+		if factor > 0 and keyboard > 0 then
+			lift = (keyboard / factor) * 0.5
+		end
+	end
+	panel.Position = UDim2.new(0.5, 0, 0.5, -lift)
+end
+
+local function applyTouchSizing()
+	local foot = footerHeight()
+	if footRule then
+		footRule.Position = UDim2.new(0, 0, 1, -foot)
+	end
+	if hint then
+		hint.Size = UDim2.new(0.6, 0, 0, foot)
+	end
+	if actionButton then
+		actionButton.Size = UDim2.fromOffset(210, if isTouch() then TOUCH_HEIGHT else foot - 10)
+	end
+	if codeBox then
+		codeBox.Size = UDim2.new(
+			1 - ACTION_WIDTH,
+			-(LAYOUT.PanelPadding * 2 + COLUMN_GAP),
+			0,
+			if isTouch() then TOUCH_HEIGHT else CODE_BOX_HEIGHT
+		)
+	end
+	if serverList then
+		serverList.Size = UDim2.new(
+			1 - ACTION_WIDTH,
+			-(LAYOUT.PanelPadding * 2 + COLUMN_GAP),
+			1,
+			-(CONTROL_TOP + foot + 12)
+		)
+	end
 end
 
 local function refresh()
@@ -289,7 +391,8 @@ local function drawServers(payload: any)
 	for index, entry in servers do
 		local button = Widgets.button(serverList, "Server" .. index)
 		button.LayoutOrder = index
-		button.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, 34)
+		button.Size =
+			UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, if isTouch() then TOUCH_HEIGHT else SERVER_ROW_HEIGHT)
 		button.BackgroundColor3 = COLOR.PanelRaised
 		button.BackgroundTransparency = PANEL.RaisedFill
 
@@ -458,7 +561,7 @@ end
 local function buildModeRow(top: number, left: number, width: number)
 	modeRow = Widgets.frame(panel, "Modes", COLOR.Panel, 1)
 	modeRow.Position = UDim2.new(ACTION_WIDTH, left, 0, top)
-	modeRow.Size = UDim2.new(1 - ACTION_WIDTH, width, 0, 34)
+	modeRow.Size = UDim2.new(1 - ACTION_WIDTH, width, 0, if isTouch() then TOUCH_HEIGHT else MODE_ROW_HEIGHT)
 	modeRow.Visible = false
 
 	local ids = { MODES.Classic, MODES.Versus }
@@ -519,7 +622,7 @@ local function build()
 	detailBody.TextWrapped = true
 	detailBody.TextYAlignment = Enum.TextYAlignment.Top
 
-	local controlTop = top + TEXT.Heading + 8 + 104
+	local controlTop = CONTROL_TOP
 	buildModeRow(controlTop, detailLeft, detailWidth)
 
 	--[[ The code, set as large as the panel allows. It exists to be read off a
@@ -575,7 +678,7 @@ local function build()
 	serverList.Visible = false
 	Widgets.list(serverList, LAYOUT.ElementGap)
 
-	local footRule = Widgets.frame(panel, "FootRule", COLOR.Border, 0)
+	footRule = Widgets.frame(panel, "FootRule", COLOR.Border, 0)
 	footRule.AnchorPoint = Vector2.new(0, 1)
 	footRule.Position = UDim2.new(0, 0, 1, -FOOTER_HEIGHT)
 	footRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
@@ -606,6 +709,7 @@ local function build()
 		commit()
 	end)
 
+	applyTouchSizing()
 	refreshPanelSize()
 end
 
@@ -624,6 +728,7 @@ function PlayController:open()
 	state.messageUntil = 0
 	gui.Enabled = true
 	refreshPanelSize()
+	applyTouchSizing()
 	refresh()
 	setSuppressed(not menuIsOpen())
 	claimCursor(true)
@@ -637,6 +742,10 @@ function PlayController:close()
 	end
 	state.open = false
 	gui.Enabled = false
+	--[[ Put back before it is hidden. A panel closed while the code box still had
+	     focus would be reopened later still shifted up by a keyboard that is no
+	     longer there. ]]
+	liftForKeyboard(false)
 	GamepadFocus.release(state.firstRow)
 	setSuppressed(false)
 	claimCursor(false)
@@ -705,9 +814,28 @@ function PlayController:start()
 	     keyboard is already in use. Everywhere else it would be a hidden second
 	     meaning for a key the player has no reason to press. ]]
 	trove:connect(codeBox.FocusLost, function(enterPressed: boolean)
+		liftForKeyboard(false)
 		if enterPressed and state.open and not state.pending then
 			commit()
 		end
+	end)
+
+	--[[
+		The on-screen keyboard covers the field it is there to fill.
+
+		This is the only text box in the game, and on a phone Roblox raises the
+		keyboard over the bottom of the screen — which is where a centred panel's
+		lower half is. A player taps JOIN LOBBY, taps the box, and the thing they
+		are typing into is behind the keys.
+
+		So the panel steps up out of the way while the box has focus and drops
+		back when it loses it. Focused rather than the keyboard's own visibility
+		signal: this box is the only reason the keyboard ever appears here, and
+		tying the lift to the field means it cannot be left raised by a keyboard
+		that closed some other way.
+	]]
+	trove:connect(codeBox.Focused, function()
+		liftForKeyboard(true)
 	end)
 end
 
