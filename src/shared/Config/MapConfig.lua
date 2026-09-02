@@ -55,8 +55,7 @@ MapConfig.Maps = {
 		     be wrong about the geometry; replace it once the map has been played,
 		     the way the other two blurbs name what you should bring. ]]
 		blurb = "Four ways in. Four ways out. Watch all of them.",
-		--[[ No picture yet, which is why `image` is optional: this draws the plain
-		     card the other two drew before they had one. ]]
+		image = "rbxassetid://111409477664761",
 	},
 } :: { MapDefinition }
 
