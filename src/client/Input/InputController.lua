@@ -75,6 +75,11 @@ local Action = table.freeze({
 	Slot4 = "Slot4",
 	Slot5 = "Slot5",
 	Ping = "Ping",
+	--[[ Opens the backpack panel. A verb rather than a hard-coded key so it shows
+	     up in the controls screen and can be rebound like every other one — a
+	     readout nobody can find is a readout that does not exist. Keyboard only:
+	     see the binding row. ]]
+	Backpack = "Backpack",
 })
 
 --[[
@@ -188,6 +193,13 @@ local BINDINGS: { Binding } = {
 	{ action = Action.Slot5, keys = { Enum.KeyCode.Five, Enum.KeyCode.DPadUp }, slot = Enums.Slot.Pills },
 
 	{ action = Action.Ping, keys = { Enum.KeyCode.Q, Enum.KeyCode.ButtonR3 } },
+
+	--[[ Keyboard only, and no touch button. A pad has no free face or shoulder
+	     button left — the view button opens the pause menu, which is where
+	     BACKPACK sits for a controller and for a phone — and the touch pad is
+	     deliberately six buttons, because a screen covered in them is a screen
+	     you cannot see a Hunter through. ]]
+	{ action = Action.Backpack, keys = { Enum.KeyCode.B } },
 }
 
 -- CAS binds under one namespace so nothing here can collide with a Roblox
@@ -707,6 +719,15 @@ local function forward(action: string)
 		Remotes.Event.ThrowItem:FireServer({ origin = origin, direction = direction, power = 1 })
 	elseif action == Action.Ping then
 		ping()
+	elseif action == Action.Backpack then
+		--[[ Opens only. Closing is the panel's own business: this binding is
+		     unbound for as long as the panel is up — every screen in the game
+		     suppresses InputController while it holds the cursor — so a toggle
+		     here would be a key that opens and then cannot close. ]]
+		local backpack = Registry.find("BackpackController")
+		if backpack and typeof(backpack.open) == "function" then
+			pcall(backpack.open, backpack)
+		end
 	end
 end
 

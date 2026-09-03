@@ -88,6 +88,10 @@ local CONTROLLERS = {
 	"UI/ProgressionController",
 	"UI/ShopController",
 	"UI/LoadoutController",
+	--[[ A panel like those two, and reachable from the pause menu the same way
+	     CAREER is. Reads nothing but Player attributes, so it has no service to
+	     wait for and its position here is only about the menus that open it. ]]
+	"UI/BackpackController",
 	-- A panel like the shop and the loadout screen, opened from the same nav row,
 	-- so it loads with them and before the menu that opens it.
 	"UI/CareerController",

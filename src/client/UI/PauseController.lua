@@ -78,6 +78,12 @@ local ENTRY_GAP = 8
 
 local ENTRIES = {
 	{ id = "Resume", title = "RESUME", line = "Back to it." },
+	--[[ Directly under RESUME, above everything about the account. It is the one
+	     entry here that is about the next thirty seconds — what is left in the
+	     sidearm you have not drawn, and which teammate is holding the medkit —
+	     and a player who paused to find that out should not have to read past
+	     the battle pass to get to it. ]]
+	{ id = "Backpack", title = "BACKPACK", line = "Your kit, and what the squad is carrying." },
 	--[[ Above SETTINGS because it is about the round you are in the middle of.
 	     Today's orders are things you do DURING a round — "revive four teammates"
 	     is a decision you make at wave three, not one you plan in a menu — and
@@ -207,6 +213,10 @@ end
 local function activate(id: string)
 	if id == "Resume" then
 		PauseController:close()
+	elseif id == "Backpack" then
+		-- Closed first, for the same reason SETTINGS is. See below.
+		PauseController:close()
+		callController("BackpackController", "open")
 	elseif id == "Career" then
 		-- Closed first, for the same reason SETTINGS is. See below.
 		PauseController:close()

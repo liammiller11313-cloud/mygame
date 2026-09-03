@@ -244,6 +244,18 @@ SettingsConfig.Definitions = table.freeze({
 		default = "",
 		action = "Throw",
 	},
+	--[[ The one row here that opens a screen rather than doing something to the
+	     world. It is in the list because a readout nobody can find is a readout
+	     that does not exist — and on a controller or a phone, where this has no
+	     key at all, the row still says so, which is the honest answer. ]]
+	{
+		key = "bindBackpack",
+		label = "BACKPACK",
+		category = "CONTROLS",
+		kind = "keybind",
+		default = "",
+		action = "Backpack",
+	},
 
 	-- ── gameplay ────────────────────────────────────────────────────────────
 	{
