@@ -18,6 +18,15 @@
 	    dies; a team that moves lives. That is the lesson, and the call is what
 	    teaches it.
 
+	── AND IT WALKS AT THE GROUP ───────────────────────────────────────────────
+	It used to leave target selection to the brain, which picks the nearest the
+	way a Common does — so a Boomer waddled at whoever was closest, often the one
+	player already separated from everybody. Biling one isolated survivor blinds
+	one survivor. It picks the CLUSTER now, and the rest of the roster reads the
+	bile: see Support.blindBias, which makes a covered survivor the preferred
+	target for every special that pins. That is the only real coordination the
+	infected have, and this creature is the front half of it.
+
 	── WHY IT VOMITS AT ALL ────────────────────────────────────────────────────
 	The burst alone would make it a walking trap that only ever punishes bad
 	shooting. The ranged vomit gives it something to DO — a reason to close, a
@@ -77,11 +86,33 @@ local BURST_CALL_SECONDS = 12
 
 local SCAN_INTERVAL = 0.2
 
+--[[
+	── WHO A BOOMER WALKS AT ───────────────────────────────────────────────────
+	Nobody, until now. The Boomer left target selection entirely to the brain,
+	which picks the nearest survivor the way a Common does, so a Boomer would
+	waddle at whoever happened to be closest — often the one player already
+	separated from the group, standing alone in a doorway.
+
+	That is precisely the wrong person. Biling one isolated survivor blinds one
+	survivor. Biling the three standing together blinds three, and the horde it
+	calls arrives on a group that now cannot see it. The burst is a 16-stud
+	sphere and the whole creature is built around covering more than one person,
+	which is a question about where the CLUSTER is.
+
+	So the Boomer picks the survivor with the most company inside the burst
+	radius and tells the brain to go there. Ties fall back to distance, because a
+	cluster on the far side of the map is not a cluster this Boomer will ever
+	reach at walkSpeed 9.
+]]
+local CLUSTER_RADIUS = BURST_RADIUS
+local CLUSTER_INTERVAL = 0.5
+
 type State = {
 	phase: string,
 	phaseTime: number,
 	nextVomitAt: number,
 	scanClock: number,
+	clusterClock: number,
 	target: Player?,
 	burst: boolean,
 	ignore: { Instance },
@@ -98,6 +129,7 @@ local function ensure(model: Model): State
 			phaseTime = 0,
 			nextVomitAt = 0,
 			scanClock = 0,
+			clusterClock = 0,
 			target = nil,
 			burst = false,
 			ignore = { model },
@@ -176,6 +208,40 @@ end
 
 --[[ The closest survivor in front of the Boomer and within vomit range. Nil when
      there is nobody worth heaving at, which is most ticks. ]]
+--[[ The survivor standing in the most company, or the nearest when nobody is
+     grouped up. See the CLUSTER note above. ]]
+local function pickCluster(model: Model, origin: Vector3): Player?
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors or typeof(survivors.getAliveSurvivors) ~= "function" then
+		return nil
+	end
+	local candidates = survivors:getAliveSurvivors()
+
+	local best: Player? = nil
+	local bestCrowd = -1
+	local bestScore = math.huge
+	for _, player in candidates do
+		local _, victimRoot = Support.rootOf(player)
+		if not victimRoot then
+			continue
+		end
+		local crowd = Support.crowdAround(candidates, victimRoot.Position, CLUSTER_RADIUS)
+		local distance = (victimRoot.Position - origin).Magnitude
+		--[[ And a Boomer stays away from somebody another special has committed
+		     to, for a reason the others do not have: a survivor who is about to
+		     be pinned is a survivor the rest of the team is about to run TO, so
+		     biling them blinds the person who is already out of the fight and
+		     nobody else. ]]
+		local score = distance * Support.claimBias(model, player)
+		if crowd > bestCrowd or (crowd == bestCrowd and score < bestScore) then
+			bestCrowd = crowd
+			bestScore = score
+			best = player
+		end
+	end
+	return best
+end
+
 local function pickVomitTarget(model: Model, root: BasePart): Player?
 	local facing = root.CFrame.LookVector
 	local best: Player? = nil
@@ -291,6 +357,17 @@ function Boomer.onUpdate(model: Model, brain: any, dt: number)
 		return
 	end
 
+	--[[ Steering runs whether or not there is bile ready. The walk IS the
+	     Boomer's contribution — it is 125 health at walkSpeed 9 and it is going
+	     to be shot; where it is standing when that happens decides whether the
+	     burst was worth anything. ]]
+	state.clusterClock += dt
+	if state.clusterClock >= CLUSTER_INTERVAL and not Support.isStaggered(brain) then
+		state.clusterClock = 0
+		local cluster = pickCluster(model, root.Position)
+		Support.setBrainTarget(brain, if cluster then cluster.Character else nil)
+	end
+
 	if now < state.nextVomitAt or Support.isStaggered(brain) then
 		return
 	end
@@ -316,6 +393,7 @@ function Boomer.onDeath(model: Model, brain: any, _ctx: any)
 		burst(model, root)
 	end
 	Support.resumeBrain(brain)
+	Support.unclaim(model)
 	states[model] = nil
 end
 

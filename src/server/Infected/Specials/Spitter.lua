@@ -16,6 +16,14 @@
 	    waiting it out is a real option and long enough that waiting is a
 	    decision with a cost, because the horde is still arriving.
 
+	── AND IT KITES BETWEEN SPITS ──────────────────────────────────────────────
+	The cooldown is thirteen seconds and the health is the second lowest in the
+	roster, so for thirteen seconds this used to sprint at the nearest survivor
+	like a Common and die there with nothing to attack with. It backs off while
+	it is reloading now, and only while it is reloading — see KEEP_DISTANCE. The
+	creature is still meant to be punished for spitting; it is not meant to
+	delete itself between spits.
+
 	── WHY THE POOL IS A PART AND NOT AN EFFECT ────────────────────────────────
 	A survivor has to be able to SEE exactly where the acid is, from any angle,
 	including through their own teammates. A client-side effect would be
@@ -77,6 +85,42 @@ local ACID_ABOVE = 6.5
      rather than pressure. ]]
 local MAX_POOLS = 4
 
+--[[
+	── KITING ──────────────────────────────────────────────────────────────────
+	A Spitter's cooldown is thirteen seconds and its health is the second lowest
+	in the roster. For those thirteen seconds it used to do exactly what a Common
+	does: sprint at the nearest survivor and swing a claw worth four damage. It
+	arrived inside shotgun range with nothing to attack with and died there, over
+	and over, and the acid — the entire reason the creature exists — never got
+	spat a second time.
+
+	The header above already says what this thing is: it attacks the FLOOR, from
+	range, and it is meant to be punished for spitting. Punished for SPITTING.
+	Walking into the guns between spits is not that; it is the creature deleting
+	itself before it can threaten anything.
+
+	So while it is reloading it backs off, and only while it is reloading. The
+	moment the acid is ready it closes again like anything else, which is when it
+	is supposed to be shootable. KEEP_DISTANCE sits comfortably inside SPIT_RANGE
+	(90) so the retreat never takes it out of its own reach — a Spitter that
+	kited itself out of range would be worse than one that suicided.
+]]
+local KEEP_DISTANCE = 44
+local RETREAT_STEP = 20
+local RETREAT_INTERVAL = 0.2
+
+--[[ Fallback headings when the way back is a wall, in degrees off straight
+     away. A Spitter that only ever retreats directly backwards reverses into
+     the first corner it finds and stands in it. Capped at 80 rather than fanned
+     further: past ninety a "retreat" has a component pointing at the thing it
+     is retreating from, which is not a retreat. ]]
+local RETREAT_FANS = { 0, 45, -45, 80, -80 }
+
+--[[ How far the ground under a retreat step may drop before it stops counting
+     as a step. Backing off a roof is not a kite, and this creature spends its
+     whole life walking backwards without looking. ]]
+local RETREAT_MAX_DROP = 8
+
 local POOL_COLOR = Color3.fromRGB(150, 190, 62)
 
 type Pool = {
@@ -92,6 +136,21 @@ type State = {
 	nextSpitAt: number,
 	scanClock: number,
 	target: Player?,
+	--[[ Whether the brain is currently stood down so this module can walk the
+	     body backwards. Tracked rather than inferred so pauseBrain is called on
+	     the transition and not every frame — it also issues a stop(), and a stop
+	     every frame is a body that never goes anywhere. ]]
+	retreating: boolean,
+	retreatClock: number,
+	--[[ The retreat's own cast, which is NOT the sightline cast the spit uses.
+	     RaycastUtil.hasLineOfSight runs with RespectCanCollide false so that a
+	     pane of glass blocks a spit, and it takes a plain ignore list — which
+	     during a horde means every Common between here and the wall counts as
+	     the wall, and the Spitter would decide it was cornered and never kite at
+	     the exact moment kiting matters. This one respects CanCollide and
+	     excludes the whole Infected folder, so only real geometry stops it. ]]
+	probe: RaycastParams,
+	probeFolder: Instance?,
 	ignore: { Instance },
 }
 
@@ -105,12 +164,22 @@ local pools: { Pool } = {}
 local function ensure(model: Model): State
 	local state = states[model]
 	if not state then
+		local probe = RaycastParams.new()
+		probe.FilterType = Enum.RaycastFilterType.Exclude
+		probe.FilterDescendantsInstances = { model }
+		probe.IgnoreWater = true
+		probe.RespectCanCollide = true
+
 		state = {
 			phase = PHASE.Stalk,
 			phaseTime = 0,
 			nextSpitAt = 0,
 			scanClock = 0,
 			target = nil,
+			retreating = false,
+			retreatClock = 0,
+			probe = probe,
+			probeFolder = nil,
 			ignore = { model },
 		}
 		states[model] = state
@@ -274,6 +343,112 @@ local function sweepPools(now: number)
 	end
 end
 
+--[[ The nearest survivor and how far away they are, or nil. The retreat only
+     ever cares about the closest one: backing away from the average of a team
+     is how you back into the middle of it. ]]
+local function nearestSurvivor(origin: Vector3): (Player?, number)
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors or typeof(survivors.getAliveSurvivors) ~= "function" then
+		return nil, math.huge
+	end
+	local best: Player? = nil
+	local bestDistance = math.huge
+	for _, player in survivors:getAliveSurvivors() do
+		local _, victimRoot = Support.rootOf(player)
+		if victimRoot then
+			local distance = (victimRoot.Position - origin).Magnitude
+			if distance < bestDistance then
+				bestDistance = distance
+				best = player
+			end
+		end
+	end
+	return best, bestDistance
+end
+
+--[[ Hands the body back to the brain. Idempotent, and called from every path
+     that stops retreating — including death and stagger — because a Spitter left
+     paused is a Spitter standing still in a fight forever. ]]
+local function endRetreat(model: Model, brain: any, state: State)
+	if not state.retreating then
+		return
+	end
+	state.retreating = false
+	setSpeed(model, DEFINITION.walkSpeed)
+	Support.resumeBrain(brain)
+end
+
+--[[ One step of backing off, throttled. Returns nothing: whether it retreated
+     or gave up, the caller's next action is the same. ]]
+local function stepRetreat(model: Model, brain: any, state: State, root: BasePart, dt: number)
+	state.retreatClock -= dt
+	if state.retreatClock > 0 then
+		return
+	end
+	state.retreatClock = RETREAT_INTERVAL
+
+	local threat, distance = nearestSurvivor(root.Position)
+	local _, threatRoot = Support.rootOf(threat)
+	if not threatRoot or distance >= KEEP_DISTANCE then
+		endRetreat(model, brain, state)
+		return
+	end
+
+	local away =
+		Vector3.new(root.Position.X - threatRoot.Position.X, 0, root.Position.Z - threatRoot.Position.Z)
+	if away.Magnitude < 0.05 then
+		endRetreat(model, brain, state)
+		return
+	end
+	away = away.Unit
+
+	--[[ The whole Infected folder, refreshed only when the body is re-parented,
+	     which happens once. Other zombies are not walls: a Spitter that treats
+	     the horde it arrived with as geometry is a Spitter that never backs up. ]]
+	local folder = model.Parent
+	if folder and state.probeFolder ~= folder then
+		state.probeFolder = folder
+		state.probe.FilterDescendantsInstances = { folder }
+	end
+
+	--[[ Straight back first, then fanned to either side, cast at the body's own
+	     height so a Spitter does not walk into the wall it is standing against. ]]
+	local destination: Vector3? = nil
+	for _, degrees in RETREAT_FANS do
+		local heading = if degrees == 0
+			then away
+			else (CFrame.fromAxisAngle(Vector3.yAxis, math.rad(degrees)) * away).Unit
+		local candidate = root.Position + heading * RETREAT_STEP
+		if Workspace:Raycast(root.Position, candidate - root.Position, state.probe) then
+			continue
+		end
+		--[[ And there has to be a floor at the far end. A clear horizontal ray is
+		     exactly what a ledge looks like. ]]
+		local floor = Workspace:Raycast(candidate, Vector3.new(0, -RETREAT_MAX_DROP, 0), state.probe)
+		if floor then
+			destination = candidate
+			break
+		end
+	end
+
+	--[[ Cornered. Stand and fight rather than grind into geometry: a body wedged
+	     against a wall reads as broken, and being caught out of position is a
+	     fair thing to happen to a Spitter that spat from the wrong place. ]]
+	if not destination then
+		endRetreat(model, brain, state)
+		return
+	end
+
+	if not state.retreating then
+		state.retreating = true
+		Support.pauseBrain(brain)
+		setSpeed(model, DEFINITION.runSpeed)
+	end
+	if brain and typeof(brain.moveTo) == "function" then
+		brain:moveTo(destination)
+	end
+end
+
 local function pickTarget(model: Model, root: BasePart): Player?
 	local survivors: any = Registry.find("SurvivorService")
 	if not survivors or typeof(survivors.getAliveSurvivors) ~= "function" then
@@ -373,9 +548,24 @@ function Spitter.onUpdate(model: Model, brain: any, dt: number)
 		return
 	end
 
-	if now < state.nextSpitAt or Support.isStaggered(brain) then
+	--[[ A shove owns the body outright: it must not be walked anywhere by this
+	     module while it is reeling, and the brain has to have it back by the
+	     time the stagger ends. ]]
+	if Support.isStaggered(brain) then
+		endRetreat(model, brain, state)
 		return
 	end
+
+	--[[ Reloading. This is the whole kite: back off while there is no acid to
+	     throw, and only while there is none. See KEEP_DISTANCE. ]]
+	if now < state.nextSpitAt then
+		stepRetreat(model, brain, state, root, dt)
+		return
+	end
+
+	-- Loaded again, so the body goes back to the brain and closes like anything
+	-- else. This is the window in which a Spitter is supposed to be shootable.
+	endRetreat(model, brain, state)
 
 	state.scanClock += dt
 	if state.scanClock < SCAN_INTERVAL then
@@ -399,6 +589,10 @@ function Spitter.onDeath(model: Model, brain: any, _ctx: any)
 	     spat it is the point — killing a Spitter does not un-poison the ground,
 	     and a team that shoots one at their own feet has still lost that corner
 	     for nine seconds. ]]
+	local state = states[model]
+	if state then
+		state.retreating = false
+	end
 	Support.resumeBrain(brain)
 	states[model] = nil
 end

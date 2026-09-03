@@ -115,17 +115,23 @@ local function lineHolds(model: Model, root: BasePart, victim: Player): boolean
 	return RaycastUtil.hasLineOfSight(root.Position, victimRoot.Position, { model, character })
 end
 
+--[[ The Hunter's isolation numbers. Every special that takes ONE survivor out
+     of the fight is asking the same question and should get the same answer. ]]
+local ISOLATION_FULL = 60
+local ISOLATION_BIAS = 0.55
+
 local function pickTarget(model: Model, root: BasePart): Player?
 	local survivors: any = Registry.find("SurvivorService")
 	if not survivors or typeof(survivors.getAliveSurvivors) ~= "function" then
 		return nil
 	end
 
+	local candidates = survivors:getAliveSurvivors()
 	local facing = root.CFrame.LookVector
 	local best: Player? = nil
-	local bestDistance = math.huge
+	local bestScore = math.huge
 
-	for _, player in survivors:getAliveSurvivors() do
+	for _, player in candidates do
 		--[[ Never someone already held. Two Tongues on one survivor is two
 		     specials spent on a player who was already out of the fight. ]]
 		if typeof(survivors.getPinnedBy) == "function" and survivors:getPinnedBy(player) then
@@ -137,7 +143,7 @@ local function pickTarget(model: Model, root: BasePart): Player?
 		end
 		local delta = victimRoot.Position - root.Position
 		local distance = delta.Magnitude
-		if distance < GRAB_MIN_RANGE or distance > GRAB_RANGE or distance >= bestDistance then
+		if distance < GRAB_MIN_RANGE or distance > GRAB_RANGE then
 			continue
 		end
 		if facing:Dot(delta.Unit) < math.cos(GRAB_CONE) then
@@ -146,8 +152,32 @@ local function pickTarget(model: Model, root: BasePart): Player?
 		if not RaycastUtil.hasLineOfSight(root.Position, victimRoot.Position, { model, character }) then
 			continue
 		end
-		best = player
-		bestDistance = distance
+
+		--[[
+			Nearest was the wrong read for this creature in particular.
+
+			A Tongue's two counters are a teammate shooting it and a teammate's
+			BODY breaking the line — and both of those are things that only exist
+			if somebody is standing near the person being dragged. Grabbing out of
+			the middle of a group is a rope that snaps in under a second on a
+			special that walks at 11 and has 250 health. Grabbing the one who has
+			drifted off is exactly the scenario the header describes: nobody can
+			free them, so somebody has to hear it and come.
+
+			Same isolation read the Hunter and the Jockey use, and the same claim
+			bias, so three specials do not all commit to one survivor.
+		]]
+		local isolation = Support.isolationOf(candidates, player, victimRoot.Position, ISOLATION_FULL)
+		local lonely = math.clamp(isolation / ISOLATION_FULL, 0, 1)
+		local score = distance
+			* (1 - ISOLATION_BIAS * lonely)
+			* Support.claimBias(model, player)
+			-- And a survivor who cannot see where the rope came from.
+			* Support.blindBias(survivors, player)
+		if score < bestScore then
+			bestScore = score
+			best = player
+		end
 	end
 	return best
 end
@@ -359,6 +389,9 @@ function Tongue.onUpdate(model: Model, brain: any, dt: number)
 	state.scanClock = 0
 
 	local target = pickTarget(model, root)
+	--[[ Renewed on every scan, and cleared when there is nobody in the cone —
+	     which for a Tongue is most of the time. See Support.claim. ]]
+	Support.claim(model, target)
 	if target then
 		beginAim(model, brain, state, root, target)
 	end
@@ -372,6 +405,7 @@ function Tongue.onDeath(model: Model, brain: any, _ctx: any)
 		release(model, brain, state, os.clock(), 0)
 	end
 	Support.resumeBrain(brain)
+	Support.unclaim(model)
 	states[model] = nil
 end
 

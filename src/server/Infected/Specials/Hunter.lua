@@ -161,7 +161,7 @@ end
 	have strayed from the rest of the team: the Hunter is the game's punishment
 	for walking alone, and this is where that lives. Runs on SCAN_INTERVAL.
 ]]
-local function pickTarget(root: BasePart): (Player?, Player?)
+local function pickTarget(model: Model, root: BasePart): (Player?, Player?)
 	local survivors: any = Registry.find("SurvivorService")
 	if not survivors then
 		return nil, nil
@@ -197,20 +197,19 @@ local function pickTarget(root: BasePart): (Player?, Player?)
 		end
 
 		-- Distance to their nearest teammate, which is the whole isolation read.
-		local isolation = ISOLATION_FULL
-		for _, other in candidates do
-			if other == player then
-				continue
-			end
-			local otherCharacter = other.Character
-			local otherRoot = if otherCharacter then RigUtil.getRoot(otherCharacter) else nil
-			if otherRoot then
-				isolation = math.min(isolation, (otherRoot.Position - victimRoot.Position).Magnitude)
-			end
-		end
+		-- Shared with the Jockey and the Tongue: see Support.isolationOf.
+		local isolation = Support.isolationOf(candidates, player, victimRoot.Position, ISOLATION_FULL)
 
 		local lonely = math.clamp(isolation / ISOLATION_FULL, 0, 1)
-		local score = distance * (1 - ISOLATION_BIAS * lonely)
+		--[[ And a penalty for somebody another special has already committed to.
+		     Two Hunters on one survivor is one pin and one wasted Hunter; the
+		     bias is what sends the second one at the person nobody is covering.
+		     See Support.claimBias. ]]
+		local score = distance
+			* (1 - ISOLATION_BIAS * lonely)
+			* Support.claimBias(model, player)
+			-- And a survivor who cannot see the crouch. See Support.blindBias.
+			* Support.blindBias(survivors, player)
 		if score < bestScore then
 			bestScore = score
 			best = player
@@ -239,6 +238,8 @@ local function backToStalk(model: Model, brain: any, state: State, delay: number
 	state.airTime = 0
 	state.victim = nil
 	state.readyAt = os.clock() + delay
+	-- Whatever this Hunter was going for, it is not going for it now.
+	Support.unclaim(model)
 
 	if not keepSpeed then
 		local humanoid = model:FindFirstChildOfClass("Humanoid")
@@ -389,11 +390,16 @@ end
 local function stepStalk(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
 	if now >= state.nextScan then
 		state.nextScan = now + SCAN_INTERVAL
-		local pounceable, nearest = pickTarget(root)
+		local pounceable, nearest = pickTarget(model, root)
 		state.target = pounceable
 		state.chase = pounceable or nearest
 		local chase = state.chase
 		Support.setBrainTarget(brain, if chase then chase.Character else nil)
+		--[[ Renewed on every scan while this Hunter is still going for them, so
+		     the claim tracks the truth rather than a decision made once. A Hunter
+		     that loses its target claims nobody, which is what frees the survivor
+		     for whichever special is actually in a position to reach them. ]]
+		Support.claim(model, pounceable)
 	end
 
 	local target = state.target
@@ -573,6 +579,7 @@ function Hunter.onDeath(model: Model, brain: any, _ctx: any)
 	-- stops being alive on its own heartbeat. Doing it now means the survivor is
 	-- free on the frame the Hunter dies rather than on the next one.
 	releaseVictim(model, brain, state, 0)
+	Support.unclaim(model)
 	states[model] = nil
 end
 

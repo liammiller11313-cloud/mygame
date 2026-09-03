@@ -95,6 +95,13 @@ local SPAWN_SETTLE = 1.0 -- never leap out of the spawn frame
 local RELEASE_RECOVERY = 1.2 -- after being shaken off, before trying again
 
 local SCAN_INTERVAL = 0.3 -- target re-selection; never per frame
+
+--[[ How far from their nearest teammate a survivor counts as fully alone, and
+     how hard that pulls the choice away from "nearest". The Hunter's numbers,
+     because the two creatures are asking the same question: which one of these
+     four can I take out of the fight for long enough to matter. ]]
+local ISOLATION_FULL = 60
+local ISOLATION_BIAS = 0.55
 local CACKLE_INTERVAL = 4.0 -- the approach laugh, on its own clock
 local RIDE_CACKLE_INTERVAL = 1.15 -- constant while riding: this is the beacon
 
@@ -461,19 +468,35 @@ end
 
 -- ─── phases ──────────────────────────────────────────────────────────────────
 
-local function pickTarget(root: BasePart): (Player?, Player?)
+--[[
+	Who to ride, and it is not simply the nearest.
+
+	A ride is worth exactly as much as the distance it can cover before somebody
+	shoots the Jockey off. Landing on the survivor in the middle of the group is
+	three seconds and a free special kill; landing on the one who has drifted to
+	the edge is a survivor dragged somewhere nobody can reach them, which is the
+	whole reason this creature is in the game.
+
+	So the same isolation read the Hunter uses, and for the same reason — see
+	Support.isolationOf — plus Support.claimBias, so a Jockey does not go for
+	somebody a Hunter has already committed to. Two specials on one survivor is
+	one pin and one wasted special: the second one cannot even land, because
+	isRideable refuses anybody already held.
+]]
+local function pickTarget(model: Model, root: BasePart): (Player?, Player?)
 	local survivors: any = Registry.find("SurvivorService")
 	if not survivors then
 		return nil, nil
 	end
 
+	local candidates = survivors:getAliveSurvivors()
 	local origin = root.Position
 	local best: Player? = nil
-	local bestDistance = math.huge
+	local bestScore = math.huge
 	local nearest: Player? = nil
 	local nearestDistance = math.huge
 
-	for _, player in survivors:getAliveSurvivors() do
+	for _, player in candidates do
 		local _, victimRoot = Support.rootOf(player)
 		if not victimRoot then
 			continue
@@ -490,8 +513,19 @@ local function pickTarget(root: BasePart): (Player?, Player?)
 		if not isRideable(survivors, player) then
 			continue
 		end
-		if distance <= DEFINITION.sightRange and distance < bestDistance then
-			bestDistance = distance
+		if distance > DEFINITION.sightRange then
+			continue
+		end
+
+		local isolation = Support.isolationOf(candidates, player, victimRoot.Position, ISOLATION_FULL)
+		local lonely = math.clamp(isolation / ISOLATION_FULL, 0, 1)
+		local score = distance
+			* (1 - ISOLATION_BIAS * lonely)
+			* Support.claimBias(model, player)
+			-- And a survivor who cannot see it coming. See Support.blindBias.
+			* Support.blindBias(survivors, player)
+		if score < bestScore then
+			bestScore = score
 			best = player
 		end
 	end
@@ -592,11 +626,13 @@ end
 local function stepStalk(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
 	if now >= state.nextScan then
 		state.nextScan = now + SCAN_INTERVAL
-		local rideable, nearest = pickTarget(root)
+		local rideable, nearest = pickTarget(model, root)
 		state.target = rideable
 		state.chase = rideable or nearest
 		local chase = state.chase
 		Support.setBrainTarget(brain, if chase then chase.Character else nil)
+		-- Renewed while this Jockey is still going for them. See Support.claim.
+		Support.claim(model, rideable)
 	end
 
 	local target = state.target
@@ -802,6 +838,7 @@ function Jockey.onDeath(model: Model, brain: any, _ctx: any)
 	-- the frame the Jockey dies rather than on the next one — and it is the only
 	-- thing that destroys the mover, which must never outlive the ride.
 	releaseVictim(model, brain, state, 0)
+	Support.unclaim(model)
 	states[model] = nil
 end
 

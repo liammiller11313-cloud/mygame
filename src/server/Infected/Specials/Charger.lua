@@ -70,6 +70,16 @@ local CHARGE_MAX_RANGE = 130
 local CHARGE_MAX_TIME = 3.0
 local CHARGE_MAX_DISTANCE = 120
 local CHARGE_LOOKAHEAD = 40 -- how far ahead the move order is re-issued
+
+--[[ The lane, for scoring a charge before committing to one. Half-width is the
+     body plus a little, because a survivor clipped at the edge is still thrown;
+     the overrun is there because the charge does not stop at the target and
+     anybody standing just behind them is in it too. LANE_BONUS is how much each
+     extra body discounts the distance — 0.35 makes a two-body lane worth about a
+     third further to walk to, which is a preference rather than an obsession. ]]
+local LANE_HALF_WIDTH = 7
+local LANE_OVERRUN = 30
+local LANE_BONUS = 0.35
 -- attack.range is the reach of the arm doing the collecting, which is exactly
 -- what the lane is: anybody inside it is hit, anybody outside it watched it pass.
 local LANE_RADIUS = ATTACK.range
@@ -347,19 +357,75 @@ end
 
 -- ─── target selection ────────────────────────────────────────────────────────
 
-local function pickTarget(root: BasePart): (Player?, Player?)
+--[[
+	How many survivors this lane would actually go through.
+
+	The charge carries the FIRST body it touches and throws every other one
+	clear, and the throw is half the value: a team that has been scattered has
+	stopped shooting whatever else is in the room. So a lane is worth more the
+	more of them are standing in it, and this counts them the way the charge will
+	find them — projected onto the heading, inside the width of the body, and out
+	past the target, because the charge does not stop where the target is.
+
+	Cheap on purpose. It runs once per candidate on a quarter-second scan with at
+	most four survivors on the server, so it is a dozen dot products.
+]]
+local function laneCount(candidates: { Player }, origin: Vector3, target: Vector3): number
+	local flat = Vector3.new(target.X - origin.X, 0, target.Z - origin.Z)
+	local length = flat.Magnitude
+	if length < 0.05 then
+		return 1
+	end
+	local heading = flat.Unit
+	local reach = length + LANE_OVERRUN
+
+	local count = 0
+	for _, player in candidates do
+		local _, victimRoot = Support.rootOf(player)
+		if not victimRoot then
+			continue
+		end
+		local delta = Vector3.new(victimRoot.Position.X - origin.X, 0, victimRoot.Position.Z - origin.Z)
+		local along = delta:Dot(heading)
+		if along < 0 or along > reach then
+			continue
+		end
+		if (delta - heading * along).Magnitude <= LANE_HALF_WIDTH then
+			count += 1
+		end
+	end
+	return count
+end
+
+--[[
+	Who to charge, which is a question about the LANE and not about the person.
+
+	It used to be whoever was nearest, which is the one read that ignores what a
+	charge does. A Charger that picks the closest survivor picks the one standing
+	at the front of the group and takes a lane that leaves the other three
+	untouched behind it; a Charger that picks a lane THROUGH the group carries
+	one of them and throws the rest across the room, which is the same charge
+	worth three times as much.
+
+	So distance still decides — a charge has a minimum range and a wind-up, and
+	crossing a map to reach a marginally better lane is a charge that never
+	happens — but each extra body the lane clips discounts it, and somebody
+	another special has already committed to costs extra. See Support.claimBias.
+]]
+local function pickTarget(model: Model, root: BasePart): (Player?, Player?)
 	local survivors: any = Registry.find("SurvivorService")
 	if not survivors then
 		return nil, nil
 	end
 
+	local candidates = survivors:getAliveSurvivors()
 	local origin = root.Position
 	local best: Player? = nil
-	local bestDistance = math.huge
+	local bestScore = math.huge
 	local nearest: Player? = nil
 	local nearestDistance = math.huge
 
-	for _, player in survivors:getAliveSurvivors() do
+	for _, player in candidates do
 		local _, victimRoot = Support.rootOf(player)
 		if not victimRoot then
 			continue
@@ -376,8 +442,18 @@ local function pickTarget(root: BasePart): (Player?, Player?)
 		if not isCarriable(survivors, player) then
 			continue
 		end
-		if distance <= DEFINITION.sightRange and distance < bestDistance then
-			bestDistance = distance
+		if distance > DEFINITION.sightRange then
+			continue
+		end
+
+		local extra = laneCount(candidates, origin, victimRoot.Position) - 1
+		local score = distance
+			/ (1 + LANE_BONUS * math.max(extra, 0))
+			* Support.claimBias(model, player)
+			-- And a survivor who cannot see the lane. See Support.blindBias.
+			* Support.blindBias(survivors, player)
+		if score < bestScore then
+			bestScore = score
 			best = player
 		end
 	end
@@ -553,10 +629,12 @@ end
 local function stepStalk(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
 	if now >= state.nextScan then
 		state.nextScan = now + SCAN_INTERVAL
-		local chargeable, nearest = pickTarget(root)
+		local chargeable, nearest = pickTarget(model, root)
 		state.target = chargeable
 		local chase = chargeable or nearest
 		Support.setBrainTarget(brain, if chase then chase.Character else nil)
+		-- Renewed while this Charger is still going for them. See Support.claim.
+		Support.claim(model, chargeable)
 	end
 
 	local target = state.target
@@ -784,6 +862,7 @@ function Charger.onDeath(model: Model, brain: any, _ctx: any)
 	-- for the rest of the round.
 	releaseVictim(model, state)
 	Support.resumeBrain(brain)
+	Support.unclaim(model)
 	states[model] = nil
 end
 
