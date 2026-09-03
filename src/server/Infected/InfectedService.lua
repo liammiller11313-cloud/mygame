@@ -321,7 +321,12 @@ end
 	already at its `maxAlive`, or the rig could not be built. The Director calls
 	this in a loop and a failed spawn must never take a batch down with it.
 ]]
-function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?): Model?
+--[[ `eliteId` is an InfectedConfig.EliteTiers id, or nil for an ordinary body.
+     It is a per-SPAWN modifier rather than a property of the kind — the finale
+     asks for a Tank and an "Apex" alongside it — so it arrives here as an
+     argument and is written onto the model, which is what every later read
+     (the brain's claw, the client's boss bar) goes back to. ]]
+function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?, eliteId: string?): Model?
 	local definition = InfectedConfig.get(kind)
 	if not definition then
 		warnOnce("kind:" .. tostring(kind), string.format("spawn(%q): no such infected kind", tostring(kind)))
@@ -373,8 +378,16 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 		model.PrimaryPart = root
 	end
 
+	--[[ Written before the rig is scaled and before health is set, because both
+	     of those read it. An unknown id is nil and the body is an ordinary one,
+	     which is the only safe way for a value that comes out of a config. ]]
+	local elite = InfectedConfig.elite(eliteId)
+	if elite then
+		model:SetAttribute(Attributes.Infected.Elite, elite.id)
+	end
+
 	-- Scale first: HipHeight and part sizes below are read after it.
-	RigUtil.scaleRig(model, definition.scale)
+	RigUtil.scaleRig(model, definition.scale * (if elite then elite.scale else 1))
 
 	--[[
 		The tier the model itself carries. See InfectedConfig.CommonTiers: the
@@ -394,10 +407,13 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 		health = math.floor(definition.health * tier.health + 0.5)
 		model:SetAttribute(Attributes.Infected.Tier, tier.id)
 	end
+	if elite then
+		health = math.floor(health * elite.health + 0.5)
+	end
 
 	humanoid.MaxHealth = health
 	humanoid.Health = health
-	humanoid.WalkSpeed = definition.walkSpeed
+	humanoid.WalkSpeed = definition.walkSpeed * (if elite then elite.speed else 1)
 	humanoid.UseJumpPower = true
 	humanoid.JumpPower = definition.jumpPower
 	humanoid.AutoRotate = true
@@ -425,8 +441,12 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 	end
 
 	model:SetAttribute(Attributes.Infected.Kind, kind)
-	model:SetAttribute(Attributes.Infected.Health, definition.health)
-	model:SetAttribute(Attributes.Infected.MaxHealth, definition.health)
+	--[[ `health`, not `definition.health`. These two used to publish the
+	     archetype's number while the Humanoid carried the tiered one, so a Riot
+	     Infected reported 50/50 with 160 in the tank. Nothing read them at the
+	     time, which is exactly how it survived; the boss bar reads them now. ]]
+	model:SetAttribute(Attributes.Infected.Health, health)
+	model:SetAttribute(Attributes.Infected.MaxHealth, health)
 	model:SetAttribute(Attributes.Infected.IsBoss, definition.isBoss)
 	model:SetAttribute(Attributes.Infected.IsDead, false)
 	model:SetAttribute(Attributes.Infected.Target, "")
@@ -527,8 +547,11 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?)
 	     swings it. Read back off the model rather than threaded through, so the
 	     two halves cannot disagree about which body this is. ]]
 	local tier = InfectedConfig.tierForVariant(kind, model:GetAttribute("FL_Variant") :: string?)
-	if tier then
-		record.brain.attackDamage = definition.attack.damage * tier.damage
+	local elite = InfectedConfig.elite(model:GetAttribute(Attributes.Infected.Elite) :: string?)
+	if tier or elite then
+		record.brain.attackDamage = definition.attack.damage
+			* (if tier then tier.damage else 1)
+			* (if elite then elite.damage else 1)
 	end
 
 	-- Anything that kills this humanoid without going through damage() — a fall

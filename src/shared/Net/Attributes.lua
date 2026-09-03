@@ -87,6 +87,10 @@ Attributes.Infected = table.freeze({
 	Health = "FL_Health", -- number
 	MaxHealth = "FL_MaxHealth", -- number
 	IsBoss = "FL_IsBoss", -- boolean, Tank / Witch
+	--[[ string, an InfectedConfig.EliteTiers id, or absent. Same creature with a
+	     modifier on it — the finale's Apex Tank is the only one. Read by the
+	     client to name the boss bar and to pick its outline. ]]
+	Elite = "FL_Elite",
 	IsDead = "FL_IsDead", -- boolean, set before the model lingers as a corpse
 	Target = "FL_Target", -- string, UserId of the survivor being chased, or ""
 	Seed = "FL_Seed", -- number, per-body gait variation; see InfectedPoseController

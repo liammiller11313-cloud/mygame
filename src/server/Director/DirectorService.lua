@@ -1477,9 +1477,9 @@ function DirectorService:_bossAnchor(flow: number): (Vector3?, number?)
 	return zone.Position, math.max(extent, SPAWNING.MinDistanceFromSurvivor)
 end
 
-function DirectorService:_enqueueBoss(kind: string, flow: number)
+function DirectorService:_enqueueBoss(kind: string, flow: number, elite: string?)
 	local anchor, radius = self:_bossAnchor(flow)
-	self:_enqueue(SOURCE_BOSS, kind, anchor, radius)
+	self:_enqueue(SOURCE_BOSS, kind, anchor, radius, nil, elite)
 end
 
 --[[
@@ -1496,7 +1496,11 @@ end
 	sight lines move. Callers should treat nil as informational and MUST NOT
 	retry — a retry loop on top of this is how you get four Tanks.
 ]]
-function DirectorService:releaseBoss(kind: string): Model?
+--[[ `elite` is an InfectedConfig.EliteTiers id or nil, straight off the wave
+     definition's `bossTier`. It is passed through unchecked: InfectedService
+     treats an unknown id as no modifier, which is the right failure — a typo in
+     a wave costs an ordinary Tank, not a round with no boss in it. ]]
+function DirectorService:releaseBoss(kind: string, elite: string?): Model?
 	if not self._queue then
 		warn("[DirectorService] releaseBoss before init(); call it from start() or later")
 		return nil
@@ -1530,11 +1534,11 @@ function DirectorService:releaseBoss(kind: string): Model?
 		-- this one goes to the ordinary queue and the boss still arrives.
 		self._starved += 1
 		self._starvedReason = failure or "unknown"
-		self:_enqueue(SOURCE_BOSS, kind, anchor, radius)
+		self:_enqueue(SOURCE_BOSS, kind, anchor, radius, nil, elite)
 		return nil
 	end
 
-	local model = infected:spawn(kind, position)
+	local model = infected:spawn(kind, position, nil, elite)
 	if not model then
 		-- Not a placement problem, and waiting does not fix it: the roster is
 		-- already at this kind's maxAlive, or the rig could not be built.
@@ -1635,7 +1639,8 @@ function DirectorService:_enqueue(
 	kind: string,
 	anchor: Vector3?,
 	radius: number?,
-	flank: boolean?
+	flank: boolean?,
+	elite: string?
 ): boolean
 	if self._queueTail - self._queueHead + 1 >= MAX_QUEUED_SPAWNS then
 		self._dropped += 1
@@ -1648,6 +1653,11 @@ function DirectorService:_enqueue(
 		anchor = anchor,
 		radius = radius,
 		flank = flank,
+		--[[ Rides the request rather than being looked up at drain time, because
+		     by then the wave that asked for it may be over — a boss that failed
+		     placement for eight seconds must still arrive as the boss it was
+		     requested as, not as whatever the current wave would ask for. ]]
+		elite = elite,
 	}
 	return true
 end
@@ -1784,7 +1794,7 @@ function DirectorService:_drainQueue(now: number)
 			break
 		end
 
-		local model = infected:spawn(request.kind, position)
+		local model = infected:spawn(request.kind, position, nil, request.elite)
 		if not model then
 			if request.source == SOURCE_BOSS then
 				self._bossRetryAt = now + BOSS_RETRY_INTERVAL

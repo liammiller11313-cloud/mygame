@@ -537,6 +537,78 @@ InfectedConfig.CommonTiers = table.freeze({
 	}),
 }) :: { CommonTier }
 
+--[[
+	── ELITE TIERS ─────────────────────────────────────────────────────────────
+
+	A modifier applied to a SPECIFIC spawn rather than to a kind. Same creature,
+	same silhouette, same tells, same counters — more of it.
+
+	The finale is the only user and the Apex Tank is the only tier. Wave 15 asks
+	for a Tank the way waves 5 and 11 do, and passes `bossTier = "Apex"`
+	alongside; DirectorService carries that through its placement queue and
+	InfectedService applies it at spawn.
+
+	── WHY A MODIFIER AND NOT A NEW KIND ───────────────────────────────────────
+	A second Tank archetype would need its own rig, its own animations, its own
+	Versus class row, its own audio and its own place in every table keyed by
+	Enums.Infected. All of that to end up with a creature that does what a Tank
+	does. The thing that makes a finale boss a boss is that the answer you spent
+	the round learning stops being enough — you already know to spread out, to
+	keep it off the person reviving, to not stand where it can reach; it just
+	takes four times as long and you have four times as long to make a mistake.
+
+	── WHY THE NUMBERS ARE WHAT THEY ARE ───────────────────────────────────────
+	Health 3.0 puts it at 12,000. Four survivors killing a 4,000-health Tank take
+	somewhere around thirty seconds of good shooting; this is a ninety-second
+	fight inside a 144-second wave, which leaves room to lose people and still
+	finish it, and no room at all to be careless.
+
+	Damage 1.35 is 32 a hit rather than 24. Deliberately restrained: a survivor
+	has 100 health, so an ordinary Tank needs five hits and this one needs four.
+	Doubling it would have made the difference "you die instantly" rather than
+	"you have less time than you thought", and instant death is not difficulty.
+
+	Scale 1.12 is the only thing you can see across a street. Big enough to read
+	as different, small enough that it still fits through the doors a Tank has to
+	fit through — the rigs are scaled by RigUtil and a boss wedged in a doorway
+	is a boss the team beats by standing still.
+]]
+export type EliteTier = {
+	id: string,
+	displayName: string,
+	health: number, -- multiplier on the kind's health
+	damage: number, -- multiplier on the kind's attack damage
+	scale: number, -- multiplier on the kind's rig scale
+	speed: number, -- multiplier on walk speed
+	outlineColor: Color3,
+}
+
+InfectedConfig.EliteTiers = table.freeze({
+	Apex = table.freeze({
+		id = "Apex",
+		displayName = "Apex Tank",
+		health = 3.0,
+		damage = 1.35,
+		scale = 1.12,
+		--[[ Not faster. A Tank is already the fastest thing in the game that can
+		     one-shot you into the floor, and the counter to a Tank is running —
+		     making an Apex outrun a survivor would delete the counter rather than
+		     raise the bar. It gets health and reach; the team keeps its legs. ]]
+		speed = 1.0,
+		outlineColor = Color3.fromRGB(240, 92, 40),
+	}),
+}) :: { [string]: EliteTier }
+
+--[[ An elite modifier by id, nil for an unknown one. Ids come out of wave
+     definitions and off attributes, so an unknown one must be a no-op rather
+     than an error: the worst outcome of a typo is an ordinary Tank. ]]
+function InfectedConfig.elite(id: string?): EliteTier?
+	if typeof(id) ~= "string" then
+		return nil
+	end
+	return InfectedConfig.EliteTiers[id]
+end
+
 --[[ The number at the end of a variant's model name, or nil. Anchored to the
      END so "Common 24" reads 24 rather than finding some other digit earlier in
      the name — a folder called "Zombie2" full of models is not a folder of

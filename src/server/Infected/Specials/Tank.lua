@@ -119,6 +119,11 @@ type State = {
 	rock: BasePart?,
 	rockFrom: Vector3,
 	rockLife: number,
+	--[[ This body's own hit, which is the definition's unless it is an Apex. See
+	     Support.eliteOf: the swing and the rock read the config directly, so the
+	     elite multiplier has to be resolved once here or it never applies to the
+	     two things a Tank actually kills anybody with. ]]
+	damage: number,
 	stuckClock: number,
 	stuckSamples: number,
 	lastDistance: number,
@@ -147,6 +152,7 @@ local function ensure(model: Model): State
 			nextRoar = 0,
 			nextFootstep = 0,
 			swung = false,
+			damage = ATTACK.damage,
 			target = nil,
 			rock = nil,
 			rockFrom = Vector3.zero,
@@ -229,7 +235,7 @@ local function detonateRock(model: Model, state: State, position: Vector3)
 		damageService:applyExplosion(
 			position,
 			ROCK_BLAST_RADIUS,
-			ATTACK.damage,
+			state.damage,
 			Types.newDamageContext({
 				attackerModel = model,
 				damageType = Enums.DamageType.Explosive,
@@ -458,7 +464,7 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 					continue
 				end
 
-				Support.damage(model, character, victimRoot, origin, ATTACK.damage)
+				Support.damage(model, character, victimRoot, origin, state.damage)
 				local away = Vector3.new(delta.X, 0, delta.Z)
 				local heading = if away.Magnitude > 0.05 then away.Unit else facing
 				launch(victimRoot, heading * LAUNCH_SPEED + Vector3.new(0, LAUNCH_LIFT, 0))
@@ -550,10 +556,16 @@ function Tank.onSpawn(model: Model, brain: any)
 	local state = ensure(model)
 	state.ignore[1] = model
 	state.probe.FilterDescendantsInstances = { model }
+	state.damage = Support.scaledDamage(model, ATTACK.damage)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = DEFINITION.runSpeed
+		--[[ Through Support rather than straight off the definition. This line
+		     runs AFTER InfectedService applied the elite's speed to the Humanoid
+		     and would otherwise put it back — which for the Apex is a no-op today
+		     (its multiplier is 1.0, on purpose: outrunning a Tank is the counter)
+		     but would silently eat any future tier's. ]]
+		humanoid.WalkSpeed = Support.scaledSpeed(model, DEFINITION.runSpeed)
 	end
 
 	-- The music system reads exactly this. Set before anything else so a Tank is

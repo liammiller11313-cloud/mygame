@@ -31,6 +31,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local RigUtil = require(Shared.Util.RigUtil)
@@ -91,6 +92,37 @@ function Support.faceTowards(brain: any, root: BasePart, position: Vector3, dt: 
 	if flat.Magnitude > 0.05 then
 		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
 	end
+end
+
+-- ── elite bodies ────────────────────────────────────────────────────────────
+
+--[[
+	The per-SPAWN modifier this body carries, or nil for an ordinary one.
+
+	InfectedService writes InfectedConfig.EliteTiers's id onto the model at spawn
+	and scales the Humanoid's health from it there. Everything else the modifier
+	touches has to be asked for, because a special's scripted attacks do not go
+	through the brain's claw: a Tank's swing and its rock both read
+	`definition.attack.damage` straight off the config, so an Apex Tank with a
+	1.35 damage multiplier would have hit for exactly as much as an ordinary one
+	and the multiplier would have been a number in a table that did nothing.
+
+	Read off the model rather than threaded through, for the same reason the
+	Common tiers are: one source, and the two halves cannot disagree about which
+	body this is.
+]]
+function Support.eliteOf(model: Model): any?
+	return InfectedConfig.elite(model:GetAttribute(Attributes.Infected.Elite) :: string?)
+end
+
+function Support.scaledDamage(model: Model, base: number): number
+	local elite = Support.eliteOf(model)
+	return if elite then base * elite.damage else base
+end
+
+function Support.scaledSpeed(model: Model, base: number): number
+	local elite = Support.eliteOf(model)
+	return if elite then base * elite.speed else base
 end
 
 -- ── survivors ───────────────────────────────────────────────────────────────

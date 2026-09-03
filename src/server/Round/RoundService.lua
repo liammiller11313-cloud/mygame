@@ -271,7 +271,7 @@ end
 
 --[[ Asks the Director to place a boss. It picks the FL_BossZone, honours the
      sight rules and fires its own Boss music cue — this only says "now". ]]
-local function releaseBoss(kind: string)
+local function releaseBoss(kind: string, elite: string?)
 	local director = Registry.find("DirectorService")
 	if not director then
 		warnOnce("noboss", "DirectorService is not registered, so wave bosses will never arrive")
@@ -286,12 +286,12 @@ local function releaseBoss(kind: string)
 		)
 		return
 	end
-	director:releaseBoss(kind)
+	director:releaseBoss(kind, elite)
 end
 
 --[[ "TANK!" for one, "TANK! 2 of them." for a wave that opens with a pair. The
      wave's own announcement already sets the tone; this is the specific. ]]
-local function bossCallout(bosses: { string }): string?
+local function bossCallout(bosses: { string }, elite: string?): string?
 	local order: { string } = {}
 	local counts: { [string]: number } = {}
 	for _, kind in bosses do
@@ -302,10 +302,18 @@ local function bossCallout(bosses: { string }): string?
 		counts[kind] += 1
 	end
 
+	--[[ An elite boss is called out by the TIER's name, not the kind's: the wave
+	     that releases an Apex Tank shouts "APEX TANK!", because a team that hears
+	     the same word it heard on wave 5 will bring the same plan. ]]
+	local eliteTier = InfectedConfig.elite(elite)
+
 	local parts: { string } = {}
 	for _, kind in order do
 		local definition = InfectedConfig.get(kind)
 		local name = string.upper(if definition then definition.displayName else kind)
+		if eliteTier then
+			name = string.upper(eliteTier.displayName)
+		end
 		if counts[kind] > 1 then
 			table.insert(parts, string.format("%s! %d of them.", name, counts[kind]))
 		else
@@ -459,18 +467,22 @@ function RoundService:_enterWave(entry)
 	     the finale must not walk in three seconds after a team wipe ended the
 	     round. ]]
 	if #wave.bosses > 0 then
-		local callout = bossCallout(wave.bosses)
+		local callout = bossCallout(wave.bosses, wave.bossTier)
 		if callout then
 			say("", callout, SAY_ANNOUNCE)
 		end
 		local mine = generation
+		--[[ The wave's own elite tier, applied to every boss it releases. Only
+		     the finale sets one; everywhere else it is nil and the Director
+		     places an ordinary body. ]]
+		local elite = wave.bossTier
 		for order, kind in wave.bosses do
 			if order == 1 then
-				releaseBoss(kind)
+				releaseBoss(kind, elite)
 			else
 				task.delay((order - 1) * BOSS_STAGGER, function()
 					if mine == generation and roundState == Enums.RoundState.InProgress then
-						releaseBoss(kind)
+						releaseBoss(kind, elite)
 					end
 				end)
 			end
