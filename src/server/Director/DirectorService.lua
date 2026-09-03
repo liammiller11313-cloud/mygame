@@ -34,7 +34,7 @@
 
 	── WAVES ────────────────────────────────────────────────────────────────────
 
-	Fading Light is not a campaign. A round is seven waves on a fixed schedule,
+	Fading Light is not a campaign. A round is fifteen waves on a fixed schedule,
 	and RoundService owns that schedule. So the Director no longer invents WHEN
 	pressure happens — it is handed a budget on every phase change and decides
 	WHAT and HOW MUCH inside it:
@@ -131,7 +131,7 @@ for _, id in SPECIAL_IDS do
 end
 
 --[[ The Director may never ask for more Commons than the roster allows alive.
-     Wave 7's 1.6x on SustainPeak's 46 asks for 74 against InfectedConfig's
+     Wave 15's 1.7x on SustainPeak's 46 asks for 78 against InfectedConfig's
      ceiling of 60, and the difference is pure waste: the queue keeps running
      full placement searches for rigs InfectedService then refuses to build. ]]
 local COMMON_CEILING = InfectedConfig.get(Enums.Infected.Common).maxAlive
@@ -1090,7 +1090,7 @@ end
 	The population plan in force.
 
 	A breather borrows the Relax plan VERBATIM, ignoring the wave's scales
-	entirely, so the calm between wave 6 and wave 7 is the same calm as the one
+	entirely, so the calm between wave 14 and the finale is the same calm as the one
 	after wave 1. That consistency is the point: a breather that scales with the
 	wave it follows gets quieter and quieter in relative terms right when the
 	team most needs to recognise it as their moment to heal and reload.
@@ -1186,7 +1186,7 @@ end
      rather than at the next reroll: drop into Relax mid-countdown and the next
      special is pushed out, climb into a peak and it arrives sooner. Pressure
      rides on top of that — the same scalar that thins the horde stretches the
-     wait, so at the bottom of the band wave 5's 24s becomes 53s. ]]
+     wait, so at the bottom of the band wave 10's 24s becomes 53s. ]]
 function DirectorService:_specialIntervalMultiplier(): number
 	local multiplier = self._profile.specialInterval
 	if self._state == STATE.Relax then
@@ -1335,8 +1335,9 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 --  Bosses
 --
---  In WAVE MODE, RoundService releases them: wave 4 is a Tank, wave 5 a Witch,
---  wave 7 two Tanks, and it calls releaseBoss at the top of each. The flow
+--  In WAVE MODE, RoundService releases them: wave 5 is a Tank, wave 8 a Witch,
+--  wave 11 another Tank, and wave 15 an Apex Tank; it calls releaseBoss at the
+--  top of each and passes the wave's own bossTier through. The flow
 --  scheduler below is the campaign model and is switched off the moment a wave
 --  budget arrives — a Tank that shows up twice, once on schedule and once by
 --  flow, is the worst possible bug to ship.

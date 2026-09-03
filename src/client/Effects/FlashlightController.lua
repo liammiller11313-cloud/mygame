@@ -3,7 +3,7 @@
 	FlashlightController — the light this player actually sees by.
 
 	AtmosphereService takes the map from a low orange sun to pitch dark across
-	seven waves. CarryVisualService hangs a torch on every survivor's weapon so a
+	fifteen waves. CarryVisualService hangs a torch on every survivor's weapon so a
 	teammate's beam sweeping a doorway is a real read from forty studs away. This
 	file exists because of the one thing that cannot cover: a gun points where the
 	ARM points, and a player aims with the CAMERA.

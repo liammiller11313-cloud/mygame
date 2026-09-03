@@ -958,7 +958,7 @@ local function showResult(outcome: string, subtitle: string)
 	local victory = outcome == ROUND.Victory
 	showCard({
 		outcome = outcome,
-		-- Seventeen minutes and seven waves. There is no door to reach and
+		-- Seventeen minutes and fifteen waves. There is no door to reach and
 		-- nowhere to have got to: holding out IS the win condition.
 		title = if victory then "YOU HELD OUT" else "THE SURVIVORS DIDN'T MAKE IT",
 		subtitle = subtitle,
@@ -1167,7 +1167,7 @@ end
 	The player's own brightness, for a game that ends in the dark.
 
 	AtmosphereService takes the map from a low orange sun to pitch black over
-	seven waves, and that ramp is tuned against one screen in one room. A phone
+	fifteen waves, and that ramp is tuned against one screen in one room. A phone
 	in daylight, a cheap panel, or somebody who simply cannot see into the gloom
 	all end up playing a different game. This is the lever for that, and it is
 	deliberately a CLIENT-side grade: it changes nothing for anybody else, and

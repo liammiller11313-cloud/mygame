@@ -158,7 +158,7 @@ EconomyConfig.MinKillReward = 2
 --[[
 	The round bonuses, which are most of the money.
 
-	Survived is per wave REACHED, so a team wiped on wave 6 is paid for six. It
+	Survived is per wave REACHED, so a team wiped on wave 11 is paid for eleven. It
 	applies to a victory too — holding out to the end is the same achievement
 	measured the same way, and stacking it under the win bonus is what makes a
 	full round clearly the best use of an hour.
@@ -172,7 +172,15 @@ EconomyConfig.MinKillReward = 2
      number is right; it fails the build outside 30-40 rounds. ]]
 EconomyConfig.VictoryBonus = 1100
 EconomyConfig.DefeatBonus = 200
-EconomyConfig.WaveBonus = 60
+--[[ 28, down from 60, when the round went from seven waves to fifteen.
+
+     This number is paid per wave REACHED, so doubling the wave count doubles
+     what it pays for the same seventeen minutes of fighting — 7 x 60 was $420 a
+     round and 15 x 60 would have been $900, which is a third of a won round
+     appearing out of nothing. 15 x 28 is $420: the same money for the same
+     round, split into more pieces. scripts/economy.py is what caught it and is
+     what decides whether the number is still right. ]]
+EconomyConfig.WaveBonus = 28
 
 --[[ A hard ceiling on what one round can pay, whatever happens inside it.
 

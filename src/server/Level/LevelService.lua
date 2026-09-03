@@ -19,7 +19,7 @@
 	    FL_PanicTrigger   a volume; walking into it starts a crescendo, once
 	    FL_BossZone       an arena a Tank or a Witch may be placed in
 
-	There are no safe rooms and no chapters. A round is seven waves on a fixed
+	There are no safe rooms and no chapters. A round is fifteen waves on a fixed
 	clock and RoundService owns that clock; this module owns geometry, and the two
 	never write the same attribute.
 

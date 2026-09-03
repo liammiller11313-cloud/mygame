@@ -3,7 +3,7 @@
 	VersusService — half the server plays the horde.
 
 	The mode is one match of two halves. Each half is a full seventeen-minute
-	round on RoundService's clock: one side holds out against the same seven
+	round on RoundService's clock: one side holds out against the same fifteen
 	waves the other side is about to face, and then the teams swap and do it
 	again. Nothing here owns a wave, a timer or a spawn budget — RoundService
 	owns the clock in both modes and the Director still owns what arrives inside
@@ -816,7 +816,7 @@ function VersusService:getAvailableKinds(player: Player): { string }
 end
 
 --[[ Shorter during the finale: the last wave is where the infected side has to
-     be able to keep arriving, or wave 7 stops being a finale and becomes a
+     be able to keep arriving, or the finale stops being a finale and becomes a
      victory lap. ]]
 local function respawnDelay(): number
 	local round = Registry.find("RoundService")
@@ -1360,7 +1360,7 @@ end
 
 --[[ A breather starting means the wave before it was cleared, which is the
      event the score is actually about: not "the survivors are alive" but "the
-     survivors got through wave N". Wave 7 has no breather and is credited by
+     survivors got through wave N". The last wave has no breather and is credited by
      the victory that ends the half. ]]
 local function creditWave(index: number)
 	if index <= wavesCredited then

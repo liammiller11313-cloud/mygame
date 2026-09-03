@@ -55,7 +55,7 @@ local CONTROLLERS = {
 	"Weapon/ViewmodelController",
 	"Effects/ImpactController",
 	"Effects/GoreController",
-	--[[ The map is pitch dark by wave 7 and the atmosphere ramp was pointed at
+	--[[ The map is pitch dark by the finale and the atmosphere ramp was pointed at
 	     nothing until this existed. See GameConfig.Flashlight. ]]
 	"Effects/FlashlightController",
 	"Effects/OutlineController",

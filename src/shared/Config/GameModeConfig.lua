@@ -3,7 +3,7 @@
 	GameModeConfig — the round structure.
 
 	Fading Light is not a campaign game. There are no safe rooms and no chapters.
-	A round is a fixed 17 minutes of holding out against seven escalating waves,
+	A round is a fixed 17 minutes of holding out against fifteen escalating waves,
 	and the only question is whether the team is still standing at the end.
 
 	That changes what the AI Director is for. In Left 4 Dead the Director decides
@@ -39,111 +39,258 @@ export type WaveDefinition = {
 	maxSpecialsAlive: number,
 	specialInterval: number, -- seconds between special spawns during this wave
 	bosses: { string }, -- boss kinds released when the wave starts
+	--[[ An InfectedConfig.EliteTiers id applied to every boss this wave releases,
+	     or nil for ordinary ones. The finale's Tank is the only user. ]]
+	bossTier: string?,
 	itemDropChance: number, -- odds the breather after this wave restocks the map
 	announcement: string,
 }
 
 --[[
-	Seven waves totalling exactly 17:00 including the opening prep window.
+	Fifteen waves totalling exactly 17:00 including the opening prep window.
 
 	  prep 15s + waves 830s + breathers 175s = 1020s
 
-	The shape is deliberate: waves 1-3 teach, wave 4 is the first Tank and the
-	first time the team has to move as a unit, wave 5 adds the Witch on top of a
-	horde so there is something to be afraid of that is not a bullet sponge, wave
-	6 is the longest sustained pressure, and wave 7 is a finale with two Tanks
-	where the honest expectation is that most teams die.
+	── WHY FIFTEEN AND NOT SEVEN ───────────────────────────────────────────────
+	The round used to be seven long waves. Same seventeen minutes, same total
+	horde, but the shape was wrong for what this game actually is: a wave-defence
+	round where the number on the screen IS the score. Seven of anything does not
+	feel like an achievement to count through, and a 180-second wave is long
+	enough that a team stops experiencing it as a wave at all — it becomes
+	weather.
+
+	Fifteen short waves fix both. A wave is now 36 to 62 seconds with a 10-to-15
+	second breather behind it, so the cycle of "brace, fight, breathe, brace"
+	runs fifteen times instead of seven and the count climbs fast enough to be
+	worth watching. Nothing about the total pressure changed: the population
+	curve is the same weighted average across the same 830 seconds of fighting,
+	so a round still costs the same ammunition and pays the same money. It is the
+	same round with more punctuation.
+
+	The breathers are shorter than they were, and that is the one real trade.
+	Ten seconds is enough to reload, take pills and pick somebody up; it is not
+	enough to walk somewhere else and heal. That is on purpose — the breather
+	still exists to make the next wave land, and at fifteen waves it has to do
+	that job without adding five minutes to the round.
+
+	── THE SHAPE ───────────────────────────────────────────────────────────────
+	  1-4    teach. No specials at all for the first two; one from wave 3.
+	  5      the first Tank, and the first time the team has to move as a unit.
+	  6-7    the aftermath, and the first waves that do not let up.
+	  8      the Witch, on top of a horde: something to fear that is not a
+	         bullet sponge.
+
+	Bosses land on 5, 8, 11 and 15 — one every three waves.
+	  9-14   the long climb. A second Tank at 11 and, by 14, four specials alive
+	         at once. Thirteen is where the light finally goes.
+	  15     the finale. One Tank, but not one of THOSE Tanks — see
+	         `bossTier` and InfectedConfig.EliteTiers. 144 seconds, the longest
+	         wave in the round by a factor of two, and the honest expectation is
+	         that most teams die on it.
 ]]
 GameModeConfig.Waves = {
 	{
 		index = 1,
 		name = "First Contact",
-		duration = 85,
-		breather = 20,
-		populationScale = 0.55,
-		spawnRateScale = 0.8,
+		duration = 36,
+		breather = 10,
+		populationScale = 0.50,
+		spawnRateScale = 0.75,
 		maxSpecialsAlive = 0,
 		specialInterval = 0,
 		bosses = {},
-		itemDropChance = 0.35,
+		itemDropChance = 0.30,
 		announcement = "THEY'RE COMING",
 	},
 	{
 		index = 2,
-		name = "Spreading",
-		duration = 95,
-		breather = 25,
-		populationScale = 0.75,
-		spawnRateScale = 0.9,
-		maxSpecialsAlive = 1,
-		specialInterval = 38,
+		name = "Stirring",
+		duration = 38,
+		breather = 10,
+		populationScale = 0.58,
+		spawnRateScale = 0.80,
+		maxSpecialsAlive = 0,
+		specialInterval = 0,
 		bosses = {},
-		itemDropChance = 0.45,
+		itemDropChance = 0.35,
 		announcement = "MORE OF THEM",
 	},
 	{
 		index = 3,
-		name = "Swarm",
-		duration = 105,
-		breather = 25,
-		populationScale = 1.0,
-		spawnRateScale = 1.0,
-		maxSpecialsAlive = 2,
-		specialInterval = 30,
+		name = "Spreading",
+		duration = 40,
+		breather = 12,
+		populationScale = 0.66,
+		spawnRateScale = 0.85,
+		maxSpecialsAlive = 1,
+		specialInterval = 40,
 		bosses = {},
-		itemDropChance = 0.5,
-		announcement = "HOLD THE LINE",
+		itemDropChance = 0.40,
+		announcement = "THEY KNOW WHERE YOU ARE",
 	},
 	{
 		index = 4,
-		name = "Heavy",
-		duration = 115,
-		breather = 30,
-		populationScale = 1.1,
-		spawnRateScale = 1.05,
-		maxSpecialsAlive = 2,
-		specialInterval = 28,
-		bosses = { Enums.Infected.Tank },
-		itemDropChance = 0.7, -- a Tank wave should always leave something behind
-		announcement = "TANK INBOUND",
+		name = "Swarm",
+		duration = 42,
+		breather = 12,
+		populationScale = 0.74,
+		spawnRateScale = 0.90,
+		maxSpecialsAlive = 1,
+		specialInterval = 36,
+		bosses = {},
+		itemDropChance = 0.45,
+		announcement = "HOLD THE LINE",
 	},
 	{
 		index = 5,
-		name = "The Crying",
-		duration = 125,
-		breather = 30,
-		populationScale = 1.2,
-		spawnRateScale = 1.1,
-		maxSpecialsAlive = 3,
-		specialInterval = 24,
-		bosses = { Enums.Infected.Witch },
-		itemDropChance = 0.6,
-		announcement = "SOMETHING IS CALLING THEM",
+		name = "Heavy",
+		duration = 44,
+		breather = 12,
+		populationScale = 0.82,
+		spawnRateScale = 0.95,
+		maxSpecialsAlive = 2,
+		specialInterval = 32,
+		bosses = { Enums.Infected.Tank },
+		itemDropChance = 0.70,
+		announcement = "TANK INBOUND",
 	},
 	{
 		index = 6,
-		name = "Overrun",
-		duration = 135,
-		breather = 35,
-		populationScale = 1.35,
-		spawnRateScale = 1.2,
-		maxSpecialsAlive = 3,
-		specialInterval = 22,
+		name = "Aftermath",
+		duration = 46,
+		breather = 14,
+		populationScale = 0.90,
+		spawnRateScale = 1.00,
+		maxSpecialsAlive = 2,
+		specialInterval = 30,
 		bosses = {},
-		itemDropChance = 0.75, -- the last real chance to restock before the finale
-		announcement = "OVERRUN",
+		itemDropChance = 0.45,
+		announcement = "KEEP MOVING",
 	},
 	{
 		index = 7,
-		name = "Last Light",
-		duration = 180,
-		breather = 0,
-		populationScale = 1.6,
-		spawnRateScale = 1.35,
+		name = "No Let Up",
+		duration = 48,
+		breather = 12,
+		populationScale = 0.98,
+		spawnRateScale = 1.05,
+		maxSpecialsAlive = 2,
+		specialInterval = 28,
+		bosses = {},
+		itemDropChance = 0.50,
+		announcement = "NO LET UP",
+	},
+	{
+		index = 8,
+		name = "The Crying",
+		duration = 50,
+		breather = 12,
+		populationScale = 1.06,
+		spawnRateScale = 1.08,
+		maxSpecialsAlive = 3,
+		specialInterval = 26,
+		bosses = { Enums.Infected.Witch },
+		itemDropChance = 0.60,
+		announcement = "SOMETHING IS CALLING THEM",
+	},
+	{
+		index = 9,
+		name = "Cornered",
+		duration = 52,
+		breather = 14,
+		populationScale = 1.14,
+		spawnRateScale = 1.12,
+		maxSpecialsAlive = 3,
+		specialInterval = 26,
+		bosses = {},
+		itemDropChance = 0.50,
+		announcement = "THEY HAVE THE STREETS",
+	},
+	{
+		index = 10,
+		name = "Overrun",
+		duration = 54,
+		breather = 14,
+		populationScale = 1.22,
+		spawnRateScale = 1.16,
+		maxSpecialsAlive = 3,
+		specialInterval = 24,
+		bosses = {},
+		itemDropChance = 0.55,
+		announcement = "OVERRUN",
+	},
+	{
+		index = 11,
+		name = "Iron",
+		duration = 56,
+		breather = 12,
+		populationScale = 1.30,
+		spawnRateScale = 1.20,
+		maxSpecialsAlive = 3,
+		specialInterval = 24,
+		bosses = { Enums.Infected.Tank },
+		itemDropChance = 0.70,
+		announcement = "ANOTHER ONE",
+	},
+	{
+		index = 12,
+		name = "Breaking",
+		duration = 58,
+		breather = 14,
+		populationScale = 1.38,
+		spawnRateScale = 1.24,
 		maxSpecialsAlive = 4,
-		specialInterval = 18,
-		bosses = { Enums.Infected.Tank, Enums.Infected.Tank },
-		itemDropChance = 0,
+		specialInterval = 22,
+		bosses = {},
+		itemDropChance = 0.55,
+		announcement = "IT IS NOT STOPPING",
+	},
+	{
+		index = 13,
+		name = "The Dark",
+		duration = 60,
+		breather = 12,
+		populationScale = 1.46,
+		spawnRateScale = 1.28,
+		maxSpecialsAlive = 4,
+		specialInterval = 20,
+		--[[ No boss, deliberately. Bosses land on 5, 8, 11 and 15 — one every
+		     three waves, which is a rhythm a team can feel coming — and thirteen
+		     is where the map goes properly dark instead (see AtmosphereService).
+		     The darkness is this wave's event; a Witch on top of it would be the
+		     thing the team remembers and the dark would be scenery. ]]
+		bosses = {},
+		itemDropChance = 0.60,
+		announcement = "THE LIGHTS ARE GOING",
+	},
+	{
+		index = 14,
+		name = "Everything",
+		duration = 62,
+		breather = 15,
+		populationScale = 1.54,
+		spawnRateScale = 1.32,
+		maxSpecialsAlive = 4,
+		specialInterval = 20,
+		bosses = {},
+		itemDropChance = 0.75,
+		announcement = "EVERYTHING THEY HAVE LEFT",
+	},
+	{
+		index = 15,
+		name = "Last Light",
+		duration = 144,
+		breather = 0,
+		populationScale = 1.70,
+		spawnRateScale = 1.40,
+		maxSpecialsAlive = 5,
+		specialInterval = 16,
+		bosses = { Enums.Infected.Tank },
+		--[[ The wave the whole round is counting up to. Its Tank is spawned
+		     through InfectedConfig.EliteTiers rather than as an ordinary one: same
+		     creature, same tells, several times the health and the reach. ]]
+		bossTier = "Apex",
+		itemDropChance = 0.00,
 		announcement = "SURVIVE",
 	},
 } :: { WaveDefinition }
@@ -154,7 +301,7 @@ GameModeConfig.Classic = table.freeze({
 	MaxPlayers = 8,
 	MinPlayersToStart = 1, -- solo is allowed; the Director scales down for it
 
-	-- Reaching the end of wave 7 alive is a win, even at one survivor left.
+	-- Reaching the end of wave 15 alive is a win, even at one survivor left.
 	VictoryRequiresAllAlive = false,
 	--[[
 		A team that cannot recover ends the round, rather than running the clock.
@@ -188,7 +335,9 @@ GameModeConfig.Classic = table.freeze({
 	Scoring is by progress, not kills: how many waves the survivor team cleared and
 	how far into the next one they got. Then the teams swap and do it again, which
 	is what makes the mode fair — you are always being measured against the same
-	seven waves the other side just faced.
+	fifteen waves the other side just faced. Fifteen also makes the score itself
+	more readable: "they got to 11, we got to 13" is a scoreline, where "they got
+	to 5, we got to 6" was a coin toss.
 ]]
 GameModeConfig.Versus = table.freeze({
 	MaxPlayers = 8,

@@ -2,7 +2,7 @@
 --[[
 	RoundService — the seventeen minutes.
 
-	A round is a fixed schedule: fifteen seconds of prep, then seven waves with a
+	A round is a fixed schedule: fifteen seconds of prep, then fifteen waves with a
 	breather after each, totalling exactly GameModeConfig.Classic.TotalDuration.
 	This service owns that clock and nothing else. It does not decide what spawns
 	or where — the Director does, and keeps every bit of its intelligence — it
@@ -13,8 +13,8 @@
 	Every phase boundary is computed from the round's start time and
 	GameModeConfig's own numbers, never accumulated tick by tick. A hitched
 	server, a long LoadCharacter, a tick that lands 200ms late — none of them can
-	push wave 7 out of place, because wave 7 starts when the clock says so and
-	not when the previous phase happens to notice it is done.
+	push the finale out of place, because wave 15 starts when the clock says so
+	and not when the previous phase happens to notice it is done.
 
 	That is also why FL_WaveEndsAt and FL_RoundEndsAt are absolute
 	workspace:GetServerTimeNow() stamps rather than remaining seconds. The client
@@ -347,7 +347,7 @@ local function buildSchedule(): { any }
 		})
 		at += wave.duration
 
-		-- Wave 7 has no breather; the schedule simply ends and the team has won.
+		-- The last wave has no breather; the schedule simply ends and the team has won.
 		if wave.breather > 0 then
 			table.insert(entries, {
 				phase = PHASE.Breather,
@@ -456,7 +456,8 @@ function RoundService:_enterWave(entry)
 	say("", wave.announcement, SAY_ANNOUNCE)
 
 	--[[ Boss releases are staggered and generation-guarded: a Tank requested for
-	     wave 7 must not walk in three seconds after a team wipe ended the round. ]]
+	     the finale must not walk in three seconds after a team wipe ended the
+	     round. ]]
 	if #wave.bosses > 0 then
 		local callout = bossCallout(wave.bosses)
 		if callout then
@@ -531,8 +532,8 @@ function RoundService:_restock(wave)
 		end
 	end
 
-	-- The wave's own odds decide whether the map gets anything back. Wave 4 (the
-	-- first Tank) is 0.7 and wave 7 is 0, which is the difficulty curve doing its
+	-- The wave's own odds decide whether the map gets anything back. Wave 5 (the
+	-- first Tank) is 0.7 and wave 15 is 0, which is the difficulty curve doing its
 	-- work quietly rather than through a number on the screen.
 	if random:NextNumber() < wave.itemDropChance then
 		local level = Registry.find("LevelService")
@@ -636,7 +637,7 @@ end
 
 --[[ Starts a round. `mode` is a GameModeConfig.Modes key; the wave schedule is
      the same in every mode, which is what makes Versus fair — both teams are
-     measured against the same seven waves. ]]
+     measured against the same fifteen waves. ]]
 function RoundService:startRound(requestedMode: string?)
 	if roundState == Enums.RoundState.Starting or roundState == Enums.RoundState.InProgress then
 		return
@@ -1039,7 +1040,7 @@ function RoundService:_step()
 		end
 		cursor += 1
 		if cursor > #schedule then
-			-- Reaching the end of wave 7 alive is the win, at four survivors or
+			-- Reaching the end of the last wave alive is the win, at four survivors or
 			-- at one: VictoryRequiresAllAlive is false and means it.
 			self:endRound(Enums.RoundState.Victory)
 			return
@@ -1114,7 +1115,7 @@ end
 function RoundService:init()
 	-- GameModeConfig ships a validator and says to run it once at boot. If the
 	-- waves and TotalDuration ever disagree the round timer and the waves drift
-	-- apart, and the symptom (wave 7 ending before the clock does) is miles from
+	-- apart, and the symptom (the last wave ending before the clock does) is miles from
 	-- the cause.
 	local ok, problem = GameModeConfig.validate()
 	if not ok then

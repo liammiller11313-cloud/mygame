@@ -6,7 +6,7 @@
 	title.
 
 	── THE SKY IS THE TIMER ────────────────────────────────────────────────────
-	The round opens under a low orange sun and is pitch dark by wave 7, and the
+	The round opens under a low orange sun and is pitch dark by the finale, and the
 	light level is a pure function of RoundService:getElapsed() over
 	GameModeConfig.Classic.TotalDuration — never a free-running clock, never a
 	timer of its own. That single decision is the reason this module exists: a
@@ -139,7 +139,7 @@ local FLASH_TO_GRADE = 0.40
 local FLASH_TO_BLOOM = 1.70
 
 -- Resting bloom for the one we build ourselves. Streetlamps and neon are the only
--- light left by wave 7, so they are allowed to bleed.
+-- light left by the finale, so they are allowed to bleed.
 local BLOOM_BASE_INTENSITY = 0.9
 
 -- ── distant lightning ───────────────────────────────────────────────────────
@@ -258,7 +258,7 @@ local VIS_DENSITY = 0.7 -- inverted: more visibility means less atmosphere
 	The shape of the round in light: waves 1-2 are a long orange evening where you
 	can still see a street. Wave 3 puts the sun on the horizon. Wave 5 — the Witch
 	— lands in blue hour, when everything is legible but nothing is coloured. By
-	wave 7 the sun is gone, the fog is at its floor, and the only reason you can
+	the finale the sun is gone, the fog is at its floor, and the only reason you can
 	see anything at all is the map's own fixtures.
 ]]
 local KEYFRAMES = {
@@ -332,7 +332,7 @@ local KEYFRAMES = {
 	},
 	{
 		anchor = 7,
-		-- Night. The finale opens here, already dark, so wave 7 does not have to
+		-- Night. The finale opens here, already dark, so wave 15 does not have to
 		-- announce itself twice.
 		clock = 20.4,
 		brightness = 1.18,

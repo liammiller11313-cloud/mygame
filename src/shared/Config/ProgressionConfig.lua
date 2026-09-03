@@ -23,15 +23,15 @@
 	Dollars you loot off a corpse.
 
 	── THE NUMBERS ARE DERIVED, NOT PICKED ─────────────────────────────────────
-	scripts/economy.py already models a round: 407 Commons, 11 specials, 2.8
-	bosses, about a quarter of them headshots, seven waves. Every figure below was
+	scripts/economy.py already models a round: 412 Commons, 12 specials, 2.8
+	bosses, about a quarter of them headshots, fifteen waves. Every figure below was
 	chosen against that round so the curve says something true:
 
-	    a won round        3,311 XP
+	    a won round        3,346 XP
 	    levels 1 to 5      0.6 won rounds — inside the first session
 	    level 10           2.3 won rounds
-	    level 20           9.2 won rounds, and 0.94 of a round for that level alone
-	    level 50           57 won rounds, 2.3 a level
+	    level 20           9.1 won rounds, and 0.93 of a round for that level alone
+	    level 50           56 won rounds, 2.3 a level
 
 	Fast at the start because the first session has to feel like it is going
 	somewhere, and slow later because a number that never slows is a number nobody
@@ -91,7 +91,13 @@ ProgressionConfig.Xp = table.freeze({
 	     picking a teammate up under pressure is worth more than ten Commons and
 	     the progression should say so out loud. ]]
 	Revive = 40,
-	WaveReached = 60,
+	--[[ 28, down from 60, when the round went from seven waves to fifteen. Paid
+	     per wave reached, so the wave count multiplies it directly: 7 x 60 was
+	     420 XP a round and 15 x 60 would have been 900, which is a fifth of a
+	     won round's XP arriving because the schedule was cut into more pieces.
+	     15 x 28 is 420 — the same round, worth the same. The same correction
+	     applies to EconomyConfig.WaveBonus for the same reason. ]]
+	WaveReached = 28,
 	Victory = 400,
 })
 
@@ -191,7 +197,7 @@ export type Quest = {
 
 	Deliberately spread across the verbs. A pool of nothing but kill counts pays
 	the player who was already going to do that; "revive four teammates" and
-	"survive to wave five" are the ones that change how somebody plays a round,
+	"survive to wave eleven" are the ones that change how somebody plays a round,
 	and they are the reason this is a quest system rather than a second XP table.
 ]]
 local QUEST_POOL: { Quest } = table.freeze({
@@ -239,10 +245,15 @@ local QUEST_POOL: { Quest } = table.freeze({
 		scrip = 50,
 	}),
 	table.freeze({
-		id = "wave5",
-		text = "Reach wave 5",
+		--[[ Eleven of fifteen, which is where "reach wave 5" landed when the
+		     round was seven waves long: about seventy per cent of the way, far
+		     enough that a team has to actually hold out and not so far that only
+		     a win counts. Rescaled with the schedule rather than left at 5,
+		     which fifteen waves would have turned into a participation prize. ]]
+		id = "wave11",
+		text = "Reach wave 11",
 		stat = "wave",
-		target = 5,
+		target = 11,
 		xp = 400,
 		scrip = 60,
 	}),

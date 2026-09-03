@@ -210,8 +210,8 @@ end
 	How much one quest moved this round.
 
 	Every quest is expressed as a positive delta, including the two that are not
-	really additive. "Reach wave 5" is a best-of rather than a sum — reaching
-	wave 3 twice is not reaching wave 6 — so its delta is however far past the
+	really additive. "Reach wave 11" is a best-of rather than a sum — reaching
+	wave 6 twice is not reaching wave 12 — so its delta is however far past the
 	stored best this round got, which is zero on a worse round. That keeps a
 	single `addQuestProgress` on the profile instead of two kinds of write.
 ]]

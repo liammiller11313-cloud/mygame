@@ -1,6 +1,6 @@
 --!nonstrict
 --[[
-	WaveController — the round clock, the seven pips, and the wave announcements.
+	WaveController — the round clock, the wave pips, and the wave announcements.
 
 	Classic is seventeen minutes long and the only question it asks is whether
 	the team is still standing at the end of them. That makes the clock the score,
@@ -15,7 +15,7 @@
 
 	── QUIET, THEN LOUD ────────────────────────────────────────────────────────
 	During a wave the block is reference information: one small line, one clock,
-	seven pips. The player is busy and the clock is not what is about to kill
+	row of pips. The player is busy and the clock is not what is about to kill
 	them, so it stays out of the way and lets the pips carry progress.
 
 	The breather is the opposite, and it is the only moment in a round where the
@@ -23,7 +23,7 @@
 	lands first, alone; then — once it has left — the countdown to the next wave
 	takes the same spot and grows as it approaches zero, so nothing ever arrives
 	as a surprise. The last ten seconds are unmistakable, and the last thirty
-	seconds of wave 7 are red, because surviving them is the whole mode.
+	seconds of the last wave are red, because surviving them is the whole mode.
 
 	── PERFORMANCE ─────────────────────────────────────────────────────────────
 	One RenderStepped. The clock and the countdown reformat their text only when
@@ -66,11 +66,27 @@ local PHASE = table.freeze({
 local WAVE_COUNT = GameModeConfig.getWaveCount()
 local PREP_DURATION = GameModeConfig.Classic.PrepDuration
 
---[[ Seven pips at this pitch come to 218px, which sits inside the block with
-     enough margin that a two-digit minute clock above them still centres. ]]
 local BLOCK_WIDTH = 300
-local PIP_WIDTH = 26
 local PIP_HEIGHT = 4
+
+--[[
+	The pip row is DERIVED from the wave count, not sized for one.
+
+	It used to be a flat 26 pixels each with a comment saying seven of them came
+	to 218 and fitted. Then the round went to fifteen waves and fifteen of them
+	came to 474 inside a 300-pixel block — the row simply ran off both ends of
+	the HUD, and nothing in the toolchain could have caught it because 26 is a
+	perfectly good number on its own.
+
+	So the pitch is solved for instead. The row is given the block minus a margin
+	and divides it up; the gap tightens once there are more than eight, because
+	at fifteen the gaps were eating more width than the pips. The floor of 8 is
+	the point below which a pip stops reading as a pip, and if a wave count ever
+	needs narrower than that the answer is two rows, not thinner slivers.
+]]
+local PIP_ROW_MAX = BLOCK_WIDTH - 36
+local PIP_GAP = if WAVE_COUNT > 8 then 4 else LAYOUT.ElementGap
+local PIP_WIDTH = math.clamp(math.floor((PIP_ROW_MAX - (WAVE_COUNT - 1) * PIP_GAP) / WAVE_COUNT), 8, 26)
 
 --[[ The one focal point. The announcement card and the countdown share it and
      are never on screen together — the beat lands, then the clock takes over —
@@ -214,14 +230,14 @@ local function buildBlock()
 	local row = newFrame(block, "Pips", COLOR.Panel, 1)
 	row.AnchorPoint = Vector2.new(0.5, 1)
 	row.Position = UDim2.new(0.5, 0, 1, 0)
-	row.Size = UDim2.fromOffset(WAVE_COUNT * PIP_WIDTH + (WAVE_COUNT - 1) * LAYOUT.ElementGap, PIP_HEIGHT)
+	row.Size = UDim2.fromOffset(WAVE_COUNT * PIP_WIDTH + (WAVE_COUNT - 1) * PIP_GAP, PIP_HEIGHT)
 
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	layout.VerticalAlignment = Enum.VerticalAlignment.Center
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, LAYOUT.ElementGap)
+	layout.Padding = UDim.new(0, PIP_GAP)
 	layout.Parent = row
 
 	for index = 1, WAVE_COUNT do

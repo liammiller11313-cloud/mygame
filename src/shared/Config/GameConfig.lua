@@ -247,7 +247,7 @@ GameConfig.Survivor = table.freeze({
 	THE FLASHLIGHT.
 
 	AtmosphereService opens the round under a low orange sun and is pitch dark by
-	wave 7. That ramp is the game's whole arc and it was, until this existed,
+	the last waves. That ramp is the game's whole arc and it was, until this existed,
 	pointed at nothing: the map goes black and the survivors have no way to see
 	into it. This is the other half of the sentence the title is making.
 

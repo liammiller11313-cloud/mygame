@@ -460,9 +460,11 @@ InfectedConfig.Definitions = {
 		loseInterestTime = 25,
 
 		spawnCost = 100,
-		-- Two, because wave 7 releases a pair and the finale announces it. A
-		-- single-Tank ceiling made the second release silently fail while the
-		-- callout still promised two.
+		--[[ Two. The finale releases ONE Tank now — an Apex one, see EliteTiers —
+		     but the ceiling stays at two because the Director's own flow schedule
+		     can still put an ordinary Tank on the map, and a ceiling of one would
+		     make the finale's boss silently fail to arrive if it did. That is the
+		     exact failure this number was raised to fix the first time. ]]
 		maxAlive = 2,
 
 		bodyColor = Color3.fromRGB(126, 98, 82),

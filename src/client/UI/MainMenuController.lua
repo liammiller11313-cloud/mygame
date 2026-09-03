@@ -1021,7 +1021,7 @@ local function showResults(payload: any)
 	fillRows(payload and payload.scores)
 
 	-- Confetti is the one flourish this game gets, and it is earned: surviving
-	-- all seven waves is meant to be uncommon.
+	-- all fifteen waves is meant to be uncommon.
 	if survived then
 		confetti:burst()
 	else
@@ -2348,7 +2348,7 @@ function MainMenuController:getLobbyState(): any
 end
 
 --[[ Shows the result screen by hand. Only for a developer checking the layout
-     without dying seven waves in. ]]
+     without dying fifteen waves in. ]]
 function MainMenuController:showResults(payload: any)
 	showResults(payload)
 end
