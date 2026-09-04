@@ -261,6 +261,30 @@ local function partsOf(instance: Instance): { BasePart }
 end
 
 --[[
+	Nails a prop to where the designer put it.
+
+	Everything this puzzle uses has to stay put for ten minutes in a room full
+	of gunfire and bodies, and an imported model is unanchored about half the
+	time. Unanchored, a clipboard is shot off its desk by the first stray pellet,
+	a flamethrower is kicked under the geometry by a Charger, and the clue a team
+	needs is somewhere nobody will ever look. MedkitService anchors its floor
+	pickups for exactly this reason and says so.
+
+	Collision is only dropped for things a player walks up to and takes — a
+	flamethrower lying in a doorway should not be something you bump into. It is
+	left alone on the documents, because a room sign may well be part of a wall
+	and turning its collision off would put a hole in the building.
+]]
+local function settle(instance: Instance, dropCollision: boolean)
+	for _, part in partsOf(instance) do
+		part.Anchored = true
+		if dropCollision then
+			part.CanCollide = false
+		end
+	end
+end
+
+--[[
 	Everything downstream deals in Models.
 
 	A designer will reasonably drop a single Part in for a room sign, and the
@@ -742,7 +766,6 @@ function PuzzleService:arm(random: Random?)
 		)
 	end
 
-	local surfaces = template.surfaces(definition, values)
 	--[[ Found now, armed later. Both live inside the room the door seals, so
 	     resolving them here costs nothing and means the moment the vault opens is
 	     a couple of attribute writes rather than a search. ]]
@@ -768,16 +791,44 @@ function PuzzleService:arm(random: Random?)
 	end
 	state.stockpile = if loot and loot.stockpile then findNamed(folder, root, loot.stockpile.object) else nil
 	state.stockpileClaimed = false
+	--[[ Both nailed down. Neither survives ten minutes of gunfire lying loose,
+	     and an imported model is unanchored about half the time. ]]
+	if state.stockpile then
+		settle(state.stockpile, false)
+	end
+	if state.weaponDrop then
+		--[[ Collision dropped as well, the way MedkitService does it for the same
+		     reason: a weapon on the floor of a doorway should not be a thing the
+		     team walks into. ]]
+		settle(state.weaponDrop, true)
+	end
 
+	--[[
+		Resolved into the maps FIRST, printed second.
+
+		`repaint` reads state.props to find the model for a clue, so every prop
+		has to be in there before anything is printed — a loop that painted as it
+		went would print only the props it had already reached, and the ones after
+		it would sit blank for the whole round.
+
+		This is where the ordered collection actually lives: `clueOf` is what
+		turns the instance a player interacted with back into "which clue is this
+		and what number is it", and without it onCollect matches nothing and the
+		counter never moves.
+	]]
 	local painted = 0
 	for _, clue in definition.clues do
 		local child = findNamed(folder, root, clue.object)
 		local model = child and asModel(child, child.Parent or root)
-		local text = surfaces[clue.object]
-		if model and text then
-			paint(model, clue, text)
+		if model then
+			--[[ Anchored, collision left alone. A document has to still be on the
+			     desk at wave twelve, and a room sign may be part of a wall. ]]
+			settle(model, false)
 			CollectionService:AddTag(model, PuzzleConfig.ClueTag)
+			model:SetAttribute(PZ.ClueOrder, clue.order)
 			table.insert(state.clues, model)
+			state.props[clue.object] = model
+			state.clueOf[model] = clue
 			painted += 1
 		else
 			warn(string.format("[PuzzleService] no %q prop — that clue is missing this round", clue.object))
@@ -786,6 +837,8 @@ function PuzzleService:arm(random: Random?)
 
 	state.definition = definition
 	state.answer = answer
+	state.values = values
+	state.found = 0
 	state.solved = false
 	state.keypad = keypad
 	state.door = door

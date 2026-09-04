@@ -182,6 +182,11 @@ local state = {
 local echoes = table.create(ECHO_SLOTS)
 local echoCursor = 0
 local sounds: { Sound } = {}
+
+--[[ The one weapon that makes a continuous noise. Held rather than pooled: a
+     loop has to be the SAME Sound from the moment the trigger goes down to the
+     moment it comes up, and a pool would hand out a different one each time. ]]
+local loopSound: Sound? = nil
 local soundCursor = 0
 local warned: { [string]: boolean } = {}
 
@@ -224,6 +229,42 @@ end
 	`Mix.MasterVolume` below is the config's baseline mix, not the player's
 	setting; the two multiply, which is the intent.
 ]]
+--[[
+	Starts or stops the sustained bed for a weapon that has one.
+
+	Called on the firing edge and on every path that ends a shot — a dry
+	magazine, a weapon swap, a menu opening — because a loop is the one sound
+	that keeps playing if nobody tells it to stop, and a flamethrower still
+	roaring after you switched to a pistol is the kind of bug that survives a
+	whole playtest because everyone assumes somebody else noticed.
+
+	A weapon with no WeaponLoop row silences whatever was playing and returns,
+	so switching from the flamethrower to anything at all stops it.
+]]
+local function setWeaponLoop(definition: any, on: boolean)
+	local row = definition and AudioConfig.WeaponLoop[definition.id]
+	if not row or not on or not AudioConfig.isConfigured(row) then
+		if loopSound then
+			loopSound:Stop()
+		end
+		return
+	end
+
+	if not loopSound or not loopSound.Parent then
+		loopSound = Instance.new("Sound")
+		loopSound.Name = "FL_WeaponLoop"
+		loopSound.Parent = SoundService
+		trove:add(loopSound)
+	end
+	local live = loopSound :: Sound
+	live.SoundId = row.id
+	live.Volume = row.volume
+	live.Looped = true
+	if not live.IsPlaying then
+		live:Play()
+	end
+end
+
 local function playLocal(definition: any)
 	if not AudioConfig.isConfigured(definition) then
 		return
@@ -407,6 +448,7 @@ local function refreshLoadout(force: boolean)
 		state.definition = definition
 		state.burstIndex = 0
 		state.firing = false
+		setWeaponLoop(nil, false)
 		state.pumpAt = 0
 		endReload(false)
 
@@ -978,6 +1020,7 @@ function WeaponController:init()
 		local survivor = survivorState()
 		if CANNOT_FIRE[survivor] then
 			state.firing = false
+			setWeaponLoop(nil, false)
 			endReload(false)
 			WeaponController:setAiming(false)
 		end
@@ -992,10 +1035,12 @@ function WeaponController:start()
 
 	trove:add(input:onBegan(Action.Fire):connect(function()
 		state.firing = true
+		setWeaponLoop(state.definition, true)
 		fireOnce()
 	end))
 	trove:add(input:onEnded(Action.Fire):connect(function()
 		state.firing = false
+		setWeaponLoop(nil, false)
 	end))
 
 	trove:add(input:onBegan(Action.Aim):connect(function()

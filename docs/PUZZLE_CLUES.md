@@ -186,23 +186,26 @@ for the first-person camera is the wrong thing for everyone else to look at.
 The model in the loot room is separate from both. That one is the pickup lying
 on the floor; these are what you hold once you have it.
 
-#### Sounds it needs
+#### Sounds — both wired
 
-One id, in `AudioConfig.Id`:
-
-| Key | What to search for | What it should sound like |
+| Key | Id | Role |
 |---|---|---|
-| `FlamethrowerLoop` | `flamethrower`, `flame burst`, `blowtorch`, `gas burner` | A **held roar**, not a shot. Low, continuous, with air in it. It plays ten times a second while the trigger is down, so it wants to be **short (0.15–0.4s) and seamless** — a sample with a hard attack will machine-gun. Think a burner igniting and holding, not a gunshot. |
+| `FlamethrowerBurst` | `129504465599355` | Per shot, ten times a second. Quiet (0.38) and low priority, so it is a texture rather than a wall. |
+| `FlamethrowerLoop` | `108835547890095` | A sustained bed that starts when the trigger goes down and stops when it comes up. |
 
-It is already wired at volume 0.62, rolloff 120 studs and a voice budget of 2 —
-much shorter reach than a rifle, because nobody two streets away should hear a
-flamethrower.
+Either alone would be wrong: ten bursts a second with no bed is a nailgun, and
+a loop with no bursts has no attack. The loop is first-person only — teammates
+hear the per-shot bursts through the ordinary world audio, because a looping
+emitter per shooter is a stream nobody asked for.
 
-The burning it causes already has sound: that is the existing fire system the
+It is stopped on every path that ends firing, not just the trigger release: a
+dry tank, a weapon swap, going down, a menu opening. A loop is the one sound
+that keeps playing if nobody tells it to stop, and a flamethrower still roaring
+after you switched to a pistol is a bug that survives a whole playtest because
+everyone assumes somebody else noticed it.
+
+The burning it causes already has sound — that is the existing fire system the
 molotov uses, and it needs nothing new.
-
-**Optional but worth it:** if you want the ignition to land harder, the fire
-sounds are `AudioConfig` rows the molotov already reads. Nothing to add.
 
 ### Dollar Stockpile
 

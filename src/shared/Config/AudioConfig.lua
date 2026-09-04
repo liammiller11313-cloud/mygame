@@ -87,10 +87,14 @@ local ID = table.freeze({
 	     is ever added, that entry needs splitting rather than sharing. ]]
 	ShotgunShell = "rbxassetid://799917192",
 	SmgFire = "rbxassetid://97897507846837",
-	--[[ The flamethrower's roar. Empty until somebody uploads one — the game
-	     warns once for a missing id and plays nothing, which is the house rule for
-	     every sound in this file. ]]
-	FlamethrowerLoop = "",
+	--[[ Two halves of one weapon, because the flamethrower is the only thing in
+	     the game that makes a CONTINUOUS noise. The burst is per shot the way
+	     every other gun's is; the loop is a sustained bed under it that starts
+	     when the trigger goes down and stops when it comes up. Either alone is
+	     wrong: ten bursts a second with no bed is a nailgun, and a loop with no
+	     bursts has no attack. ]]
+	FlamethrowerBurst = "rbxassetid://129504465599355",
+	FlamethrowerLoop = "rbxassetid://108835547890095",
 	AkShot = "rbxassetid://1065188024",
 	M4Shot = "rbxassetid://18521643711",
 	SniperShot = "rbxassetid://135333708100426",
@@ -185,7 +189,11 @@ AudioConfig.WeaponFire = {
 	     the weapon does — nobody two streets away should hear a flamethrower —
 	     and the voice budget is low so twelve pellets a shot cannot each try to
 	     be a sound. ]]
-	[Enums.Weapon.Flamethrower] = sound(ID.FlamethrowerLoop, 0.62, 0.98, 1.02, 120, 2),
+	--[[ The per-shot half. Quiet and low-priority on purpose: it fires ten times
+	     a second, so it is a texture over the loop rather than the sound of the
+	     weapon, and a budget of 2 means the ones that would have stacked are
+	     dropped instead of turning into a wall. ]]
+	[Enums.Weapon.Flamethrower] = sound(ID.FlamethrowerBurst, 0.38, 0.96, 1.04, 120, 2),
 	[Enums.Weapon.M1911A1] = sound(ID.PistolShot, 0.72, 0.97, 1.05, 320, 4),
 	[Enums.Weapon.Magnum357] = sound(ID.RevolverShot, 1.0, 0.94, 1.02, 560, 5),
 	--[[ These four shipped with no row and this table is indexed directly — no
@@ -265,6 +273,32 @@ AudioConfig.WeaponFire = {
 	[Enums.Weapon.BaseballBat] = sound(ID.BatSwing, 0.6, 0.95, 1.07, 75, 3),
 	[Enums.Weapon.Knife] = sound(ID.KnifeSlash, 0.42, 0.96, 1.1, 55, 2),
 } :: { [string]: SoundDefinition }
+
+--[[
+	Sounds that hold while a trigger is held, by weapon.
+
+	One entry, and it needs its own table rather than a flag on WeaponFire
+	because the two are played by completely different rules: WeaponFire is
+	fired once per shot and forgotten, and this is started on an edge and
+	stopped on the opposite one. A weapon with no row here simply has no bed,
+	which is every gun in the game.
+
+	First-person only. Teammates hear the per-shot bursts through the ordinary
+	world audio; a looping emitter per shooter is a stream nobody asked for.
+]]
+AudioConfig.WeaponLoop = {
+	[Enums.Weapon.Flamethrower] = {
+		id = ID.FlamethrowerLoop,
+		ids = nil,
+		volume = 0.55,
+		pitchMin = 1.0,
+		pitchMax = 1.0,
+		rollOffMin = 12,
+		rollOffMax = 120,
+		looped = true,
+		priority = 3,
+	},
+}
 
 AudioConfig.WeaponReload = {
 	MagOut = sound(ID.GunReload, 0.5, 0.98, 1.06, 60, 2),
