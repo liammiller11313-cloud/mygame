@@ -26,7 +26,7 @@ local GameConfig = {}
 	none. If it is stale, the log says so honestly: the code in Studio is at least
 	as new as this date, and no newer than the push that set it.
 ]]
-GameConfig.BuildStamp = "2026-08-24w"
+GameConfig.BuildStamp = "2026-08-24x"
 
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true

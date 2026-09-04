@@ -104,9 +104,21 @@ local state = {
 	clueOf = {} :: { [Model]: any },
 }
 
---[[ Per-player, and cleared when they leave. `at` is the last attempt and
-     `wrong` is the run of consecutive misses that drives the lockout. ]]
-local attempts: { [Player]: { at: number, wrong: number, lockedUntil: number } } = {}
+--[[
+	Per-player, and cleared when they leave.
+
+	`typedAt` and `tookAt` are SEPARATE on purpose. They started as one field and
+	that was a bug you would only find by playing it: picking up the fourth clue
+	stamped the same clock the keypad reads, so walking straight to the door and
+	entering the code you had just earned answered WAIT. The two actions are
+	throttled for different reasons and at different rates, so they get a stamp
+	each.
+
+	`wrong` is the run of consecutive misses that drives the lockout.
+]]
+local attempts: {
+	[Player]: { typedAt: number, tookAt: number, wrong: number, lockedUntil: number },
+} = {}
 
 --[[ The floor between two collect requests from one player. Short, because
      picking clues up is not a thing anybody spams for advantage — it exists so
@@ -133,7 +145,7 @@ end
 local function record(player: Player)
 	local entry = attempts[player]
 	if not entry then
-		entry = { at = 0, wrong = 0, lockedUntil = 0 }
+		entry = { typedAt = 0, tookAt = 0, wrong = 0, lockedUntil = 0 }
 		attempts[player] = entry
 	end
 	return entry
@@ -178,6 +190,28 @@ local function findNamed(scope: Instance?, root: Instance, wanted: string): Inst
 		end
 	end
 	for _, descendant in root:GetDescendants() do
+		if MapConfig.folderMatches(descendant.Name, wanted) then
+			return descendant
+		end
+	end
+	return nil
+end
+
+--[[
+	A named descendant of one assembly, and nowhere else.
+
+	The door is why this exists separately from findNamed. `findNamed` falls back
+	to scanning the whole map, which is right for a clue prop a designer put
+	wherever they liked and badly wrong for something called "Door" — a KFC has
+	a front door, a kitchen door and a walk-in, and GetDescendants returns
+	whichever it reaches first. Fading a random door and leaving the vault shut
+	is a bug that looks like the puzzle being broken.
+
+	So the vault door is looked for INSIDE the keypad assembly, which is where it
+	lives, and if it is not there the puzzle says so rather than guessing.
+]]
+local function findWithin(scope: Instance, wanted: string): Instance?
+	for _, descendant in scope:GetDescendants() do
 		if MapConfig.folderMatches(descendant.Name, wanted) then
 			return descendant
 		end
@@ -448,21 +482,40 @@ end
 function PuzzleService:clear()
 	doorTrove:clean()
 
-	if state.door and state.door.Parent then
-		for _, part in partsOf(state.door) do
-			part.Transparency = state.doorLooks[part] or part.Transparency
-			part.CanCollide = true
-			part.CanQuery = true
-		end
-	end
+	--[[ Through the same function that opened it, so there is one place that
+	     knows what a closed door looks like. It used to be restored inline here
+	     as well, which meant two copies of that answer and a `false` branch in
+	     setDoorOpen nothing ever reached. ]]
+	setDoorOpen(false)
 	table.clear(state.doorLooks)
 
+	--[[
+		The paper goes blank as well as untagged.
+
+		Removing the tag stops a prop being interactable and does nothing at all
+		to what it SAYS, so a round ending used to leave four documents lying
+		around the lobby still displaying the digits somebody earned. Harmless
+		for the next round, which reprints them redacted — and not harmless at
+		all if the next round has no puzzle, because then last round's answer
+		sits legible on the wall until the server restarts.
+
+		A generated surface is destroyed outright. One the designer supplied is
+		emptied rather than destroyed: it is their instance, positioned against
+		their geometry, and this only ever borrowed the text on it.
+	]]
 	for _, model in state.clues do
 		if model.Parent then
 			CollectionService:RemoveTag(model, PuzzleConfig.ClueTag)
 			model:SetAttribute(PZ.ClueText, nil)
 			model:SetAttribute(PZ.CluePrompt, nil)
 			model:SetAttribute(PZ.ClueOrder, nil)
+			for _, gui in model:GetDescendants() do
+				if gui:IsA("SurfaceGui") and gui.Name == "FL_Clue" then
+					gui:Destroy()
+				elseif gui:IsA("TextLabel") and gui:FindFirstAncestorWhichIsA("SurfaceGui") then
+					gui.Text = ""
+				end
+			end
 		end
 	end
 	if state.keypad and state.keypad.Parent then
@@ -517,6 +570,28 @@ function PuzzleService:arm(random: Random?)
 	     search; an untidy one is searched whole. See findNamed. ]]
 	local folder = findPuzzleFolder(root)
 
+	--[[
+		One clue per digit, or nothing.
+
+		A fifth clue with a four-digit code is a puzzle that cannot be finished:
+		the template rolls four digits, the fifth clue's is nil, so its field
+		stays redacted forever and the counter stalls at 4/5 with nothing left to
+		find. Caught here because that is a config mistake somebody would
+		otherwise diagnose by playing ten minutes of a round that cannot end.
+	]]
+	if #definition.clues ~= definition.digits then
+		warn(
+			string.format(
+				"[PuzzleService] %s has %d clues but a %d-digit code — one clue per digit "
+					.. "or the puzzle cannot be completed. Puzzle off.",
+				definition.id,
+				#definition.clues,
+				definition.digits
+			)
+		)
+		return false
+	end
+
 	local template = TEMPLATES[definition.template]
 	if not template then
 		warn(string.format("[PuzzleService] no template called %q", tostring(definition.template)))
@@ -558,10 +633,22 @@ function PuzzleService:arm(random: Random?)
 		return false
 	end
 
-	--[[ Taken as it is rather than wrapped. The door in the supplied assembly is
-	     a single Part and wrapping it in a Model would reparent somebody else's
-	     geometry for no gain — partsOf and GetPivot both handle either shape. ]]
-	local door = findNamed(keypad.Parent, root, definition.door)
+	--[[ Inside the keypad assembly and nowhere else — see findWithin for why a
+	     map-wide search for "Door" is actively dangerous. Taken as it is rather
+	     than wrapped: it is a single Part in the supplied assembly and wrapping
+	     it would reparent somebody else's geometry for no gain, while partsOf
+	     and GetPivot both handle either shape. ]]
+	local door = findWithin(keypad, definition.door)
+	if not door then
+		warn(
+			string.format(
+				"[PuzzleService] found %q but no %q inside it — the code will be accepted "
+					.. "and nothing will open. Put the door part inside the assembly.",
+				definition.keypad,
+				definition.door
+			)
+		)
+	end
 
 	local surfaces = template.surfaces(definition, values)
 	local painted = 0
@@ -634,11 +721,11 @@ local function onSubmit(player: Player, payload: any)
 		reply(player, false, "KEYPAD LOCKED", entry.lockedUntil)
 		return
 	end
-	if now - entry.at < state.definition.attemptCooldown then
-		reply(player, false, "WAIT", entry.at + state.definition.attemptCooldown)
+	if now - entry.typedAt < state.definition.attemptCooldown then
+		reply(player, false, "WAIT", entry.typedAt + state.definition.attemptCooldown)
 		return
 	end
-	entry.at = now
+	entry.typedAt = now
 
 	if state.solved then
 		reply(player, true, "ALREADY OPEN", 0)
@@ -742,15 +829,18 @@ local function onCollect(player: Player, target: any)
 	--[[ The rate check first, before anything touches the world — every branch
 	     below answers with a FireClient, and an unthrottled handler that answers
 	     is an outbound amplifier. ]]
-	if now - entry.at < COLLECT_INTERVAL then
+	if now - entry.tookAt < COLLECT_INTERVAL then
 		return
 	end
-	entry.at = now
 
 	local clue = state.clueOf[target]
 	if not clue then
+		--[[ Not one of ours. Stamped nothing, because a player looking at a
+		     lamppost should not be spending the budget that lets them pick up the
+		     clipboard a tenth of a second later. ]]
 		return
 	end
+	entry.tookAt = now
 
 	--[[ Already in. Silent rather than refused: walking back past a clipboard
 	     you have read is not a mistake and does not deserve a message. ]]
@@ -761,6 +851,10 @@ local function onCollect(player: Player, target: any)
 			found = state.found,
 			total = #state.definition.clues,
 			text = target:GetAttribute(PZ.ClueText),
+			--[[ Named, so re-reading the badge opens a page headed SECURITY BADGE
+			     rather than DOCUMENT. It is the same page either way; only the
+			     first read gets the "you just found this" line. ]]
+			headline = clue.prompt,
 			repeated = true,
 		})
 		return
@@ -812,18 +906,6 @@ local function onCollect(player: Player, target: any)
 		total = #state.definition.clues,
 		prompt = clue.prompt,
 	})
-end
-
--- ── public reads ────────────────────────────────────────────────────────────
-
---[[ Whether this instance is the live keypad. The client asks the same question
-     to decide whether to draw a prompt; this is the answer that counts. ]]
-function PuzzleService:isKeypad(instance: Instance): boolean
-	return state.keypad ~= nil and state.keypad == instance
-end
-
-function PuzzleService:isSolved(): boolean
-	return state.solved
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────

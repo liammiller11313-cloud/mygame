@@ -304,6 +304,12 @@ local function stepTracker()
 	if state.flashUntil > 0 and os.clock() >= state.flashUntil then
 		state.flashUntil = 0
 		TweenService:Create(trackerCard, TweenInfo.new(0.5), { GroupTransparency = TRACKER_IDLE }):Play()
+		--[[ And back to what the counter normally says. A refusal is written
+		     straight over that line, and without this "COLLECT THE FIRST CLUE
+		     FIRST" would still be sitting there ten minutes later — long after
+		     the player collected it — because nothing else was going to rewrite
+		     the line until somebody found something. ]]
+		refreshTracker()
 	end
 end
 
