@@ -720,21 +720,22 @@ local function readKeyGlyph()
 	local touch = scheme == "Touch"
 	state.touch = touch
 
-	--[[ The box goes with the glyph rather than sitting there empty, and the text
-	     closes the gap it leaves — it is left-aligned from just past the box, so
-	     hiding the box alone would push the whole prompt a key-width off centre. ]]
-	keyBox.Visible = not touch
-	local indent = if touch then 0 else KEY_BOX + LAYOUT.ElementGap * 2
-	textLabel.Position = UDim2.new(0.5, -PROMPT_WIDTH * 0.5 + indent, 0.5, 0)
-	textLabel.Size = UDim2.fromOffset(PROMPT_WIDTH - indent, KEY_BOX)
-	textLabel.TextXAlignment = if touch then Enum.TextXAlignment.Center else Enum.TextXAlignment.Left
-
 	local glyph = Glyph.forAction("Interact", scheme, controller)
 	state.interactKey = glyph
 	keyLabel.Text = glyph
-	--[[ Bound to nothing on this device. Better an empty box than a lie, and the
-	     verb on its own still reads. ]]
-	keyBox.Visible = keyBox.Visible and glyph ~= ""
+
+	--[[ The box goes with the glyph rather than sitting there empty — on a phone,
+	     which has no key, and on a pad with nothing bound to this verb, where an
+	     empty box is a promise there is a button. And the text closes the gap it
+	     leaves in BOTH cases: it is left-aligned from just past the box, so
+	     hiding the box without moving the text would push the whole prompt a
+	     key-width off centre. ]]
+	local showBox = not touch and glyph ~= ""
+	keyBox.Visible = showBox
+	local indent = if showBox then KEY_BOX + LAYOUT.ElementGap * 2 else 0
+	textLabel.Position = UDim2.new(0.5, -PROMPT_WIDTH * 0.5 + indent, 0.5, 0)
+	textLabel.Size = UDim2.fromOffset(PROMPT_WIDTH - indent, KEY_BOX)
+	textLabel.TextXAlignment = if showBox then Enum.TextXAlignment.Left else Enum.TextXAlignment.Center
 end
 
 -- ── presentation ────────────────────────────────────────────────────────────

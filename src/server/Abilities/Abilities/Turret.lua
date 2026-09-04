@@ -358,6 +358,17 @@ end
 local SEAT_SIZE = Vector3.new(1.9, 0.35, 1.9)
 local SEAT_BACK = 2.2
 
+--[[ The collision group only survivors touch. Registered in init.server.lua,
+     where the reasoning lives: a Seat seats any Humanoid, and the thing most
+     likely to walk over a turret's seat is a zombie attacking the turret. ]]
+local SEAT_GROUP = "TurretSeat"
+
+--[[ How long the seat stops answering touches after it has thrown somebody out.
+     Belt and braces behind the collision group: if a body somehow reaches it
+     anyway, this is what stops the eject and the re-seat happening on alternate
+     frames for as long as it stands there. ]]
+local EJECT_COOLDOWN = 1.0
+
 local function buildSeat(model: Model, root: BasePart, facing: Vector3, visible: boolean): Seat
 	--[[ The artist's own, if they built one. Any Seat inside a supplied model is
 	     taken as the place to sit — so somebody who has modelled a gunner's stool
@@ -366,6 +377,7 @@ local function buildSeat(model: Model, root: BasePart, facing: Vector3, visible:
 	if supplied then
 		supplied.Anchored = true
 		supplied.CanCollide = false
+		supplied.CollisionGroup = SEAT_GROUP
 		return supplied
 	end
 
@@ -383,6 +395,7 @@ local function buildSeat(model: Model, root: BasePart, facing: Vector3, visible:
 	seat.Transparency = if visible then 0.35 else 1
 	seat.Color = UITheme.Color.AccentDim
 	seat.Material = Enum.Material.Metal
+	seat.CollisionGroup = SEAT_GROUP
 	seat.CFrame = CFrame.lookAt(root.Position - facing * SEAT_BACK, root.Position)
 	seat.Parent = model
 	return seat
@@ -416,6 +429,16 @@ local function occupantOf(seat: Seat): Player?
 		end
 	end
 	humanoid.Sit = false
+	--[[ And shut the seat for a second. Unseating alone leaves the body standing
+	     on a live seat, which re-seats it on the next touch — an eject every
+	     frame, a zombie stuttering in and out of the gun and never attacking
+	     anything. A second is long enough for it to walk off or swing. ]]
+	seat.CanTouch = false
+	task.delay(EJECT_COOLDOWN, function()
+		if seat.Parent then
+			seat.CanTouch = true
+		end
+	end)
 	return nil
 end
 

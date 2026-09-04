@@ -39,6 +39,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local EventConfig = require(Shared.Config.EventConfig)
+local Device = require(Shared.Util.Device)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -80,6 +81,23 @@ local RAIN = table.freeze({
      enough that turning does not reveal an edge. ]]
 local RAIN_HEIGHT = 40
 local RAIN_SPREAD = 34
+
+--[[
+	Drops a second at full strength, and how much of that a small device gets.
+
+	Nine hundred is a desktop number and it was being asked of every device in
+	the game. A phone rendering nine hundred transparent, light-influenced quads
+	a second — over the horde it is already drawing, in the weather event that
+	also just dropped the light level — is the frame rate going, in a way that
+	looks like the game breaking rather than like weather.
+
+	Every other effect in this client already scales this way; see
+	ImpactController and OutlineController, whose numbers these are modelled on.
+	Rain reads as rain at a third of it, because a drop lasts most of a second
+	and the eye counts streaks rather than particles.
+]]
+local RAIN_RATE = 900
+local RAIN_DEVICE_SCALE = Device.scale({ Mobile = 0.3, Tablet = 0.55 })
 
 local EventController = {}
 
@@ -214,7 +232,7 @@ local function startRain(strength: number)
 	emitter.Lifetime = NumberRange.new(0.55, 0.8)
 	emitter.Speed = NumberRange.new(78, 96)
 	emitter.SpreadAngle = Vector2.new(4, 4)
-	emitter.Rate = 900 * strength
+	emitter.Rate = RAIN_RATE * strength * RAIN_DEVICE_SCALE
 	emitter.Acceleration = Vector3.new(0, -40, 0)
 	emitter.LightEmission = 0.25
 	emitter.LightInfluence = 1

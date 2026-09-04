@@ -1092,6 +1092,14 @@ function InfectedBrain:_stepEmplacement(now: number, dt: number, bar: number): b
 		return true
 	end
 
+	--[[ At a run, not at a stroll. _travelTo sets neither state nor speed — the
+	     chase path had already set both before it got there — so a body that broke
+	     off while WANDERING would amble to the turret at wander speed. A horde
+	     turning on a turret has to read as a horde turning on it. ]]
+	if self.state ~= State.Chase then
+		self:_setState(State.Chase)
+		self:_setSpeed(self.chaseSpeed)
+	end
 	self:_travelTo(part.Position, now)
 	return true
 end

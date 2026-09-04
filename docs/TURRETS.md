@@ -6,7 +6,15 @@ it did not: you can **sit in it and drive it**, and the **horde attacks it**.
 ## Manning it
 
 Walk into the seat behind the gun. That is the whole interaction — no prompt, no
-key. Jump to get out.
+key, and the same on all three platforms. Jump (or the touch JUMP button, or A on
+a pad) to get out.
+
+The seat is on its own collision group so **only survivors can touch it**. A
+Roblox Seat otherwise seats any Humanoid that walks over it, and the thing most
+likely to walk over a turret's seat is a zombie attacking the turret — which
+would then sit down in the gun and stop being part of the fight. Anything that
+somehow reaches it anyway is ejected, and the seat shuts for a second so the two
+cannot alternate every frame.
 
 While you are in it:
 

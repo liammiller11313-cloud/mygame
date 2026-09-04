@@ -46,7 +46,7 @@ local RULE = "  " .. string.rep("-", 68)
 
 -- Read by RigUtil.makeDebris and by every service that reparents a body, so the
 -- names here are a contract, not a preference.
-local COLLISION_GROUPS = { "Survivor", "Infected", "Debris", "Gib" }
+local COLLISION_GROUPS = { "Survivor", "Infected", "Debris", "Gib", "TurretSeat" }
 
 --[[
 	Pairs that must NOT use the Roblox default of "collides with everything".
@@ -74,6 +74,25 @@ local COLLISION_RULES: { { any } } = {
 	{ "Gib", "Survivor", false },
 	{ "Gib", "Infected", false },
 	{ "Gib", "Gib", false },
+
+	--[[
+		The turret's gunner seat, which only a survivor may touch.
+
+		A Roblox Seat seats ANY Humanoid that touches it, and the thing most likely
+		to walk over a turret's seat is a zombie attacking the turret. One would
+		sit down in the gun and stop being part of the fight.
+
+		The Turret module ejects anything that is not a survivor, so this is not
+		the only guard — but an eject is a repair and this is a prevention: a body
+		that never generates the touch never has to be thrown back out, and cannot
+		stutter in and out of the seat while it is standing on it.
+
+		Debris and gibs too. A severed arm landing on the seat is not a gunner.
+	]]
+	{ "TurretSeat", "Infected", false },
+	{ "TurretSeat", "Debris", false },
+	{ "TurretSeat", "Gib", false },
+	{ "TurretSeat", "TurretSeat", false },
 }
 
 --[[
