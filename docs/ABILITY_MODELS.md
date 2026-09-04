@@ -82,8 +82,15 @@ model that is nothing but geometry still deploys and still shoots.
 |---|---|---|
 | `base` | the part that stands on the floor | the model's `PrimaryPart`, else its largest part |
 | `gun` | the part or model that swings to track a target | nothing turns; it shoots from where it stands |
-| `Muzzle` | an `Attachment` inside `gun`, at the end of the barrel | tracers start from the middle of the gun |
+| `Muzzle`… | an `Attachment` at the end of each barrel | tracers start from the middle of the gun |
 
+- **One `Muzzle` attachment per barrel.** Any name starting with `Muzzle`
+  counts — `Muzzle` and `Muzzle 2`, or `Muzzle L` and `Muzzle R`, or four of
+  them. They are sorted by name and **fired in turn**, so a twin gun visibly
+  alternates left, right, left instead of pouring everything out of one barrel.
+  Nothing needs to be told how many there are.
+- They can sit anywhere inside `gun` — on the gun part itself, or on any part
+  inside it if `gun` is a Model. Both are found.
 - `gun` may be a **`Part` or a `Model`**. A Model turns as a whole, so a
   multi-part gun keeps its sights and its ammo box attached.
 - **Set `gun`'s pivot at the rotation joint** — where it would really pivot on

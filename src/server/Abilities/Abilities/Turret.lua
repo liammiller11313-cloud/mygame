@@ -79,9 +79,12 @@ type Emplacement = {
 	     CFramed, so a PivotOffset set at the model's rotation joint is
 	     honoured. ]]
 	aim: PVInstance,
-	--[[ Where shots leave from, or nil when the model did not supply one. See
-	     `fire`: nil is a fallback rather than a fault. ]]
-	muzzle: Attachment?,
+	--[[ Every barrel the model supplied, in name order, or empty when it
+	     supplied none. See `fire`: empty is a fallback rather than a fault, and
+	     more than one is a twin gun that alternates. ]]
+	muzzles: { Attachment },
+	--[[ Which barrel fires next, as an index into the above. ]]
+	nextMuzzle: number,
 	health: number,
 	maxHealth: number,
 	expiresAt: number,
@@ -109,13 +112,40 @@ local function countFor(player: Player): number
 end
 
 --[[
+	Every barrel on a supplied gun, in a stable order.
+
+	ANY Attachment whose name starts with "Muzzle" counts, so a twin gun can
+	name them "Muzzle" and "Muzzle 2" — or "Muzzle L" and "Muzzle R", or four of
+	them — without this file being told how many to expect. Sorted by name so
+	the alternation in `fire` is the same order every deploy rather than
+	whatever order GetDescendants happened to return.
+
+	Searched over DESCENDANTS rather than direct children, because where the
+	attachments live depends on how the model was built: on the gun part itself
+	when `gun` is a Part, and on some part inside it when `gun` is a Model. A
+	direct-child lookup finds the first case and silently misses the second.
+]]
+local function findMuzzles(within: Instance): { Attachment }
+	local found: { Attachment } = {}
+	for _, child in within:GetDescendants() do
+		if child:IsA("Attachment") and string.sub(child.Name, 1, 6) == "Muzzle" then
+			table.insert(found, child :: Attachment)
+		end
+	end
+	table.sort(found, function(a, b)
+		return a.Name < b.Name
+	end)
+	return found
+end
+
+--[[
 	The supplied model, if there is one.
 
 	ReplicatedStorage/Assets/Abilities/Turret, with `gun` as the part that swings
-	and an Attachment named `Muzzle` at the end of the barrel. Both are optional
-	and each degrades on its own: no `gun` and the model sits still, no `Muzzle`
-	and shots leave from the gun's own position. A model that is only geometry
-	still deploys and still shoots.
+	and one Attachment per barrel, each named starting with "Muzzle". Both are
+	optional and each degrades on its own: no `gun` and the model sits still, no
+	muzzles and shots leave from the gun's own position. A model that is only
+	geometry still deploys and still shoots.
 
 	Returns the same four things the procedural body below does — the model, the
 	part it stands on, the part shots leave from, and the thing that swings — so
@@ -244,11 +274,32 @@ local function retire(turret: Emplacement, index: number, destroyed: boolean)
 end
 
 local function fire(turret: Emplacement, target: Model, targetRoot: BasePart, damage: number)
-	--[[ From the barrel, not from the middle of the gun. `Muzzle` is an
-	     Attachment the model may supply; without one the gun's own position is
-	     the honest fallback, and the tracer simply starts a little further back
-	     than it should rather than not being drawn. ]]
-	local origin = if turret.muzzle then turret.muzzle.WorldPosition else turret.head.Position
+	--[[
+		From a barrel, not from the middle of the gun.
+
+		Alternating when the model supplied more than one, so a twin gun visibly
+		fires left, right, left rather than pouring everything out of whichever
+		barrel happened to sort first. It costs one integer and it is the
+		difference between a model with two guns and a model with two guns and
+		one of them decorative.
+
+		With no muzzles at all the gun's own position is the honest fallback: the
+		tracer starts a little further back than it should rather than not being
+		drawn.
+	]]
+	local origin = turret.head.Position
+	local count = #turret.muzzles
+	if count > 0 then
+		local muzzle = turret.muzzles[turret.nextMuzzle]
+		--[[ Guarded because an Attachment can be deleted out from under this at
+		     any time — a model streamed out, or somebody editing in a live
+		     session. A destroyed one keeps its Parent as nil rather than
+		     erroring, so the check is on the parent. ]]
+		if muzzle and muzzle.Parent then
+			origin = muzzle.WorldPosition
+		end
+		turret.nextMuzzle = (turret.nextMuzzle % count) + 1
+	end
 
 	local infected: any = Registry.find("InfectedService")
 	if infected and typeof(infected.damage) == "function" then
@@ -360,7 +411,8 @@ function Turret.activate(context: any): boolean
 		root = base,
 		head = head,
 		aim = aim,
-		muzzle = head:FindFirstChild("Muzzle") :: Attachment?,
+		muzzles = findMuzzles(aim),
+		nextMuzzle = 1,
 		health = tuning.Health,
 		maxHealth = tuning.Health,
 		expiresAt = os.clock() + tuning.Lifetime,
