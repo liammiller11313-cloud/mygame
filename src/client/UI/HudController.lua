@@ -75,6 +75,7 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
+local Glyph = require(script.Parent.Glyph)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local TopStack = require(script.Parent.TopStack)
 local UiSound = require(script.Parent.UiSound)
@@ -379,74 +380,6 @@ local function itemLabel(itemId: string): string
 	end
 	local spaced = string.gsub(itemId, "(%l)(%u)", "%1 %2")
 	return string.upper(spaced)
-end
-
---[[ What a controller's D-pad directions are called on screen. Arrows rather
-     than "DPADUP", which is four times as wide and reads as a debug string. The
-     face buttons keep their letters, which are the same on both platforms even
-     though the colours are not — a Roblox game cannot know whether it is on a
-     PlayStation or an Xbox, so it must not draw a glyph that would be wrong on
-     one of them. ]]
-local GAMEPAD_GLYPH: { [string]: string } = {
-	DPadUp = "▲",
-	DPadDown = "▼",
-	DPadLeft = "◄",
-	DPadRight = "►",
-	ButtonA = "A",
-	ButtonB = "B",
-	ButtonX = "X",
-	ButtonY = "Y",
-	ButtonL1 = "L1",
-	ButtonR1 = "R1",
-	ButtonL2 = "L2",
-	ButtonR2 = "R2",
-	ButtonL3 = "L3",
-	ButtonR3 = "R3",
-}
-
-local function isGamepadKey(key: any): boolean
-	return typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode and GAMEPAD_GLYPH[key.Name] ~= nil
-end
-
---[[
-	The printable glyph for a bound key, for the device the player is actually
-	holding.
-
-	A keyboard glyph on a console is not a small cosmetic problem: it tells the
-	player to press a key that does not exist, and the button that DOES work is
-	somewhere else entirely — this game's D-pad layout deliberately does not
-	mirror the 1-5 row. So the row is searched for a binding that matches the
-	scheme first, and the keyboard half is the fallback rather than the default.
-
-	Roblox's KeyCode values for letters and digits ARE their ASCII codes, so the
-	common cases turn into "E" and "3" without a lookup table.
-]]
-local function keyGlyph(keys: { any }, scheme: string?): string
-	if scheme == "Gamepad" then
-		for _, key in keys do
-			if isGamepadKey(key) then
-				return GAMEPAD_GLYPH[key.Name]
-			end
-		end
-		-- Bound to no gamepad button at all. Blank rather than a keyboard letter:
-		-- "there is no button for this" is true, and "press 5" is not.
-		return ""
-	end
-
-	for _, key in keys do
-		if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode and not isGamepadKey(key) then
-			local value = key.Value
-			if (value >= 48 and value <= 57) or (value >= 97 and value <= 122) then
-				return string.upper(string.char(value))
-			end
-		end
-	end
-	for _, key in keys do
-		if typeof(key) == "EnumItem" and not isGamepadKey(key) then
-			return string.upper(key.Name)
-		end
-	end
-	return "?"
 end
 
 -- ── survivor panels ─────────────────────────────────────────────────────────
@@ -1169,7 +1102,7 @@ local function bindItemKeys()
 	if scheme == "Gamepad" then
 		for _, binding in bindings do
 			if binding.action == "CycleWeapon" then
-				cycleGlyph = keyGlyph(binding.keys, scheme)
+				cycleGlyph = Glyph.forKeys(binding.keys, scheme)
 				break
 			end
 		end
@@ -1181,7 +1114,7 @@ local function bindItemKeys()
 			--[[ Nothing to press on a touchscreen, because the slot IS the
 			     button. A key glyph there would be instructions for hardware the
 			     player does not have. ]]
-			local glyph = if touch then "" else keyGlyph(binding.keys, scheme)
+			local glyph = if touch then "" else Glyph.forKeys(binding.keys, scheme)
 			if glyph == "" and WEAPON_SLOTS[binding.slot] then
 				glyph = cycleGlyph
 			end

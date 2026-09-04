@@ -1335,6 +1335,49 @@ if _anchors and _durations and _prep and _total:
             f"holds. Re-anchor them against the current wave schedule"
         )
 
+# ── 32. Two verbs on one button ─────────────────────────────────────────────
+#
+# The bug this exists for has not happened yet, and that is the point: the
+# keymap is one list of literals that four different features append to, and a
+# collision in it is silent. Two actions on ButtonX means one of them is
+# unreachable on every console in the world and nothing anywhere says so — the
+# player just finds that a button does the wrong thing.
+#
+# Cheap to check and impossible to notice by eye once the table is twenty rows.
+_input = ROOT / "src/client/Input/InputController.lua"
+if _input.exists():
+    _text = _input.read_text(encoding="utf-8")
+    _start = _text.find("local BINDINGS: { Binding } = {")
+    if _start != -1:
+        _block = _text[_start:]
+        _block = _block[: _block.index("\n}\n")]
+        _seen = {}
+        for _action, _keys in re.findall(
+            r"action = Action\.(\w+),?\s*(?:.*?)keys = \{([^}]*)\}", _block, re.S
+        ):
+            for _key in re.findall(r"Enum\.(?:KeyCode|UserInputType)\.(\w+)", _keys):
+                if _key in _seen and _seen[_key] != _action:
+                    problems.append(
+                        f"InputController binds {_key} to both {_seen[_key]!r} and {_action!r} — "
+                        f"one of the two is unreachable on whatever device that key belongs to, "
+                        f"and nothing warns at runtime"
+                    )
+                _seen[_key] = _action
+
+        # And the verbs a player cannot finish a round without. A console build
+        # that cannot pick a gun up is not a console build.
+        _pad = {k for k in _seen if k.startswith("Button") or k.startswith("DPad")}
+        for _need in ("Fire", "Aim", "Reload", "Interact", "Jump", "Crouch", "Melee", "Shove"):
+            _has = any(
+                _seen[k] == _need for k in _pad
+            )
+            if not _has:
+                problems.append(
+                    f"InputController has no gamepad button bound to {_need!r} — a controller "
+                    f"player cannot do it at all. Every essential verb needs a pad key in BINDINGS"
+                )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

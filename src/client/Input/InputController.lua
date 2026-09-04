@@ -137,9 +137,11 @@ local BINDINGS: { Binding } = {
 		keys = { Enum.UserInputType.MouseButton2, Enum.KeyCode.ButtonL2 },
 		touch = "AIM",
 	},
+	--[[ Y on a pad, not X. See Action.Interact below for why: X is the use
+	     button on every console shooter there is, and reload is what moves. ]]
 	{
 		action = Action.Reload,
-		keys = { Enum.KeyCode.R, Enum.KeyCode.ButtonX },
+		keys = { Enum.KeyCode.R, Enum.KeyCode.ButtonY },
 		touch = "RELOAD",
 	},
 	-- The panic button. Mouse 3 rather than a letter because it has to be
@@ -181,9 +183,21 @@ local BINDINGS: { Binding } = {
 		keys = { Enum.KeyCode.LeftControl, Enum.KeyCode.C, Enum.KeyCode.ButtonB },
 		touch = "CROUCH",
 	},
+	--[[
+		X, and this was Y.
+
+		Left 4 Dead 2 on a 360 pad puts Use on X and Reload on Y, and so does
+		nearly every console shooter since — X is the button a player's thumb goes
+		to when they want to pick a thing up, and they will find it there without
+		reading anything. Y was simply wrong, and the prompt made it worse by
+		drawing a keyboard E over it (see Glyph), so a controller player was told
+		to press a key they do not have for a button they would not have guessed.
+
+		Reload took Y, which is also where L4D2 has it.
+	]]
 	{
 		action = Action.Interact,
-		keys = { Enum.KeyCode.E, Enum.KeyCode.ButtonY },
+		keys = { Enum.KeyCode.E, Enum.KeyCode.ButtonX },
 		touch = "USE",
 	},
 	--[[ Keyboard-only, and they do not need a gamepad or touch key: on those two
@@ -225,13 +239,14 @@ local BINDINGS: { Binding } = {
 	AbilityConfig.MaxSlots and not a number repeated here. Adding a third slot is
 	that one config change plus a key on the end of this list.
 
-	Keyboard only, and that is a real gap rather than an oversight. Every gamepad
-	button is spoken for — both triggers, both bumpers, all four face buttons,
-	both stick clicks, all four D-pad directions and the view button — and Start
-	belongs to Roblox. Nothing here is worth taking from a verb that already has
-	it, so a controller player rebinds an ability onto whichever of those they
-	want least, in the CONTROLS screen, which takes gamepad inputs. Touch gets
-	real buttons: see `touch`, which TouchController draws.
+	Keyboard only IN THIS TABLE, which is not the same as unreachable. Every
+	gamepad button is spoken for — both triggers, both bumpers, all four face
+	buttons, both stick clicks, all four D-pad directions and the view button —
+	and Start belongs to Roblox, so nothing here is worth taking from a verb that
+	already has it. A pad reaches abilities through the LAYER instead: hold the
+	view button and press a face button. See LAYER_KEY, a few hundred lines down,
+	which is where that lives and why the view button was the only honest donor.
+	Touch gets real buttons: see `touch`, which TouchController draws.
 ]]
 local ABILITY_KEYS = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.F, Enum.KeyCode.N }
 
@@ -901,10 +916,10 @@ end
 
 	── AND THE FACE BUTTONS ARE SUNK, NOT SHARED ───────────────────────────────
 	These bind at a HIGHER ContextActionService priority than the ordinary
-	keymap and return Pass while the layer is closed, so ButtonX is still reload
-	and ButtonY is still interact for the whole time nobody is holding view. The
-	instant the layer opens they return Sink, so holding view and pressing X
-	fires an ability WITHOUT also reloading.
+	keymap and return Pass while the layer is closed, so ButtonX is still USE and
+	ButtonY is still reload for the whole time nobody is holding view. The instant
+	the layer opens they return Sink, so holding view and pressing X fires an
+	ability WITHOUT also picking up whatever you were standing over.
 ]]
 local LAYER_KEY = Enum.KeyCode.ButtonSelect
 local LAYER_FACE_KEYS = {
@@ -991,8 +1006,8 @@ local function bindAbilityLayer()
 			function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult?
 				if state == Enum.UserInputState.Begin then
 					--[[ Pass while the layer is shut, which is almost always. This
-					     is what keeps ButtonX as reload and ButtonY as interact for
-					     every player who never holds the view button. ]]
+					     is what keeps ButtonX as USE and ButtonY as reload for every
+					     player who never holds the view button. ]]
 					if not layerOpen() then
 						return Enum.ContextActionResult.Pass
 					end
@@ -1006,7 +1021,7 @@ local function bindAbilityLayer()
 					     the release was swallowed by a layer that was shut when the
 					     press went through — leaving the player crouched at nine
 					     studs a second with nothing holding the key. The same on
-					     ButtonY left a revive begun and never cancelled.
+					     the USE button left a revive begun and never cancelled.
 
 					     Whatever the press was answered with, the release gets the
 					     same answer. ]]

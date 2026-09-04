@@ -44,6 +44,7 @@ local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local Glyph = require(script.Parent.Glyph)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 
 local COLOR = UITheme.Color
@@ -127,6 +128,9 @@ local root: Frame
 local panel: Frame
 local keyBox: Frame
 local keyLabel: TextLabel
+--[[ The prompt itself, as a button, on a touchscreen only. See makeTappable. ]]
+local tapButton: TextButton
+local tapPlate: Frame
 local textLabel: TextLabel
 local progressBar: Frame
 local progressFill: Frame
@@ -163,6 +167,11 @@ local state = {
 	alpha = 0,
 	shownText = "",
 	interactKey = "E",
+	--[[ Whether the player is on a touchscreen, from InputController's scheme
+	     rather than from the device: a phone in a dock with a pad attached is a
+	     gamepad player, and the prompt must say what they are holding. Refreshed
+	     by readKeyGlyph, which schemeChanged also drives. ]]
+	touch = false,
 }
 
 -- ── construction ────────────────────────────────────────────────────────────
@@ -220,6 +229,51 @@ local function build()
 	keyLabel.Text = state.interactKey
 	keyLabel.Parent = keyBox
 
+	--[[
+		THE PROMPT IS THE BUTTON, ON A PHONE.
+
+		There has always been a USE button on the touch pad, in the bottom-right
+		corner, appearing when there is something to use. It works and almost
+		nobody finds it: the thing that tells you an action exists is in the middle
+		of the screen and the thing that performs it is two hundred pixels away in
+		the corner, and a player's thumb goes to what they are reading.
+
+		So on touch the prompt draws itself as a panel and takes the tap. A press
+		holds Interact down and a lift releases it, which is one behaviour covering
+		both kinds of interaction — a tap picks a gun up and a held thumb revives a
+		teammate, with the bar filling under the finger doing it.
+
+		── AND IT ONLY EXISTS WHEN IT IS NEEDED ────────────────────────────────
+		A GuiButton swallows the touch that starts on it, so this is a band of
+		screen the player cannot turn the camera from — which is why it is exactly
+		the panel's own size, and why it is Visible only on touch AND only while
+		there is something to interact with. That is a few seconds a minute, in a
+		strip a fifth of the screen wide, at a moment when the player is looking
+		at the thing rather than turning away from it.
+	]]
+	tapPlate = Instance.new("Frame")
+	tapPlate.Name = "Plate"
+	tapPlate.AnchorPoint = Vector2.new(0.5, 0.5)
+	tapPlate.Position = UDim2.fromScale(0.5, 0.5)
+	tapPlate.Size = UDim2.fromOffset(PROMPT_WIDTH, PROMPT_HEIGHT)
+	tapPlate.BackgroundColor3 = COLOR.PanelRaised
+	tapPlate.BackgroundTransparency = 0.25
+	tapPlate.BorderSizePixel = 0
+	tapPlate.Visible = false
+	--[[ Behind the text, which is built after it and therefore draws on top
+	     under Sibling ZIndex ordering. ]]
+	tapPlate.Parent = panel
+
+	local plateCorner = Instance.new("UICorner")
+	plateCorner.CornerRadius = UDim.new(0, LAYOUT.CornerRadius)
+	plateCorner.Parent = tapPlate
+
+	local plateStroke = Instance.new("UIStroke")
+	plateStroke.Color = COLOR.Accent
+	plateStroke.Thickness = LAYOUT.BorderThickness
+	plateStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	plateStroke.Parent = tapPlate
+
 	textLabel = Instance.new("TextLabel")
 	textLabel.Name = "Text"
 	textLabel.AnchorPoint = Vector2.new(0, 0.5)
@@ -251,6 +305,51 @@ local function build()
 	progressFill.BackgroundColor3 = COLOR.Accent
 	progressFill.BorderSizePixel = 0
 	progressFill.Parent = progressBar
+
+	--[[ Last, so it is the topmost sibling and the tap reaches it rather than
+	     the labels. Transparent and text-free: the panel underneath is what the
+	     player sees, and this is only the hit area over it. ]]
+	tapButton = Instance.new("TextButton")
+	tapButton.Name = "Tap"
+	tapButton.AnchorPoint = Vector2.new(0.5, 0.5)
+	tapButton.Position = UDim2.fromScale(0.5, 0.5)
+	tapButton.Size = UDim2.fromOffset(PROMPT_WIDTH, PROMPT_HEIGHT)
+	tapButton.BackgroundTransparency = 1
+	tapButton.Text = ""
+	tapButton.AutoButtonColor = false
+	--[[ Never a gamepad focus candidate. It is invisible off touch and Roblox does
+	     not select invisible objects, but this is a button living in the HUD layer
+	     rather than in a panel, and a controller landing on it would be a stuck
+	     selection with nothing to explain it. ]]
+	tapButton.Selectable = false
+	tapButton.Visible = false
+	tapButton.Parent = panel
+
+	--[[ Down and up rather than Activated, so a HOLD works: Activated only fires
+	     on release and would turn a five-second revive into a tap that does
+	     nothing. The release is answered on three signals, not one — a finger
+	     that slides off the button never sends MouseButton1Up, and an interact
+	     left held down is a revive the server never hears the end of. ]]
+	trove:connect(tapButton.MouseButton1Down, function()
+		if input and typeof(input.raise) == "function" then
+			input:raise(input.Action.Interact, true)
+		end
+	end)
+	local function releaseTap()
+		if input and typeof(input.raise) == "function" then
+			input:raise(input.Action.Interact, false)
+		end
+	end
+	trove:connect(tapButton.MouseButton1Up, releaseTap)
+	trove:connect(tapButton.MouseLeave, releaseTap)
+	--[[ And when the prompt goes away under the finger — the teammate got up,
+	     the crate emptied, somebody else took the gun. Nothing else would ever
+	     send the release in that case. ]]
+	trove:connect(tapButton:GetPropertyChangedSignal("Visible"), function()
+		if not tapButton.Visible then
+			releaseTap()
+		end
+	end)
 
 	rayParams = RaycastUtil.excluding({})
 
@@ -599,53 +698,43 @@ end
 	The glyph in the box is whatever Interact is actually bound to, read back from
 	InputController rather than assumed, so a rebind relabels the prompt.
 
-	── AND NOTHING AT ALL ON A TOUCHSCREEN ─────────────────────────────────────
-	This drew a keyboard E regardless of what the player was holding, so a phone
+	── AND IT WAS WRONG ON BOTH DEVICES THAT ARE NOT A KEYBOARD ────────────────
+	This walked the bound keys itself and took the first one in the ASCII letter
+	range. Interact is bound to E and to a face button; E sorts first. So a phone
 	player standing over a downed teammate was told, in a box, to press a key
-	their device does not have — while the button that actually does it sat
-	unlabelled in the corner of their own screen.
+	their device does not have — and so was every player on a controller, which is
+	worse, because a controller HAS a button for it and this told them the wrong
+	one.
 
-	The HUD's hotbar already got this right: "a key glyph there would be
-	instructions for hardware the player does not have". This is the same rule,
-	and the box goes with the glyph rather than sitting there empty.
+	Glyph answers it now, for every scheme, once. Touch gets no box at all: the
+	prompt itself is the button there — see makeTappable.
 ]]
 local function readKeyGlyph()
 	local controller = Registry.find("InputController")
-	if not controller or typeof(controller.getBindings) ~= "function" then
+	if not controller then
 		return
 	end
-	local touch = typeof(controller.isTouchScheme) == "function"
-		and select(2, pcall(controller.isTouchScheme, controller)) == true
+	local scheme = if typeof(controller.getScheme) == "function"
+		then select(2, pcall(controller.getScheme, controller))
+		else nil
+	local touch = scheme == "Touch"
+	state.touch = touch
+
+	--[[ The box goes with the glyph rather than sitting there empty, and the text
+	     closes the gap it leaves — it is left-aligned from just past the box, so
+	     hiding the box alone would push the whole prompt a key-width off centre. ]]
 	keyBox.Visible = not touch
-	--[[ And the text closes the gap the box leaves. It is left-aligned from just
-	     past the box, so hiding the box alone would push the whole prompt a
-	     key-width off centre. ]]
 	local indent = if touch then 0 else KEY_BOX + LAYOUT.ElementGap * 2
 	textLabel.Position = UDim2.new(0.5, -PROMPT_WIDTH * 0.5 + indent, 0.5, 0)
 	textLabel.Size = UDim2.fromOffset(PROMPT_WIDTH - indent, KEY_BOX)
-	if touch then
-		state.interactKey = ""
-		keyLabel.Text = ""
-		return
-	end
-	local ok, bindings = pcall(controller.getBindings, controller)
-	if not ok or typeof(bindings) ~= "table" then
-		return
-	end
-	for _, binding in bindings do
-		if binding.action == "Interact" then
-			for _, key in binding.keys do
-				if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then
-					local value = key.Value
-					if (value >= 48 and value <= 57) or (value >= 97 and value <= 122) then
-						state.interactKey = string.upper(string.char(value))
-						keyLabel.Text = state.interactKey
-						return
-					end
-				end
-			end
-		end
-	end
+	textLabel.TextXAlignment = if touch then Enum.TextXAlignment.Center else Enum.TextXAlignment.Left
+
+	local glyph = Glyph.forAction("Interact", scheme, controller)
+	state.interactKey = glyph
+	keyLabel.Text = glyph
+	--[[ Bound to nothing on this device. Better an empty box than a lie, and the
+	     verb on its own still reads. ]]
+	keyBox.Visible = keyBox.Visible and glyph ~= ""
 end
 
 -- ── presentation ────────────────────────────────────────────────────────────
@@ -657,7 +746,15 @@ local function composeText(): string
 		return ""
 	end
 
-	local prefix = if state.holding or state.holdable then "HOLD" else "PRESS"
+	--[[ "PRESS E" on a keyboard, "PRESS X" on a pad, and "TAP" on a phone — where
+	     there is no glyph after it and "press" is not what anybody does. HOLD is
+	     the same word on all three, because it is the same gesture. ]]
+	local prefix
+	if state.holding or state.holdable then
+		prefix = "HOLD"
+	else
+		prefix = if state.touch then "TAP" else "PRESS"
+	end
 	local subjectText = if subject ~= ""
 		then string.format(' <font color="%s">%s</font>', hex(state.subjectColor), subject)
 		else ""
@@ -721,11 +818,25 @@ local function update(dt: number)
 	if panel.Visible ~= visible then
 		panel.Visible = visible
 	end
+	--[[ The tap target follows the PANEL rather than the fade, and it is armed
+	     only while the prompt is genuinely up. See the tapButton comment in
+	     build: this is a strip of screen a touch player cannot turn from, so it
+	     must not outlive the thing it is for by even a fade. ]]
+	local tappable = visible and state.touch
+	if tapButton.Visible ~= tappable then
+		tapButton.Visible = tappable
+	end
+	if tapPlate.Visible ~= tappable then
+		tapPlate.Visible = tappable
+	end
 	if visible then
 		local fade = 1 - state.alpha
 		textLabel.TextTransparency = fade
 		keyLabel.TextTransparency = fade
 		keyBox.BackgroundTransparency = 0.15 + fade * 0.85
+		if tappable then
+			tapPlate.BackgroundTransparency = 0.25 + fade * 0.75
+		end
 		progressBar.Visible = state.holding and state.duration > 0
 		progressBar.BackgroundTransparency = 0.25 + fade * 0.75
 		progressFill.BackgroundTransparency = fade
