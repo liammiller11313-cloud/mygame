@@ -36,6 +36,11 @@
 	exactly as tight as the hand-tuned version was.
 
 	── WHY THE ORDER IS THIS ORDER ─────────────────────────────────────────────
+	Spectate is second because it is the one card that is about the PLAYER rather
+	than about the round, and a dead player has nothing else on their screen to
+	read; only a boss bar outranks it. Everything else is ordered by how permanent
+	it is.
+
 	Transient things go LAST. A boss bar arriving pushes the objective and the
 	clue counter down, which is correct — a Tank is the most important thing on
 	the screen and it has earned the space nearest the clock. But the random-event
@@ -58,7 +63,7 @@ local TopStack = {}
 --[[ Top to bottom. A name not in this list is refused rather than silently
      dropped on the floor at y = base: a typo'd key would otherwise draw its card
      over the clock and look exactly like the bug this file replaced. ]]
-local ORDER = table.freeze({ "Boss", "Objective", "Event" })
+local ORDER = table.freeze({ "Boss", "Spectate", "Objective", "Event" })
 
 local ALLOWED: { [string]: boolean } = {}
 for _, key in ORDER do

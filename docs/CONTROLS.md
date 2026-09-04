@@ -27,6 +27,21 @@ editing it by hand.
 | Backpack | B | — | — |
 | Requisitions | T | — | — |
 
+## When you die you watch the team
+
+Dying used to unlock the camera and leave it pointed at your own body, so a
+player killed early spent the rest of a seventeen-minute round looking at the
+spot they died in while the fight walked away from them.
+
+Now it follows a teammate. **Fire cycles forward, Aim cycles back** — the same
+two buttons on all three platforms, chosen because both already exist everywhere
+and neither means anything while you are dead. A card under the round clock names
+who you are watching and which button changes it.
+
+It is a camera choice and nothing else: no remote, no server state, no
+permission. Everyone's character is already replicated to everyone, so the worst
+failure available is looking at the wrong person.
+
 ## The trigger uses what is in your hands
 
 With a **medkit or pills** selected, the fire button uses them on yourself — the

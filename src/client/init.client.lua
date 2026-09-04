@@ -139,6 +139,10 @@ local CONTROLLERS = {
 	     down — by registry name at tick time rather than at load, so the ordering
 	     is tidiness rather than need. ]]
 	"UI/TurretController",
+	--[[ Following a teammate once you are dead. After InputController, whose Fire
+	     and Aim signals it cycles on, and after TopStack's other claimants so the
+	     card it draws lands under them rather than over the clock. ]]
+	"UI/SpectateController",
 	--[[ After the screens it can open, and after the HUD whose corner it shares. ]]
 	--[[ Before MainMenuController, which attaches it in its own build(). Order
 	     is belt and braces — every controller is required before any init() runs
