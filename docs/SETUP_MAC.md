@@ -110,6 +110,45 @@ while the server runs.
 
 Press **Stop** in Terminal with Ctrl+C when you're done.
 
+## "Rojo is connected but I'm testing old code"
+
+Rojo syncing and your checkout being current are **two different things**, and
+only the first one is automatic. `rojo serve` live-syncs the files on disk
+perfectly — if those files are eleven days old, it will put eleven-day-old code
+into Studio every time, forever, with every version number checking out.
+
+That is the confusing one, because it is indistinguishable from a bug that will
+not die: you get a fix, you test it, the old behaviour is still there.
+
+**One command tells you:**
+
+```bash
+./scripts/rojo-doctor.sh
+```
+
+It ends with how far behind origin this checkout is, what is blocking the
+auto-pull if anything, and the build string this code will print. Compare that
+against the line Studio prints on every server start:
+
+```
+FADING LIGHT — build 2026-09-04h — server up in 121 ms
+```
+
+**If those two do not match, Studio is not running this code** — and nothing
+else is worth debugging until they do.
+
+### Why the auto-pull stops
+
+`dev.sh` only ever fast-forwards, and it refuses rather than throwing work away.
+Both refusals are quiet by design, which is exactly what makes them easy to miss:
+
+| | What happened | Fix |
+|---|---|---|
+| **Dirty tree** | You edited files a pull would touch | `git stash && git pull` |
+| **Diverged** | You committed here as well as on the remote | sort out the merge by hand |
+
+`./scripts/autostart.sh log` shows it saying so.
+
 ## Getting updates
 
 `./scripts/dev.sh` already does this — it checks the branch every 20 seconds and

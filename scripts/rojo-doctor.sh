@@ -212,6 +212,68 @@ if [ -z "$PIDS" ] && [ -z "$SRV_VER" ]; then
   fi
 fi
 
+# ── 4. is this checkout even current? ────────────────────────────────────────
+#
+#  The question this script did not used to ask, and the one that cost the most.
+#
+#  Rojo can be perfectly healthy — right CLI, right plugin, connected, syncing
+#  every keystroke — and still put eleven-day-old code in Studio, because it
+#  serves the FILES ON DISK and nothing makes those current. The symptom is
+#  indistinguishable from a bug that will not die: you are handed a fix, you test
+#  it, the old behaviour is still there, and every version number checks out.
+#
+#  So: how far behind origin is this working tree, and what stopped it catching
+#  up. Both failure modes dev.sh has are silent by design — it refuses to touch a
+#  diverged branch or a dirty tree rather than throwing work away — and a refusal
+#  nobody reads looks exactly like a sync that is working.
+echo ""
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
+  echo "Not on a branch, so there is nothing to be behind."
+else
+  git fetch --quiet origin "$BRANCH" 2>/dev/null || true
+  BEHIND=$(git rev-list --count "HEAD..origin/$BRANCH" 2>/dev/null || echo 0)
+  AHEAD=$(git rev-list --count "origin/$BRANCH..HEAD" 2>/dev/null || echo 0)
+  DIRTY=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ "$BEHIND" -gt 0 ] && [ "$AHEAD" -gt 0 ]; then
+    echo "PROBLEM: $BRANCH has DIVERGED — $BEHIND behind, $AHEAD ahead."
+    echo "  dev.sh will not touch a diverged branch, so it has stopped pulling."
+    echo "  Studio is being served whatever was here when that happened."
+    PROBLEM=1
+  elif [ "$BEHIND" -gt 0 ]; then
+    echo "PROBLEM: this checkout is $BEHIND commit(s) BEHIND origin/$BRANCH."
+    echo "  Rojo is serving these older files to Studio, correctly and forever."
+    if [ "$DIRTY" -gt 0 ]; then
+      echo "  $DIRTY changed file(s) here — that is what is blocking the auto-pull."
+      echo "  Commit or stash them and it resumes on its own:"
+      echo ""
+      echo "    git stash && git pull"
+    else
+      echo ""
+      echo "    git pull"
+    fi
+    PROBLEM=1
+  else
+    echo "Up to date with origin/$BRANCH."
+  fi
+
+  #[[ The ground truth, and the only check that needs no trust in any of the
+  #   above: what the code on disk SAYS its build is. Studio prints the same
+  #   string on every server start, so the two can be compared by eye. If they
+  #   differ, the place is not running this code, whatever git thinks. ]]
+  STAMP=$(grep -o 'BuildStamp = "[^"]*"' src/shared/Config/GameConfig.lua 2>/dev/null | head -1 | cut -d'"' -f2)
+  if [ -n "$STAMP" ]; then
+    echo ""
+    echo "This checkout is build $STAMP."
+    echo "Studio prints its build on every server start:"
+    echo ""
+    echo "    FADING LIGHT — build $STAMP — server up in ..."
+    echo ""
+    echo "If that line says anything else, Studio is not running this code."
+  fi
+fi
+
 #[[ The plugin cannot be inspected from out here — it lives inside Studio and
 #   nothing on this side can read it. So it is not guessed at; it is named as
 #   the half still to check, with where to look. ]]
