@@ -65,6 +65,19 @@ local BLOOM_SCALE = 1.06
      is the same size on a phone held sideways and on an ultrawide. ]]
 local MARK_FRACTION = 0.42
 
+--[[ How long the logo has to have been ON SCREEN before an input may skip it.
+     See the InputBegan handler: this is the whole fix for a splash nobody ever
+     saw. Short — anybody deliberately skipping is still skipping within a
+     second — but past the point where the first click of a session lands. ]]
+local SKIP_ARMS_AFTER = 0.6
+
+--[[ The longest the black hold will wait on PreloadAsync. It yields until the
+     assets arrive or fail, and an id the client cannot reach can take its time
+     about failing — which would be a black screen with no way to know why. The
+     chime may then land a frame late on a cold cache; a late chime is a worse
+     splash and an unbounded black screen is a broken game. ]]
+local PRELOAD_BUDGET = 3.0
+
 local SplashController = {}
 
 local trove = Trove.new()
@@ -78,6 +91,9 @@ local scale: UIScale
 local state = {
 	running = false,
 	finished = false,
+	--[[ When a skip starts being allowed. Zero means never — see the note on the
+	     InputBegan handler in start(), which is where this bug lived. ]]
+	skippableAt = 0,
 }
 
 -- ── the sequence ────────────────────────────────────────────────────────────
@@ -126,9 +142,20 @@ local function run()
 	chime.Parent = SoundService
 	trove:add(chime)
 
-	pcall(function()
-		ContentProvider:PreloadAsync({ mark, chime })
+	--[[ Bounded. PreloadAsync yields until every id resolves or fails, and one
+	     the client cannot see can take several seconds to give up — all of them
+	     spent on a black screen. See PRELOAD_BUDGET. ]]
+	local preloaded = false
+	task.spawn(function()
+		pcall(function()
+			ContentProvider:PreloadAsync({ mark, chime })
+		end)
+		preloaded = true
 	end)
+	local deadline = os.clock() + PRELOAD_BUDGET
+	while not preloaded and os.clock() < deadline and not state.finished do
+		task.wait()
+	end
 
 	if state.finished then
 		return -- skipped while the preload was in flight
@@ -141,6 +168,8 @@ local function run()
 
 	tween(mark, FADE_IN, Enum.EasingStyle.Quad, { ImageTransparency = 0 })
 	tween(scale, FADE_IN, Enum.EasingStyle.Quad, { Scale = 1 })
+	--[[ Armed only now, when there is finally something on screen to skip. ]]
+	state.skippableAt = os.clock() + SKIP_ARMS_AFTER
 	task.wait(FADE_IN + HOLD)
 	if state.finished then
 		return
@@ -240,12 +269,25 @@ function SplashController:start()
 	--[[ Any input at all, and the mouse and touch cases both matter: a player who
 	     has seen this eleven times is reaching for the mouse before it finishes,
 	     and a phone player is already tapping where PLAY will be. ]]
+	--[[
+		Skipping, and it is armed LATE on purpose.
+
+		This listener used to fire from the moment it was connected, which is
+		before the logo has faded in and — critically — before the player has
+		done the very first thing anybody does: click into the window to focus
+		it, or tap the screen on a phone. That click is an InputBegan, so the
+		splash skipped itself on frame one and the whole sequence played to
+		nobody. It looked exactly like a splash that had never been written.
+
+		So a skip is only accepted once the mark has actually been on screen for
+		SKIP_ARMS_AFTER. Anybody deliberately skipping still gets out inside a
+		second; the opening click of a session no longer counts as one.
+	]]
 	trove:connect(UserInputService.InputBegan, function()
-		--[[ Only "not finished". The earlier version also fired when the sequence
-		     had not STARTED, which is the window between this connection and the
-		     first frame of run() — an input landing there would have ended the
-		     splash before it began. ]]
-		if not state.finished then
+		if state.finished or state.skippableAt <= 0 then
+			return
+		end
+		if os.clock() >= state.skippableAt then
 			finish()
 		end
 	end)
