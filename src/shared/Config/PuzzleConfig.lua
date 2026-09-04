@@ -211,7 +211,12 @@ PuzzleConfig.Notes = table.freeze({
 	It also happens to be the most honest possible reason for a number to be
 	missing from a security file.
 ]]
-PuzzleConfig.Redacted = "[ REDACTED ]"
+--[[ U+2588 FULL BLOCK, written as its UTF-8 bytes the way every other
+     non-ASCII character in this codebase is. Four of them: enough to read as a
+     struck-out field rather than as a typo, and short enough that "ROOM ████"
+     still fits a sign built for "ROOM 7". ]]
+local BLOCK = "\226\150\136"
+PuzzleConfig.Redacted = string.rep(BLOCK, 4)
 
 --[[ 0 through 9, one per clue. Ten thousand codes, and every digit is somewhere
      a player has to walk to. ]]

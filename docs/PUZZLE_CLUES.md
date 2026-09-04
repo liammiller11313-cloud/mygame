@@ -53,7 +53,7 @@ The code is those four digits **in that order**. All four change every round.
 ### The digits are hidden until collected
 
 Every document is legible from the first second of the round, but the one field
-that matters reads `[ REDACTED ]` until that clue is picked up. That is what
+that matters reads `████` until that clue is picked up. That is what
 makes the order mean anything — with all four digits readable from across the
 room, the counter and the sequence would be decoration.
 
