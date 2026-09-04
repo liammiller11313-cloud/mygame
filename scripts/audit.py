@@ -1351,11 +1351,21 @@ if _input.exists():
     if _start != -1:
         _block = _text[_start:]
         _block = _block[: _block.index("\n}\n")]
+        # Split at each entry rather than matching action-then-keys across the
+        # block. A spanning match pairs an entry that has no `keys` with the NEXT
+        # entry's keys and reports a collision that is not there — which is not
+        # hypothetical: the same pattern over `touch` silently attributed Jump's
+        # button to Sprint, which has none.
+        _bounds = [m.start() for m in re.finditer(r"action = Action\.\w+", _block)]
+        _bounds.append(len(_block))
         _seen = {}
-        for _action, _keys in re.findall(
-            r"action = Action\.(\w+),?\s*(?:.*?)keys = \{([^}]*)\}", _block, re.S
-        ):
-            for _key in re.findall(r"Enum\.(?:KeyCode|UserInputType)\.(\w+)", _keys):
+        for _i in range(len(_bounds) - 1):
+            _chunk = _block[_bounds[_i] : _bounds[_i + 1]]
+            _action = re.match(r"action = Action\.(\w+)", _chunk).group(1)
+            _km = re.search(r"keys = \{([^}]*)\}", _chunk)
+            if not _km:
+                continue
+            for _key in re.findall(r"Enum\.(?:KeyCode|UserInputType)\.(\w+)", _km.group(1)):
                 if _key in _seen and _seen[_key] != _action:
                     problems.append(
                         f"InputController binds {_key} to both {_seen[_key]!r} and {_action!r} — "

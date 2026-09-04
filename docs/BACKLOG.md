@@ -4,7 +4,7 @@ Captured 2026-08-20, reviewed 2026-08-21. Roughly ordered by how broken each one
 is rather than how big — a thing that traps the mouse is worse than a thing that
 is merely missing.
 
-Four of the original nine are built. They are kept at the bottom rather than
+Six of the original nine are built. They are kept at the bottom rather than
 deleted, because "we tried that" is worth more than a shorter file, and because
 each one names where the answer ended up.
 
@@ -18,23 +18,19 @@ Reported by a real player on an iPad. The jump button was reworked on
 2026-08-20 (bigger, moved to the bottom row, Roblox's duplicate suppressed), so
 **re-test before investigating** — this report predates that change.
 
-If it is still broken on iPad specifically, suspect `Device`: an iPad now
-classifies as `Tablet` rather than `Mobile`, and anything that gates the touch
-pad on a `Mobile` comparison instead of `Device.isHandheld()` would hide it.
-`InputController`'s `initialScheme` is a separate detection from `Device` and is
-what decides whether the touch scheme is drawn at all — that is the first place
-to look.
+Two of the three suspects have since been ruled out by reading rather than by
+testing, so if it reproduces, start at the third:
 
-### 2. Mobile has no button for interacting
-
-Reviving a teammate, opening an ammo crate and taking a medkit are all the
-`Interact` verb, and the touch pad has a USE button for it — but it is
-`CONTEXTUAL`, so it only appears when `PromptController` reports a target.
-
-Worth confirming per case: does the prompt fire for a downed teammate, for a
-crate, and for a kit? If any of those three does not raise a prompt, the button
-never appears and that action is unreachable on a phone. Reviving is the one
-that matters most: a mobile player who cannot revive is a liability to the team.
+- **Not the pad being hidden on a tablet.** `TouchController` gates on
+  `InputController:isTouchScheme()`, which is the scheme rather than the device
+  class, so an iPad with no keyboard gets the pad like any phone.
+- **Not a `Device.pick` table that forgot `Tablet`.** Every call site in the
+  codebase lists it, and `CHEAPER_THAN` covers one that did not.
+- **Still unexamined: the suppression itself.** `suppressRobloxJump` hides
+  Roblox's own JumpButton and re-hides it whenever it comes back. If Roblox
+  draws a differently-named button on iPadOS, ours would be the only one on
+  screen — which is the working case — but if the geometry differs, ours may be
+  landing off the safe area. That is the thing to photograph first.
 
 ### 3. Difficulty only changes incoming damage
 
@@ -72,6 +68,30 @@ than a new system.
 ---
 
 ## Built since this list was written
+
+### Mobile has no button for interacting — **fixed**
+
+There was a USE button, contextual, in the bottom-right corner. It worked and
+almost nobody found it: the thing that tells you an action exists was in the
+middle of the screen and the thing that performs it was two hundred pixels away,
+and a thumb goes to what it is reading.
+
+**The prompt is the button now.** On touch it draws itself as a panel and takes
+the tap — press holds `Interact`, lift releases it, so a tap picks a gun up and a
+held thumb revives a teammate with the bar filling under the finger doing it. The
+corner button stays, and still swaps to PING when there is nothing to use.
+
+### Controllers were told to press E — **fixed**
+
+Interact is bound to a keyboard key and a face button; `PromptController` walked
+the bound keys and took the first one in the ASCII letter range, so it always
+found E. Every console player in the game was told to press a key their machine
+does not have, for a verb that did have a button.
+
+The scheme-aware lookup HudController already had is now `UI/Glyph`, and both
+callers use it. Interact also moved from **Y to X**, where Left 4 Dead 2 and
+every console shooter since put it; Reload took Y. `audit.py` check 32 fails the
+build on two verbs sharing a key, or on an essential verb with no pad button.
 
 ### Wiped-out screen traps the mouse on PC — **fixed**
 
