@@ -127,6 +127,10 @@ than deploying immediately.
   prompt says which: `NO SOLID GROUND THERE` or `TOO FAR AWAY`.
 - Fire to place, press the ability key again to place, or Escape / B to cancel.
   A red spot refuses the confirm and leaves you still placing.
+- **On a phone the ability card is the button.** Tap it to start placing, drag
+  to aim, tap it again to place, or use the CANCEL button under the prompt.
+  The fire button stays the fire button — placement never steals it, because
+  a drag to aim would otherwise confirm the moment you reached up to turn.
 - Range is `AbilityConfig.Definitions.Turret.range` (45 studs).
 
 None of this is a permission check. The client greys out and reddens as a

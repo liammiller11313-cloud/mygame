@@ -78,7 +78,12 @@ local player = Players.LocalPlayer
 --[[ The card. Two lines — what it is, and whether you can use it — because
      under pressure a player reads the second one and nothing else. ]]
 local CARD_WIDTH = 138
-local CARD_HEIGHT = 44
+--[[ LAYOUT.RowHeightTouch, not a number of its own, because on a phone the card
+     IS the button — see `touch` in buildCard. A phone draws the whole interface
+     at the 0.75 scale floor, so 56 reference pixels is 42 real ones, which is
+     the smallest target this project asks a thumb to hit. It was 44, which is 33
+     real: under the standard everything else on touch is held to. ]]
+local CARD_HEIGHT = LAYOUT.RowHeightTouch
 local CARD_GAP = 6
 
 --[[ Where the stack sits: bottom-left, above the health block, opposite the
@@ -104,6 +109,11 @@ local GHOST_BAD = Color3.fromRGB(206, 46, 32)
      are about ownership and cooldown, which the card has already greyed out —
      so a red ghost always has one of these next to it rather than a shrug. ]]
 local HINT_PLACE = "AIM AND FIRE TO PLACE IT"
+--[[ Touch says something different because it CONFIRMS differently. On every
+     other scheme the confirm is the fire control, which is why it is sunk; on a
+     phone it is the card you tapped to get here, and the fire button goes on
+     being the fire button. ]]
+local HINT_PLACE_TOUCH = "TAP THE ABILITY AGAIN TO PLACE IT"
 local HINT_NO_GROUND = "NO SOLID GROUND THERE"
 local HINT_TOO_FAR = "TOO FAR AWAY"
 
@@ -122,6 +132,9 @@ local stack: Frame
 local reticle: Frame
 local reticleLabel: TextLabel
 local reticleHint: TextLabel
+--[[ The way out of a placement on a phone, where Escape and B do not exist.
+     Shown on touch only — see `build`. ]]
+local reticleCancel: TextButton
 
 type Card = {
 	frame: Frame,
@@ -129,6 +142,9 @@ type Card = {
 	status: TextLabel,
 	stroke: UIStroke,
 	key: TextLabel,
+	--[[ The whole card as a tap target, shown on TOUCH ONLY. Hidden on every
+	     other scheme so it cannot eat a mouse click meant for the world. ]]
+	touch: TextButton,
 	id: string,
 	readyAt: number,
 	shownWhole: number,
@@ -171,15 +187,35 @@ local LAYER_FACE = { "X", "Y", "A", "B" }
 	them. Touch gets nothing, because the on-screen button IS the prompt and
 	labelling a button with its own name is noise.
 ]]
+--[[ The scheme the player is driving with, or "" when InputController has not
+     registered yet. One place asks, so the card's button and the card's prompt
+     cannot disagree about which scheme is in front of them. ]]
+local function schemeName(): string
+	local input = Registry.find("InputController")
+	if not input or typeof(input.getScheme) ~= "function" then
+		return ""
+	end
+	local ok, scheme = pcall(input.getScheme, input)
+	return if ok and typeof(scheme) == "string" then scheme else ""
+end
+
+local function isTouch(): boolean
+	return schemeName() == "Touch"
+end
+
 local function keyLabelFor(slot: number): string
 	local input = Registry.find("InputController")
 	if not input then
 		return ""
 	end
 
-	local scheme = if typeof(input.getScheme) == "function" then input:getScheme() else nil
+	local scheme = schemeName()
 	if scheme == "Touch" then
-		return ""
+		--[[ The card is the button on a phone, so the corner says what to do with
+		     it rather than naming a key that does not exist. It used to say
+		     nothing, which was honest when there was no way to fire an ability on
+		     touch at all. ]]
+		return "TAP"
 	end
 	if scheme == "Gamepad" then
 		local face = LAYER_FACE[slot]
@@ -244,6 +280,11 @@ local function refreshSlots()
 
 		local definition = AbilityConfig.get(id)
 		card.frame.Visible = definition ~= nil
+		--[[ Re-asked here rather than once at build, because this runs on
+		     schemeChanged too — a player who picks up a controller mid-round has
+		     to stop having a tap target, and one who puts it down has to get it
+		     back. ]]
+		card.touch.Visible = definition ~= nil and isTouch()
 		if definition then
 			card.name.Text = definition.displayName
 			local key = keyLabelFor(index)
@@ -288,7 +329,8 @@ local function stepGhost()
 	local point = aimPoint()
 
 	local ok = point ~= nil and definition ~= nil and root ~= nil
-	local hint = HINT_PLACE
+	local placeHint = if isTouch() then HINT_PLACE_TOUCH else HINT_PLACE
+	local hint = placeHint
 	local resting: Vector3? = point
 	if ok then
 		local aimed = point :: Vector3
@@ -322,7 +364,7 @@ local function stepGhost()
 	if hint ~= state.hint then
 		state.hint = hint
 		reticleHint.Text = hint
-		reticleHint.TextColor3 = if hint == HINT_PLACE then COLOR.TextSecondary else GHOST_BAD
+		reticleHint.TextColor3 = if hint == placeHint then COLOR.TextSecondary else GHOST_BAD
 	end
 
 	if resting then
@@ -456,6 +498,10 @@ local function beginAim(slot: number)
 	endAim()
 	state.aiming = slot
 	reticle.Visible = true
+	--[[ Asked per placement rather than once, because the scheme can change
+	     between two of them — a player who put a controller down still has to get
+	     the cancel back. ]]
+	reticleCancel.Visible = isTouch()
 
 	--[[ A ghost for anything that declares one. Cheap to fail: an ability with
 	     no `preview`, or a preview whose model nobody has uploaded, simply aims
@@ -479,8 +525,9 @@ local function beginAim(slot: number)
 	--[[ Back to the plain instruction on every entry. Without a ghost nothing
 	     ever rewrites it, so an airstrike opened right after a refused turret
 	     placement would still be showing that turret's complaint. ]]
-	state.hint = HINT_PLACE
-	reticleHint.Text = HINT_PLACE
+	local placeHint = if isTouch() then HINT_PLACE_TOUCH else HINT_PLACE
+	state.hint = placeHint
+	reticleHint.Text = placeHint
 	reticleHint.TextColor3 = COLOR.TextSecondary
 	reticleLabel.Text = if definition then definition.displayName else ""
 	local card = cards[slot]
@@ -491,12 +538,23 @@ local function beginAim(slot: number)
 	--[[
 		Bound through ContextActionService and SUNK, rather than watched.
 
-		The confirm is the fire button on every scheme — a click, a tap, or the
-		right trigger — which is also the button that shoots the gun in your
-		hands. A raw InputBegan listener sees the press but cannot stop it, so
-		placing an airstrike also emptied a magazine into the floor in front of
-		you. Bound above InputController's own priority and returning Sink, the
-		shot never happens.
+		The confirm is the fire control on a mouse and on a pad — which is also
+		what shoots the gun in your hands. A raw InputBegan listener sees the
+		press but cannot stop it, so placing an airstrike also emptied a magazine
+		into the floor in front of you. Bound above InputController's own priority
+		and returning Sink, the shot never happens.
+
+		── AND NOT TOUCH ───────────────────────────────────────────────────────
+		UserInputType.Touch is deliberately NOT in this list, and it used to be.
+		On a phone the camera is aimed by dragging, and a drag opens with a touch
+		Begin — so a binding that confirmed on one placed the turret at whatever
+		the camera happened to be pointing at the instant the player reached up to
+		aim, and sinking it stopped them turning at all. It was harmless only for
+		as long as touch had no way to reach placement in the first place.
+
+		A phone confirms with the card it started from, which is a control that
+		exists, is already under a thumb, and is not the one being dragged. See
+		`touch` in buildCard.
 
 		Torn down with aimTrove the moment the mode ends, so nothing here can
 		outlive the aim and eat a trigger pull afterwards.
@@ -513,7 +571,6 @@ local function beginAim(slot: number)
 		false,
 		AIM_PRIORITY,
 		Enum.UserInputType.MouseButton1,
-		Enum.UserInputType.Touch,
 		Enum.KeyCode.ButtonR2
 	)
 	aimTrove:add(function()
@@ -598,12 +655,38 @@ local function buildCard(index: number)
 	key.Size = UDim2.fromOffset(56, TEXT.Tiny + 2)
 	key.TextXAlignment = Enum.TextXAlignment.Right
 
+	--[[
+		The card as a button, for the one scheme with no key to press.
+
+		Touch had NO way to use an ability at all. The binding declares a
+		`touch` label and TouchController skips any verb with no entry in its
+		PAD_LAYOUT — abilities never got one — so a phone player could buy a
+		three-thousand-dollar airstrike, equip it, and never fire it.
+
+		The card rather than a ninth pad button. The pad is already eight buttons
+		wide on a five-inch screen and its own history is a note about how tall it
+		got; meanwhile this card is already on screen, already says what the
+		ability is, and already says whether it is ready. A button that is also
+		the readout costs nothing and needs no label.
+
+		Last child, so under ZIndexBehavior.Sibling it sits over the text it
+		covers. Hidden off touch: an invisible button in the corner that ate a
+		mouse click would be a worse bug than the one this fixes.
+	]]
+	local touch = Widgets.button(frame, "Tap")
+	touch.Size = UDim2.fromScale(1, 1)
+	touch.Visible = false
+	trove:connect(touch.Activated, function()
+		AbilityController:press(index)
+	end)
+
 	cards[index] = {
 		frame = frame,
 		name = name,
 		status = status,
 		stroke = stroke,
 		key = key,
+		touch = touch,
 		id = "",
 		readyAt = 0,
 		shownWhole = -1,
@@ -650,10 +733,42 @@ local function build()
 	reticleHint.Position = UDim2.new(0, 0, 0, TEXT.Small + 6)
 	reticleHint.Size = UDim2.new(1, 0, 0, TEXT.Tiny + 2)
 	reticleHint.TextXAlignment = Enum.TextXAlignment.Center
-	--[[ "FIRE" rather than a named button. It is the left mouse, the trigger and
-	     a tap on the screen, and the one word covers all three without this file
-	     having to know which scheme is in front of it. ]]
+	--[[ "FIRE" rather than a named button: it is the left mouse and the right
+	     trigger, and the one word covers both. Touch is the exception and gets
+	     its own line — see HINT_PLACE_TOUCH — because on a phone the confirm is
+	     the card rather than the fire control. Rewritten on every beginAim, so
+	     this is only what it says before the first one. ]]
 	reticleHint.Text = HINT_PLACE
+
+	--[[
+		A real way out, for the one scheme with no cancel key.
+
+		Escape is the keyboard's and B is the pad's, and a phone has neither. A
+		touch player who opened a placement and changed their mind could not back
+		out of it: the card tap confirms, and confirming is REFUSED on a red spot
+		— so aiming at the sky and thinking better of it left them holding a mode
+		they could not leave without dying.
+
+		Below the prompt rather than beside it. The middle of the screen is where
+		a thumb drags to aim, and a cancel that sat there would be pressed by
+		accident every time the player looked around.
+	]]
+	reticleCancel = Widgets.button(reticle, "Cancel")
+	reticleCancel.AnchorPoint = Vector2.new(0.5, 0)
+	reticleCancel.Position = UDim2.new(0.5, 0, 1, LAYOUT.ElementGap)
+	reticleCancel.Size = UDim2.fromOffset(140, LAYOUT.RowHeightTouch)
+	reticleCancel.BackgroundColor3 = COLOR.PanelRaised
+	reticleCancel.BackgroundTransparency = 0.15
+	reticleCancel.Text = "CANCEL"
+	reticleCancel.Font = FONT.Heading
+	reticleCancel.TextSize = TEXT.Small
+	reticleCancel.TextColor3 = COLOR.TextPrimary
+	reticleCancel.Visible = false
+	Widgets.stroke(reticleCancel, COLOR.BorderBright)
+	trove:connect(reticleCancel.Activated, function()
+		endAim()
+		UiSound.play(AudioConfig.UI.MenuBack)
+	end)
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────
