@@ -31,7 +31,7 @@ one to the other:
 | Riot Shield | `Shield` | no — a welded ForceField sphere |
 | Field Medic | `Medic` | no — a heal pulse, nothing persists |
 | Cryo Blast | `CryoBlast` | no — a frost field on the floor |
-| Airstrike | `Airstrike` | no — a marker, then explosions |
+| Airstrike | `Airstrike` | no — but see **The airstrike jet** below |
 
 **The turret is the only one that wants a model, and that is not an oversight.**
 It is the only ability that puts a solid object in the world and leaves it
@@ -42,6 +42,36 @@ a folder for them would be adding a hook nothing could usefully hang on.
 
 If you later want a different look for one of those, it is a change to that
 ability's own build function — not a model drop.
+
+## The airstrike jet
+
+The airstrike does have a plane, and it is **not** an `Assets` model — it is
+built from catalogue mesh ids in `AbilityConfig.Definitions.Airstrike.tuning`:
+
+```
+JetMeshId    JetTextureId       the F-22 that makes the run
+BombMeshId   BombTextureId      the stick of three it drops
+JetHeight    JetRunway          how high it passes and how far out it starts
+JetCrossSeconds                 how long it takes to cross
+```
+
+Swap those four ids for any mesh you like. If one fails to load, the plane
+falls back to a plain block that still crosses the sky — the flyover is the
+tell that shells are coming, and losing it to a missing mesh would cost the
+player information they need.
+
+**All of it is cosmetic.** The jet has no collision, no `Humanoid`, no
+`Explosion` and no `Touched` handler. Damage is the server's five walking
+shells through `DamageService`, scheduled the instant the marker goes down, and
+they land whether or not a single frame of the plane ever renders.
+
+Every time in the flyover is derived from `JetCrossSeconds`, `JetHeight` and
+the ability's own `WarningTime` — when the plane launches, where the bombs
+leave it, how long they fall. Change the warning and the plane still arrives
+overhead exactly as the shells land. Nothing needs re-tuning by hand.
+
+The one thing it does not have is **sound**. Abilities have no audio hooks in
+`AudioConfig` yet, so the jet is silent.
 
 ## The turret
 

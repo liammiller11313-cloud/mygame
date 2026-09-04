@@ -31,6 +31,8 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AbilityConfig = require(Shared.Config.AbilityConfig)
+local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -39,6 +41,11 @@ local UITheme = require(Shared.Config.UITheme)
 local COLOR = UITheme.Color
 
 local CRYO_COLOR = Color3.fromRGB(122, 196, 226)
+
+--[[ The airstrike's own numbers, including the flyover meshes. Read once: this
+     is a frozen table and re-reaching through the config on every strike is a
+     table walk for values that cannot change. ]]
+local STRIKE = AbilityConfig.get(Enums.Ability.Airstrike).tuning
 
 local AbilityEffects = {}
 
@@ -144,6 +151,148 @@ local function cryoField(payload: any)
 	Debris:AddItem(part, duration + 1)
 end
 
+--[[
+	The plane that drops it, and the bombs falling out of it.
+
+	Entirely cosmetic, and it is worth saying twice because this is the one
+	effect in the file that LOOKS like it should be doing damage. It is not: no
+	collision, no Humanoid, no Explosion instance, no Touched handler. The
+	shells are the server's, they are already scheduled, and they land whether
+	or not a single frame of this ever renders. Deleting this function changes
+	how the airstrike looks and nothing about what it does.
+
+	── EVERY TIME IN HERE IS DERIVED ───────────────────────────────────────────
+	One number is chosen — how long the plane takes to cross its run — and the
+	rest falls out of it, of the altitude, and of the warning the server already
+	sent:
+
+	  the bombs fall for  sqrt(2 * height / gravity)      — actual free-fall
+	  so they are let go  that long before the shells land
+	  the plane launches  half a crossing before the shells land, so it is
+	                      overhead at the moment they do
+	  and it lets go      wherever it has got to by then, which works out as
+	                      exactly its own speed times the fall — the throw that
+	                      carries the bombs from the plane to the marker
+
+	Nothing here needs re-tuning when WarningTime changes, and none of those
+	agreements can quietly drift apart, because there is only one of each.
+
+	── THE BOMBS ARE UNANCHORED ON PURPOSE ─────────────────────────────────────
+	They are given the plane's velocity and then left to Roblox's own gravity,
+	which is the whole arc for free and is correct rather than approximated. A
+	tween would have to fake the parabola, and this file has no per-frame loop
+	to do it properly with.
+]]
+local function flyover(position: Vector3, warning: number, heading: Vector3)
+	local flat = Vector3.new(heading.X, 0, heading.Z)
+	local run = if flat.Magnitude > 0.05 then flat.Unit else Vector3.zAxis
+	local cross = STRIKE.JetCrossSeconds
+	local altitude = Vector3.new(0, STRIKE.JetHeight, 0)
+	local from = position - run * STRIKE.JetRunway + altitude
+	local to = position + run * STRIKE.JetRunway + altitude
+	local speed = (STRIKE.JetRunway * 2) / cross
+
+	--[[ Read rather than assumed: a map that sets its own gravity would
+	     otherwise get bombs that miss by the difference. Guarded because zero
+	     gravity would divide the fall time by nothing. ]]
+	local gravity = math.max(Workspace.Gravity, 1)
+	local fall = math.sqrt((2 * STRIKE.JetHeight) / gravity)
+
+	--[[ Launched half a crossing before the shells, so it is over the target as
+	     they land. Clamped at zero: a warning shorter than half a crossing gets
+	     a plane that arrives late rather than one that needed to launch before
+	     the player pressed the button. ]]
+	task.delay(math.max(warning - cross * 0.5, 0), function()
+		if not folder then
+			return
+		end
+		local jet = Instance.new("Part")
+		jet.Name = "FL_StrikeJet"
+		--[[ The block under the mesh is the fallback silhouette. Roblox renders
+		     nothing at all for a MeshId that fails to load, so the part's own
+		     shape has to be something a player two hundred studs below would
+		     still read as an aircraft crossing the sky. ]]
+		jet.Size = Vector3.new(18, 4, 34)
+		jet.Color = COLOR.Border
+		jet.CFrame = CFrame.lookAt(from, from + run)
+		decorate(jet)
+
+		local mesh = Instance.new("SpecialMesh")
+		mesh.MeshType = Enum.MeshType.FileMesh
+		mesh.MeshId = STRIKE.JetMeshId
+		mesh.TextureId = STRIKE.JetTextureId
+		mesh.Scale = Vector3.new(10, 10, 10)
+		mesh.Parent = jet
+
+		--[[ A contrail, so the plane is findable in a dark sky — which is every
+		     round past the first. Trail rather than Smoke: Smoke costs the same
+		     whether it is two studs away or two hundred, and this is always two
+		     hundred. ]]
+		local ahead = Instance.new("Attachment")
+		ahead.Position = Vector3.new(0, 0, 6)
+		ahead.Parent = jet
+		local behind = Instance.new("Attachment")
+		behind.Position = Vector3.new(0, 0, 14)
+		behind.Parent = jet
+
+		local trail = Instance.new("Trail")
+		trail.Attachment0 = ahead
+		trail.Attachment1 = behind
+		trail.Lifetime = 1.6
+		trail.Transparency = NumberSequence.new(0.4, 1)
+		trail.Color = ColorSequence.new(Color3.fromRGB(190, 190, 190))
+		trail.LightEmission = 0.2
+		trail.Parent = jet
+
+		--[[ Linear, and deliberately not eased. An aircraft crossing the sky
+		     does not accelerate into frame or settle out of it, and any easing
+		     makes this look like a UI element shaped like a plane. ]]
+		TweenService:Create(jet, TweenInfo.new(cross, Enum.EasingStyle.Linear), {
+			CFrame = CFrame.lookAt(to, to + run),
+		}):Play()
+		Debris:AddItem(jet, cross + 0.5)
+	end)
+
+	--[[ Let go one fall before the shells land, from the point the plane's own
+	     forward throw carries them to the marker. ]]
+	task.delay(math.max(warning - fall, 0), function()
+		if not folder then
+			return
+		end
+		local dropFrom = position - run * (speed * fall) + altitude
+		local velocity = run * speed
+		--[[ A stick of three across the line of flight. One bomb is a dropped
+		     object; three is a plane doing a job. They are Debris'd as the shells
+		     land rather than exploding — the blast that follows is the server's,
+		     and a second one here would be the client inventing damage it has no
+		     ability to deal. ]]
+		for index = -1, 1 do
+			local bomb = Instance.new("Part")
+			bomb.Name = "FL_StrikeBomb"
+			bomb.Size = Vector3.new(1.5, 1.5, 5)
+			bomb.Color = COLOR.Border
+			bomb.CFrame = CFrame.lookAt(dropFrom + run * index * 12, dropFrom + run)
+			decorate(bomb)
+			--[[ decorate anchors everything, which is right for every other
+			     effect in this file and wrong for the one thing here that is
+			     meant to fall. Unanchored and uncollidable: gravity draws the
+			     arc, nothing can be hit by it, and it is a client-local part so
+			     it is simulated here and replicated nowhere. ]]
+			bomb.Anchored = false
+			bomb.AssemblyLinearVelocity = velocity
+
+			local bombMesh = Instance.new("SpecialMesh")
+			bombMesh.MeshType = Enum.MeshType.FileMesh
+			bombMesh.MeshId = STRIKE.BombMeshId
+			bombMesh.TextureId = STRIKE.BombTextureId
+			bombMesh.Scale = Vector3.new(6, 6, 6)
+			bombMesh.Parent = bomb
+
+			Debris:AddItem(bomb, fall)
+		end
+	end)
+end
+
 --[[ The airstrike warning. The most important thing in this file: it is the
      only reason 260 damage across five shells is fair, and it has to be
      unmistakable from any angle and at any distance. ]]
@@ -153,6 +302,14 @@ local function marker(payload: any)
 	end
 	local radius = tonumber(payload.radius) or 16
 	local warning = tonumber(payload.warning) or 2.5
+
+	--[[ The plane, if the server sent a heading. Older payloads and any other
+	     ability that ever broadcasts a Marker simply do not get one, which is
+	     why this is a check rather than a default — a jet flying over a cryo
+	     field would be worse than no jet. ]]
+	if typeof(payload.heading) == "Vector3" then
+		flyover(payload.position, warning, payload.heading)
+	end
 
 	local ring = disc(payload.position, radius, COLOR.Danger, 0.5)
 	--[[ Pulsing rather than steady. A static red circle reads as scenery on a

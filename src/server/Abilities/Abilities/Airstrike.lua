@@ -104,6 +104,18 @@ function Airstrike.activate(context: any): boolean
 		random = Random.new(),
 	})
 
+	--[[
+		The heading the jet comes in on, chosen HERE rather than on each client.
+
+		The flyover is pure decoration and could have been left entirely to the
+		client — except that four survivors stand next to each other and look up
+		at the same plane. Four clients rolling their own heading means four
+		players watching jets arrive from four different directions, which reads
+		as broken in a way no amount of good animation fixes. One number in a
+		payload that was already being sent buys them the same sky.
+	]]
+	local angle = Random.new():NextNumber(0, math.pi * 2)
+
 	--[[ The marker goes out NOW, which is the point of the ability. Everything
 	     after this is on a clock the whole server can see coming. ]]
 	AbilitySupport.broadcast("Marker", {
@@ -112,6 +124,7 @@ function Airstrike.activate(context: any): boolean
 		position = context.target,
 		radius = tuning.Radius,
 		warning = tuning.WarningTime,
+		heading = Vector3.new(math.cos(angle), 0, math.sin(angle)),
 	})
 	return true
 end

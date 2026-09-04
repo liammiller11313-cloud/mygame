@@ -205,6 +205,36 @@ local DEFINITIONS: { Ability } = {
 			     enough that a team standing in it has been warned. ]]
 			WarningTime = 2.5,
 			SpreadTime = 1.1, -- the explosions walk across the area, not at once
+
+			--[[
+				── THE FLYOVER ──────────────────────────────────────────────────
+				Meshes, and the geometry of the run that drops the shells. All of
+				it is COSMETIC: the jet is drawn on each client from the marker
+				broadcast, it has no collision, no Humanoid and no explosion of
+				its own, and the damage is the server's shells either way. A
+				player who never sees the jet takes and deals exactly the same
+				damage as one who does.
+
+				The meshes are Roblox catalogue assets. If one fails to load the
+				jet falls back to a plain wedge — the flyover still happens,
+				because the flyover is the tell that the shells are coming and
+				losing it to a missing mesh would cost the player information.
+			]]
+			JetMeshId = "rbxassetid://88775328",
+			JetTextureId = "rbxassetid://88775716",
+			BombMeshId = "rbxassetid://88782666",
+			BombTextureId = "rbxassetid://88782631",
+			--[[ How high it passes and how far out it starts. 200 studs up is
+			     above every map's roofline, so the run is never interrupted by
+			     the building the strike is called on. ]]
+			JetHeight = 200,
+			JetRunway = 900,
+			--[[ How long the plane takes to cross its whole run. Everything else
+			     about the flyover is derived from this, from JetHeight and from
+			     WarningTime — when the plane launches, where the bombs leave it,
+			     how long they fall — so none of it has to be re-tuned when the
+			     warning changes. See AbilityEffects.flyover. ]]
+			JetCrossSeconds = 3.4,
 		}),
 	}),
 }
