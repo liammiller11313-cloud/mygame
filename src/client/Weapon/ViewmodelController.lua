@@ -848,16 +848,145 @@ local function attachmentHost(built: Model): BasePart?
 	return largestPart(built)
 end
 
---[[ Pins the pivot to the centre of the model's own bounding box when the
-     artist did not choose one. An unset pivot is recomputed by the engine as
-     the parts move, and the pose, the fit and the muzzle below are all measured
-     against it — it has to hold still. ]]
-local function pinPivot(built: Model)
-	if built.PrimaryPart then
+--[[ How far off forward a model has to be before this file overrules the
+     artist. Thirty-five degrees is well past any deliberate cant and well short
+     of the ninety a gun modelled along the wrong axis lands at, so a weapon that
+     is merely angled is left exactly as it was made. ]]
+local FORWARD_TOLERANCE = math.cos(math.rad(35))
+
+--[[ How much longer the longest axis has to be than the forward one before it is
+     believed to be the barrel. A gun that is 1.05 times as wide as it is long is
+     not telling us anything. ]]
+local AXIS_MARGIN = 1.3
+
+--[[
+	The model's own extents, in the frame it will be POSED in.
+
+	Not GetBoundingBox, which answers in world axes and therefore says nothing
+	about which way the model itself is built. This walks the eight corners of
+	every part through the pivot's inverse, which is the only measurement that
+	survives the model being saved at some arbitrary rotation in ServerStorage.
+
+	Two hundred-odd CFrame multiplies for a detailed gun, once per weapon swap.
+]]
+local function localExtents(built: Model, pivot: CFrame): (Vector3, Vector3)
+	local inverse = pivot:Inverse()
+	local low = Vector3.new(math.huge, math.huge, math.huge)
+	local high = -low
+	for _, part in built:GetDescendants() do
+		if part:IsA("BasePart") then
+			local frame = inverse * part.CFrame
+			local half = part.Size * 0.5
+			for _, sx in { -1, 1 } do
+				for _, sy in { -1, 1 } do
+					for _, sz in { -1, 1 } do
+						local corner = frame * Vector3.new(half.X * sx, half.Y * sy, half.Z * sz)
+						low = low:Min(corner)
+						high = high:Max(corner)
+					end
+				end
+			end
+		end
+	end
+	return low, high
+end
+
+--[[
+	Which way the model's barrel points, in pivot space, or nil when it cannot
+	tell.
+
+	Two answers, in order of how much they can be trusted:
+
+	  1. A MUZZLE ATTACHMENT. Exact, and it is already the documented convention
+	     for this game — the same names ensureMuzzle looks for. An artist whose
+	     gun comes out sideways fixes it by putting an Attachment called "Muzzle"
+	     at the end of the barrel, which they may well want to do anyway so the
+	     flash and the tracers leave from the right place.
+
+	  2. THE LONGEST AXIS, POINTED AWAY FROM THE GRIP. A gun is longer than it is
+	     wide, and the end furthest from the thing you hold it by is the end the
+	     rounds come out of. Only believed when the longest axis is clearly longer
+	     than the forward one — see AXIS_MARGIN — because on a stubby weapon the
+	     comparison is noise.
+]]
+local function forwardOf(built: Model, host: BasePart, pivot: CFrame, centre: Vector3): Vector3?
+	local muzzle = findAttachment(built, MUZZLE_NAMES)
+	if muzzle then
+		local delta = (pivot:Inverse() * muzzle.WorldPosition) - centre
+		if delta.Magnitude > 0.05 then
+			return delta.Unit
+		end
+	end
+
+	local low, high = localExtents(built, pivot)
+	local size = high - low
+	local axis, length = Vector3.zAxis, size.Z
+	if size.X > length then
+		axis, length = Vector3.xAxis, size.X
+	end
+	if size.Y > length then
+		axis, length = Vector3.yAxis, size.Y
+	end
+	if axis == Vector3.zAxis or length < size.Z * AXIS_MARGIN then
+		return nil
+	end
+
+	--[[ Away from the grip. `host` is the PrimaryPart, the Handle, or the biggest
+	     part — see attachmentHost — and every one of those sits at the held end of
+	     a gun rather than at the muzzle. ]]
+	local grip = ((pivot:Inverse() * host.CFrame).Position - centre):Dot(axis)
+	return if grip > 0 then -axis else axis
+end
+
+--[[
+	Pins the pivot, and straightens the model if it is plainly not facing forward.
+
+	── WHY THIS DOES MORE THAN PIN ─────────────────────────────────────────────
+	The pose puts the weapon at an offset and lets the camera do the rest, which
+	assumes the model's barrel runs down its own -Z. Nothing ever checked. A gun
+	modelled along X — which is a perfectly ordinary way to build one — was drawn
+	lying across the bottom of the screen pointing at the edge of it, and looked
+	enormous doing it, because you were seeing its whole length side-on instead of
+	foreshortened down the barrel.
+
+	So a model that is clearly not pointing forward gets its PIVOT rotated, which
+	moves nothing and costs nothing: everything downstream — the pose, the fit,
+	the muzzle, the sight, the arms — is measured against the pivot, so correcting
+	it once here corrects all of them.
+
+	── AND A MODEL THAT IS FINE IS NOT TOUCHED ─────────────────────────────────
+	Within FORWARD_TOLERANCE of forward, this behaves exactly as it did: the
+	artist's PrimaryPart is left as the pivot if they set one, and the bounding
+	box centre is used if they did not. Overruling a deliberate cant would be
+	worse than the bug.
+]]
+local function pinPivot(built: Model, host: BasePart)
+	local pivot = built:GetPivot()
+	local low, high = localExtents(built, pivot)
+	local centre = (low + high) * 0.5
+
+	local forward = forwardOf(built, host, pivot, centre)
+	if not forward or forward.Z <= -FORWARD_TOLERANCE then
+		-- Already pointing the right way, or unreadable. Old behaviour exactly.
+		if built.PrimaryPart then
+			return
+		end
+		built.WorldPivot = built:GetBoundingBox()
 		return
 	end
-	local boxCFrame = built:GetBoundingBox()
-	built.WorldPivot = boxCFrame
+
+	--[[ The pivot is only honoured when there is no PrimaryPart: with one set,
+	     GetPivot returns that part's CFrame and WorldPivot is ignored entirely.
+	     So straightening a model means giving up the artist's choice of pivot —
+	     which is the cheaper of the two, since a pivot only decides where the
+	     model is measured from and the orientation decides whether it is a gun or
+	     a plank lying across the screen. ]]
+	built.PrimaryPart = nil
+
+	--[[ Roll is taken from world up unless the barrel IS up, where there is no
+	     meaningful up left and any perpendicular will do. ]]
+	local up = if math.abs(forward.Y) > 0.9 then Vector3.zAxis else Vector3.yAxis
+	built.WorldPivot = pivot * CFrame.new(centre) * CFrame.lookAt(Vector3.zero, forward, up)
 end
 
 --[[
@@ -1368,7 +1497,7 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	end
 
 	built.Name = "FL_Viewmodel"
-	pinPivot(built)
+	pinPivot(built, host)
 	-- Fit before measuring anything off the model: the muzzle, the sight and the
 	-- flash are all placed against its final geometry.
 	fitScale(built, pose)

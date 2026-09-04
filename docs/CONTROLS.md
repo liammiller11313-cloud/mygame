@@ -27,6 +27,17 @@ editing it by hand.
 | Backpack | B | — | — |
 | Requisitions | T | — | — |
 
+## The trigger uses what is in your hands
+
+With a **medkit or pills** selected, the fire button uses them on yourself — the
+same button, on all three platforms. `H` still works, and so does pressing the
+slot key a second time; they were the only two ways before, and a player who knew
+neither reasonably concluded the game would not let them heal.
+
+The heal runs on its own timer with a bar, so a click starts it and holding the
+button down is harmless. It is gated on the slot rather than on what you are
+carrying: pull the trigger with a **throwable** out and nothing is spent.
+
 ## Touch
 
 **The prompt is the button.** When something is usable, the prompt in the middle

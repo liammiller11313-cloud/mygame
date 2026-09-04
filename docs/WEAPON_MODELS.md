@@ -121,7 +121,8 @@ copy is what the game uses:
   not something bullets can hit or a zombie can walk into.
 - **A `Muzzle` attachment is invented** at the front of the bounding box if the
   model does not carry one. Add your own named `Muzzle` and tracers and the flash
-  come out of exactly where you put it.
+  come out of exactly where you put it — **and it is also what tells the game
+  which way your gun points**, so it is the fix for the problem below.
 - **A `Sight` or `AimPoint` attachment**, if present, is what gets put on the
   screen's centre line when you aim — so a scope's glass lines up with the
   crosshair instead of merely near it.
@@ -131,3 +132,28 @@ copy is what the game uses:
 None of this is required. A bare model with no attachments and no PrimaryPart
 works; the four bullets above are what you get for free and what to add if you
 want it exact.
+
+## If a gun comes out sideways
+
+The first-person pose assumes a weapon's barrel runs down its own **-Z**. A gun
+modelled along X — a perfectly ordinary way to build one — used to be drawn lying
+across the bottom of the screen pointing at the edge of it, and looked enormous
+doing it, because you were seeing its whole length side-on instead of
+foreshortened down the barrel.
+
+That is now corrected automatically: a model whose barrel is more than 35° off
+forward has its pivot straightened, which moves nothing and fixes the pose, the
+scale fit, the muzzle, the sight and the arms in one go. A model that is already
+close to forward is left exactly as you made it — a deliberate cant is yours to
+keep.
+
+The barrel is found in one of two ways:
+
+1. **A `Muzzle` attachment**, if the model has one. Exact, and the answer if you
+   want to be certain.
+2. Otherwise the **longest axis, pointed away from the grip** — the `Handle`, the
+   `PrimaryPart`, or the biggest part, whichever it finds first.
+
+So if a weapon still comes out pointing the wrong way, **put an Attachment called
+`Muzzle` at the end of its barrel.** That settles it, and it improves where the
+flash and the tracers come from at the same time.

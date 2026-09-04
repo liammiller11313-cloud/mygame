@@ -724,9 +724,59 @@ end
 	BEFORE the remote call, because FireServer is where the frame's latency
 	lives. Flash, tracer, kick, shake, sound, counter — then the packet.
 ]]
+--[[
+	The trigger, with a consumable in your hands.
+
+	Selecting a medkit and pulling the trigger did nothing at all: a health slot
+	carries no weapon definition, so this function returned on its first line. The
+	only way to heal was H, or pressing the slot key a second time, and a player
+	who knows neither reasonably concludes the game will not let them heal.
+
+	So the trigger uses it, which is what the trigger does in the game this one is
+	modelled on. Pills too — the same rule, and a heal key that worked for one and
+	not the other would be a worse thing to have to remember.
+
+	── AND IT IS GATED ON THE SLOT, NOT ON WHAT YOU CARRY ──────────────────────
+	The obvious version tests "is a gun in hand, and do I own a medkit" — and a
+	THROWABLE is also not a gun. Pull the trigger with a pipe bomb out and that
+	version spends your medkit, because the UseItem action falls back to Health
+	when the selected slot is not something it can spend. Burning a kit for a
+	click the player meant as a throw is far worse than the bug being fixed.
+
+	So it asks which slot is actually out, and answers only for the two that this
+	is about. The slot attribute lags a SwitchSlot by one round trip, which means
+	pressing 4 and clicking inside a tenth of a second does nothing and wants a
+	second click. That is the right way round for the trade.
+
+	It delegates the WHICH to InputController, whose UseItem action already
+	resolves it, rather than firing the remote from here.
+]]
+local USE_ON_TRIGGER: { [string]: boolean } = {
+	[Enums.Slot.Health] = true,
+	[Enums.Slot.Pills] = true,
+}
+
+local function useHeldConsumable(): boolean
+	if not USE_ON_TRIGGER[Attributes.get(player, LA.ActiveSlot, "")] then
+		return false
+	end
+	local input = Registry.find("InputController")
+	if not input or typeof(input.raise) ~= "function" then
+		return false
+	end
+	input:raise(input.Action.UseItem, true)
+	input:raise(input.Action.UseItem, false)
+	return true
+end
+
 local function fireOnce()
 	local definition = state.definition
 	if not definition then
+		--[[ No gun in hand. If a consumable is, the trigger spends it; the
+		     medkit's own use timer then owns the rest, so holding the button
+		     down is harmless — the server refuses a second use while one is
+		     already running. ]]
+		useHeldConsumable()
 		return
 	end
 	if definition.fireMode == "Melee" then
