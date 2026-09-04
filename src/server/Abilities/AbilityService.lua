@@ -133,8 +133,27 @@ local function clearCooldowns(player: Player)
 	end
 end
 
+--[[
+	Whether an ability may be used at all right now.
+
+	Starting counts, and it did not — which made the fifteen seconds of prep the
+	one window where an ability card says READY and every activation is refused.
+	That is also the window a player most wants a turret in: the wave has not
+	arrived, they are choosing a spot rather than defending one, and "set up
+	before it starts" is the entire appeal of a deployable.
+
+	Nothing is gained by refusing it. The cooldown is five minutes, so using it in
+	prep is spending it, not duplicating it; the turret it leaves behind is the
+	same turret placed fifteen seconds later; and the client already ends a
+	placement the moment the round leaves either state.
+
+	Both states, spelled out rather than borrowed from RoundService.isRunning:
+	this is a rule about when a PLAYER may act, and it should not silently follow
+	a helper that exists to answer a different question.
+]]
 local function roundIsRunning(): boolean
-	return Workspace:GetAttribute(GA.RoundState) == Enums.RoundState.InProgress
+	local state = Workspace:GetAttribute(GA.RoundState)
+	return state == Enums.RoundState.InProgress or state == Enums.RoundState.Starting
 end
 
 -- ── the gate ────────────────────────────────────────────────────────────────

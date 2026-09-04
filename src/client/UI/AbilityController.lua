@@ -302,6 +302,57 @@ local function refreshCooldowns()
 	end
 end
 
+--[[ The states an ability may be used in, matching AbilityService's own rule —
+     see roundIsRunning there for why prep counts. Written once here because two
+     places in this file ask it and they must not drift: one deciding whether a
+     placement may START and the other whether one may CONTINUE. ]]
+local function roundAllowsAbilities(): boolean
+	local round = Workspace:GetAttribute(GA.RoundState)
+	return round == Enums.RoundState.InProgress or round == Enums.RoundState.Starting
+end
+
+--[[
+	Says why a press did nothing, where the player was looking when it did.
+
+	This is the bug that made every other one in this file undiagnosable. The
+	server answers every refusal with a REASON — "Still cooling down", "Not right
+	now", "Could not deploy that here" — and the client received all of them,
+	dropped the aim, played a small click and threw the string away. From the
+	player's side, pressing fire to place a turret did nothing at all, with no
+	message, no turret and no way to tell a refused placement from a broken one.
+
+	Shown on the reticle rather than in a subtitle: the reticle is already at the
+	spot they were aiming at, and a placement refusal is about that spot. It
+	outlives the aim by design — the whole point is that it is still there after
+	the ghost has gone.
+]]
+local REFUSAL_SECONDS = 2.2
+local refusalUntil = 0
+
+local function showRefusal(reason: string?)
+	local text = if typeof(reason) == "string" and reason ~= "" then reason else "Not right now."
+	reticleLabel.Text = text
+	reticleLabel.TextColor3 = GHOST_BAD
+	reticleHint.Text = ""
+	reticle.Visible = true
+	refusalUntil = os.clock() + REFUSAL_SECONDS
+	--[[ Cleared so the hint comparison in stepGhost cannot decide the next
+	     placement's opening hint is already on screen and skip writing it. ]]
+	state.hint = ""
+end
+
+--[[ Takes the refusal down once it has been read. Driven from the same frame
+     loop the ghost is, so there is no timer to cancel when a new placement
+     starts on top of one — beginAim clears the deadline and the reticle is its
+     again. ]]
+local function stepRefusal()
+	if refusalUntil > 0 and os.clock() >= refusalUntil then
+		refusalUntil = 0
+		reticle.Visible = false
+		reticleLabel.TextColor3 = COLOR.AccentBright
+	end
+end
+
 --[[
 	Moves the placement preview to wherever the crosshair is, and colours it.
 
@@ -405,6 +456,7 @@ end
 local function step()
 	local at = now()
 	stepGhost()
+	stepRefusal()
 	for index, card in cards do
 		if not card.frame.Visible then
 			continue
@@ -488,6 +540,11 @@ end
 	touch path here.
 ]]
 local function beginAim(slot: number)
+	--[[ A new placement owns the reticle, so any refusal still sitting on it is
+	     dropped rather than left to expire over the top of the new one. ]]
+	refusalUntil = 0
+	reticleLabel.TextColor3 = COLOR.AccentBright
+
 	if state.aiming == slot then
 		--[[ Pressing the same key again confirms, rather than doing nothing. On a
 		     phone the ability button is the only thing under a thumb, so it has to
@@ -611,6 +668,26 @@ function AbilityController:press(slot: number)
 	     round trip to be told no, and would make the card a liar. ]]
 	if now() < card.readyAt then
 		UiSound.play(AudioConfig.UI.MenuBack)
+		showRefusal("Still cooling down.")
+		return
+	end
+
+	--[[
+		And not before the round is running.
+
+		AbilityService requires RoundState == InProgress and refuses everything
+		else, but nothing here stopped a placement STARTING during prep — so the
+		card said READY, the ghost worked, the spot went green, and the confirm
+		came back refused every time. The one state where the whole placement
+		system looks like it works and cannot possibly succeed.
+
+		The listener further down already ends an aim when the round leaves
+		InProgress, so this file always meant placement to be in-round only. It
+		just never said so at the front door.
+	]]
+	if not roundAllowsAbilities() then
+		UiSound.play(AudioConfig.UI.MenuBack)
+		showRefusal("Not right now.")
 		return
 	end
 
@@ -800,6 +877,9 @@ function AbilityController:start()
 		end
 		endAim()
 		UiSound.play(AudioConfig.UI.MenuBack)
+		--[[ AFTER endAim, which hides the reticle this then puts back up. The
+		     other order shows the reason for one frame and hides it. ]]
+		showRefusal(payload.reason)
 	end)
 
 	--[[
@@ -820,7 +900,7 @@ function AbilityController:start()
 	end
 	trove:connect(player:GetAttributeChangedSignal(PA.State), cancelIfUnplaceable)
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
-		if Workspace:GetAttribute(GA.RoundState) ~= Enums.RoundState.InProgress then
+		if not roundAllowsAbilities() then
 			endAim()
 		end
 	end)
