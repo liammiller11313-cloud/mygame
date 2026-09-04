@@ -510,7 +510,78 @@ local function retire(turret: Emplacement, index: number, destroyed: boolean)
 	})
 end
 
-local function fire(turret: Emplacement, target: Model, targetRoot: BasePart, damage: number)
+--[[
+	Where the gun points, from where it wants to shoot.
+
+	── IT PITCHES NOW, AND IT IS CLAMPED ───────────────────────────────────────
+	This used to flatten the aim entirely: yaw only, on the reasoning that a
+	supplied model's gun is a child sitting on a base and pitching it at
+	somebody's feet three studs away would tip the whole assembly onto its face.
+	The reasoning was right about the failure and wrong about the fix. What tips
+	a model over is an EXTREME angle, not any angle, and a gun that stays dead
+	level while its rounds go up at a rooftop is a gun visibly lying about what
+	it is doing — which a person sitting behind it notices immediately.
+
+	So it pitches, inside a clamp a real emplacement would have. Past the clamp
+	the barrel simply stops and the rounds keep going, which is the honest
+	compromise every mounted gun in every shooter makes.
+
+	Nil for an aim with no horizontal component at all — straight up or straight
+	down — where there is no heading to point along and the last one is the
+	better answer than a spin.
+]]
+local MAX_PITCH = math.rad(28)
+
+--[[ For the missed-shot ray only. Rebuilt per shot rather than kept in sync,
+     because the one thing it must exclude — every turret in the world plus the
+     firing player — changes as turrets come and go, and a stale filter would
+     stop a tracer inside the gun that fired it. It is one table allocation on a
+     path that already casts a ray. ]]
+local missParams = RaycastParams.new()
+missParams.FilterType = Enum.RaycastFilterType.Exclude
+missParams.IgnoreWater = true
+
+local function refreshMissFilter(turret: Emplacement)
+	local filter = { turret.model }
+	local character = turret.player.Character
+	if character then
+		table.insert(filter, character)
+	end
+	local infectedFolder = Workspace:FindFirstChild("Infected")
+	if infectedFolder then
+		--[[ Bodies are excluded because a MISS is defined by manualTarget, not by
+		     this ray: a round that clipped a shoulder the cylinder did not accept
+		     must still show as going past, not as stopping in mid-air. ]]
+		table.insert(filter, infectedFolder)
+	end
+	missParams.FilterDescendantsInstances = filter
+end
+
+local function aimHeading(delta: Vector3): Vector3?
+	local flat = Vector3.new(delta.X, 0, delta.Z)
+	local run = flat.Magnitude
+	if run < 0.05 then
+		return nil
+	end
+	local pitch = math.clamp(math.atan2(delta.Y, run), -MAX_PITCH, MAX_PITCH)
+	return (flat / run) * math.cos(pitch) + Vector3.yAxis * math.sin(pitch)
+end
+
+--[[
+	One round, at a point, hitting a body or hitting nothing.
+
+	`target` is optional and that is the whole change: a manned turret must be
+	able to MISS. Manual fire only finds a body inside a 2.5-stud cylinder around
+	the aim, so a player pointing slightly off got no sound, no tracer and no
+	muzzle — a trigger pull that produced nothing at all, which reads as the
+	turret being broken rather than as the player missing. Every gun in this game
+	fires whether or not it connects, and so does this one now.
+
+	`at` is where the round ends up: the body's root when there is one, and the
+	wall (or the far end of the aim) when there is not. It is what the tracer is
+	drawn to and nothing else reads it.
+]]
+local function fire(turret: Emplacement, at: Vector3, target: Model?, targetRoot: BasePart?, damage: number)
 	--[[
 		From a barrel, not from the middle of the gun.
 
@@ -539,7 +610,7 @@ local function fire(turret: Emplacement, target: Model, targetRoot: BasePart, da
 	end
 
 	local infected: any = Registry.find("InfectedService")
-	if infected and typeof(infected.damage) == "function" then
+	if target and targetRoot and infected and typeof(infected.damage) == "function" then
 		local delta = targetRoot.Position - origin
 		local distance = delta.Magnitude
 		infected:damage(
@@ -570,7 +641,7 @@ local function fire(turret: Emplacement, target: Model, targetRoot: BasePart, da
 		pcall(audio.play, audio, "WeaponFire", Enums.Weapon.M249, turret.head)
 	end
 
-	AbilitySupport.broadcast("TurretShot", { origin = origin, hit = targetRoot.Position })
+	AbilitySupport.broadcast("TurretShot", { origin = origin, hit = at })
 end
 
 --[[ The nearest living infected this turret can actually see. Line of sight
@@ -769,6 +840,9 @@ function Turret.step(_dt: number)
 		--[[ Where the barrel wants to point, as a flat heading. Both modes end up
 		     here; only the way they arrive at it differs. ]]
 		local heading: Vector3? = nil
+		--[[ Where this round lands. Nil until something decides; only ever read
+		     alongside wantsShot. ]]
+		local impact: Vector3? = nil
 		local wantsShot = false
 		local rate = TUNING.FireRate
 
@@ -776,17 +850,15 @@ function Turret.step(_dt: number)
 			--[[
 				MANNED. The player's aim, and their trigger.
 
-				The barrel still traverses in YAW ONLY, for the reason the automatic
-				branch below gives — a supplied gun pitched at somebody's feet tips
-				the whole assembly over — but the SHOT goes down the full
-				three-dimensional aim. So a player leaning the crosshair onto a
-				rooftop hits the rooftop while the model stays upright, which is
-				exactly the compromise every emplacement in every shooter makes.
+				The barrel follows the aim, pitch included, up to the clamp in
+				aimHeading — and the SHOT goes down the full three-dimensional aim
+				whether the barrel could follow it there or not. So leaning the
+				crosshair onto a rooftop hits the rooftop, and the gun visibly
+				points as far up as an emplacement can.
 			]]
 			local direction = turret.manualDirection
 			if direction then
-				local flat = Vector3.new(direction.X, 0, direction.Z)
-				heading = if flat.Magnitude > 0.05 then flat.Unit else nil
+				heading = aimHeading(direction)
 				--[[ Behind the fire-rate gate on purpose, not just behind the
 				     trigger. manualTarget walks every living body and traces a
 				     sight line to each candidate; doing that on every frame a
@@ -799,6 +871,19 @@ function Turret.step(_dt: number)
 					and now >= turret.nextShotAt
 				then
 					target, targetRoot = manualTarget(turret, direction, TUNING.Range)
+					--[[ Where the round ends up when it hits nobody: the body it
+					     found, or whatever it buries itself in. One raycast, at
+					     most ManualFireRate times a second, and it is what stops a
+					     missed tracer sailing seventy studs through the wall the
+					     player was firing at three studs away. ]]
+					if targetRoot then
+						impact = targetRoot.Position
+					else
+						refreshMissFilter(turret)
+						local reach = direction * TUNING.Range
+						local hit = Workspace:Raycast(turret.head.Position, reach, missParams)
+						impact = if hit then hit.Position else turret.head.Position + reach
+					end
 					wantsShot = true
 				end
 			end
@@ -824,23 +909,12 @@ function Turret.step(_dt: number)
 				turret.target = nil
 			end
 			if target and targetRoot then
-				--[[
-					Aimed every frame even between shots, so the barrel tracks rather
-					than snapping at the moment it fires. It is the only thing that
-					makes a static box read as a machine paying attention.
-
-					YAW ONLY. A supplied model's gun is a child sitting on a base, and
-					pitching it at a Common's chest three studs away would tip the
-					whole assembly onto its face. Real emplacements traverse; they do
-					not roll over. The flat heading also keeps the muzzle at a sane
-					height, which is what the tracer is drawn from.
-				]]
-				local flat = Vector3.new(
-					targetRoot.Position.X - turret.head.Position.X,
-					0,
-					targetRoot.Position.Z - turret.head.Position.Z
-				)
-				heading = if flat.Magnitude > 0.05 then flat.Unit else nil
+				--[[ Aimed every frame even between shots, so the barrel tracks
+				     rather than snapping at the moment it fires. It is the only
+				     thing that makes a static box read as a machine paying
+				     attention. See aimHeading for the pitch clamp. ]]
+				heading = aimHeading(targetRoot.Position - turret.head.Position)
+				impact = targetRoot.Position
 				wantsShot = true
 			end
 		end
@@ -860,9 +934,12 @@ function Turret.step(_dt: number)
 			branch has always worked this way because it never reaches here without
 			a target; this keeps the manned one honest about the same rule.
 		]]
-		if wantsShot and target and targetRoot and now >= turret.nextShotAt then
+		--[[ `impact` rather than a target is what gates the shot now: an automatic
+		     turret never reaches here without one, and a manned one is allowed to
+		     put a round into a wall. ]]
+		if wantsShot and impact and now >= turret.nextShotAt then
 			turret.nextShotAt = now + 1 / math.max(rate, 0.01)
-			fire(turret, target, targetRoot, TUNING.Damage)
+			fire(turret, impact, target, targetRoot, TUNING.Damage)
 		end
 
 		publish(turret)

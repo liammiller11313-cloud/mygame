@@ -18,13 +18,28 @@ cannot alternate every frame.
 
 While you are in it:
 
+- **The camera pulls back behind the gun.** Locked first person put it inside the
+  gunner's head, two studs behind the barrel, looking at the back of the turret
+  with the viewmodel deliberately hidden — you could not tell where the thing was
+  pointing. Now the turret, its arc and whatever is coming down it are all in
+  frame. Scroll to choose how far back, between 7 and 18 studs.
 - The gun aims where **your camera** points and fires on your **normal fire
   button**.
+- **The barrel follows your aim, pitch included**, up to 28° — past that it stops
+  and the rounds keep going, which is what a real emplacement does.
+- **You can miss.** A round that finds nothing still fires: sound, muzzle, and a
+  tracer that stops on whatever it buries itself in. A trigger pull that produced
+  nothing at all read as the turret being broken rather than as you missing.
 - Your own weapon is put away. The viewmodel goes off screen and the trigger does
   not fire it, because it is firing the turret instead.
 - The bar over the turret reads **MANUAL** instead of **AUTO**.
 - It shoots **half again as fast** — 4.5 rounds a second against the automatic
   3.0 — for the same damage per round.
+
+Your shots land on anything within about a body's width of where you point. That
+is deliberately forgiving: a raw ray down the barrel misses bodies you are
+plainly aiming at, because half an infected rig's parts are invisible to
+raycasts for the ballistics path's own reasons.
 
 Empty, it goes back to picking the nearest thing it can see.
 

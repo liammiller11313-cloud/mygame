@@ -126,6 +126,11 @@ local DOWNED_STATES: { [string]: boolean } = {
 	[STATE.LedgeHanging] = true,
 }
 
+--[[ How far back the camera sits while a player is driving a turret. See the
+     ManningTurret branch in applyCameraMode. ]]
+local TURRET_ZOOM_MIN = 7
+local TURRET_ZOOM_MAX = 18
+
 local NO_CHARACTER_STATES: { [string]: boolean } = {
 	[STATE.Dead] = true,
 	[STATE.Spectating] = true,
@@ -562,6 +567,28 @@ local function applyCameraMode()
 		player.CameraMode = Enum.CameraMode.Classic
 		player.CameraMinZoomDistance = 0.5
 		player.CameraMaxZoomDistance = 128
+	elseif Attributes.get(player, PA.ManningTurret, false) == true then
+		--[[
+			BEHIND THE GUN, NOT INSIDE THE GUNNER.
+
+			The turret's seat is a couple of studs behind the barrel, so locked
+			first person put the camera in the gunner's head — looking at the back
+			of the gun, with the viewmodel deliberately hidden and nothing else to
+			see. You could not tell where the thing was pointing, which is the one
+			job the view has while you are driving it.
+
+			So it pulls out, the way a mounted gun does in every game that has one:
+			the turret, the arc it covers and the bodies coming down it are all in
+			frame at once. A band rather than a fixed distance because a corridor
+			and a car park want different amounts of it, and the player is the only
+			one who can tell which they are in.
+
+			The floor is well past first person on purpose. Zooming back into the
+			gunner's skull is the state this exists to get out of.
+		]]
+		player.CameraMode = Enum.CameraMode.Classic
+		player.CameraMinZoomDistance = TURRET_ZOOM_MIN
+		player.CameraMaxZoomDistance = TURRET_ZOOM_MAX
 	else
 		player.CameraMode = Enum.CameraMode.LockFirstPerson
 		player.CameraMinZoomDistance = 0.5
@@ -606,6 +633,10 @@ end
 
 function CameraController:init()
 	trove:connect(player:GetAttributeChangedSignal(PA.State), refreshState)
+	--[[ Sitting down in a turret and standing back up both change the camera and
+	     neither changes the survivor state, so refreshState would never hear
+	     about it. applyCameraMode directly: there is no cached state to refresh. ]]
+	trove:connect(player:GetAttributeChangedSignal(PA.ManningTurret), applyCameraMode)
 	refreshState()
 	applyCameraMode()
 end
