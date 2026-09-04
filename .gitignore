@@ -6,5 +6,10 @@
 build/
 # Tooling
 ~/.rokit
+# The Rojo binary this project keeps beside itself, and the archive it came in.
+# scripts/update-rojo.sh downloads these; they are per-machine, not source.
+/rojo
+/rojo-*.zip
+/rojo-*.tar.gz
 .DS_Store
 *.log

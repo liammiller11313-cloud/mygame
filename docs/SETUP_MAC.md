@@ -149,6 +149,34 @@ Both refusals are quiet by design, which is exactly what makes them easy to miss
 
 `./scripts/autostart.sh log` shows it saying so.
 
+### One more thing that can make a tree dirty: Studio itself
+
+If the tree keeps going dirty without you editing anything, and the log is
+scrolling errors like these:
+
+```
+[ERROR librojo::change_processor] Failed to write file .../src/shared/Enums: Is a directory (os error 21)
+[WARN  librojo::change_processor] Cannot remove instance Ref(...), it's from a project file
+```
+
+then **Two-Way Sync is on in the Rojo plugin**. Turn it off:
+
+> Studio → Plugins → Rojo → the settings gear → **Two-Way Sync: off**
+
+Sync is meant to go one way — files into Studio. With two-way on, Studio pushes
+its own copy of the tree back onto the filesystem. Most of those writes fail
+loudly (`src/shared/Enums` is a *folder* holding `init.lua`, and a file cannot be
+written over a folder, so it retries forever), but the ones that succeed
+overwrite source you just pulled — and then the dirty tree they leave behind
+stops the next auto-pull. `rojo-doctor.sh` counts these errors and says so.
+
+If you have already stashed changes you did not make, look before you keep them:
+
+```bash
+git stash show -p        # if this is Studio's writeback, not your work
+git stash drop           # throw it away
+```
+
 ## Getting updates
 
 `./scripts/dev.sh` already does this — it checks the branch every 20 seconds and

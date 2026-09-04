@@ -274,6 +274,42 @@ else
   fi
 fi
 
+# ── 5. is Studio writing BACK? ──────────────────────────────────────────────
+#
+#  Sync is supposed to run one way: files -> Studio. The Rojo plugin has a
+#  "Two-Way Sync" / "Sync from Studio" switch that reverses part of it, and with
+#  it on, Studio tries to push its own tree onto the filesystem. That fails here
+#  in a way that reads like a Rojo bug and is not one:
+#
+#     Failed to write file .../src/shared/Enums: Is a directory (os error 21)
+#     Cannot remove instance Ref(...), it's from a project file
+#
+#  Studio holds `Enums` as one ModuleScript, so it writes it as one file. On disk
+#  it is a FOLDER containing init.lua, and you cannot write a file over a folder.
+#  Every single change re-tries and re-fails, thousands of lines of it, and the
+#  real risk is the writes that DO land: Studio overwriting source you pulled.
+#
+#  Nothing on this side can read the plugin's settings, but the errors it causes
+#  land in the log this project keeps, so they can be counted from here.
+LOGFILE=".rojo-dev.log"
+if [ -f "$LOGFILE" ]; then
+  WRITEBACK=$(tail -n 4000 "$LOGFILE" 2>/dev/null \
+    | grep -c -e 'Failed to write file' -e "it's from a project file" || true)
+  if [ "${WRITEBACK:-0}" -gt 0 ]; then
+    PROBLEM=1
+    echo ""
+    echo "PROBLEM: Studio is trying to write back to the filesystem"
+    echo "         ($WRITEBACK such error(s) in the recent log)."
+    echo ""
+    echo "  That is Two-Way Sync, and it is on in the Rojo plugin. Sync should go"
+    echo "  one way only — files to Studio. Turn it off:"
+    echo ""
+    echo "    Studio > Plugins > Rojo > the settings gear > Two-Way Sync: off"
+    echo ""
+    echo "  Then reconnect. Until you do, Studio can overwrite source you pulled."
+  fi
+fi
+
 #[[ The plugin cannot be inspected from out here — it lives inside Studio and
 #   nothing on this side can read it. So it is not guessed at; it is named as
 #   the half still to check, with where to look. ]]
