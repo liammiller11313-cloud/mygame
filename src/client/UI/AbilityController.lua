@@ -42,6 +42,7 @@ local AbilityAssets = require(Shared.Util.AbilityAssets)
 local AbilityConfig = require(Shared.Config.AbilityConfig)
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
+local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
@@ -52,6 +53,20 @@ local UITheme = require(Shared.Config.UITheme)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
+
+local GA = Attributes.Game
+local PA = Attributes.Player
+local STATE = Enums.SurvivorState
+
+--[[ The states in which a placement cannot be finished. Aiming is cancelled the
+     moment the player enters one — see `start`. ]]
+local CANNOT_PLACE: { [string]: boolean } = {
+	[STATE.Incapacitated] = true,
+	[STATE.LedgeHanging] = true,
+	[STATE.Pinned] = true,
+	[STATE.Dead] = true,
+	[STATE.Spectating] = true,
+}
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -380,13 +395,11 @@ local function endAim()
 	end
 	local slot = state.aiming
 	state.aiming = 0
+	--[[ Cleans the confirm binding, the cancel listener AND the ghost, which is
+	     in the trove. The nil-out below is bookkeeping, not the destruction. ]]
 	aimTrove:clean()
+	state.ghost = nil
 	reticle.Visible = false
-
-	if state.ghost then
-		state.ghost:Destroy()
-		state.ghost = nil
-	end
 	--[[ Forces the card back off its cached second, so "PICK A SPOT" is replaced
 	     on the next frame rather than whenever the clock happens to tick. ]]
 	local card = cards[slot]
@@ -450,7 +463,15 @@ local function beginAim(slot: number)
 	     airstrike do by design. ]]
 	local definition = AbilityConfig.get(cards[slot] and cards[slot].id or "")
 	if definition and definition.preview then
-		state.ghost = AbilityAssets.ghost(definition.preview, GHOST_TRANSPARENCY, GHOST_OK)
+		local ghost = AbilityAssets.ghost(definition.preview, GHOST_TRANSPARENCY, GHOST_OK)
+		state.ghost = ghost
+		--[[ Owned by the aim trove as well as by endAim. endAim covers the normal
+		     path; the trove covers the ones that skip it — a controller torn down
+		     mid-placement would otherwise leave the model in Workspace with
+		     nothing left alive to destroy it. ]]
+		if ghost then
+			aimTrove:add(ghost)
+		end
 		--[[ Forced to disagree, so the first stepGhost paints it whichever it
 		     actually is rather than trusting the colour it was cloned with. ]]
 		state.ghostOk = false
@@ -665,8 +686,29 @@ function AbilityController:start()
 		UiSound.play(AudioConfig.UI.MenuBack)
 	end)
 
-	--[[ Rebinding changes what the corner of a card says. Cheap to re-read and
-	     it happens once in a blue moon, so it rides the same refresh. ]]
+	--[[
+		Anything that makes a placement impossible cancels it.
+
+		Without this, being pounced mid-placement left the ghost following a
+		spectator camera around the map, the prompt on screen, and — worst — the
+		confirm still bound at High + 500, so the first shot fired after a respawn
+		was swallowed and spent as a placement instead.
+
+		Both halves matter and neither implies the other: a player can die
+		without the round ending, and a round can end with everyone alive.
+	]]
+	local function cancelIfUnplaceable()
+		if CANNOT_PLACE[tostring(Attributes.get(player, PA.State, STATE.Spectating))] then
+			endAim()
+		end
+	end
+	trove:connect(player:GetAttributeChangedSignal(PA.State), cancelIfUnplaceable)
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
+		if Workspace:GetAttribute(GA.RoundState) ~= Enums.RoundState.InProgress then
+			endAim()
+		end
+	end)
+
 	--[[ Rebinding changes what the corner of a card says, and so does picking up
 	     a controller — the prompt is per-scheme, so both have to redraw it. ]]
 	local input = Registry.find("InputController")

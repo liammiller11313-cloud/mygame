@@ -55,7 +55,7 @@ local trove = Trove.new()
      one thing to destroy if this controller is ever torn down — a stray
      airstrike marker with no owner is the kind of thing that outlives a round
      and confuses everybody. ]]
-local folder: Folder
+local folder: Folder?
 
 local function decorate(part: BasePart)
 	part.Anchored = true
@@ -407,6 +407,12 @@ end
 
 function AbilityEffects:destroy()
 	trove:destroy()
+	--[[ Nil'd as well as destroyed. The flyover's two delayed callbacks fire up
+	     to a few seconds after the marker and check this before building
+	     anything; a variable still pointing at a DESTROYED folder passes a plain
+	     truthiness check and then throws on the parent assignment, because a
+	     destroyed instance is locked. ]]
+	folder = nil
 end
 
 Registry.register("AbilityEffects", AbilityEffects)

@@ -906,10 +906,16 @@ local layer = {
 	consumed = false,
 }
 
---[[ Whether the modifier is being held long enough to count. Read on every face
-     button press rather than latched, so a press in the first fraction of a
-     second still falls through to reload rather than being eaten by a layer the
-     player has not opened yet. ]]
+--[[ Which face buttons were sunk on their way DOWN, so their release can be
+     answered the same way. See bindAbilityLayer: the layer can open or shut
+     between the two edges, and a release answered differently from its press
+     strands the action underneath it. ]]
+local sunkFace: { [number]: boolean } = {}
+
+--[[ Whether the modifier is being held long enough to count. Read on the face
+     button PRESS rather than latched at the layer, so a press in the first
+     fraction of a second still falls through to reload rather than being eaten
+     by a layer the player has not opened yet. ]]
 local function layerOpen(): boolean
 	return layer.down and (os.clock() - layer.downAt) >= LAYER_HOLD
 end
@@ -958,19 +964,43 @@ local function bindAbilityLayer()
 		ContextActionService:BindActionAtPriority(
 			PREFIX .. "AbilityFace" .. index,
 			function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult?
-				--[[ Pass while the layer is shut, which is almost always. This is
-				     what keeps ButtonX as reload and ButtonY as interact for every
-				     player who never holds the view button. ]]
-				if not layerOpen() then
-					return Enum.ContextActionResult.Pass
-				end
 				if state == Enum.UserInputState.Begin then
+					--[[ Pass while the layer is shut, which is almost always. This
+					     is what keeps ButtonX as reload and ButtonY as interact for
+					     every player who never holds the view button. ]]
+					if not layerOpen() then
+						return Enum.ContextActionResult.Pass
+					end
+					--[[ LATCHED, and this is the whole reason the branch is on the
+					     edge rather than on layerOpen() every time.
+
+					     The layer can open or shut between a button going down and
+					     coming back up, and re-asking would then answer the release
+					     differently from the press. Both directions broke
+					     something real: hold ButtonB to crouch, then hold view, and
+					     the release was swallowed by a layer that was shut when the
+					     press went through — leaving the player crouched at nine
+					     studs a second with nothing holding the key. The same on
+					     ButtonY left a revive begun and never cancelled.
+
+					     Whatever the press was answered with, the release gets the
+					     same answer. ]]
+					sunkFace[index] = true
 					layer.consumed = true
 					if enabled and UserInputService:GetFocusedTextBox() == nil then
 						forward("Ability" .. index)
 					end
+					return Enum.ContextActionResult.Sink
 				end
-				return Enum.ContextActionResult.Sink
+
+				--[[ End and Cancel both settle the latch, so a button the game
+				     never saw released — focus lost, controller unplugged — does
+				     not leave it set for the next press. ]]
+				if sunkFace[index] then
+					sunkFace[index] = nil
+					return Enum.ContextActionResult.Sink
+				end
+				return Enum.ContextActionResult.Pass
 			end,
 			false,
 			LAYER_PRIORITY,
@@ -984,6 +1014,12 @@ local function unbindAbilityLayer()
 	for index = 1, #LAYER_FACE_KEYS do
 		ContextActionService:UnbindAction(PREFIX .. "AbilityFace" .. index)
 	end
+	--[[ Unbinding cancels nothing, so a button held through a scheme change
+	     never delivers its release edge. Cleared here or the latch would answer
+	     the NEXT press's release with the last one's decision. ]]
+	table.clear(sunkFace)
+	layer.down = false
+	layer.consumed = false
 end
 
 -- ── public API ──────────────────────────────────────────────────────────────
