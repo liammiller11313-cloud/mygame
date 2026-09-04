@@ -17,6 +17,12 @@
 	is unreadable — "CLUES 0/4" printed through "REQUISITION AND READY UP" printed
 	through "SEARCH THE BUILDING".
 
+	(The clue counter has since moved out of the centre entirely, to the left
+	column under the orders card — four cards queuing down the middle of the
+	screen was legible and still too much furniture over the part of the view a
+	player is shooting into. It is named above because it is the reason this file
+	exists, not because it is still here.)
+
 	It could not be fixed locally, either. Each controller knew its own height and
 	nobody knew the order, so every fix was one more controller reaching into two
 	others through Registry and adding numbers up — which is how the third one
@@ -52,7 +58,7 @@ local TopStack = {}
 --[[ Top to bottom. A name not in this list is refused rather than silently
      dropped on the floor at y = base: a typo'd key would otherwise draw its card
      over the clock and look exactly like the bug this file replaced. ]]
-local ORDER = table.freeze({ "Boss", "Objective", "Clues", "Event" })
+local ORDER = table.freeze({ "Boss", "Objective", "Event" })
 
 local ALLOWED: { [string]: boolean } = {}
 for _, key in ORDER do

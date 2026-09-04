@@ -37,7 +37,7 @@ scaled by 2.5. Roughly:
 
 | Attacking it | Time to destroy 250 HP |
 |---|---|
-| One Common | 22 s — it will not manage it alone inside the turret's lifetime |
+| One Common | 22 s — one body alone will not finish it before help arrives |
 | Five Commons | 4.5 s |
 | One Charger | 5.8 s |
 | One Tank | 3.1 s |
@@ -88,7 +88,7 @@ All in `AbilityConfig`, under the Turret definition's `tuning`:
 | `ManualFireRate` | 4.5 | Rounds a second, manned |
 | `Range` | 70 | How far it will shoot |
 | `Health` | 250 | |
-| `Lifetime` | 30 | Seconds, then it packs up |
+| `Lifetime` | 75 | Seconds, then it packs up |
 | `AggroRadius` | 22 | How close a body has to be to turn on it |
 | `MaxAttackers` | 5 | How many can attack one turret at once |
 | `AttackDamageScale` | 2.5 | A swing against it, as a multiple of a swing against a person |

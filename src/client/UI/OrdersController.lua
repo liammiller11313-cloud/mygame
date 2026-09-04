@@ -92,6 +92,17 @@ local BAR_HEIGHT = 4
 local ORDER_HEIGHT = 26
 local ORDER_GAP = 3
 
+--[[ The header plus however many orders the track hands out, written out of the
+     same numbers the rows are built from rather than typed — the last three
+     times a row changed shape in this project, a hand-written parent height did
+     not follow. Hoisted out of build() because the clue counter now sits under
+     this card and needs to know where it ends. ]]
+local CARD_HEIGHT = LAYOUT.PanelPadding * 2
+	+ LEVEL_HEIGHT
+	+ BAR_HEIGHT
+	+ LAYOUT.ElementGap
+	+ ProgressionConfig.DailyQuests * (ORDER_HEIGHT + ORDER_GAP)
+
 --[[
 	How faded the card sits when nothing is happening to it, and how solid it
 	goes when something is. The gap between the two is the whole design — see
@@ -324,17 +335,7 @@ local function build()
 	card.BorderSizePixel = 0
 	card.GroupTransparency = IDLE_TRANSPARENCY
 	card.Position = cardPosition()
-	--[[ Height is the header plus three orders, written out of the same numbers
-	     the rows are built from rather than typed — the last three times a row
-	     changed shape in this project, a hand-written parent height did not. ]]
-	card.Size = UDim2.fromOffset(
-		CARD_WIDTH,
-		LAYOUT.PanelPadding * 2
-			+ LEVEL_HEIGHT
-			+ BAR_HEIGHT
-			+ LAYOUT.ElementGap
-			+ ProgressionConfig.DailyQuests * (ORDER_HEIGHT + ORDER_GAP)
-	)
+	card.Size = UDim2.fromOffset(CARD_WIDTH, CARD_HEIGHT)
 
 	card.Parent = layer
 	--[[ Inside the group, so the outline fades with everything else. A card with
@@ -410,6 +411,21 @@ function OrdersController:isEnabled(): boolean
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────
+
+--[[
+	Where this card stops, in the scaled layer's own pixels — or where the top of
+	the left column is, when the card is not on screen.
+
+	The left column is now a column: the clue counter draws under this. Asked
+	rather than guessed, because everything about this card's Y is conditional —
+	Roblox's chrome inset, the scale factor it is divided by, and whether the
+	profile has landed yet — and a second file working any of that out for itself
+	is the mistake TopStack exists to have stopped making in the centre.
+]]
+function OrdersController:getBottom(): number
+	local top = cardPosition().Y.Offset
+	return if state.visible then top + CARD_HEIGHT else top
+end
 
 function OrdersController:init()
 	build()

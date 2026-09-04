@@ -44,7 +44,6 @@ local UITheme = require(Shared.Config.UITheme)
 local FreeCursor = require(script.Parent.FreeCursor)
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
-local TopStack = require(script.Parent.TopStack)
 local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
 
@@ -76,21 +75,51 @@ local VAULT_LINE_SECONDS = 5
      four of them over ten minutes should not each hold the subtitle bar. ]]
 local CLUE_LINE_SECONDS = 3
 
---[[ The clue counter, top-centre under the wave banner. Its own small card
-     rather than a line in the objective, because the objective is rewritten on
-     every wave edge and a side objective that got overwritten by "WAVE 4" would
-     be a counter nobody could rely on.
+--[[
+	The clue counter. Its own small card rather than a line in the objective,
+	because the objective is rewritten on every wave edge and a side objective
+	that got overwritten by "WAVE 4" would be a counter nobody could rely on.
 
-     Its Y used to be the literal number 96, which is how it came to be drawn
-     THROUGH the round block and the objective line at once — the wave block is
-     22 + 96 tall on its own before a modifier, so the card was landing inside it
-     rather than under it, and nothing about a fixed pixel could ever have
-     followed a boss bar opening above. It claims a TopStack slot now. ]]
-local TRACKER_WIDTH = 250
+	── IT LIVES DOWN THE LEFT NOW ──────────────────────────────────────────────
+	It was top-centre, at the literal number 96, which is INSIDE the wave block —
+	the round clock and its pips are 22 + 84 tall before a modifier — so it drew
+	straight through the round's own lines and through the objective under them.
+	Putting it in the centre stack fixed the collision and left four cards queuing
+	down the middle of the screen, which is a lot of furniture over the one part
+	of the view a player is actually shooting into.
+
+	So it moved to the left column, under the orders card, where nothing else
+	draws until the survivor panels at the bottom. The centre is back to the round
+	block, the objective and whatever is transient. OrdersController is ASKED
+	where it ends rather than the number being copied — see its getBottom.
+]]
+--[[ The same width as the orders card above it. A column of two cards that do
+     not agree on where their right edge is reads as two things that happen to be
+     near each other rather than as one column. ]]
+local TRACKER_WIDTH = 208
 local TRACKER_HEIGHT = 52
 local TRACKER_FLASH = 1.6
 local TRACKER_IDLE = 0.45
 local TRACKER_LIVE = 0.0
+
+--[[ Under the orders card, at the same left margin.
+
+     OrdersController owns every conditional in that Y — Roblox's chrome inset,
+     the scale factor it is divided by, and whether the profile has landed and
+     the card is on screen at all — so it is asked. Falling back to the plain
+     screen margin means a build with the orders card removed still puts this
+     somewhere sane rather than at zero, under the platform's own buttons. ]]
+local function trackerPosition(): UDim2
+	local top = LAYOUT.ScreenMargin
+	local orders = Registry.find("OrdersController")
+	if orders and typeof(orders.getBottom) == "function" then
+		local ok, bottom = pcall(orders.getBottom, orders)
+		if ok and typeof(bottom) == "number" then
+			top = bottom
+		end
+	end
+	return UDim2.fromOffset(LAYOUT.ScreenMargin, top + LAYOUT.ElementGap)
+end
 
 local KEY_GAP = 8
 local READOUT_HEIGHT = 64
@@ -279,13 +308,14 @@ local function refreshTracker()
 	     thing on the screen. ]]
 	local wanted = total > 0 and not solved
 	trackerGui.Enabled = wanted
-	--[[ Claimed only while the card is on screen, so a map with no vault leaves
-	     the event banner sitting straight under the objective line. ]]
-	TopStack.set("Clues", if wanted then TRACKER_HEIGHT else 0)
 	if not wanted then
 		return
 	end
-	trackerCard.Position = UDim2.new(0.5, 0, 0, TopStack.top("Clues"))
+	--[[ Re-placed on every refresh rather than once at build. The orders card
+	     above it appears when the profile lands, a second or two into a round,
+	     and a counter that was placed before that sits in the gap where the card
+	     was going to be. ]]
+	trackerCard.Position = trackerPosition()
 
 	trackerCount.Text = string.format("CLUES  %d/%d", found, total)
 	if found >= total then
@@ -307,11 +337,30 @@ local function flashTracker()
 	TweenService:Create(trackerCard, TweenInfo.new(0.12), { GroupTransparency = TRACKER_LIVE }):Play()
 end
 
---[[ The only per-frame work in this file, and it does nothing on all but one
-     frame in a hundred: it exists to end a flash. A tween cannot schedule its
-     own reversal without a second tween that would fight the first when two
-     clues are picked up a second apart. ]]
+--[[ The only per-frame work in this file, and it does almost nothing on almost
+     every frame: it ends a flash, and it keeps the card under the one above it.
+     A tween cannot schedule its own reversal without a second tween that would
+     fight the first when two clues are picked up a second apart. ]]
 local function stepTracker()
+	--[[
+		Follow the orders card, by comparing rather than by listening.
+
+		Its Y moves for three different reasons — the profile landing and the card
+		appearing a second into the round, Roblox's chrome inset changing, and the
+		viewport resizing under a ScaleLayer — and only the last of those has a
+		signal worth connecting to. Recomputing costs one function call and one
+		compare on a frame where nothing moved, and it is correct for every cause
+		including the ones nobody has thought of yet.
+
+		Only while the card is up: a hidden counter has nothing to place.
+	]]
+	if trackerGui.Enabled then
+		local wanted = trackerPosition()
+		if trackerCard.Position ~= wanted then
+			trackerCard.Position = wanted
+		end
+	end
+
 	if state.flashUntil > 0 and os.clock() >= state.flashUntil then
 		state.flashUntil = 0
 		TweenService:Create(trackerCard, TweenInfo.new(0.5), { GroupTransparency = TRACKER_IDLE }):Play()
@@ -431,8 +480,8 @@ local function buildTracker()
 
 	trackerCard = Instance.new("CanvasGroup")
 	trackerCard.Name = "Card"
-	trackerCard.AnchorPoint = Vector2.new(0.5, 0)
-	trackerCard.Position = UDim2.new(0.5, 0, 0, TopStack.top("Clues"))
+	trackerCard.AnchorPoint = Vector2.new(0, 0)
+	trackerCard.Position = trackerPosition()
 	trackerCard.Size = UDim2.fromOffset(TRACKER_WIDTH, TRACKER_HEIGHT)
 	trackerCard.BackgroundColor3 = COLOR.Panel
 	trackerCard.BackgroundTransparency = 0.3
@@ -441,15 +490,18 @@ local function buildTracker()
 	trackerCard.Parent = layer
 	Widgets.stroke(trackerCard, COLOR.Border)
 
+	--[[ Left-aligned, like the orders rows above it. Centred text was right when
+	     this card was centred on the screen and is wrong in a column: two cards
+	     with their text starting in different places do not read as a column. ]]
 	trackerCount = Widgets.label(trackerCard, "Count", FONT.Heading, TEXT.Body, COLOR.AccentBright)
-	trackerCount.Position = UDim2.fromOffset(0, 6)
-	trackerCount.Size = UDim2.new(1, 0, 0, TEXT.Body + 2)
-	trackerCount.TextXAlignment = Enum.TextXAlignment.Center
+	trackerCount.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 6)
+	trackerCount.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Body + 2)
+	trackerCount.TextXAlignment = Enum.TextXAlignment.Left
 
 	trackerLine = Widgets.label(trackerCard, "Line", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
-	trackerLine.Position = UDim2.fromOffset(6, 6 + TEXT.Body + 4)
-	trackerLine.Size = UDim2.new(1, -12, 0, TEXT.Tiny + 2)
-	trackerLine.TextXAlignment = Enum.TextXAlignment.Center
+	trackerLine.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 6 + TEXT.Body + 4)
+	trackerLine.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Tiny + 2)
+	trackerLine.TextXAlignment = Enum.TextXAlignment.Left
 	trackerLine.TextTruncate = Enum.TextTruncate.AtEnd
 end
 
@@ -564,15 +616,6 @@ end
 
 function VaultController:init()
 	build()
-
-	--[[ A boss bar or an objective line opening above the card moves it down.
-	     Only while it is up: a hidden card has claimed nothing and has nothing
-	     to reposition. ]]
-	trove:add(TopStack.onChanged(function()
-		if trackerCard and trackerGui and trackerGui.Enabled then
-			trackerCard.Position = UDim2.new(0.5, 0, 0, TopStack.top("Clues"))
-		end
-	end))
 end
 
 function VaultController:start()

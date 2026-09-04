@@ -157,7 +157,26 @@ local DEFINITIONS: { Ability } = {
 			FireRate = 3.0,
 			Range = 70,
 			Health = 250,
-			Lifetime = 30,
+			--[[
+				Seventy-five seconds, up from thirty.
+
+				Thirty was sized for a thing you dropped and walked away from: long
+				enough to cover one push, and the clock rather than the horde was
+				usually what ended it. Manning it changed what the number is for.
+				A gun you SIT IN is a position you commit to, and committing to one
+				for half a minute — on a five-minute cooldown — was a worse deal
+				than not using the ability at all.
+
+				Seventy-five spans a wave and the breather after it, which is the
+				unit a defensive position is actually worth measuring in. It is
+				still a quarter of the cooldown, so a turret is a thing a team has
+				sometimes rather than a thing they have.
+
+				Its health did NOT go up with it. Placement is the skill, and a
+				turret in a bad spot should still be taken apart in seconds — the
+				extra time is for the one somebody put somewhere sensible.
+			]]
+			Lifetime = 75,
 			--[[ Per player, not per server. Two players who both took Turret
 			     should get two turrets; one player should not get four by
 			     waiting out a cooldown twice. ]]
