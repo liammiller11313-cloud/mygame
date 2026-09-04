@@ -445,6 +445,8 @@ local function applySetting(key: string, value: any)
 		callController("CameraController", "setShakeEnabled", value == true)
 	elseif key == "damageNumbers" then
 		callController("HitmarkerController", "setDamageNumbersEnabled", value == true)
+	elseif key == "showOrders" then
+		callController("OrdersController", "setEnabled", value == true)
 	elseif key == "masterVolume" then
 		callController("MainMenuController", "setMasterVolume", value)
 	elseif key == "musicVolume" then

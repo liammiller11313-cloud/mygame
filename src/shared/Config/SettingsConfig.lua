@@ -124,6 +124,18 @@ SettingsConfig.Definitions = table.freeze({
 		kind = "toggle",
 		default = true,
 	},
+	--[[ On by default, because a card nobody knows exists is a card nobody
+	     turns on. It is the largest single thing on a phone's HUD after the pad,
+	     and a player who has already read today's orders has no use for it for
+	     the next fifteen minutes — so it is the one HUD element with a switch. ]]
+	{
+		key = "showOrders",
+		label = "ORDERS CARD",
+		category = "GRAPHICS",
+		kind = "toggle",
+		default = true,
+		blurb = "Level and today's orders, top-left, during a round.",
+	},
 
 	-- ── audio ───────────────────────────────────────────────────────────────
 	{

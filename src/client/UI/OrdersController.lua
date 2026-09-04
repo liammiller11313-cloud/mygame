@@ -127,6 +127,11 @@ local state = {
 	     is one thing happening, not three. ]]
 	brightUntil = 0,
 	visible = false,
+	--[[ The player's own answer to SettingsConfig `showOrders`. Kept apart from
+	     `visible`, which is about whether a round is running: both have to be
+	     true, and collapsing them into one boolean is how a HUD element ends up
+	     switched off by a round ending. ]]
+	allowed = true,
 }
 
 -- ── helpers ─────────────────────────────────────────────────────────────────
@@ -165,7 +170,7 @@ local function refresh()
 	--[[ Nothing until the profile has landed. A card reading LEVEL 0 for the
 	     first two seconds of a round is a card that lies before it tells the
 	     truth. ]]
-	local wanted = ready and inRound()
+	local wanted = state.allowed and ready and inRound()
 	if wanted ~= state.visible then
 		state.visible = wanted
 		gui.Enabled = wanted
@@ -325,6 +330,41 @@ local function build()
 	for index = 1, ProgressionConfig.DailyQuests do
 		buildRow(column, index)
 	end
+end
+
+-- ── public ──────────────────────────────────────────────────────────────────
+
+--[[
+	The player's switch, from SettingsConfig `showOrders`.
+
+	Applied at boot as well as on every change — SettingsController pushes every
+	definition once at start — so a player who turned this off on their last
+	server never sees it here.
+
+	A hidden card is not kept up to date: `refresh` stops at the visibility test,
+	because three labels nobody is looking at are three labels not worth
+	redrawing. It is fully redrawn on the way back IN, which is the only moment
+	its contents have to be right.
+
+	Coming back on clears the pulse memory for the same reason a round starting
+	does. The orders may well have advanced while the card was away, and lighting
+	it up for progress the player made ten minutes ago would be announcing old
+	news as though it had just happened.
+]]
+function OrdersController:setEnabled(value: boolean)
+	local wanted = value == true
+	if state.allowed == wanted then
+		return
+	end
+	state.allowed = wanted
+	if wanted then
+		table.clear(state.shown)
+	end
+	refresh()
+end
+
+function OrdersController:isEnabled(): boolean
+	return state.allowed
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────
