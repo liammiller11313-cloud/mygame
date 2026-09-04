@@ -42,6 +42,7 @@ local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
 local LoadoutConfig = require(Shared.Config.LoadoutConfig)
 local Registry = require(Shared.Util.Registry)
+local Signal = require(Shared.Util.Signal)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
@@ -194,6 +195,11 @@ local PICKER_CONFIRM: { [Enum.KeyCode]: boolean } = {
 }
 
 local LoadoutController = {}
+
+--[[ Fires the moment the round-start loadout picker leaves the screen, whether
+     the player chose, ran out the clock, or hit EDIT. RequisitionController
+     waits on it: see setPickerVisible. ]]
+LoadoutController.pickerClosed = Signal.new()
 
 local trove = Trove.new()
 local rowTrove = Trove.new()
@@ -653,6 +659,7 @@ local function setPickerVisible(visible: boolean)
 	if not pickerGui then
 		return
 	end
+	local was = pickerGui.Enabled
 	pickerGui.Enabled = visible
 	if visible then
 		--[[ No relayout here, deliberately. The footer is measured against the
@@ -681,6 +688,14 @@ local function setPickerVisible(visible: boolean)
 		state.pickerUntil = 0
 		state.pickerLocked = false
 		GamepadFocus.release(nil)
+	end
+
+	--[[ Announced so the screen that comes NEXT knows when it may. The pre-round
+	     requisition window opens on the same round-state edge this does, and two
+	     full-screen panels arriving on the same frame is one of them landing
+	     behind the other. Fired on the edge only, so a repeated hide is silent. ]]
+	if was and not visible then
+		LoadoutController.pickerClosed:fire()
 	end
 end
 
@@ -1221,6 +1236,12 @@ local function applyTouchSizing()
 			then UDim2.fromOffset(120, BACK_HEIGHT_TOUCH)
 			else UDim2.fromOffset(70, TEXT.Large)
 	end
+end
+
+--[[ Whether the round-start picker is on screen right now. Asked by anything
+     that must not open over it — see `pickerClosed`. ]]
+function LoadoutController:isPickerOpen(): boolean
+	return pickerGui ~= nil and pickerGui.Enabled
 end
 
 function LoadoutController:isOpen(): boolean

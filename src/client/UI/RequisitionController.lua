@@ -34,6 +34,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local ProgressionConfig = require(Shared.Config.ProgressionConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -67,6 +68,12 @@ local HEADER_HEIGHT = PANEL.HeaderHeight
 local BALANCE_HEIGHT = 24
 local BODY_TOP = HEADER_HEIGHT + LAYOUT.PanelPadding + BALANCE_HEIGHT
 
+--[[ The modifier advice sits between the balance and the rows, and only during
+     the pre-round hold. The list starts BELOW it when it is showing and at
+     BODY_TOP when it is not — see refreshBodyTop, which moves both. ]]
+local COUNTER_TOP = BODY_TOP
+local COUNTER_HEIGHT = 34
+
 --[[ A row is a name, a line of prose and a price, plus a BUY button that has to
      be hittable with a thumb. The touch height is the project's standard rather
      than derived from the type, because unlike the backpack's rows this one IS
@@ -92,6 +99,17 @@ local hint: TextLabel
 
 --[[ The ready gate's corner of the footer. Built with the panel and shown only
      while the round is actually holding — see `build`. ]]
+--[[ Forward-declared: `refresh` moves the row list when the modifier advice
+     appears or goes, and the function that owns where the list starts is
+     defined below it. Declaring it here keeps the offset arithmetic in one
+     place rather than copied into both. ]]
+local applyTouchSizing: () -> ()
+
+local caption: TextLabel
+--[[ The round's condition and what answers it, shown above the rows in the
+     pre-round window. See ModifierConfig.counter. ]]
+local counterLabel: TextLabel
+
 local readyRoot: Frame
 local readyButton: TextButton
 local readyStroke: UIStroke
@@ -101,6 +119,10 @@ local readyCount: TextLabel
 local state = {
 	open = false,
 	suppressed = false,
+	--[[ Whether the suppression currently in force is the SOFT one. Tracked
+	     separately because the hold can lift while the panel is still open, and
+	     the panel then has to tighten from soft to hard without a close. ]]
+	softSuppressed = false,
 	--[[ Whether the panel opened ITSELF for the pre-round window, as opposed to
 	     the player opening it. Only a self-opened panel closes itself again when
 	     the gate lifts: a player who deliberately opened the shop should not have
@@ -154,13 +176,55 @@ local function menuIsOpen(): boolean
 	return ok and open == true
 end
 
-local function setSuppressed(value: boolean)
-	if state.suppressed == value then
+--[[ The verbs the pre-round window refuses. Everything a player might do to the
+     world with a weapon, and nothing they might do to move around it — see
+     setSuppressed for why the two are separated. ]]
+local HOLD_MUTED = { "Fire", "Aim", "Reload", "Melee", "Shove", "Throw", "UseItem" }
+
+--[[
+	Takes the world away from the player while this panel is up — except before
+	wave 1, where it deliberately does not.
+
+	── HARD, WHICH IS EVERY OTHER TIME ─────────────────────────────────────────
+	Between waves this is a shop opened mid-round, and a player reading it is a
+	player not watching a doorway. Everything goes off, the way it does for every
+	other panel in the game.
+
+	── AND SOFT, DURING THE READY HOLD ─────────────────────────────────────────
+	The pre-round window is the opposite situation: nothing is hunting anybody,
+	the round is explicitly waiting, and the team is meant to be able to spread
+	out and grab a gun while they argue about who is paying. Freezing four people
+	in place to read five cards makes the one calm minute of the round the one
+	minute they cannot move.
+
+	So movement, jumping, crouching, sprinting and INTERACT all stay live, the
+	touch pad stays on screen, and the prompts keep working — you can walk to a
+	shotgun and pick it up with the panel open. What goes away is the trigger,
+	because the cursor is free for the BUY buttons and a click that bought a
+	requisition should not also put a magazine into the floor.
+]]
+local function setSuppressed(value: boolean, soft: boolean?)
+	local wantSoft = value and soft == true
+	if state.suppressed == value and state.softSuppressed == wantSoft then
 		return
 	end
 	state.suppressed = value
-	callController("InputController", "setEnabled", not value)
+	state.softSuppressed = wantSoft
+
+	--[[ The crosshair goes either way. The mouse is a cursor while this is open,
+	     so a reticle in the middle of the screen is pointing at nothing. ]]
 	callController("CrosshairController", "setVisible", not value)
+
+	if wantSoft then
+		callController("InputController", "setEnabled", true)
+		callController("InputController", "setMuted", HOLD_MUTED)
+		callController("PromptController", "setEnabled", true)
+		callController("TouchController", "setVisible", true)
+		return
+	end
+
+	callController("InputController", "setMuted", nil)
+	callController("InputController", "setEnabled", not value)
 	callController("PromptController", "setEnabled", not value)
 	callController("TouchController", "setVisible", not value)
 end
@@ -289,6 +353,37 @@ local function refresh()
 	end
 
 	local hold = holding()
+
+	--[[ The round's condition and what answers it, but only while the team is
+	     still deciding. Between waves it is old news and the space is better
+	     spent on the rows. ]]
+	local modifier = ModifierConfig.active(Workspace)
+	local advise = hold and modifier ~= nil and modifier.counter ~= nil
+	if advise then
+		local answer = RequisitionConfig.get(modifier.counter)
+		counterLabel.Text = string.format(
+			"%s — %s  ·  BUY %s: %s",
+			string.upper(modifier.displayName),
+			modifier.blurb,
+			if answer then answer.displayName else "?",
+			modifier.counterLine or ""
+		)
+	end
+	if counterLabel.Visible ~= advise then
+		counterLabel.Visible = advise
+		--[[ The rows move when this appears or goes. applyTouchSizing owns where
+		     the list starts, so it is asked again rather than the offset being
+		     computed a second time here. ]]
+		applyTouchSizing()
+	end
+
+	--[[ And the row it points at is marked, so the advice above and the button
+	     below are visibly the same recommendation. ]]
+	for _, row in rows do
+		local recommended = advise and modifier.counter == row.entry.id
+		row.frame.BackgroundTransparency = if recommended then 0.86 else 0.94
+	end
+
 	readyRoot.Visible = hold
 	if hold then
 		local mine = Attributes.get(player, PA.Ready, false) == true
@@ -315,15 +410,20 @@ end
 
 -- ── build ───────────────────────────────────────────────────────────────────
 
-local function applyTouchSizing()
+function applyTouchSizing()
 	local height = if isTouch() then ROW_HEIGHT_TOUCH else ROW_HEIGHT
 	for _, row in rows do
 		row.frame.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, height)
 		row.button.Size = UDim2.fromOffset(BUY_WIDTH, height - 16)
 	end
 	if list then
+		--[[ The rows start below the modifier advice when it is showing, and at
+		     BODY_TOP when it is not. Both the position and the height move, or
+		     the list keeps its old height and runs off the bottom. ]]
+		local top = if counterLabel and counterLabel.Visible then BODY_TOP + COUNTER_HEIGHT else BODY_TOP
+		list.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top)
 		list.Size =
-			UDim2.new(1, -LAYOUT.PanelPadding * 2, 1, -(BODY_TOP + PANEL.FooterHeight + LAYOUT.PanelPadding))
+			UDim2.new(1, -LAYOUT.PanelPadding * 2, 1, -(top + PANEL.FooterHeight + LAYOUT.PanelPadding))
 	end
 end
 
@@ -427,13 +527,34 @@ local function build()
 	balanceLabel.Size = UDim2.new(0.4, 0, 0, BALANCE_HEIGHT)
 	balanceLabel.TextXAlignment = Enum.TextXAlignment.Right
 
-	local caption = Widgets.label(panel, "Caption", FONT.Heading, TEXT.Small, COLOR.TextDim)
+	caption = Widgets.label(panel, "Caption", FONT.Heading, TEXT.Small, COLOR.TextDim)
 	caption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, HEADER_HEIGHT + LAYOUT.PanelPadding)
 	caption.Size = UDim2.new(0.6, 0, 0, BALANCE_HEIGHT)
 	caption.Text = "PAID BY ONE, CARRIED BY ALL"
 
+	--[[
+		What is different about tonight, and what to do about it.
+
+		The modifier is announced in chat at round start and then gone, which is
+		fine for "here is what is happening" and useless at the moment the team
+		is deciding how to spend a shared currency. This sits directly above the
+		rows it is advice about, so ARMORED ZOMBIES and INCENDIARY ROUNDS are on
+		screen together rather than a minute apart.
+
+		Only during the hold: between waves the modifier has been live for ten
+		minutes and everybody knows.
+	]]
+	counterLabel = Widgets.label(panel, "Counter", FONT.Body, TEXT.Small, COLOR.Accent)
+	counterLabel.Position = UDim2.fromOffset(LAYOUT.PanelPadding, COUNTER_TOP)
+	counterLabel.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, COUNTER_HEIGHT)
+	counterLabel.TextWrapped = true
+	counterLabel.TextYAlignment = Enum.TextYAlignment.Top
+	counterLabel.Visible = false
+
 	list = Widgets.scroller(panel, "List")
 	list.Position = UDim2.fromOffset(LAYOUT.PanelPadding, BODY_TOP)
+	--[[ Sized and placed by refreshPanelSize, which now has two answers
+	     depending on whether the modifier advice is on screen. ]]
 	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	Widgets.list(list, LAYOUT.ElementGap)
 	for _, entry in RequisitionConfig.Catalogue do
@@ -511,7 +632,7 @@ function RequisitionController:open()
 	applyTouchSizing()
 	refreshPanelSize()
 	refresh()
-	setSuppressed(not menuIsOpen())
+	setSuppressed(not menuIsOpen(), holding())
 	claimCursor(true)
 	GamepadFocus.capture(closeButton)
 	UiSound.play(AudioConfig.UI.MenuConfirm)
@@ -577,15 +698,45 @@ function RequisitionController:start()
 		that opened it: a player who deliberately opened the shop should not have
 		it shut in their face because somebody else pressed READY.
 	]]
+	--[[
+		Opened after the LOADOUT picker, not on top of it.
+
+		Both screens answer to the same round-state edge, so opening on the
+		attribute alone put two full panels on the frame and one of them behind
+		the other. The loadout question comes first — it decides what you are
+		holding, and the requisitions are what you buy on top of that — so this
+		waits for LoadoutController to say it is done. If the picker is not up
+		at all (a player who joined mid-prep) there is nothing to wait for.
+	]]
+	local function openForHold()
+		if not holding() or state.open then
+			return
+		end
+		state.autoOpened = true
+		self:open()
+	end
+
+	local loadout = Registry.find("LoadoutController")
+	if loadout and loadout.pickerClosed then
+		trove:add(loadout.pickerClosed:connect(openForHold))
+	end
+
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.ReadyHold), function()
 		if holding() then
-			if not state.open then
-				state.autoOpened = true
-				self:open()
+			local picker = Registry.find("LoadoutController")
+			local waiting = picker and typeof(picker.isPickerOpen) == "function" and picker:isPickerOpen()
+			if not waiting then
+				openForHold()
 			end
 		elseif state.autoOpened then
 			state.autoOpened = false
 			self:close()
+		elseif state.open then
+			--[[ Still open because the PLAYER opened it, and the calm window it
+			     was soft-suppressed for is over. Tighten to the ordinary rules
+			     rather than leaving them able to walk around a live round with a
+			     shop on screen. ]]
+			setSuppressed(not menuIsOpen(), false)
 		end
 		refresh()
 	end)

@@ -806,6 +806,24 @@ end
 
 -- ── binding ─────────────────────────────────────────────────────────────────
 
+--[[
+	Verbs the game is currently refusing by name, as opposed to `enabled`, which
+	refuses all of them.
+
+	One screen needs this: the pre-round requisition window. It is open while the
+	team decides what to buy, and the whole point of that window is that nobody
+	is under pressure — so a player should be able to walk to a gun and pick it
+	up while reading, which switching the controller off entirely would prevent.
+	What they must NOT be able to do is empty a magazine into the floor by
+	clicking a BUY button, so the trigger is muted and movement is not.
+
+	Checked in BOTH paths a verb can arrive by — the ContextActionService handler
+	below and `raise`, which is how the touch pad's buttons get here. Muting one
+	and not the other would leave a phone player firing from a screen a desktop
+	player could not fire from.
+]]
+local muted: { [string]: boolean } = {}
+
 local function handle(binding: Binding)
 	return function(_name: string, state: Enum.UserInputState, _input: InputObject): Enum.ContextActionResult?
 		if binding.pass then
@@ -820,6 +838,13 @@ local function handle(binding: Binding)
 
 		if not enabled or UserInputService:GetFocusedTextBox() ~= nil then
 			return Enum.ContextActionResult.Pass
+		end
+
+		--[[ A muted verb still gets its RELEASE. Swallowing that would strand
+		     whatever the press started — the same way the gamepad ability layer
+		     used to strand a crouch — so only the Begin edge is refused. ]]
+		if muted[binding.action] and state == Enum.UserInputState.Begin then
+			return Enum.ContextActionResult.Sink
 		end
 
 		if state == Enum.UserInputState.Begin then
@@ -1063,7 +1088,7 @@ function InputController:raise(action: string, isDown: boolean): boolean
 	if not bindingFor[action] then
 		return false
 	end
-	if isDown and (not enabled or UserInputService:GetFocusedTextBox() ~= nil) then
+	if isDown and (not enabled or muted[action] or UserInputService:GetFocusedTextBox() ~= nil) then
 		return false
 	end
 	setDown(action, isDown)
@@ -1167,6 +1192,29 @@ end
 
 function InputController:isEnabled(): boolean
 	return enabled
+end
+
+--[[
+	Refuses a named set of verbs while leaving the rest alone.
+
+	`actions` REPLACES the muted set rather than adding to it, so a screen that
+	closes without cleaning up cannot leave the trigger dead for the rest of the
+	round — passing nil or an empty list is how everything comes back, and that
+	is the only call a caller has to remember.
+
+	Anything already held goes down cleanly on the way in. A verb muted while its
+	key is still pressed would otherwise never see its release.
+]]
+function InputController:setMuted(actions: { string }?)
+	table.clear(muted)
+	if actions then
+		for _, action in actions do
+			muted[action] = true
+			if down[action] then
+				setDown(action, false)
+			end
+		end
+	end
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────

@@ -59,6 +59,26 @@ export type Modifier = {
 	blocksCrateRespawn: boolean?, -- a spent ammo crate stays spent
 	specialWeights: { [string]: number }?, -- multipliers on the Director's pick
 	specialCaps: { [string]: number }?, -- multipliers on a kind's maxAlive
+
+	--[[
+		The requisition that best answers this modifier, and one line on why.
+
+		Advice, not a rule. Nothing reads these to change a price or a chance —
+		they are shown in the pre-round window so a team choosing what to buy is
+		choosing against the round they are actually about to play rather than
+		against rounds in general. A modifier the player only learns about by
+		being caught by it was already called out as a bug in this file; a
+		modifier they are told about and cannot act on is the smaller version of
+		the same problem.
+
+		Every one of them is a real interaction, checked against what the
+		requisition actually does. NO AMMO DROPS points at AIRDROP because
+		`blocksRestock` is only tested on the breather roll — the airdrop calls
+		LevelService.restockItems directly and is genuinely the one restock the
+		modifier does not stop.
+	]]
+	counter: string?, -- a RequisitionConfig id
+	counterLine: string?, -- one line, read under a clock
 }
 
 local ModifierConfig = {}
@@ -72,6 +92,8 @@ ModifierConfig.Chance = 1.0
 local CATALOGUE: { Modifier } = {
 	table.freeze({
 		id = "Fast",
+		counter = "Drill",
+		counterLine = "They are on you before a normal reload finishes. Cut the window.",
 		displayName = "FAST ZOMBIES",
 		blurb = "Every one of them sprints, and they are almost as fast as you.",
 		--[[ 21 becomes 25.2 against a survivor's SprintSpeed of 26. Deliberately
@@ -85,6 +107,8 @@ local CATALOGUE: { Modifier } = {
 	}),
 	table.freeze({
 		id = "Armored",
+		counter = "Incendiary",
+		counterLine = "Twice the health per body. Fire keeps working after the magazine stops.",
 		displayName = "ARMORED ZOMBIES",
 		blurb = "Body shots barely register. Aim higher.",
 		--[[ 50 health becomes 110, so an M4A1 round goes from two body shots to
@@ -96,6 +120,8 @@ local CATALOGUE: { Modifier } = {
 	}),
 	table.freeze({
 		id = "DoubleSpawn",
+		counter = "Surplus",
+		counterLine = "Twice the bodies is twice the ammunition, and the boxes do not keep up.",
 		displayName = "DOUBLE SPAWN",
 		blurb = "Twice the horde, arriving twice as fast.",
 		--[[ Honest about its own ceiling: InfectedConfig caps Commons at 60
@@ -116,6 +142,8 @@ local CATALOGUE: { Modifier } = {
 	}),
 	table.freeze({
 		id = "Darkness",
+		counter = "Spotter",
+		counterLine = "If you cannot see them coming, be told where they are.",
 		displayName = "DARKNESS",
 		blurb = "The sun is already gone. You have a torch and that is all.",
 		--[[ The round's light ramp normally runs a full evening into night over
@@ -128,6 +156,8 @@ local CATALOGUE: { Modifier } = {
 	}),
 	table.freeze({
 		id = "Elite",
+		counter = "Drill",
+		counterLine = "Three times the boss health is a longer fight, and a longer fight is more reloads. Incendiary will not help — an Apex is too big to light.",
 		displayName = "ELITE WAVE",
 		blurb = "Every boss this round is an Apex.",
 		--[[ Waves 5, 8 and 11 get what wave 15 already had. It is the harshest
@@ -139,6 +169,8 @@ local CATALOGUE: { Modifier } = {
 	}),
 	table.freeze({
 		id = "NoAmmo",
+		counter = "Airdrop",
+		counterLine = "The one restock this does not block. It calls the map back rather than waiting on a breather.",
 		displayName = "NO AMMO DROPS",
 		blurb = "Nothing restocks. What you find is what you get.",
 		--[[ The breather stops resupplying the map and a spent ammo crate stays
@@ -150,6 +182,8 @@ local CATALOGUE: { Modifier } = {
 	}),
 	table.freeze({
 		id = "Exploders",
+		counter = "Spotter",
+		counterLine = "Know which one is a Boomer before you put a shell into it at arm's length.",
 		displayName = "EXPLODER INVASION",
 		blurb = "Boomers, everywhere. Watch what you shoot.",
 		--[[ The Director picks specials weighted by the inverse of spawnCost;
