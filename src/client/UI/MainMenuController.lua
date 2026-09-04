@@ -1456,117 +1456,19 @@ end
 	Rows without an `action` are structural — a movement stick has no binding to
 	look up — and carry their own text per scheme.
 ]]
-local BRIEFING = {
-	{ desktop = "WASD", touch = "STICK", gamepad = "L STICK", text = "Move" },
-	{ action = "Fire", text = "Fire" },
-	{ action = "Aim", text = "Aim" },
-	{ action = "Reload", text = "Reload" },
-	{ action = "Shove", text = "Shove — frees a pinned teammate" },
-	{ action = "Interact", text = "Hold to revive, heal, or take a crate" },
-	{ action = "Melee", text = "Draw your melee weapon" },
-	{ action = "Crouch", text = "Crouch — steadies your aim" },
-	{ action = "Ping", text = "Call out what you are looking at" },
-	{
-		desktop = "1-5",
-		touch = "TILES",
-		gamepad = "D-PAD",
-		text = "Weapons and items. Tap the one you hold to look at it",
-	},
-	--[[ The row this card was missing, and its absence was half of "you cannot
-	     heal yourself": nothing anywhere told a player the key existed. The
-	     literals cover the two schemes where the verb has no key of its own —
-	     there you press the item again, which is the same rule the row above
-	     describes for looking at a gun. ]]
-	{
-		action = "UseItem",
-		touch = "TAP AGAIN",
-		gamepad = "PRESS AGAIN",
-		text = "Use your medkit or pills on yourself",
-	},
-	{ action = "Sprint", text = "Sprint — costs stamina. Automatic on touch" },
-}
+--[[
+	What the column says now that the keys have gone.
 
---[[ Short names for the keys whose EnumItem name is not what a player calls it.
-     Anything absent falls through to the uppercased name, which is already right
-     for letters. Covers both KeyCode and UserInputType, because a binding list
-     holds both — shove is Enum.UserInputType.MouseButton3. ]]
-local KEY_LABELS: { [string]: string } = {
-	MouseButton1 = "LMB",
-	MouseButton2 = "RMB",
-	MouseButton3 = "MMB",
-	LeftShift = "SHIFT",
-	RightShift = "SHIFT",
-	LeftControl = "CTRL",
-	RightControl = "CTRL",
-	LeftAlt = "ALT",
-	Space = "SPACE",
-	One = "1",
-	Two = "2",
-	Three = "3",
-	Four = "4",
-	Five = "5",
-	ButtonR1 = "RB",
-	ButtonL1 = "LB",
-	ButtonR2 = "RT",
-	ButtonL2 = "LT",
-	ButtonA = "A",
-	ButtonB = "B",
-	ButtonX = "X",
-	ButtonY = "Y",
-	ButtonL3 = "L3",
-	ButtonR3 = "R3",
-	DPadUp = "D-UP",
-	DPadDown = "D-DOWN",
-	DPadLeft = "D-LEFT",
-	DPadRight = "D-RIGHT",
-}
+	It used to lead with a CONTROLS legend — every verb and the key it sits on,
+	re-derived per input scheme. That was worth having before there was a
+	controls screen; there is one now, in SETTINGS, where it can be rebound
+	rather than only read. Two copies of the same list is one that goes stale,
+	and the one that goes stale is always the one that cannot be edited.
 
---[[ What to print for a row, on the scheme the player is actually using. Touch
-     gets the pad's own button label — telling a phone player to press R is worse
-     than telling them nothing. ]]
-local function briefingGlyph(entry: any, bindings: { any }, scheme: string): string
-	--[[ The explicit per-scheme label, for a row that has one — and the fallback
-	     for a row that has an action with no key on THIS scheme. A verb bound
-	     only on a keyboard still happens on a phone, it just happens by a
-	     different gesture, and answering "—" there tells a touch player the game
-	     will not let them do it at all.
-
-	     Nested rather than a file-level local because all three of its callers
-	     are in this function, and audit.py reports this file at 182 of Luau's
-	     200-per-scope limit. ]]
-	local function literal(): string?
-		local text = if scheme == "Touch"
-			then entry.touch
-			elseif scheme == "Gamepad" then entry.gamepad
-			else entry.desktop
-		return if typeof(text) == "string" and text ~= "" then text else nil
-	end
-
-	if not entry.action then
-		return literal() or "—"
-	end
-	for _, binding in bindings do
-		if binding.action ~= entry.action then
-			continue
-		end
-		if scheme == "Touch" then
-			return binding.touch or "—"
-		end
-		for _, key in binding.keys do
-			if typeof(key) ~= "EnumItem" then
-				continue
-			end
-			local isGamepadKey = string.sub(key.Name, 1, 6) == "Button"
-				or string.sub(key.Name, 1, 5) == "DPad"
-			if (scheme == "Gamepad") == isGamepadKey then
-				return KEY_LABELS[key.Name] or string.upper(key.Name)
-			end
-		end
-		return literal() or "—"
-	end
-	return literal() or "—"
-end
-
+	These five are not controls. They are the things a new player loses to
+	without ever being told, and none of them is discoverable by looking at a
+	keymap.
+]]
 local RULES = {
 	"HEADSHOTS KILL ANYTHING COMMON, WITH ANY GUN.",
 	"WHITE HEALTH DRAINS. PERMANENT HEALTH DOES NOT.",
@@ -1575,54 +1477,37 @@ local RULES = {
 	"NOBODY SURVIVES ALONE.",
 }
 
+--[[ Two lines of room per rule. They wrap, and at 300 pixels the longer ones
+     do — the old single-line height clipped them and nobody noticed because the
+     keybind list above was carrying the column. ]]
+local RULE_HEIGHT = (TEXT.Tiny + 2) * 2 + 4
+
 local function buildBriefing()
 	briefingColumn = Widgets.frame(menuLayer, "Briefing", COLOR.Background, 1)
 	local column = briefingColumn
 	column.AnchorPoint = Vector2.new(1, 0.5)
 	column.Position = UDim2.new(1 - COLUMN_X, 0, 0.52, 0)
-	column.Size = UDim2.fromOffset(300, 420)
+	--[[ Sized to what is in it rather than to a number. The column lost its
+	     keybind half and 420 pixels of frame around 150 of content is a hole in
+	     the layout that only shows up as the rules floating in the middle of
+	     nothing. ]]
+	column.Size = UDim2.fromOffset(300, TEXT.Body + 8 + #RULES * (RULE_HEIGHT + 4))
 
 	local heading = Widgets.label(column, "Heading", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	heading.Size = UDim2.new(1, 0, 0, TEXT.Body)
 	heading.TextXAlignment = Enum.TextXAlignment.Right
-	heading.Text = tracked("CONTROLS")
-
-	local input = Registry.find("InputController")
-	local bindings = if input and typeof(input.getBindings) == "function" then input:getBindings() else {}
-	local scheme = if input and typeof(input.getScheme) == "function" then input:getScheme() else "Desktop"
+	heading.Text = tracked("BRIEFING")
 
 	local y = TEXT.Body + 8
-	for index, entry in BRIEFING do
-		local key = Widgets.label(column, "K_" .. index, FONT.Stencil, TEXT.Small, COLOR.Accent)
-		key.Position = UDim2.fromOffset(0, y)
-		--[[ Wider than the old 64. A touch label is a word ("RELOAD"), not a
-		     letter, and at 64 every one of them clipped. ]]
-		key.Size = UDim2.fromOffset(84, TEXT.Body + 2)
-		key.TextXAlignment = Enum.TextXAlignment.Right
-		key.Text = briefingGlyph(entry, bindings, scheme)
-
-		local text = Widgets.label(column, "T_" .. index, FONT.Body, TEXT.Small, COLOR.TextSecondary)
-		text.Position = UDim2.fromOffset(94, y)
-		text.Size = UDim2.new(1, -94, 0, TEXT.Body + 2)
-		text.Text = entry.text
-
-		y += TEXT.Body + 6
-	end
-
-	y += 14
-	local rule = Widgets.rule(column, "Rule", COLOR.Border)
-	rule.Position = UDim2.fromOffset(0, y)
-	rule.Size = UDim2.new(1, 0, 0, 1)
-	y += 12
-
 	for index, line in RULES do
 		local label = Widgets.label(column, "Rule" .. index, FONT.Body, TEXT.Tiny, COLOR.TextDim)
 		label.Position = UDim2.fromOffset(0, y)
-		label.Size = UDim2.new(1, 0, 0, TEXT.Body + 4)
+		label.Size = UDim2.new(1, 0, 0, RULE_HEIGHT)
 		label.TextXAlignment = Enum.TextXAlignment.Right
+		label.TextYAlignment = Enum.TextYAlignment.Top
 		label.TextWrapped = true
 		label.Text = line
-		y += TEXT.Body + 6
+		y += RULE_HEIGHT + 4
 	end
 end
 
