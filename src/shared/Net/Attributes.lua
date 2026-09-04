@@ -45,7 +45,19 @@ Attributes.Player = table.freeze({
 	     bile does, instead of one ticked over the wire sixty times a second. ]]
 	BiledUntil = "FL_BiledUntil",
 	FlowDistance = "FL_Flow", -- number, studs along the level spline
-	IsReady = "FL_Ready", -- boolean, lobby readiness
+	--[[
+		Lobby readiness, which is NOT the pre-round ready gate above it.
+
+		These two were the same string — both "FL_Ready" — so MatchmakingService
+		admitting somebody wrote the gate RoundService counts, and dropping them
+		cleared it. Prep clears the gate for everybody at the top of the round, which
+		is why it never showed up as an obvious bug: what it actually cost was a
+		player admitted DURING prep arriving pre-readied, having pressed nothing.
+
+		Nothing reads this one today. It is kept, with its own name, because a
+		write-only attribute is cheap and a collision is not.
+	]]
+	IsReady = "FL_LobbyReady", -- boolean
 	IsCrouching = "FL_IsCrouching", -- boolean; the server owns it, the client asks
 	--[[ boolean, whether this survivor is actually running rather than merely
 	     asking to. Published because the FOOTSTEPS need it and the client cannot

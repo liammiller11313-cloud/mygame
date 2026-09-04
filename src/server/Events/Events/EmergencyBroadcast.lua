@@ -55,40 +55,65 @@ function EmergencyBroadcast.start(context: any)
 	if #pool == 0 then
 		return
 	end
-	local message = pool[random:NextInteger(1, #pool)]
 
-	context.state.generation = (context.state.generation or 0) + 1
-	local mine = context.state.generation
 	local state = context.state
-	state.running = true
+	state.message = pool[random:NextInteger(1, #pool)]
+	state.line = 0
+	--[[ The blip lands, then a beat of nothing, then the voice. That is how a
+	     transmission opening actually sounds, and without the beat the first line
+	     is swallowed by the noise announcing it. ]]
+	state.nextLineAt = 0
+	state.openingAt = OPENING_DELAY
 
-	--[[ Played at the team rather than positionally. A transmission is arriving
-	     on a radio somebody is carrying, not from a point in the map, and giving
-	     it a location would have players turning to look for a speaker. ]]
+	--[[ Played at the team rather than positionally. A transmission arrives on a
+	     radio somebody is carrying, not from a point in the map, and giving it a
+	     location would have players turning to look for a speaker. ]]
 	local centre = Support.teamCentre()
 	if centre then
 		Support.play("Radio", centre)
 	end
-
-	task.spawn(function()
-		task.wait(OPENING_DELAY)
-		for _, line in message.lines do
-			--[[ Checked between every line, not just at the top. The whole message
-			     takes the best part of twenty seconds and a round can end inside
-			     it — a broadcast still talking over a scoreboard is the kind of
-			     thing that survives a hundred playtests and then ships. ]]
-			if state.generation ~= mine or not state.running then
-				return
-			end
-			Support.say(message.speaker, line, LINE_HOLD)
-			task.wait(LINE_GAP)
-		end
-	end)
 end
 
+--[[
+	The lines, paced on the DIRECTOR'S tick rather than on a thread of its own.
+
+	This was a task.spawn with task.wait between lines, and it worked — but a
+	spawned thread keeps running through a pause, so a solo player who paused
+	mid-transmission came back to a radio that had finished talking to an empty
+	room. The director's tick is already frozen while the game is, so pacing here
+	is paused for free and there is no thread to guard against a round ending
+	underneath it either.
+
+	`now` is server time and `state.startedAt` is stamped on the first tick rather
+	than in start(), because start() is the frame the banner goes up and the
+	opening beat should be measured from the sound, not from the schedule.
+]]
+function EmergencyBroadcast.update(context: any, now: number)
+	local state = context.state
+	local message = state.message
+	if not message or state.line >= #message.lines then
+		return
+	end
+
+	if not state.startedAt then
+		state.startedAt = now
+		state.nextLineAt = now + state.openingAt
+		return
+	end
+	if now < state.nextLineAt then
+		return
+	end
+
+	state.line += 1
+	state.nextLineAt = now + LINE_GAP
+	Support.say(message.speaker, message.lines[state.line], LINE_HOLD)
+end
+
+--[[ Nothing to stop. There is no thread and no world state — the last line
+     either played or it did not, and a transmission cut short by a round ending
+     is a transmission cut short, which is fine. ]]
 function EmergencyBroadcast.stop(context: any)
-	context.state.running = false
-	context.state.generation = (context.state.generation or 0) + 1
+	context.state.message = nil
 end
 
 return EmergencyBroadcast

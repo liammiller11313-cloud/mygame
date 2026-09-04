@@ -31,6 +31,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
@@ -99,16 +100,39 @@ local hideAt = 0
 
 -- ── the banner ──────────────────────────────────────────────────────────────
 
---[[ Under the round block, asked for rather than assumed. See the header. ]]
+--[[
+	Under everything already at the top of the screen, asked for rather than
+	assumed.
+
+	Two numbers, not one. The wave block's height is the obvious half — and on
+	its own it puts the banner exactly where the boss bar draws, because that
+	anchors to the same reserved top. A Tank and a random event overlapping is
+	not a corner case either: the surge is gated to wave 3 and Tanks arrive at
+	wave 5, so a banner over a boss health bar was going to happen in most
+	rounds that saw both.
+
+	So the boss bar is asked how much room it is taking, which is 0 when no boss
+	is up. Recomputed on every show rather than cached, because a Tank can arrive
+	between two events.
+]]
 local function bannerY(): number
-	local waves = Registry.find("WaveController")
 	local reserved = LAYOUT.ScreenMargin + BANNER_HEIGHT
+	local waves = Registry.find("WaveController")
 	if waves and typeof(waves.getReservedTopHeight) == "function" then
 		local ok, height = pcall(waves.getReservedTopHeight, waves)
 		if ok and typeof(height) == "number" then
 			reserved = height
 		end
 	end
+
+	local boss = Registry.find("BossBarController")
+	if boss and typeof(boss.getReservedExtra) == "function" then
+		local ok, extra = pcall(boss.getReservedExtra, boss)
+		if ok and typeof(extra) == "number" then
+			reserved += extra
+		end
+	end
+
 	return reserved + BANNER_GAP
 end
 
@@ -169,6 +193,16 @@ end
 local function startRain(strength: number)
 	stopRain()
 
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		--[[ No camera yet. Refused rather than parented to nil, which would have
+		     made an orphan part and then thrown on the signal below — and this is
+		     genuinely reachable, because a client can be told it is raining
+		     before its camera exists. The state listener re-runs and rain starts
+		     on the next change. ]]
+		return
+	end
+
 	local part = Instance.new("Part")
 	part.Name = "FL_Rain"
 	part.Anchored = true
@@ -180,7 +214,7 @@ local function startRain(strength: number)
 	--[[ Parented to the camera, so it is drawn for this player and replicates to
 	     nobody. A Part in Workspace would be a Part every other client also has
 	     to stream. ]]
-	part.Parent = Workspace.CurrentCamera
+	part.Parent = camera
 
 	local emitter = Instance.new("ParticleEmitter")
 	emitter.Name = "Drops"
@@ -212,14 +246,54 @@ local function startRain(strength: number)
 	rainPart = part
 	rainEmitter = emitter
 
-	--[[ Follows the camera in POSITION only, never in rotation: rain that
-	     inherits the camera's pitch falls sideways when you look up. ]]
-	rainConnection = Workspace.CurrentCamera:GetPropertyChangedSignal("CFrame"):Connect(function()
-		local camera = Workspace.CurrentCamera
-		if not camera or not part.Parent then
+	--[[
+		The rain's own sound, if there is one yet.
+
+		Wired but silent: AudioConfig.Event.RainLoop carries no id, because
+		nothing in this project sounds like rain and a wrong loop running for two
+		minutes is worse than none. Playing it anyway — guarded on the id being
+		non-empty — means the day an id is dropped into that row, rain has sound
+		and no code changes.
+
+		On the rain part, so it rides the camera and is the same volume wherever
+		the player is standing. Weather is not a thing you can walk away from.
+	]]
+	local loop = AudioConfig.Event.RainLoop
+	if loop.id ~= "" then
+		local sound = Instance.new("Sound")
+		sound.Name = "FL_RainLoop"
+		sound.SoundId = loop.id
+		sound.Volume = loop.volume * strength
+		sound.Looped = true
+		sound.Parent = part
+		sound:Play()
+	end
+
+	--[[
+		Follows the camera in POSITION only, never in rotation: rain that inherits
+		the camera's pitch falls sideways the moment you look up.
+
+		On RenderStepped rather than on the camera's own CFrame signal, and
+		re-parented every frame if the camera has changed. Both are the same bug:
+		Workspace.CurrentCamera is REPLACED, not moved, when a character
+		respawns — so a connection bound to the old one stops firing and a part
+		parented to it is destroyed with it, and the rain quietly stops halfway
+		through an event with nothing in the log. Reading the camera fresh each
+		frame is the only version that survives that.
+	]]
+	rainConnection = RunService.RenderStepped:Connect(function()
+		--[[ `rainPart ~= part` means this connection belongs to rain that has
+		     already been replaced. stopRain disconnects before it destroys, so
+		     this should not happen — and checking is a compare, while being wrong
+		     is a write to a destroyed instance. ]]
+		local current = Workspace.CurrentCamera
+		if not current or rainPart ~= part then
 			return
 		end
-		part.CFrame = CFrame.new(camera.CFrame.Position + Vector3.new(0, RAIN_HEIGHT, 0))
+		if part.Parent ~= current then
+			part.Parent = current
+		end
+		part.CFrame = CFrame.new(current.CFrame.Position + Vector3.new(0, RAIN_HEIGHT, 0))
 	end)
 end
 

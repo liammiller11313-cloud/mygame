@@ -391,6 +391,15 @@ end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
+--[[ How much room this is taking under the wave block right now, or 0. Asked by
+     anything else that draws below it — see EventController's banner, which
+     would otherwise be laid straight over a Tank's health bar, since both anchor
+     to the same reserved top. Nobody has to know whether a boss is up; they ask
+     for a number and add it. ]]
+function BossBarController:getReservedExtra(): number
+	return state.inset
+end
+
 function BossBarController:init()
 	build()
 end

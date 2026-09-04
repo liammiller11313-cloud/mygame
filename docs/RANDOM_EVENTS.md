@@ -28,7 +28,11 @@ are all folded away, the same contract the medkits, ammo crates, vault props and
 barricades use. **A map missing a folder is not broken**: the events that need it
 are simply never offered there. That is the point of the split.
 
-- `Lights` / `EmergencyLights` — point them at fixtures. What gets switched is
+- `Lights` / `EmergencyLights` — point them at fixtures. **They need actual
+  `Light` objects in them** (PointLight, SpotLight, SurfaceLight) — only a Light
+  can be switched, so a folder of glowing neon bricks gives you a blackout that
+  announces itself and turns nothing off. That is the one silent failure this
+  event has, so it warns by name at round start if it finds parts and no lights. What gets switched is
   the `Light` objects inside them, never the parts, so the lamp posts stay.
   Every light is recorded with the state it was *already* in and put back to
   that, not to "on" — a fixture you deliberately left dark stays dark.
@@ -97,8 +101,14 @@ Empty pool → the draw is skipped and rescheduled. A round where nothing qualif
 is a legitimate round.
 
 **One event at a time**, deliberately. Two at once is one confused thing rather
-than two legible ones, the banner can only say one name, and the conflict table
-then does a job that "one at a time" does for free.
+than two legible ones, and the banner can only say one name.
+
+Which means a `conflicts` entry can never be a genuine overlap — so it means
+**"may not immediately follow"** instead. Rain ending and a thunderstorm starting
+straight after is one storm that appeared to restart; a blackout chased by a
+power failure is the lights going out twice with an explanation in between. Both
+are what somebody writing `ConflictsWith` wanted to prevent. Costs almost
+nothing: 2.46 events per round with the rule, 2.45 without.
 
 ## What it reuses rather than rebuilds
 
@@ -136,8 +146,13 @@ weather, the dark and the noise.
 | `Event.Radio` | *(stand-in)* | the objective blip — passes for a transmission opening |
 | `Event.RainLoop` | *(silent)* | **no id yet** — there is no rain sample in this project, and a wrong loop running for two minutes is worse than none |
 
-The three non-siren rows are one id each away from being real. Rain is
-deliberately silent rather than approximated.
+The three non-siren rows are one id each away from being real, and the rain loop
+is already **wired**: the client plays it on the rain volume, guarded on the id
+being non-empty. Drop an id into that row and rain has sound with no code change.
+
+The siren is played by the client only, on the banner's remote. It was briefly
+played from both ends — server per player *and* client on the remote — which is
+two sirens a frame apart.
 
 ## Testing one
 

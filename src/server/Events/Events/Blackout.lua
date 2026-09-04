@@ -99,8 +99,6 @@ function Blackout.start(context: any)
 	state.generation = (state.generation or 0) + 1
 	local mine = state.generation
 
-	Support.setWeather("Blackout")
-
 	--[[ Emergency lighting is forced OFF first, whatever the designer left it
 	     at. It is the light that means "the mains have failed", and one that was
 	     already on before the failure says nothing. ]]
@@ -109,6 +107,12 @@ function Blackout.start(context: any)
 	local slow = context.definition.id == ID.PowerFailure
 
 	local function fail()
+		--[[ The sky sags at the moment the lights actually go, not when the event
+		     starts. For a plain blackout those are the same instant; for a power
+		     failure the flicker comes first, and darkening the whole scene before
+		     the first stutter gave the ending away — the player saw the world dim
+		     and then watched the lights pretend to fight it. ]]
+		Support.setWeather("Blackout")
 		switch(state.mains, false)
 		task.delay(EMERGENCY_DELAY, function()
 			--[[ The generation check is the whole safety story for these delayed

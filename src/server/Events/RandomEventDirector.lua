@@ -52,14 +52,12 @@
 	nobody asked for, must never be the reason a round stops.
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
-local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
 local EventConfig = require(Shared.Config.EventConfig)
 local Registry = require(Shared.Util.Registry)
@@ -93,6 +91,9 @@ local nextEventAt = 0
      absolute, so a pause has to be added back rather than waited out. ]]
 local pausedSince = 0
 local lastIntensity = 0
+--[[ The event that ran last, for the conflict rule. "" before the first one,
+     and cleared with the round like everything else here. ]]
+local lastId = ""
 local history: { [string]: { lastEndedAt: number, count: number } } = {}
 
 --[[ id -> module. Loaded once at boot from the folder beside this one, so a new
@@ -205,6 +206,24 @@ local function eligible(definition: any, now: number, seconds: number, wave: num
 		return false
 	end
 
+	--[[
+		And a conflicting event may not FOLLOW one either.
+
+		Only one event runs at a time here, so a conflict can never be a genuine
+		overlap — which nearly made the whole conflicts table dead configuration.
+		The reading that keeps it meaningful is the one it was for: rain ending
+		and a thunderstorm starting straight afterwards is one storm that appeared
+		to restart, and a blackout chased by a power failure is the lights going
+		out twice with an explanation in between. Both are exactly what somebody
+		writing `ConflictsWith` wanted to prevent.
+	]]
+	if lastId ~= "" then
+		local previous = EventConfig.get(lastId)
+		if previous and EventConfig.conflict(previous, definition) then
+			return false
+		end
+	end
+
 	--[[ Last, because it is the only clause that touches the map. Everything
 	     above is arithmetic; this walks a folder tree, and it is worth not doing
 	     for an event three cheaper tests have already refused. ]]
@@ -274,6 +293,7 @@ local function finish(now: number)
 	local entry = record(running.definition.id)
 	entry.lastEndedAt = now
 	lastIntensity = running.definition.intensity
+	lastId = running.definition.id
 
 	local module = modules[running.definition.id]
 	if module and typeof(module.stop) == "function" then
@@ -332,12 +352,10 @@ local function begin(definition: any, now: number)
 		service:announce("", definition.announcement)
 	end
 
-	local audio = Registry.find("AudioService")
-	if audio then
-		for _, player in Players:GetPlayers() do
-			audio:play("Event", "Siren", player)
-		end
-	end
+	--[[ The siren is NOT played here. EventController plays it on the remote
+	     above, which is the same event arriving at the same moment, and playing
+	     it from both ends is how you get two sirens a frame apart — the banner's
+	     own sound and a second copy nobody asked for. One producer per sound. ]]
 
 	print(
 		string.format(
@@ -403,6 +421,7 @@ function RandomEventDirector:reset()
 	end
 	table.clear(history)
 	lastIntensity = 0
+	lastId = ""
 	nextEventAt = 0
 	pausedSince = 0
 	publish(nil, 0)
@@ -540,10 +559,6 @@ function RandomEventDirector:destroy()
 	self:reset()
 	table.clear(modules)
 end
-
---[[ Named so the siren row cannot be renamed out from under this file without
-     the audit noticing. ]]
-assert(AudioConfig.Event.Siren ~= nil, "AudioConfig.Event.Siren is required by the event director")
 
 Registry.register("RandomEventDirector", RandomEventDirector)
 

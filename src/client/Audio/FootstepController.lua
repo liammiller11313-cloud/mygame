@@ -62,6 +62,7 @@ local GROUNDED = table.freeze({
 local FootstepController = {}
 
 local trove = Trove.new()
+local random = Random.new()
 local accumulator = 0
 
 --[[ player -> { sound, root, humanoid, gait }. Rebuilt per character rather than
@@ -70,15 +71,35 @@ local accumulator = 0
 local tracked: { [Player]: any } = {}
 
 --[[
-	Silences Roblox's own running sound for this character.
+	Silences Roblox's own character sounds, at the source.
 
-	The default sounds are Sound instances parented to the HumanoidRootPart and
-	driven by the engine's RbxCharacterSounds script. Muted rather than destroyed:
-	that script re-reads them and re-creates what it is missing, so a deleted
-	Sound comes back and a silent one stays silent.
+	They are Sound instances on each HumanoidRootPart, but they are DRIVEN by
+	RbxCharacterSounds — a LocalScript the engine puts in PlayerScripts, which
+	runs on this client and handles every character this client can see. It sets
+	Volume itself when a state changes, so muting a Sound is a value that gets
+	written back over the next time that character starts or stops running. That
+	is why this disables the script instead: it is the thing doing the writing.
+
+	Best-effort by design. It is engine-supplied, it has been renamed before, and
+	a client where it cannot be found should still get our footsteps — just with
+	Roblox's underneath. So the per-Sound muting below stays as the fallback,
+	which handles the sounds that already exist even where the script survives.
 ]]
+local function silenceEngineSounds()
+	local scripts = Players.LocalPlayer:FindFirstChild("PlayerScripts")
+	local default = scripts and scripts:FindFirstChild("RbxCharacterSounds")
+	--[[ Disabled rather than destroyed. Deleting something the engine inserted is
+	     a fight with a future engine version; disabling is the supported way to
+	     say "not in this place". ]]
+	if default and default:IsA("LuaSourceContainer") then
+		(default :: any).Disabled = true
+	end
+end
+
+--[[ The fallback, per character: mute what is already there. Harmless when the
+     script above is gone, and the only thing that works when it is not. ]]
 local function silenceDefault(root: BasePart)
-	for _, name in { "Running", "FreeFalling" } do
+	for _, name in { "Running", "FreeFalling", "Climbing", "Swimming" } do
 		local existing = root:FindFirstChild(name)
 		if existing and existing:IsA("Sound") then
 			existing.Volume = 0
@@ -86,12 +107,16 @@ local function silenceDefault(root: BasePart)
 	end
 end
 
-local function applyDefinition(sound: Sound, definition: any)
+--[[ `pitch` is per CHARACTER and fixed for its life, not per step. Four
+     survivors running on one sample at one speed is a metronome; a few percent
+     of difference each is four people. Rolling it per step instead would make a
+     single player's own footsteps wobble, which is worse than the metronome. ]]
+local function applyDefinition(sound: Sound, definition: any, pitch: number)
 	sound.SoundId = definition.id
 	sound.Volume = definition.volume
 	sound.RollOffMinDistance = definition.rollOffMin
 	sound.RollOffMaxDistance = definition.rollOffMax
-	sound.PlaybackSpeed = definition.pitchMin + (definition.pitchMax - definition.pitchMin) * 0.5
+	sound.PlaybackSpeed = definition.pitchMin + (definition.pitchMax - definition.pitchMin) * pitch
 end
 
 local function release(player: Player)
@@ -131,6 +156,7 @@ local function adopt(player: Player, character: Model)
 		--[[ "" rather than a gait, so the first tick always applies one — the
 		     same sentinel trick the server's own publish uses. ]]
 		gait = "",
+		pitch = random:NextNumber(),
 	}
 end
 
@@ -179,7 +205,7 @@ local function step()
 			if wanted == "" then
 				entry.sound:Stop()
 			else
-				applyDefinition(entry.sound, AudioConfig.Footstep[wanted])
+				applyDefinition(entry.sound, AudioConfig.Footstep[wanted], entry.pitch)
 				entry.sound:Play()
 			end
 		end
@@ -189,6 +215,8 @@ end
 function FootstepController:init() end
 
 function FootstepController:start()
+	silenceEngineSounds()
+
 	for _, player in Players:GetPlayers() do
 		watch(player)
 	end

@@ -32,6 +32,19 @@ local FOLDERS = EventConfig.MapFolders
 
 local Support = {}
 
+--[[ One warning per problem per server, not one per round. These are authoring
+     mistakes: the same folder is wrong every round until somebody fixes it, and
+     seventeen copies of the message is how a log stops being read. ]]
+local warned: { [string]: boolean } = {}
+
+local function warnOnce(key: string, message: string)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn("[RandomEvents] " .. message)
+end
+
 --[[ A named folder anywhere under `root`. Descendants rather than children
      because a designer's own organisation is theirs and the folder might be
      three deep. ]]
@@ -80,15 +93,36 @@ function Support.lights(kind: string): { Light }
 	if not folder then
 		return out
 	end
+	local parts = 0
 	for _, descendant in folder:GetDescendants() do
 		if descendant:IsA("Light") then
 			table.insert(out, descendant)
+		elseif descendant:IsA("BasePart") then
+			parts += 1
 		end
 	end
-	--[[ A folder of bare parts with no Light in them is a designer who meant
-	     well, so the parts themselves count as fixtures too — anything with a
-	     Light child was already caught above, and this catches a PointLight
-	     somebody put on the part rather than in it. ]]
+
+	--[[
+		A folder of bare parts is the silent failure this event has.
+
+		Only a Light can be switched — that is why the parts themselves are not
+		collected, and why a designer who fills this folder with glowing NEON
+		bricks gets a blackout that announces itself and turns nothing off. There
+		is nothing to detect that at runtime except this, so it is said once, by
+		name, where somebody can act on it.
+	]]
+	if #out == 0 and parts > 0 then
+		warnOnce(
+			"nolights:" .. kind,
+			string.format(
+				"the map's Events/%s folder has %d part(s) in it and no Light objects, "
+					.. "so a blackout there would turn nothing off. Put a PointLight, "
+					.. "SpotLight or SurfaceLight in each fixture.",
+				kind,
+				parts
+			)
+		)
+	end
 	return out
 end
 

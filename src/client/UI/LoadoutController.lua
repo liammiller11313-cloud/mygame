@@ -537,15 +537,19 @@ local function buildAbilityPickRow(slot: number, abilityId: string, index: numbe
 	status.Size = UDim2.new(0.56, 0, 1, 0)
 	status.TextXAlignment = Enum.TextXAlignment.Right
 	status.TextTruncate = Enum.TextTruncate.AtEnd
-	if not owned and definition then
+	--[[ The empty row never says EQUIPPED, even when the slot is empty and it
+	     technically is. "— EMPTY —  EQUIPPED" is a sentence that stops a player
+	     mid-scroll to work out what it means, and the row is an ACTION — the one
+	     that clears the slot — so it says what pressing it does. ]]
+	if not definition then
+		status.Text = "Carry nothing in this slot"
+	elseif not owned then
 		status.Text = "LOCKED · " .. EconomyConfig.format(definition.price)
 	elseif editing()[LoadoutConfig.AbilitySlots[slot]] == abilityId then
 		status.Text = "EQUIPPED"
 		status.TextColor3 = COLOR.Accent
-	elseif definition then
-		status.Text = definition.blurb
 	else
-		status.Text = "Carry nothing in this slot"
+		status.Text = definition.blurb
 	end
 
 	local rule = Widgets.frame(button, "Rule", COLOR.Border, 0.6)
@@ -656,10 +660,10 @@ function LoadoutController:_openPicker(slot: string)
 	local height = if isTouch() then PICK_ROW_HEIGHT_TOUCH else PICK_ROW_HEIGHT
 	pickList.CanvasPosition = Vector2.zero
 	pickList.CanvasSize = UDim2.fromOffset(0, count * height)
-	pickTitle.Text = "CHOOSE AN " .. slotLabel(slot)
-	if not (entry and entry.ability) then
-		pickTitle.Text = "CHOOSE A " .. slotLabel(slot)
-	end
+	--[[ "AN ABILITY 1", "A PRIMARY". One line rather than the two it took to
+	     write, because the second was overwriting the first and the pair read as
+	     a bug even though it was not. ]]
+	pickTitle.Text = (if entry and entry.ability then "CHOOSE AN " else "CHOOSE A ") .. slotLabel(slot)
 
 	pickList.Visible = true
 	pickTitle.Visible = true

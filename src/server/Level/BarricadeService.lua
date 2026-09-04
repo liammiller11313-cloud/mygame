@@ -337,6 +337,25 @@ function BarricadeService:arm(): number
 		)
 	end
 
+	--[[
+		A folder that armed nothing is the other silent failure, and the opposite
+		one: somebody made the folder, dragged parts in, and got no barricades at
+		all because they are unanchored or non-colliding. The scan's failure is
+		loud (everything is edible); this one looks exactly like the feature not
+		existing.
+	]]
+	if folder and #armed == 0 then
+		warn(
+			string.format(
+				"[BarricadeService] %s has a %q folder but nothing in it armed — a barricade "
+					.. "has to be Anchored with CanCollide on. Loose or non-colliding parts "
+					.. "are furniture, not obstacles.",
+				mapService:getCurrentId(),
+				folder.Name
+			)
+		)
+	end
+
 	--[[ The scan finding a crowd is the one failure this cannot detect on its
 	     own, so it says so instead. A map with this many breakable things in it
 	     is a map where the trim and the furniture got armed along with the doors,
