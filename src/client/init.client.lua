@@ -134,6 +134,11 @@ local CONTROLLERS = {
 	     is what opens both — a world interaction rather than a keybind, so this
 	     has no binding of its own. ]]
 	"UI/VaultController",
+	--[[ The bar over a deployed turret, and the trigger while you are sitting in
+	     one. After InputController, which it asks whether the fire button is
+	     down — by registry name at tick time rather than at load, so the ordering
+	     is tidiness rather than need. ]]
+	"UI/TurretController",
 	--[[ After the screens it can open, and after the HUD whose corner it shares. ]]
 	--[[ Before MainMenuController, which attaches it in its own build(). Order
 	     is belt and braces — every controller is required before any init() runs

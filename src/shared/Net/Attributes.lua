@@ -115,6 +115,11 @@ Attributes.Player = table.freeze({
 	Ability4ReadyAt = "FL_Ability4ReadyAt",
 	Callsign = "FL_Callsign", -- string, a ProgressionConfig reward id or ""
 	Accent = "FL_Accent", -- string, a ProgressionConfig reward id or ""
+	--[[ Sitting in a turret and driving it by hand. Server-written, so the gate
+	     it feeds is the same fact on every machine: the viewmodel goes away and
+	     the trigger stops firing the gun in your hands, because it is firing the
+	     one you are sitting behind instead. ]]
+	ManningTurret = "FL_ManningTurret", -- boolean
 })
 
 -- Written on the Player instance, read by the ammo counter.
@@ -225,6 +230,24 @@ Attributes.Puzzle = table.freeze({
 Attributes.Barricade = table.freeze({
 	Health = "FL_BarricadeHealth", -- number, what is left of it
 	MaxHealth = "FL_BarricadeMaxHealth", -- number, what it was armed with
+})
+
+--[[
+	Written on a deployed turret model by the Turret ability.
+
+	The health bar over it is a client's job and the numbers behind it are the
+	server's, and attributes are the seam: they replicate on their own, they cost
+	nothing per frame, and a player who walks up to a turret that was deployed
+	before they spawned reads its state without anybody re-sending anything.
+
+	`Manned` is what makes the bar say AUTO or MANUAL, and it is also what stops
+	two players fighting over one gun.
+]]
+Attributes.Turret = table.freeze({
+	Health = "FL_TurretHealth", -- number, what is left of it
+	MaxHealth = "FL_TurretMaxHealth", -- number, what it was deployed with
+	Manned = "FL_TurretManned", -- boolean, somebody is in the seat
+	Owner = "FL_TurretOwner", -- number, the UserId of whoever placed it
 })
 
 -- Written on Workspace. Global, read by the music system and the debug overlay.

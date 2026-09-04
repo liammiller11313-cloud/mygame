@@ -69,6 +69,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AbilityConfig = require(Shared.Config.AbilityConfig)
 local Attributes = require(Shared.Net.Attributes)
 local BarricadeConfig = require(Shared.Config.BarricadeConfig)
 local Enums = require(Shared.Enums)
@@ -122,6 +123,24 @@ local INCAP_ATTRACTION = 0.5
 -- oscillate, and flip-flopping AI reads as broken faster than bad AI does.
 local TARGET_STICKINESS = 0.72
 local RETARGET_MIN, RETARGET_MAX = 0.45, 0.85
+
+--[[
+	How far away a turret can pull a body off the survivors, and how often this
+	body bothers to look.
+
+	Read once from the ability's own tuning rather than duplicated here, so
+	changing what a turret is worth attacking is one number in AbilityConfig and
+	not two files that quietly disagree. Defaulted, because an install with the
+	Turret ability removed from the config must still boot.
+
+	The interval is what keeps this cheap: a look costs a walk of the turret list
+	— at most one per player — and it happens four times a second per body rather
+	than sixty. A turret does not appear fast enough for that to matter.
+]]
+local TURRET_TUNING = (AbilityConfig.get(Enums.Ability.Turret) or {}).tuning or {}
+local TURRET_AGGRO = TURRET_TUNING.AggroRadius or 22
+local TURRET_LOOK_INTERVAL = 0.25
+local TURRET_DAMAGE_SCALE = TURRET_TUNING.AttackDamageScale or 2.5
 
 -- ── Pathing budget ──────────────────────────────────────────────────────────
 -- Re-path between 0.6s and 1.2s, jittered per entity at construction so 46
@@ -282,6 +301,14 @@ function InfectedBrain.new(model: Model, definition: any)
 		     tick starts the identical swing — a body beating on a wall forever
 		     without ever marking it. ]]
 		barricadeAim = nil :: Vector3?,
+		--[[ The turret this body has broken off to attack, if any. Held ACROSS
+		     ticks rather than for one windup like `barricade`, because attacking
+		     an emplacement is a whole errand — walk to it, then swing at it —
+		     rather than something that happens to be in the way of the errand it
+		     was already on. See _stepEmplacement. ]]
+		emplacement = nil :: Model?,
+		emplacementRoot = nil :: BasePart?,
+		emplacementLookAt = 0,
 
 		staggerUntil = 0,
 		lurePosition = nil :: Vector3?,
@@ -707,9 +734,21 @@ function InfectedBrain:update(dt: number, snapshot: any)
 		if not targetRoot or not target.Parent or not RigUtil.isAlive(target) then
 			self:setTarget(nil)
 		else
+			--[[ A turret nearer than this survivor outranks them. Ahead of the
+			     chase rather than inside it, so a body that has broken off never
+			     also swings at the person it broke off from. ]]
+			if self:_stepEmplacement(now, dt, (targetRoot.Position - root.Position).Magnitude) then
+				return
+			end
 			self:_chase(target, targetRoot, now, dt)
 			return
 		end
+	end
+
+	--[[ And with nobody to chase, any turret in range will do — which is what
+	     makes a turret left behind in an empty corridor still get taken apart. ]]
+	if self:_stepEmplacement(now, dt, math.huge) then
+		return
 	end
 
 	self:_wander(now)
@@ -920,6 +959,8 @@ function InfectedBrain:_landSwing(target: Model, targetRoot: BasePart, now: numb
 	self.swinging = false
 	self.barricade = nil
 	self.barricadeAim = nil
+	self.emplacement = nil
+	self.emplacementRoot = nil
 	self:_setSwingPose(false)
 	self:_setAutoRotate(true)
 	self.attackReadyAt = now + self.definition.attack.cooldown
@@ -955,6 +996,149 @@ function InfectedBrain:_landSwing(target: Model, targetRoot: BasePart, now: numb
 			distance = distance,
 		})
 	)
+end
+
+--[[
+	Breaking off to attack a turret, and everything that has to be true first.
+
+	── WHY IT IS A DIVERSION AND NOT A TARGET ──────────────────────────────────
+	A turret is not a victim. _selectTarget scores survivors, everything
+	downstream of a target calls RigUtil.getRoot and RigUtil.isAlive on it, and
+	the kill feed, the gore and the Director all assume the thing being chased is
+	a person. Making a Model with no Humanoid into a `target` would have meant a
+	guard in every one of those places.
+
+	So it sits beside target selection instead, in exactly the seat the pipe bomb
+	lure already occupies: something more interesting than the survivor, for as
+	long as it is there. The lure outranks it, because a pipe bomb has to work.
+
+	── THE THREE THINGS THAT BOUND IT ──────────────────────────────────────────
+	1. RANGE. A turret has to be inside AggroRadius. Nothing walks across the map
+	   for one.
+	2. CLOSER THAN THE PERSON. `bar` is how far away the survivor this body is
+	   already chasing is; a turret further than that is ignored. Without this a
+	   body with a survivor in claw range would turn round and walk to a turret
+	   twenty studs behind it, which is not a horde defending itself — it is a
+	   horde that has stopped working.
+	3. THE CAP. Turret.nearest refuses a turret that already has MaxAttackers
+	   bodies on it — enforced there rather than here on purpose, because the cap
+	   is a fact about the turret and every body would otherwise have to count its
+	   neighbours for itself. See its header for why the test is proximity rather
+	   than a registry of claims.
+
+	Returns true when it has taken the frame, exactly like the lure branch: the
+	caller must not then also chase.
+]]
+function InfectedBrain:_stepEmplacement(now: number, dt: number, bar: number): boolean
+	--[[ A swing already committed to a turret finishes against the turret, for
+	     the same reason one committed to a barricade does — falling through would
+	     land a claw on whoever is standing behind it. ]]
+	if self.swinging then
+		--[[ A swing already committed to a PERSON finishes against the person.
+		     Without this the look below could start a turret swing on top of one
+		     already in its windup — a body that reared back at a survivor and then
+		     turned and hit a box instead, sparing the hit the telegraph promised.
+		     The whole reason the telegraph is worth having is that it is kept. ]]
+		local model = self.emplacement
+		if not model then
+			return false
+		end
+		local part = self.emplacementRoot
+		if not part or not model.Parent then
+			self:_cancelSwing()
+			return false
+		end
+		self:faceTowards(part.Position, dt)
+		if now >= self.windupEnds then
+			self:_landEmplacementSwing(model, part, now)
+		end
+		return true
+	end
+
+	if now >= self.emplacementLookAt then
+		self.emplacementLookAt = now + TURRET_LOOK_INTERVAL
+		self.emplacement = nil
+		self.emplacementRoot = nil
+
+		local service = Registry.find("AbilityService")
+		if service and typeof(service.nearestTurret) == "function" then
+			local ok, model, part, distance =
+				pcall(service.nearestTurret, service, self.root.Position, TURRET_AGGRO, self.model)
+			--[[ The compare against `bar` happens HERE rather than every frame,
+			     so a body that committed on this look keeps walking for a quarter
+			     of a second instead of flickering between the two the moment the
+			     survivor it was chasing steps a stud closer. ]]
+			if ok and model and part and distance < bar then
+				self.emplacement = model
+				self.emplacementRoot = part
+			end
+		end
+	end
+
+	local model = self.emplacement
+	local part = self.emplacementRoot
+	if not model or not part or not model.Parent then
+		self.emplacement = nil
+		self.emplacementRoot = nil
+		return false
+	end
+
+	--[[ The same reach the barricade path uses. A turret is a waist-high box and
+	     claw range alone leaves a body standing just outside it, shuffling. ]]
+	local reach =
+		math.min(self.definition.attack.range + BarricadeConfig.ReachBonus, BarricadeConfig.ProbeRange)
+	if (part.Position - self.root.Position).Magnitude <= reach and now >= self.attackReadyAt then
+		self:_beginSwing(part, now, dt)
+		return true
+	end
+
+	self:_travelTo(part.Position, now)
+	return true
+end
+
+--[[
+	A landed swing against a turret.
+
+	Re-checked at impact rather than trusted from the windup, for the reason every
+	other landing here is: the windup is a real telegraph and the world may change
+	during it. Somebody else's swing can finish the turret, and paying damage into
+	one that is already gone would let a crowd keep hitting a hole in the air.
+
+	AbilityService answers rather than the ability module, so the AI never depends
+	on whether Abilities/Turret.lua is installed — a build with the ability removed
+	simply never finds a turret to swing at in the first place.
+]]
+function InfectedBrain:_landEmplacementSwing(model: Model, part: BasePart, now: number)
+	self.swinging = false
+	self.emplacement = nil
+	self.emplacementRoot = nil
+	self:_setSwingPose(false)
+	self:_setAutoRotate(true)
+	self.attackReadyAt = now + self.definition.attack.cooldown
+	self:_setState(State.Chase)
+	self:_setSpeed(self.chaseSpeed)
+
+	if not model.Parent then
+		return
+	end
+	local reach =
+		math.min(self.definition.attack.range + BarricadeConfig.ReachBonus, BarricadeConfig.ProbeRange)
+	--[[ Shoved, staggered or charged away during the windup. Barricades re-probe
+	     down the committed line for this; a turret is a compact object rather than
+	     a wall, so its distance is the honest test and there is no diagonal to get
+	     wrong. ]]
+	if (part.Position - self.root.Position).Magnitude > reach then
+		return
+	end
+
+	local service = Registry.find("AbilityService")
+	if not service or typeof(service.damageTurret) ~= "function" then
+		return
+	end
+	--[[ Scaled from what this body does to a person, so the roster's hierarchy
+	     carries across without a second damage table: a Tank ends a turret and a
+	     Common needs help. See AbilityConfig's AttackDamageScale for the sums. ]]
+	service:damageTurret(model, self.attackDamage * TURRET_DAMAGE_SCALE)
 end
 
 --[[
@@ -1035,6 +1219,8 @@ function InfectedBrain:_cancelSwing()
 	self.swinging = false
 	self.barricade = nil
 	self.barricadeAim = nil
+	self.emplacement = nil
+	self.emplacementRoot = nil
 	self:_setSwingPose(false)
 	self:_setAutoRotate(true)
 end

@@ -1975,7 +1975,12 @@ local function applyHidden()
 end
 
 local function refreshHidden()
+	--[[ Manning a turret hides the weapon for the same reason being pinned does:
+	     it is not in your hands. You are behind a different gun, and a rifle
+	     floating in the corner of the screen while you fire a turret is the model
+	     telling you something untrue about what the trigger does. ]]
 	hiddenByState = HIDDEN_STATES[Attributes.get(player, PA.State, STATE.Spectating)] == true
+		or Attributes.get(player, PA.ManningTurret, false) == true
 	applyHidden()
 end
 
@@ -2358,6 +2363,7 @@ end
 
 function ViewmodelController:init()
 	trove:connect(player:GetAttributeChangedSignal(PA.State), refreshHidden)
+	trove:connect(player:GetAttributeChangedSignal(PA.ManningTurret), refreshHidden)
 
 	--[[ The camera instance is replaced on respawn and on some death cameras. A
 	     viewmodel parented to the old one renders nowhere, which looks exactly

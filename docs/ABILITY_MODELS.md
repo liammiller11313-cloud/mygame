@@ -138,6 +138,17 @@ courtesy; the server independently re-checks alive, round, slot, ownership,
 cooldown, range and footing, and refuses a client that skipped every one of
 them.
 
+## The gunner's seat
+
+A turret can be manned — sit in it and you aim and fire it yourself. See
+`docs/TURRETS.md`.
+
+**If your model contains a `Seat` anywhere inside it, that is the seat players
+use.** Model a stool, a saddle, a milk crate; whatever it is, put a Seat where a
+gunner should end up and it is used as-is (anchored and made non-collidable on
+the way in). With no Seat in the model, an invisible one is placed 2.2 studs
+behind the gun along the direction it faces.
+
 ## Scale
 
 A stud is about 28cm. The grey-box turret is a 2.6-stud base with a barrel three

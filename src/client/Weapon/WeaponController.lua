@@ -647,6 +647,16 @@ local function canAct(): boolean
 	if not humanoid or humanoid.Health <= 0 then
 		return false
 	end
+	--[[ Sitting in a turret. The trigger belongs to the gun you are behind, not
+	     the one in your hands, and without this both fire on the same click.
+
+	     Read off the PLAYER rather than off the seat, because the server writes
+	     it: whether you are manning a turret is a fact it already owns — it is
+	     what routes your input — and asking the character which seat it is in
+	     would be this file's own second opinion about the same thing. ]]
+	if Attributes.get(player, PA.ManningTurret, false) == true then
+		return false
+	end
 	local survivor = survivorState()
 	if CANNOT_FIRE[survivor] then
 		return false

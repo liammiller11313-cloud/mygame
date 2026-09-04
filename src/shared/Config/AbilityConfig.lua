@@ -95,6 +95,12 @@ local AbilityConfig = {}
 	`math.min(MaxSlots, #keys)`, so raising this is a one-line change there and
 	nothing at all anywhere else.
 ]]
+--[[ The CollectionService tag a deployed turret carries. Here rather than in
+     either half, because the server adds it and the client watches for it, and a
+     tag spelled two ways is a health bar that never appears with nothing in any
+     log to say why. ]]
+AbilityConfig.TurretTag = "FL_Turret"
+
 AbilityConfig.MaxSlots = 2
 
 --[[ The ceiling the attribute names go up to. Raising MaxSlots past this needs
@@ -156,6 +162,60 @@ local DEFINITIONS: { Ability } = {
 			     should get two turrets; one player should not get four by
 			     waiting out a cooldown twice. ]]
 			MaximumActiveTurrets = 1,
+
+			--[[
+				MANNED. Sit in it and you pick the targets.
+
+				The same damage per shot, deliberately. Manning it is already
+				worth doing — the automatic gun shoots the nearest thing it can
+				see, and a player shoots the Smoker on the roof, the Tank, or the
+				body about to reach a downed teammate — and pricing that in
+				damage as well would make sitting in it the only correct play.
+				What you get is CADENCE: a person on the trigger runs it half as
+				fast again, which is the difference between holding a corridor
+				and holding a corridor confidently.
+
+				The cost is the whole point of the trade: you are stationary, you
+				cannot use your own weapon, and everything in the map knows
+				exactly where you are.
+			]]
+			ManualFireRate = 4.5,
+
+			--[[
+				How close a body has to be before it turns on the turret, and how
+				many of them one turret can pull off the survivors at once.
+
+				A cap, because a turret that diverted an entire horde would be a
+				better crowd-control tool than any of the ones designed to be one,
+				and because a wave that walks past four survivors to punch a box is
+				a wave that stopped being a threat. Five bodies is enough that a
+				badly-placed turret dies in seconds and a well-placed one buys the
+				team a corridor's worth of breathing room.
+
+				A body that has already committed keeps its place regardless — the
+				cap only refuses NEW diversions — so nothing lets go of a turret it
+				is standing on top of. See Turret.nearest for how that is counted,
+				and for why counting bodies near the turret instead cannot work.
+			]]
+			AggroRadius = 22,
+			MaxAttackers = 5,
+
+			--[[
+				What a swing takes out of it, as a multiple of what that body
+				would take out of a person.
+
+				A separate number from the barricade scale, which is 3 against
+				wood measured in hundreds of hit points. Set so five Commons take
+				a turret apart in about four and a half seconds — 4 damage on a
+				0.9s cooldown is 4.4 a second each, times five, times this —
+				which is the number the old proximity damage was tuned to and the
+				one the ability was balanced around.
+
+				It also means a Tank ends a turret in three seconds, which is
+				correct: a turret is never the answer to a boss and standing
+				behind one while a Tank walks up should not feel like it is.
+			]]
+			AttackDamageScale = 2.5,
 		}),
 	}),
 	table.freeze({

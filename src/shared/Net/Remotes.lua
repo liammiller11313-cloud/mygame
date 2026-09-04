@@ -166,6 +166,30 @@ local EVENTS: { string } = {
 	     of sight: a position that crossed the wire is a position somebody chose. ]]
 	"RequestAbility", -- C->S {slot: number, target: Vector3?}
 	"AbilityResult", -- {slot, id, ok: boolean, reason: string}
+	--[[
+		Driving a turret you are sitting in. Sent at a fixed low rate while seated
+		and never otherwise.
+
+		A stream, which the rule at the top of this file says attributes are for —
+		and it cannot be one. An attribute a CLIENT writes does not replicate to
+		the server, so an aim the player is choosing has no other way across. It
+		is the same shape as FireWeapon: intent, with where it was aimed,
+		re-validated on arrival.
+
+		A POINT rather than a direction, and that is the difference between the
+		turret shooting where you are looking and nearly where you are looking.
+		The camera sits behind and above the player, who sits behind the gun; a
+		direction taken from one and applied at the other misses by the offset
+		between them, which is nothing at seventy studs and most of a body at
+		five — where a manned turret does most of its work. A point has no such
+		error: the client resolves what it is looking AT and the server aims the
+		barrel at that.
+
+		`firing` is a HELD flag rather than a shot: the server owns the turret's
+		rate of fire entirely, so a client sending this sixty times a second gets
+		exactly the same number of bullets as one sending it fifteen.
+	]]
+	"TurretInput", -- C->S {point: Vector3, firing: boolean}
 	--[[ Broadcast so every client can draw the effect. Nothing here is
 	     authoritative: the damage, the healing and the spawning have already
 	     happened on the server by the time this goes out. ]]

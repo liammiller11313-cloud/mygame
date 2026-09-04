@@ -362,6 +362,46 @@ function AbilityService:absorb(player: Player, amount: number): number
 	return if ok and typeof(remaining) == "number" then remaining else amount
 end
 
+--[[
+	The turret half of the same idea, and for the same reason: InfectedBrain has
+	exactly one ability-shaped thing to know about.
+
+	The brain must not require an ability module — it is loaded by this service
+	from a folder, it can be absent, and a hard require from the AI would make the
+	horde depend on whether somebody deleted Abilities/Turret.lua. So both of
+	these degrade to "there is no turret" rather than to an error.
+]]
+function AbilityService:nearestTurret(
+	origin: Vector3,
+	range: number,
+	claimant: Model?
+): (Model?, BasePart?, number)
+	local turret = modules[Enums.Ability.Turret]
+	if not turret or typeof(turret.nearest) ~= "function" then
+		return nil, nil, math.huge
+	end
+	--[[ `claimant` is the body asking, and passing it is what enforces the cap:
+	     see Turret.nearest. Optional so anything else that ever wants to know
+	     where the nearest turret is can ask without booking a place at it. ]]
+	local ok, model, part, distance = pcall(turret.nearest, origin, range, claimant)
+	if not ok then
+		return nil, nil, math.huge
+	end
+	return model, part, if typeof(distance) == "number" then distance else math.huge
+end
+
+--[[ Returns what is left of it, or nil when the model is not a live turret —
+     which is how a brain finds out its target went down between the windup and
+     the swing landing. ]]
+function AbilityService:damageTurret(model: Instance, amount: number): number?
+	local turret = modules[Enums.Ability.Turret]
+	if not turret or typeof(turret.damage) ~= "function" then
+		return nil
+	end
+	local ok, remaining = pcall(turret.damage, model, amount)
+	return if ok and typeof(remaining) == "number" then remaining else nil
+end
+
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function AbilityService:init()
@@ -398,6 +438,19 @@ function AbilityService:start()
 	trove:connect(Remotes.Event.RequestAbility.OnServerEvent, onRequest)
 	trove:connect(Remotes.Event.PurchaseAbility.OnServerEvent, onPurchase)
 	trove:connect(Remotes.Event.SetAbilitySlot.OnServerEvent, onSetSlot)
+	--[[ Driving a turret you are sitting in. Unvalidated here on purpose: the
+	     module owns the check that matters — that this player is the CURRENT
+	     occupant of a live turret — and duplicating it out here would be a second
+	     copy of the rule to keep in step. Rate limiting is structural rather than
+	     a counter: the fire rate lives on the server, so a client sending this
+	     every frame gets exactly the bullets a client sending it fifteen times a
+	     second gets. ]]
+	trove:connect(Remotes.Event.TurretInput.OnServerEvent, function(player: Player, payload: any)
+		local turret = modules[Enums.Ability.Turret]
+		if turret and typeof(turret.input) == "function" then
+			pcall(turret.input, player, payload)
+		end
+	end)
 
 	--[[ Republished on every spawn, not just on join. The attributes live on the
 	     Player rather than the Character so they survive a death, but a client
