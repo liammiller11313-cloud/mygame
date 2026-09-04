@@ -533,8 +533,22 @@ local function block(parent: Instance, name: string, size: Vector3, offset: CFra
 	part.CFrame = offset
 	part.Color = color
 	part.Material = Enum.Material.SmoothPlastic
-	part.TopSurface = Enum.NormalId.Front
-	part.BottomSurface = Enum.NormalId.Front
+	--[[
+		SurfaceType, not NormalId, and getting that wrong was not cosmetic.
+
+		These two properties take Enum.SurfaceType — Smooth, Studs, Inlet. They
+		were being handed Enum.NormalId.Front, which is a FACE, and Roblox rejects
+		a wrong-typed property assignment by THROWING. So this function raised on
+		its first part, every time, and took buildFallback down with it: the model
+		was abandoned half-built and setWeapon never finished.
+
+		Which is why melee was invisible in first person. Not the pose, and not
+		the art — the stand-in threw before it had a second part, and any weapon
+		with no supplied viewmodel drew nothing at all. Every other file in this
+		project already wrote Enum.SurfaceType.Smooth here; this one did not.
+	]]
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
 	part.Parent = parent
 	return part
 end
