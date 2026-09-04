@@ -147,6 +147,11 @@ local SPECIAL_JITTER_FRACTION = SPECIALS.IntervalJitter / math.max(SPECIALS.Base
 local BAND_PUSH = 1.25
 local BAND_BACKOFF = 0.45
 
+--[[ What the band is pinned to while a teammate is down and gettable: exactly
+     the wave definition's own baseline. Not a floor — a pin. See THE RESCUE in
+     _updatePressure for why neither easing nor pushing is right there. ]]
+local RESCUE_BASELINE = 1.0
+
 --[[ Team health, normalised so that 1 is "the average survivor is as hurt as the
      game's own definition of hurt". Derived rather than invented: below
      HurtThreshold a survivor limps and every infected in the map can hear them. ]]
@@ -176,17 +181,32 @@ local MAX_SPAWNS_PER_TICK = 2
      recomputed every interval and will simply ask again. ]]
 local MAX_QUEUED_SPAWNS = 64
 
---[[ Cosmetic only. A reused placement point (see VisibilityGracePeriod below)
-     would otherwise stack a whole batch into one silhouette for the second
-     before their brains pick different paths. The point was already validated
-     for ground and clearance, and infected do not collide with each other, so a
-     couple of studs of scatter is free. ]]
+--[[
+	How far a reused placement point is scattered, so a batch does not stack into
+	one silhouette for the second before their brains pick different paths.
+
+	It is NOT free, which is what the comment here used to say. Two and a half
+	studs is most of a body: scattered off a point cleared next to a wall, a car,
+	a railing or a stair riser — which is most of a street — the rig appears with
+	its torso in the geometry, invisible to every client, and its brain walks it
+	at the team from inside. "Some zombies do not spawn and you take damage
+	anyway" is that bug, reported from the only seat it can be seen from.
+
+	So the scattered point is re-settled through SpawnPlacement.settle, and a
+	scatter that lands somewhere a body does not fit falls back to the centre.
+	One raycast and one box test per spawn, on the cached path only.
+]]
 local SPAWN_SPREAD = 2.5
 
 --[[ Placement failures are reported at most this often. A Director that cannot
      find room says so once every few seconds with a count, rather than turning
      the output window into a wall of identical warnings. ]]
 local STARVATION_WARN_INTERVAL = 8
+
+--[[ Much rarer than the starvation report: crowding is information rather than a
+     fault, and a line about it every eight seconds would bury the ones that
+     matter. ]]
+local CROWDING_WARN_INTERVAL = 45
 
 --[[
 	Backoff after a failed placement search.
@@ -446,7 +466,19 @@ function DirectorService:init()
 
 	self._starved = 0
 	self._starvedReason = ""
+	--[[ Scatter offsets that landed somewhere a body does not fit. Not a failure
+	     — the spawn still happens, at the centre — but a MAP reading: a level
+	     whose only clear placements are single body-widths is one where the
+	     horde arrives in a stack, and the number says so without anybody having
+	     to stand there and count. ]]
+	self._crowded = 0
 	self._starvedWarnedAt = -math.huge
+	self._crowdedWarnedAt = -math.huge
+	--[[ Somebody is down and the team can still reach them. Set by _updatePressure
+	     once a tick; read by the pacing state machine, which must not announce a
+	     lull over a survivor bleeding out. ]]
+	self._rescuing = false
+	self._shortStress = 0
 
 	self._accumulator = 0
 end
@@ -707,6 +739,7 @@ function DirectorService:_tick(dt: number, now: number)
 
 	self:_publish()
 	self:_reportStarvation(now)
+	self:_reportCrowding(now)
 end
 
 --[[ The Director runs whenever there is somebody left to press and RoundService
@@ -982,9 +1015,42 @@ function DirectorService:_updateIntensity(dt: number)
 	self._teamIntensity = peak
 end
 
+--[[
+	How many survivors are down, and how many are still standing.
+
+	Separate from the health read on purpose, and it is the fix for the single
+	most-felt complaint about this Director: it went EASY the moment somebody was
+	incapacitated. That fell out of the health fraction counting a downed player
+	as zero — one of four down dragged the team read to 0.75, which is a quarter
+	of the way to the bottom of the band, and the game answered the most dramatic
+	moment in a round by sending fewer zombies.
+
+	Going down is not the team being weak. It is the team being ONE PERSON SHORT
+	for twenty seconds while somebody kneels in the open, and that is the tensest
+	thing the game does. The Director's job there is to hold, not to help.
+
+	Zero for both when SurvivorService cannot answer, which reads as "nobody is
+	down" — the same optimistic failure as the health read below, and for the same
+	reason: a missing service must never invent a crisis.
+]]
+function DirectorService:_rescueCounts(): (number, number)
+	local survivors = Registry.find("SurvivorService")
+	if not survivors or typeof(survivors.getRescueCounts) ~= "function" then
+		return 0, 0
+	end
+	local ok, down, upright = pcall(survivors.getRescueCounts, survivors)
+	if not ok or typeof(down) ~= "number" or typeof(upright) ~= "number" then
+		return 0, 0
+	end
+	return down, upright
+end
+
 --[[ SurvivorService's 0-1 read on the team, or 1 when it cannot answer. Failing
      OPTIMISTIC is deliberate: a Director that reads a missing service as "this
-     team is dying" would quietly halve every horde in the game. ]]
+     team is dying" would quietly halve every horde in the game.
+
+     Counts UPRIGHT survivors only — see getRescueCounts above for why a downed
+     one is not simply a survivor at zero health. ]]
 function DirectorService:_teamHealthFraction(): number
 	local survivors = Registry.find("SurvivorService")
 	if not survivors or typeof(survivors.getTeamHealthFraction) ~= "function" then
@@ -1009,8 +1075,54 @@ function DirectorService:_updatePressure()
 	self._healthStress = math.clamp((1 - self:_teamHealthFraction()) / HEALTH_STRESS_SPAN, 0, 1)
 	self._intensityStress = math.clamp(self._teamIntensity / math.max(INTENSITY.PeakThreshold, 1e-3), 0, 1)
 
-	local stress = math.max(self._healthStress, self._intensityStress)
-	self._pressure = BAND_PUSH + (BAND_BACKOFF - BAND_PUSH) * stress
+	--[[
+		A THIRD READ: how short-handed the team is.
+
+		It exists because the health fraction now counts upright survivors only,
+		and without this that change has a tail nobody wants. One healthy survivor
+		with three teammates on the floor reads as a perfectly healthy team — a
+		full 1.25, the maximum push, at the exact moment there is one person left
+		to hold a room. The old code got that case right by accident, scoring the
+		downed as zero health; this gets it right on purpose, and separately from
+		what the standing survivors' health is doing.
+
+		0 with nobody down, 1 with nobody up.
+	]]
+	local down, upright = self:_rescueCounts()
+	local roster = down + upright
+	self._shortStress = if roster > 0 then down / roster else 0
+
+	local stress = math.max(self._healthStress, self._intensityStress, self._shortStress)
+	local pressure = BAND_PUSH + (BAND_BACKOFF - BAND_PUSH) * stress
+
+	--[[
+		THE RESCUE, and it PINS rather than lifting.
+
+		While somebody is down and the rescue is still winnable, the Director plays
+		the wave exactly as written: no easing, and no pushing either. Both halves
+		matter and only the first was the complaint.
+
+		Easing was the bug — a quarter of the way to the bottom of the band the
+		moment anybody went down, and into an outright "Relax" if it happened
+		during a quiet stretch, so the tensest twenty seconds in the game were
+		answered by switching the game off. Pushing would be the obvious
+		overcorrection: a team that is one gun short does not need the horde grown
+		as well, and a Director that piles on there turns every rescue into a wipe.
+
+		Baseline is the honest answer. The wave schedule already knows how hard
+		this wave is meant to be; a rescue is the moment to simply hold it.
+
+		"Winnable" is at least as many on their feet as on the floor. Past that it
+		is a wipe in progress rather than a rescue, and grinding one out is not
+		tense, it is long — so the band comes back, with the short-handed read
+		above now driving it, and the last survivor gets the room to try something.
+	]]
+	self._rescuing = down > 0 and upright > 0 and down <= upright
+	if self._rescuing then
+		pressure = RESCUE_BASELINE
+	end
+
+	self._pressure = pressure
 end
 
 --[[ Where inside the wave's band the Director currently sits. 1 is the wave's
@@ -1093,6 +1205,31 @@ function DirectorService:_updatePacing(now: number)
 		return
 	end
 
+	--[[
+		AND NO LULL OVER A RESCUE.
+
+		The band decides how many bodies; this decides what the round is CALLED,
+		which drives the music mix, the callouts and the special interval. Relax
+		asks for FOUR common infected on a six-second interval — a "Relax"
+		announced while a teammate is bleeding out is the Director stopping the
+		game during the twenty seconds it should least be stopped, and it is the
+		half of "the Director plays easy when somebody is down" that the pressure
+		floor alone would not have fixed.
+
+		ABOVE the dwell minimum, alongside the PeakThreshold override, and for the
+		same reason that one is: Relax's minimum is twenty-two seconds and a whole
+		down-and-revive is over inside that. A rule that only applied after the
+		minimum would be a rule that never fired.
+
+		It only refuses a lull; it does not promote anything. BuildUp is where a
+		round that has something to do sits, and the ordinary rules take it from
+		there.
+	]]
+	if self._rescuing and state == STATE.Relax then
+		self:_setState(STATE.BuildUp)
+		return
+	end
+
 	local window = PACING[state]
 	if not window then
 		return
@@ -1120,9 +1257,9 @@ function DirectorService:_updatePacing(now: number)
 			self:_setState(STATE.PeakFade)
 		end
 	elseif state == STATE.PeakFade then
-		if intensity < INTENSITY.RelaxThreshold then
+		if intensity < INTENSITY.RelaxThreshold and not self._rescuing then
 			self:_setState(STATE.Relax)
-		elseif elapsed >= window.max and intensity >= self._stateIntensity then
+		elseif elapsed >= window.max and (intensity >= self._stateIntensity or self._rescuing) then
 			-- The maximum does NOT force a lull. PeakFade only ends into Relax
 			-- once intensity is genuinely under RelaxThreshold; the alternative
 			-- is a "calm" state announced over a team still being chewed on.
@@ -1276,7 +1413,11 @@ function DirectorService:_specialsAllowed(): boolean
 	if self._budget.isBreather or self._budget.maxSpecialsAlive <= 0 then
 		return false
 	end
-	return self._healthStress < 1
+	--[[ And nobody left standing closes it too, which the health read alone no
+	     longer does: it counts UPRIGHT survivors, and a team with none of those
+	     reports a perfectly healthy 1. A Hunter sent at four people already on
+	     the floor is not tension, it is a loading screen with extra steps. ]]
+	return self._healthStress < 1 and self._shortStress < 1
 end
 
 function DirectorService:_aliveSpecials(): number
@@ -1799,7 +1940,17 @@ function DirectorService:_placeFor(request, now: number): (Vector3?, string?)
 	then
 		local bearing = random:NextNumber() * math.pi * 2
 		local spread = SPAWN_SPREAD * math.sqrt(random:NextNumber())
-		return cached.position + Vector3.new(math.cos(bearing) * spread, 0, math.sin(bearing) * spread), nil
+		local scattered = cached.position
+			+ Vector3.new(math.cos(bearing) * spread, 0, math.sin(bearing) * spread)
+		--[[ Re-settled, because the CENTRE was validated and this point was not.
+		     See SPAWN_SPREAD. The fallback is the centre itself, which is still
+		     legal — two bodies in one silhouette for a second is a cosmetic
+		     problem and one inside a wall is not. ]]
+		local settled = SpawnPlacement.settle(scattered, request.kind)
+		if not settled then
+			self._crowded += 1
+		end
+		return settled or cached.position, nil
 	end
 
 	local options
@@ -1899,6 +2050,29 @@ function DirectorService:_reportStarvation(now: number)
 	)
 	self._starved = 0
 	self._dropped = 0
+end
+
+--[[ Reported separately from starvation, and much more quietly, because it is
+     not a failure: every one of these still spawned. It is the map telling you
+     its cleared spawn points are one body wide. ]]
+function DirectorService:_reportCrowding(now: number)
+	if self._crowded == 0 then
+		return
+	end
+	if now - self._crowdedWarnedAt < CROWDING_WARN_INTERVAL then
+		return
+	end
+	self._crowdedWarnedAt = now
+	print(
+		string.format(
+			"[DirectorService] %d spawn(s) in the last %ds had no room to spread and stacked on "
+				.. "the batch point instead — the cleared placements near the team are about one "
+				.. "body wide. More FL_SpawnNode parts in open ground would spread the horde out",
+			self._crowded,
+			CROWDING_WARN_INTERVAL
+		)
+	)
+	self._crowded = 0
 end
 
 -- ════════════════════════════════════════════════════════════════════════════

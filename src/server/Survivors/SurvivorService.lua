@@ -828,7 +828,60 @@ end
 --[[ 0-1 read on how the team is doing, weighted by effective health. Downed and
      dead survivors contribute zero, which is exactly the signal the Director
      wants when it decides whether to leave a medkit in the next room. ]]
+--[[
+	How healthy the team that is STILL STANDING is, and how many of them are not.
+
+	The fraction counts upright survivors only, and that is a deliberate change
+	from counting everybody with a downed player scored as zero. The Director
+	reads this as "how much trouble is this team in" and eases off as it falls —
+	so the old shape meant that the moment somebody went down, the game got
+	easier. That is backwards. Going down is the most dramatic thing that happens
+	in a round and the rescue is the drama; answering it with fewer zombies takes
+	the teeth out of the one moment the whole design is pointing at.
+
+	So the two facts are now reported separately and the Director decides what
+	each one means. Health is about the people who can still shoot. Being down is
+	its own thing, and it belongs to the rescue rule rather than to an average.
+
+	`down` counts Incapacitated and Pinned — a survivor in a Hunter's claws needs
+	a teammate exactly as much as one bleeding out does — and NOT Dead, because
+	nobody is going to rescue those.
+]]
 function SurvivorService:getTeamHealthFraction(): number
+	local total, count = 0, 0
+	for _, record in records do
+		if self:_isUpright(record) then
+			count += 1
+			total += math.clamp(self:_effective(record) / S.MaxHealth, 0, 1)
+		end
+	end
+	--[[ Nobody upright is not "a perfectly healthy team", but it is also not a
+	     number the Director should be leaning on: with the whole team down there
+	     is no fight left to pace. 1 keeps it out of the way and lets the rescue
+	     rule — which knows how many are down — own the decision. ]]
+	if count == 0 then
+		return 1
+	end
+	return total / count
+end
+
+--[[
+	The WHOLE roster's health, with a downed survivor scored as zero.
+
+	The other reading of the same question, and both are wanted — by different
+	callers, for different decisions.
+
+	`getTeamHealthFraction` above asks "how much fight has this team got left",
+	which is about the people who can still shoot, and it is what the Director
+	paces on. This asks "how badly does this team need supplies", which is not
+	the same thing at all: somebody on the floor is coming back up on a sliver of
+	health and black-and-white, and they will want a kit more than anyone still
+	standing. ItemPlacer reads this one.
+
+	Dead survivors are counted as zero too, and stay counted: a defibrillator is
+	exactly the supply that team needs.
+]]
+function SurvivorService:getRosterHealthFraction(): number
 	local total, count = 0, 0
 	for _, record in records do
 		if record.state ~= STATE.Spectating then
@@ -842,6 +895,22 @@ function SurvivorService:getTeamHealthFraction(): number
 		return 1
 	end
 	return total / count
+end
+
+--[[ How many survivors are waiting on a teammate, and how many are still up to
+     go and get them. Both, because the Director's answer depends on the ratio:
+     one down out of four is a rescue, three down out of four is a wipe in
+     progress and grinding it out is not fun for anybody. ]]
+function SurvivorService:getRescueCounts(): (number, number)
+	local down, upright = 0, 0
+	for _, record in records do
+		if self:_isUpright(record) then
+			upright += 1
+		elseif record.state == STATE.Incapacitated or record.state == STATE.Pinned then
+			down += 1
+		end
+	end
+	return down, upright
 end
 
 --[[

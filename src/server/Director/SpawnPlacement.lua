@@ -403,6 +403,43 @@ end
 	every survivor and the out-of-sight rule still apply, which are the two rules
 	that actually protect the illusion.
 ]]
+--[[
+	Re-validates a point that was DERIVED from a legal one.
+
+	The Director scatters a batch a couple of studs around one cleared placement
+	so they do not all appear inside one silhouette, and for a long time the
+	comment on that scatter said the offset was free because "the point was
+	already validated for ground and clearance". The CENTRE was. The offset was
+	not, and it was never tested by anything.
+
+	Two and a half studs is most of a body. Scattered off a cleared point next to
+	a wall, a car, a railing or a stair riser — which is most of a street map —
+	the body appears with its torso inside the geometry, where no client can see
+	it and its brain drives it at the team anyway. That is damage arriving from a
+	zombie that is not visibly there, and it is why this function exists.
+
+	Cheap on purpose: one downward ray and one box test, run per spawn only on
+	the scatter path. Returns the settled floor point, or nil for a caller that
+	should fall back to the point it derived this one from.
+]]
+function SpawnPlacement.settle(point: Vector3, kind: string?): Vector3?
+	if typeof(point) ~= "Vector3" then
+		return nil
+	end
+	--[[ The same ignore list the search itself uses — survivor characters and
+	     the Infected folder — so a body standing where this one is going does not
+	     count as the floor, or as the thing blocking it. It is rebuilt by every
+	     `find`, and a scatter only ever happens moments after one. ]]
+	local ground, normal = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore, GROUND_RISE)
+	if not ground or not normal or normal.Y < MIN_GROUND_NORMAL_Y then
+		return nil
+	end
+	if not SpawnVolume.fitsKind(ground, kind, ignore) then
+		return nil
+	end
+	return ground
+end
+
 function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vector3?, string?)
 	local opts = options or DEFAULT_OPTIONS
 

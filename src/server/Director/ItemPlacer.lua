@@ -183,13 +183,19 @@ end
 
 --[[ 0 when the team is healthy, 1 once its average has fallen to the hurt
      threshold. Everything below that stays at 1: there is nothing more the
-     Director can do for you than hand you the best item it has. ]]
+     Director can do for you than hand you the best item it has.
+
+     The ROSTER read, not the upright one the Director paces on. A survivor on
+     the floor is coming back up on a sliver of health and will want a kit more
+     than anyone still standing, so they count here as the zero they are — which
+     is what this asked for before the two readings were separated, and it must
+     keep asking for it. See SurvivorService:getRosterHealthFraction. ]]
 function ItemPlacer:_hurtFraction(): number
 	local survivors = Registry.find("SurvivorService")
-	if not survivors or typeof(survivors.getTeamHealthFraction) ~= "function" then
+	if not survivors or typeof(survivors.getRosterHealthFraction) ~= "function" then
 		return 0
 	end
-	local ok, fraction = pcall(survivors.getTeamHealthFraction, survivors)
+	local ok, fraction = pcall(survivors.getRosterHealthFraction, survivors)
 	if not ok or typeof(fraction) ~= "number" then
 		return 0
 	end
