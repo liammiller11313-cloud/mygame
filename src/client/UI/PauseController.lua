@@ -445,11 +445,41 @@ function PauseController:start()
 		if processed then
 			return
 		end
-		--[[ P, and the pad's view button. Not Escape and not Start: both belong
-		     to Roblox, and taking either would take the platform menu with it. ]]
-		if input.KeyCode == Enum.KeyCode.P or input.KeyCode == Enum.KeyCode.ButtonSelect then
+		--[[ P, and only P, on the press. Not Escape and not Start: both belong to
+		     Roblox, and taking either would take the platform menu with it. ]]
+		if input.KeyCode == Enum.KeyCode.P then
 			PauseController:open()
 		end
+	end)
+
+	--[[
+		The pad's view button, on RELEASE rather than on press.
+
+		It is also the modifier for the gamepad ability layer — hold it and the
+		face buttons become ability slots — and a button that is a modifier cannot
+		fire its own verb on the press, because at that moment nobody knows yet
+		whether it is a tap or a hold. See the ABILITY LAYER note in
+		InputController for why the view button is the only pad input that can
+		afford this: the pause menu is the one thing on a controller where a
+		fifth of a second is invisible, which MELEE and SHOVE are not.
+
+		A tap opens the menu. A hold does not, whether or not an ability was
+		chosen — somebody who held it, looked at their cards and let go has
+		decided against, and answering that with a pause menu is worse than doing
+		nothing.
+	]]
+	trove:connect(UserInputService.InputEnded, function(input: InputObject, processed: boolean)
+		if state.open or processed or input.KeyCode ~= Enum.KeyCode.ButtonSelect then
+			return
+		end
+		local controller = Registry.find("InputController")
+		if controller and typeof(controller.consumedLayerTap) == "function" then
+			local ok, consumed = pcall(controller.consumedLayerTap, controller)
+			if ok and consumed then
+				return
+			end
+		end
+		PauseController:open()
 	end)
 
 	--[[

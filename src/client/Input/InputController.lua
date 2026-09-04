@@ -851,6 +851,141 @@ local function unbind(binding: Binding)
 	ContextActionService:UnbindAction(PREFIX .. binding.action)
 end
 
+-- ── the gamepad ability layer ───────────────────────────────────────────────
+
+--[[
+	Abilities on a controller, without taking a button from anything.
+
+	Every gamepad input this game has is spoken for — both triggers, both
+	bumpers, four face buttons, both stick clicks, four D-pad directions — and
+	Start belongs to Roblox. So abilities get a LAYER instead: hold the view
+	button and the face buttons become ability slots for as long as you hold it.
+
+	── WHY THE VIEW BUTTON IS THE ONE THAT CAN AFFORD IT ───────────────────────
+	Making a button a modifier means its own verb can no longer fire on press —
+	it has to wait for the release to find out whether you were holding it. For
+	MELEE or SHOVE that is unacceptable: both are panic buttons and a fifth of a
+	second of latency is a death. The view button opens the PAUSE MENU, which is
+	the one thing on the pad where nobody can feel a delay, so it is the only
+	honest donor.
+
+	A tap still opens the pause menu, on release. A hold opens the layer and
+	suppresses the tap, whether or not an ability was actually chosen — a player
+	who held it, looked at their cards and let go had decided not to, and
+	throwing a pause menu at them for that would be worse than doing nothing.
+
+	── AND THE FACE BUTTONS ARE SUNK, NOT SHARED ───────────────────────────────
+	These bind at a HIGHER ContextActionService priority than the ordinary
+	keymap and return Pass while the layer is closed, so ButtonX is still reload
+	and ButtonY is still interact for the whole time nobody is holding view. The
+	instant the layer opens they return Sink, so holding view and pressing X
+	fires an ability WITHOUT also reloading.
+]]
+local LAYER_KEY = Enum.KeyCode.ButtonSelect
+local LAYER_FACE_KEYS = {
+	Enum.KeyCode.ButtonX,
+	Enum.KeyCode.ButtonY,
+	Enum.KeyCode.ButtonA,
+	Enum.KeyCode.ButtonB,
+}
+
+--[[ Above the ordinary bindings so the face buttons are seen first, and by
+     enough that a future layer could sit between them. ]]
+local LAYER_PRIORITY = PRIORITY + 100
+
+--[[ How long the view button has to be down before it counts as a hold rather
+     than a tap. Short enough that the layer feels instant, long enough that a
+     deliberate tap on the pause menu is never mistaken for one. ]]
+local LAYER_HOLD = 0.18
+
+local layer = {
+	down = false,
+	downAt = 0,
+	--[[ Set when the layer has done anything at all — opened, or fired — so the
+	     release knows not to also open the pause menu. ]]
+	consumed = false,
+}
+
+--[[ Whether the modifier is being held long enough to count. Read on every face
+     button press rather than latched, so a press in the first fraction of a
+     second still falls through to reload rather than being eaten by a layer the
+     player has not opened yet. ]]
+local function layerOpen(): boolean
+	return layer.down and (os.clock() - layer.downAt) >= LAYER_HOLD
+end
+
+--[[
+	True when the view button's release should be swallowed rather than opening
+	the pause menu. PauseController asks this instead of opening on the PRESS,
+	which is the whole of the coordination between the two.
+]]
+function InputController:consumedLayerTap(): boolean
+	return layer.consumed
+end
+
+function InputController:isAbilityLayerOpen(): boolean
+	return layerOpen()
+end
+
+local function bindAbilityLayer()
+	ContextActionService:BindActionAtPriority(
+		PREFIX .. "AbilityLayer",
+		function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult?
+			if state == Enum.UserInputState.Begin then
+				layer.down = true
+				layer.downAt = os.clock()
+				layer.consumed = false
+			elseif state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
+				--[[ A hold is consumed whether or not an ability was chosen. See
+				     the header: letting go without picking one is a decision, and
+				     answering it with a pause menu is the wrong answer. ]]
+				if layerOpen() then
+					layer.consumed = true
+				end
+				layer.down = false
+			end
+			--[[ Passed, always. PauseController still needs to see this button —
+			     it is what opens the pause menu on a tap — and sinking it here
+			     would leave a controller with no way into the menu at all. ]]
+			return Enum.ContextActionResult.Pass
+		end,
+		false,
+		LAYER_PRIORITY,
+		LAYER_KEY
+	)
+
+	for index = 1, math.min(AbilityConfig.MaxSlots, #LAYER_FACE_KEYS) do
+		ContextActionService:BindActionAtPriority(
+			PREFIX .. "AbilityFace" .. index,
+			function(_name: string, state: Enum.UserInputState): Enum.ContextActionResult?
+				--[[ Pass while the layer is shut, which is almost always. This is
+				     what keeps ButtonX as reload and ButtonY as interact for every
+				     player who never holds the view button. ]]
+				if not layerOpen() then
+					return Enum.ContextActionResult.Pass
+				end
+				if state == Enum.UserInputState.Begin then
+					layer.consumed = true
+					if enabled and UserInputService:GetFocusedTextBox() == nil then
+						forward("Ability" .. index)
+					end
+				end
+				return Enum.ContextActionResult.Sink
+			end,
+			false,
+			LAYER_PRIORITY,
+			LAYER_FACE_KEYS[index]
+		)
+	end
+end
+
+local function unbindAbilityLayer()
+	ContextActionService:UnbindAction(PREFIX .. "AbilityLayer")
+	for index = 1, #LAYER_FACE_KEYS do
+		ContextActionService:UnbindAction(PREFIX .. "AbilityFace" .. index)
+	end
+end
+
 -- ── public API ──────────────────────────────────────────────────────────────
 
 --[[
@@ -1004,10 +1139,17 @@ function InputController:init()
 	for _, binding in BINDINGS do
 		bind(binding)
 	end
+	--[[ After the ordinary keymap, though the priority is what actually decides
+	     the order — see LAYER_PRIORITY. Bound unconditionally rather than only on
+	     a gamepad: a player who picks a controller up mid-round should find it
+	     already working, and the layer costs nothing while the view button is
+	     not being held. ]]
+	bindAbilityLayer()
 	trove:add(function()
 		for _, binding in BINDINGS do
 			unbind(binding)
 		end
+		unbindAbilityLayer()
 	end)
 end
 

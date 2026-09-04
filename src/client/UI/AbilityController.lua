@@ -32,6 +32,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ContextActionService = game:GetService("ContextActionService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -73,6 +74,11 @@ local STACK_Y = 210
      is to find the ground under the crosshair, not to enforce a rule. ]]
 local AIM_DISTANCE = 900
 
+--[[ The confirm binding, above InputController's own so the shot that would
+     otherwise accompany a placement is sunk before the weapon ever sees it. ]]
+local AIM_ACTION = "FL_AbilityAim"
+local AIM_PRIORITY = Enum.ContextActionPriority.High.Value + 500
+
 local AbilityController = {}
 
 local trove = Trove.new()
@@ -107,13 +113,41 @@ local function now(): number
 	return Workspace:GetServerTimeNow()
 end
 
---[[ What key opens this slot, for the corner of the card. Asked of
-     InputController rather than assumed, because these are rebindable — and on
-     a pad or a phone there is no key at all, which is why an empty string is a
-     legitimate answer rather than a bug. ]]
+--[[ The face buttons the gamepad ability layer puts each slot on, in the same
+     order InputController binds them. See the ABILITY LAYER note there. ]]
+local LAYER_FACE = { "X", "Y", "A", "B" }
+
+--[[
+	What opens this slot, for the corner of the card — and it is a different
+	answer on every scheme.
+
+	Keyboard gets the bound key, asked of InputController rather than assumed
+	because these are rebindable. A gamepad gets the LAYER prompt, because there
+	is no single button to name: abilities live behind holding the view button,
+	and a card that said "Z" to a controller player would be actively lying to
+	them. Touch gets nothing, because the on-screen button IS the prompt and
+	labelling a button with its own name is noise.
+]]
 local function keyLabelFor(slot: number): string
 	local input = Registry.find("InputController")
-	if not input or typeof(input.getBindings) ~= "function" then
+	if not input then
+		return ""
+	end
+
+	local scheme = if typeof(input.getScheme) == "function" then input:getScheme() else nil
+	if scheme == "Touch" then
+		return ""
+	end
+	if scheme == "Gamepad" then
+		local face = LAYER_FACE[slot]
+		--[[ "VIEW" rather than a glyph. A Roblox game cannot know whether it is
+		     on an Xbox or a PlayStation pad, so any symbol drawn here would be
+		     wrong on one of them — the same reason InputController's D-pad
+		     prompts use arrows and its face buttons keep their letters. ]]
+		return if face then "VIEW+" .. face else ""
+	end
+
+	if typeof(input.getBindings) ~= "function" then
 		return ""
 	end
 	local ok, bindings = pcall(input.getBindings, input)
@@ -267,21 +301,50 @@ local function beginAim(slot: number)
 		card.shownWhole = -1
 	end
 
-	aimTrove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
-		if processed then
-			return
-		end
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-			or input.KeyCode == Enum.KeyCode.ButtonR2
-		then
+	--[[
+		Bound through ContextActionService and SUNK, rather than watched.
+
+		The confirm is the fire button on every scheme — a click, a tap, or the
+		right trigger — which is also the button that shoots the gun in your
+		hands. A raw InputBegan listener sees the press but cannot stop it, so
+		placing an airstrike also emptied a magazine into the floor in front of
+		you. Bound above InputController's own priority and returning Sink, the
+		shot never happens.
+
+		Torn down with aimTrove the moment the mode ends, so nothing here can
+		outlive the aim and eat a trigger pull afterwards.
+	]]
+	ContextActionService:BindActionAtPriority(
+		AIM_ACTION,
+		function(_name: string, inputState: Enum.UserInputState): Enum.ContextActionResult
+			if inputState ~= Enum.UserInputState.Begin then
+				return Enum.ContextActionResult.Sink
+			end
 			local point = aimPoint()
 			if point then
 				send(slot, point)
 			end
 			endAim()
-		elseif input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.ButtonB then
+			return Enum.ContextActionResult.Sink
+		end,
+		false,
+		AIM_PRIORITY,
+		Enum.UserInputType.MouseButton1,
+		Enum.UserInputType.Touch,
+		Enum.KeyCode.ButtonR2
+	)
+	aimTrove:add(function()
+		ContextActionService:UnbindAction(AIM_ACTION)
+	end)
+
+	--[[ Cancelling stays a plain listener. Escape and B do not need sinking —
+	     Escape is Roblox's and B is crouch, and crouching as you back out of a
+	     placement is harmless. ]]
+	aimTrove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
+		if processed then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.ButtonB then
 			endAim()
 			UiSound.play(AudioConfig.UI.MenuBack)
 		end
@@ -347,7 +410,9 @@ local function buildCard(index: number)
 	local key = Widgets.label(frame, "Key", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	key.AnchorPoint = Vector2.new(1, 1)
 	key.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, -3)
-	key.Size = UDim2.fromOffset(28, TEXT.Tiny + 2)
+	--[[ Wide enough for "VIEW+X", which is the longest thing this ever says. A
+	     28-pixel box sized for "Z" truncated the gamepad prompt to nothing. ]]
+	key.Size = UDim2.fromOffset(56, TEXT.Tiny + 2)
 	key.TextXAlignment = Enum.TextXAlignment.Right
 
 	cards[index] = {
@@ -402,6 +467,9 @@ local function build()
 	hint.Position = UDim2.new(0, 0, 0, TEXT.Small + 6)
 	hint.Size = UDim2.new(1, 0, 0, TEXT.Tiny + 2)
 	hint.TextXAlignment = Enum.TextXAlignment.Center
+	--[[ "FIRE" rather than a named button. It is the left mouse, the trigger and
+	     a tap on the screen, and the one word covers all three without this file
+	     having to know which scheme is in front of it. ]]
 	hint.Text = "AIM AND FIRE TO PLACE IT"
 end
 
@@ -437,9 +505,16 @@ function AbilityController:start()
 
 	--[[ Rebinding changes what the corner of a card says. Cheap to re-read and
 	     it happens once in a blue moon, so it rides the same refresh. ]]
+	--[[ Rebinding changes what the corner of a card says, and so does picking up
+	     a controller — the prompt is per-scheme, so both have to redraw it. ]]
 	local input = Registry.find("InputController")
-	if input and input.created then
-		trove:add(input.created:connect(refreshSlots))
+	if input then
+		if input.created then
+			trove:add(input.created:connect(refreshSlots))
+		end
+		if input.schemeChanged then
+			trove:add(input.schemeChanged:connect(refreshSlots))
+		end
 	end
 
 	trove:connect(RunService.RenderStepped, step)
