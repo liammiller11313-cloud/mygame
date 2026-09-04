@@ -1738,6 +1738,12 @@ local NAV_ENTRIES = {
 		line = "THREE KITS  ONE ACTIVE",
 		controller = "LoadoutController",
 	},
+	{
+		id = "Abilities",
+		title = "ABILITIES",
+		line = "UNLOCK  EQUIP  TWO SLOTS",
+		controller = "AbilityPanelController",
+	},
 	{ id = "Career", title = "CAREER", line = "LEVEL  QUESTS  PASS", controller = "CareerController" },
 	{
 		id = "Settings",
@@ -1748,8 +1754,13 @@ local NAV_ENTRIES = {
 }
 
 local NAV_HEIGHT = 46
-local NAV_WIDTH = 0.21
 local NAV_GAP = 0.015
+--[[ Derived from the entry count rather than fixed, and it had to be: four
+     entries at a flat 0.21 sat inside the row with a tenth of it spare, and a
+     fifth would have run 11% off the end of it. Solved for instead, so the row
+     always fills exactly and adding a sixth is one line above rather than two
+     numbers here that have to be re-tuned together. ]]
+local NAV_WIDTH = (1 - NAV_GAP * (#NAV_ENTRIES - 1)) / #NAV_ENTRIES
 
 local function buildNav()
 	navRow = Widgets.frame(menuLayer, "Nav", COLOR.Background, 1)

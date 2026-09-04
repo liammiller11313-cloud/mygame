@@ -36,6 +36,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local AbilityConfig = require(Shared.Config.AbilityConfig)
 local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -83,6 +84,15 @@ local Action = table.freeze({
 	--[[ Opens the requisition panel. Same reasoning as Backpack: a verb rather
 	     than a hard-coded key, so it shows in the controls screen and rebinds. ]]
 	Requisitions = "Requisitions",
+	--[[ One per ability slot, named rather than generated because Action is a
+	     frozen literal and a verb somebody rebinds has to have a stable name.
+	     There are four because AbilityConfig.SlotCeiling is four; how many are
+	     actually BOUND comes off AbilityConfig.MaxSlots below, so raising the
+	     number of slots a player gets does not touch this table. ]]
+	Ability1 = "Ability1",
+	Ability2 = "Ability2",
+	Ability3 = "Ability3",
+	Ability4 = "Ability4",
 })
 
 --[[
@@ -208,6 +218,42 @@ local BINDINGS: { Binding } = {
 	     which is how a controller and a phone reach them. ]]
 	{ action = Action.Requisitions, keys = { Enum.KeyCode.T } },
 }
+
+--[[
+	── THE ABILITY SLOTS ───────────────────────────────────────────────────────
+	Appended rather than written out, so the number of ability keys is
+	AbilityConfig.MaxSlots and not a number repeated here. Adding a third slot is
+	that one config change plus a key on the end of this list.
+
+	Keyboard only, and that is a real gap rather than an oversight. Every gamepad
+	button is spoken for — both triggers, both bumpers, all four face buttons,
+	both stick clicks, all four D-pad directions and the view button — and Start
+	belongs to Roblox. Nothing here is worth taking from a verb that already has
+	it, so a controller player rebinds an ability onto whichever of those they
+	want least, in the CONTROLS screen, which takes gamepad inputs. Touch gets
+	real buttons: see `touch`, which TouchController draws.
+]]
+local ABILITY_KEYS = { Enum.KeyCode.Z, Enum.KeyCode.X, Enum.KeyCode.F, Enum.KeyCode.N }
+
+for index = 1, math.min(AbilityConfig.MaxSlots, #ABILITY_KEYS) do
+	table.insert(BINDINGS, {
+		action = (Action :: any)["Ability" .. index],
+		keys = { ABILITY_KEYS[index] },
+		touch = "ABILITY " .. index,
+	})
+end
+
+if AbilityConfig.MaxSlots > #ABILITY_KEYS then
+	warn(
+		string.format(
+			"[InputController] AbilityConfig.MaxSlots is %d but only %d ability keys are listed — "
+				.. "slots past %d have no default binding and can only be reached by rebinding",
+			AbilityConfig.MaxSlots,
+			#ABILITY_KEYS,
+			#ABILITY_KEYS
+		)
+	)
+end
 
 -- CAS binds under one namespace so nothing here can collide with a Roblox
 -- default binding or with another controller's.
@@ -740,6 +786,20 @@ local function forward(action: string)
 		local requisitions = Registry.find("RequisitionController")
 		if requisitions and typeof(requisitions.open) == "function" then
 			pcall(requisitions.open, requisitions)
+		end
+		return
+	end
+
+	--[[ The ability slots, matched on the verb's NAME rather than with a branch
+	     each. A fourth slot is a key in ABILITY_KEYS and nothing here — and this
+	     controller stays ignorant of what an ability is: it forwards a slot
+	     number, and AbilityController decides whether that means "fire it" or
+	     "start choosing a spot". ]]
+	local slot = tonumber(string.match(action, "^Ability(%d+)$"))
+	if slot then
+		local abilities = Registry.find("AbilityController")
+		if abilities and typeof(abilities.press) == "function" then
+			pcall(abilities.press, abilities, slot)
 		end
 	end
 end

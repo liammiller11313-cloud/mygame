@@ -40,6 +40,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
+local AbilityConfig = require(Shared.Config.AbilityConfig)
 local LoadoutConfig = require(Shared.Config.LoadoutConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -82,6 +83,11 @@ local state = {
 	owned = {} :: { [string]: boolean },
 	loadouts = LoadoutConfig.sanitiseAll(nil, nil),
 	active = 1,
+	--[[ The ability half of the same profile. It rides the same sync for the
+	     same reason the loadouts do: one payload, one arrival order, and no
+	     screen that has to reconcile two halves that showed up separately. ]]
+	abilities = {} :: { [string]: boolean },
+	abilitySlots = AbilityConfig.sanitiseSlots(nil, nil),
 	--[[ The id currently waiting on the server, so the shop can grey its own BUY
 	     button rather than letting somebody press it four times while a
 	     DataStore write is in flight. ]]
@@ -120,6 +126,32 @@ end
 --[[ The three, as stored. Returned by reference on purpose: the loadout screen
      edits a COPY it makes itself and sends the result, so nothing here is ever
      half-edited by a screen that was closed midway. ]]
+function ProfileController:ownsAbility(id: string): boolean
+	return state.abilities[id] == true
+end
+
+function ProfileController:getAbilities(): { [string]: boolean }
+	return state.abilities
+end
+
+function ProfileController:getAbilitySlots(): { string }
+	return state.abilitySlots
+end
+
+--[[ Which slot this ability is in, or 0. The question the panel asks about
+     every row, so it is answered here rather than by five copies of a loop. ]]
+function ProfileController:abilitySlotOf(id: string): number
+	if id == "" then
+		return 0
+	end
+	for index, equipped in state.abilitySlots do
+		if equipped == id then
+			return index
+		end
+	end
+	return 0
+end
+
 function ProfileController:getLoadouts(): { LoadoutConfig.Loadout }
 	return state.loadouts
 end
@@ -225,6 +257,9 @@ local function onSynced(payload: any)
 	     that index it, and a payload that arrived malformed for any reason
 	     should produce a drawable loadout rather than a nil index. ]]
 	state.loadouts = LoadoutConfig.sanitiseAll(payload.loadouts, nil)
+	state.abilities = if typeof(payload.abilities) == "table" then payload.abilities else {}
+	-- Same reasoning as the loadouts above: the shape has to be right to index.
+	state.abilitySlots = AbilityConfig.sanitiseSlots(payload.abilitySlots, nil)
 	state.ready = true
 	--[[ `pending` is deliberately NOT cleared here. A sync fires for any
 	     structural change — a loadout edited on another screen — and clearing it

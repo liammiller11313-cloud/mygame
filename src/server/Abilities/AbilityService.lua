@@ -309,6 +309,14 @@ local function onSetSlot(player: Player, payload: any)
 	if not profiles or typeof(profiles.setAbilitySlot) ~= "function" then
 		return
 	end
+	--[[ Not during a round. Abilities are chosen BEFORE a match — that is what
+	     makes the two slots a decision rather than a menu you open when you want
+	     the other one. It is not an exploit guard: cooldowns are per SLOT, so
+	     swapping never returned a fresh one anyway. ]]
+	if roundIsRunning() then
+		return
+	end
+
 	local id = if typeof(payload.id) == "string" then payload.id else ""
 	if profiles:setAbilitySlot(player, payload.slot, id) then
 		publishSlots(player)

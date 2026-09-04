@@ -95,6 +95,13 @@ local CONTROLLERS = {
 	     the player can afford. A panel like the shop, on the same layer, and
 	     never open at the same time as one. ]]
 	"UI/RequisitionController",
+	--[[ The permanent abilities. The panel goes with the other menu screens; the
+	     HUD cards and the effects are separate modules because they are separate
+	     jobs — one draws two cards and asks the server, the other draws what the
+	     server says happened. ]]
+	"UI/AbilityPanelController",
+	"UI/AbilityController",
+	"Effects/AbilityEffects",
 	"UI/ShopController",
 	"UI/LoadoutController",
 	--[[ A panel like those two, and reachable from the pause menu the same way

@@ -264,6 +264,26 @@ SettingsConfig.Definitions = table.freeze({
 		default = "",
 		action = "Requisitions",
 	},
+	--[[ One row per ability slot. Written out rather than generated because this
+	     table is a frozen literal read by a panel that walks it — and because
+	     every gamepad button is taken, these are the rows a controller player
+	     comes here to rebind. See InputController's ABILITY_KEYS. ]]
+	{
+		key = "bindAbility1",
+		label = "ABILITY 1",
+		category = "CONTROLS",
+		kind = "keybind",
+		default = "",
+		action = "Ability1",
+	},
+	{
+		key = "bindAbility2",
+		label = "ABILITY 2",
+		category = "CONTROLS",
+		kind = "keybind",
+		default = "",
+		action = "Ability2",
+	},
 
 	-- ── gameplay ────────────────────────────────────────────────────────────
 	{
