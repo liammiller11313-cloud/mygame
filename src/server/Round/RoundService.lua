@@ -129,6 +129,22 @@ local generation = 0 -- invalidates every delayed callback from an older round
      ATTRIBUTE is what every other file reads. ]]
 local activeModifier: any = nil
 
+--[[
+	The pre-round ready gate.
+
+	`holdUntil` is an absolute stamp: the latest moment wave 1 will wait. While
+	the hold is on, `_step` pushes startedAt forward instead of advancing the
+	schedule — which freezes the ROUND rather than pausing a phase, so every
+	wave, the boss, and the round's own end time all move together and none of
+	the arithmetic downstream has to know the gate exists.
+
+	`holdSince` is the last moment that shift was applied. The push is computed
+	from the gap between steps rather than accumulated per frame, so a server
+	hitch during the hold does not quietly eat seconds off the round.
+]]
+local holdUntil = 0
+local holdSince = 0
+
 --[[ False until every module's start() has run. _startIfReady refuses to do
      anything before then; see the comment there for why that matters. ]]
 local bootComplete = false
@@ -441,20 +457,90 @@ function RoundService:_announceWave(entry, isBreather: boolean)
 	})
 end
 
+--[[
+	Who the ready gate is waiting on, and how many of them have answered.
+
+	Everyone who is IN the round, not everyone in the server: a spectator has no
+	stake in the requisitions being chosen and nothing to ready up for, and
+	waiting on one is how a gate with a cap turns into a gate that always runs
+	the cap.
+
+	Counted rather than tracked, because both halves can change under the gate —
+	a player joins during prep, a player leaves — and a running tally that had to
+	be corrected on both edges is a tally that will eventually be wrong.
+]]
+local function readyTally(): (number, number)
+	local survivors = Registry.find("SurvivorService")
+	if not survivors or typeof(survivors.getAliveSurvivors) ~= "function" then
+		return 0, 0
+	end
+	local ok, alive = pcall(survivors.getAliveSurvivors, survivors)
+	if not ok or typeof(alive) ~= "table" then
+		return 0, 0
+	end
+	local ready = 0
+	for _, player in alive do
+		if player:GetAttribute(Attributes.Player.Ready) == true then
+			ready += 1
+		end
+	end
+	return ready, #alive
+end
+
+local function publishReady(holding: boolean)
+	local ready, needed = readyTally()
+	setGameAttribute(Attributes.Game.ReadyHold, holding)
+	setGameAttribute(Attributes.Game.ReadyCount, ready)
+	setGameAttribute(Attributes.Game.ReadyNeeded, needed)
+end
+
+--[[ Every answer wiped, at the top of every prep. Last round's "ready" is not
+     this round's, and a flag that survived would start the new one instantly
+     for anyone who had not touched it since. ]]
+local function clearReady()
+	for _, player in Players:GetPlayers() do
+		player:SetAttribute(Attributes.Player.Ready, false)
+	end
+end
+
+--[[ Whether the gate should let go. An empty roster releases immediately rather
+     than waiting out the cap — with nobody in the round there is nobody to wait
+     for, and holding would just delay the wipe check that ends it. ]]
+local function readySatisfied(): boolean
+	local ready, needed = readyTally()
+	return needed == 0 or ready >= needed
+end
+
 function RoundService:_enterPrep(entry)
 	self:_publishPhase(entry)
 	self:_publishRoundState(Enums.RoundState.Starting, { phase = phase, waveIndex = waveIndex })
+
+	--[[ The gate opens here and `_step` closes it. Wave 1 waits for the team, or
+	     for CLASSIC.ReadyCap, whichever comes first — see that constant for why
+	     the cap is what makes waiting safe. ]]
+	clearReady()
+	holdSince = serverNow()
+	holdUntil = holdSince + CLASSIC.ReadyCap
+	publishReady(true)
+	--[[ The client counts down THIS rather than the prep clock while the hold is
+	     on, so the number on screen is the honest one: how long until the round
+	     stops waiting. _releaseHold puts the prep clock back. ]]
+	setGameAttribute(Attributes.Game.WaveEndsAt, holdUntil)
 
 	-- Nothing spawns during prep. The window exists so a team can find a gun and
 	-- find each other, and a Director trickling commons into it spends it.
 	setWaveBudget(0, 1, 0, 0, false)
 	setDirectorActive(false)
 
-	setObjective(string.format("Gear up — first wave in %d seconds", math.floor(CLASSIC.PrepDuration)))
+	--[[ The gate's line, not prep's. While the round is holding, "first wave in
+	     15 seconds" is simply untrue — the wave is waiting on the team, and the
+	     clock on screen is counting the cap. _releaseHold puts the prep line
+	     back when the wait is actually over. ]]
+	setObjective("Requisition and ready up — the round is waiting on you")
 	say(
 		"",
 		string.format(
-			"%d minutes until the lights come back on. Find a weapon.",
+			"%d minutes until the lights come back on. Spend what you have, then call it.",
 			math.floor(CLASSIC.TotalDuration / 60)
 		),
 		SAY_ANNOUNCE
@@ -817,6 +903,13 @@ function RoundService:endRound(outcome: string)
 	local elapsed = self:getElapsed()
 	generation += 1
 
+	--[[ The gate goes down with the round. A round that ended DURING the hold —
+	     everyone left, or the last survivor quit — would otherwise leave
+	     ReadyHold lit on Workspace with nothing left to release it. ]]
+	holdUntil = 0
+	holdSince = 0
+	publishReady(false)
+
 	phase = PHASE.Over
 	local now = serverNow()
 	setGameAttribute(Attributes.Game.WavePhase, phase)
@@ -936,6 +1029,13 @@ function RoundService:_returnToLobby()
 	startedAt = 0
 	roundEndsAt = 0
 	phaseEndsAt = 0
+
+	--[[ And the ready gate, for the same reason endRound clears it: an empty
+	     server during the hold must not leave ReadyHold lit for whoever joins
+	     next. ]]
+	holdUntil = 0
+	holdSince = 0
+	publishReady(false)
 
 	setGameAttribute(Attributes.Game.WaveIndex, 0)
 	setGameAttribute(Attributes.Game.WavePhase, phase)
@@ -1074,6 +1174,71 @@ function RoundService:_checkWipe(): boolean
 	return true
 end
 
+--[[
+	Holds wave 1 while the team decides, and returns true while it is holding.
+
+	It works by pushing `startedAt` FORWARD rather than by pausing a phase. That
+	distinction is the whole design: everything about a round — every wave
+	boundary, the boss releases, the round's own end — is an offset from
+	startedAt, so moving it moves all of them together and not one line of the
+	arithmetic downstream has to learn that a gate exists. Pausing the prep phase
+	alone would have started wave 1 late and then run the remaining fourteen on
+	the original clock.
+
+	Released by the team readying up, or by CLASSIC.ReadyCap, whichever comes
+	first. The cap is what makes this safe to ship: see GameModeConfig.
+
+	The push is measured between steps rather than added per frame, so a hitch
+	during the hold cannot quietly cost the round seconds.
+]]
+function RoundService:_stepHold(): boolean
+	if holdUntil <= 0 then
+		return false
+	end
+
+	local now = serverNow()
+	if readySatisfied() or now >= holdUntil then
+		self:_releaseHold()
+		return false
+	end
+
+	local shift = math.max(now - holdSince, 0)
+	holdSince = now
+	startedAt += shift
+	roundEndsAt += shift
+	phaseEndsAt += shift
+	setGameAttribute(Attributes.Game.RoundEndsAt, roundEndsAt)
+
+	--[[ Republished every step because a player joining or leaving changes the
+	     denominator, and a gate showing "2 / 4" to a team of three is a gate
+	     nobody trusts. It is one attribute write on an unchanged value, which
+	     setGameAttribute skips. ]]
+	publishReady(true)
+	return true
+end
+
+--[[ Lets the round go. The prep clock is put back to a full PrepDuration from
+     NOW rather than from the original start, so a team that readied instantly
+     still gets its fifteen seconds to find a gun — the gate buys deliberation
+     time, it does not spend the run-up. ]]
+function RoundService:_releaseHold()
+	if holdUntil <= 0 then
+		return
+	end
+	holdUntil = 0
+	holdSince = 0
+	publishReady(false)
+
+	local entry = schedule[cursor]
+	if not entry then
+		return
+	end
+	phaseEndsAt = startedAt + entry.endsAt
+	setGameAttribute(Attributes.Game.WaveEndsAt, phaseEndsAt)
+	setObjective(string.format("Gear up — first wave in %d seconds", math.floor(CLASSIC.PrepDuration)))
+	say("", "Move out.", SAY_ANNOUNCE)
+end
+
 function RoundService:_step()
 	if roundState ~= Enums.RoundState.Starting and roundState ~= Enums.RoundState.InProgress then
 		return
@@ -1088,6 +1253,10 @@ function RoundService:_step()
 	end
 
 	if self:_checkWipe() then
+		return
+	end
+
+	if self:_stepHold() then
 		return
 	end
 
@@ -1197,6 +1366,59 @@ function RoundService:init()
 end
 
 function RoundService:start()
+	--[[
+		The team's answer to the ready gate.
+
+		The only thing a client sends about it, and it decides nothing on its
+		own: it sets one boolean and `_stepHold` re-reads the whole roster on the
+		next step. A client that spams it, sends a non-boolean, or claims to be
+		ready while spectating changes nothing — readyTally only counts players
+		SurvivorService says are in the round.
+
+		Accepted only while the gate is actually open. Outside it a "ready" flag
+		means nothing and setting one would leave the attribute lit through a
+		round for no reason.
+	]]
+	serviceTrove:connect(Remotes.Event.SetReady.OnServerEvent, function(player: Player, ready: any)
+		if holdUntil <= 0 then
+			return
+		end
+		player:SetAttribute(Attributes.Player.Ready, ready == true)
+		publishReady(true)
+	end)
+
+	--[[
+		Leaving a match in progress.
+
+		Drops the sender out of the round and back to the lobby. It does NOT put
+		them in another server: the mode entries on the main menu are how a player
+		moves servers here, and this is the smaller thing — stop playing THIS
+		round, keep the connection, be here for the next one.
+
+		SurvivorService owns what that means to a body, so this asks rather than
+		reaching in. The round carries on for everybody else; if the leaver was
+		the last one standing, the wipe check on the next step ends it exactly as
+		it would have if they had died.
+	]]
+	serviceTrove:connect(Remotes.Event.LeaveMatch.OnServerEvent, function(player: Player)
+		if not self:isRunning() then
+			return
+		end
+		--[[ Their vote no longer counts toward the gate. Without this, one player
+		     leaving during prep could leave the tally at 3/4 forever — the
+		     denominator drops with them, but only if it is recounted. ]]
+		player:SetAttribute(Attributes.Player.Ready, false)
+
+		local survivors = Registry.find("SurvivorService")
+		if survivors and typeof(survivors.leaveRound) == "function" then
+			survivors:leaveRound(player)
+		end
+		if holdUntil > 0 then
+			publishReady(true)
+		end
+		say("", string.format("%s has left the match.", player.DisplayName), SAY_CALLOUT)
+	end)
+
 	local survivors = Registry.find("SurvivorService")
 	if survivors then
 		--[[ Callouts for the two things a team must hear over gunfire. The line

@@ -21,11 +21,21 @@
 	thing every other menu in this game does: suppress input, free the cursor,
 	and dim the world. The horde keeps coming. The overlay says so.
 
-	── RETURN TO MAIN MENU ──────────────────────────────────────────────────────
-	Opens the main menu over the round rather than leaving the server, because
-	leaving is what the Roblox menu is for and because the mode entries on that
-	screen are how a player moves servers here. The round carries on behind it —
-	stated on the button, not hidden.
+	── LEAVE MATCH ──────────────────────────────────────────────────────────────
+	Takes the player OUT of the round and back to the lobby. It used to open the
+	main menu over a round the player was still very much in — which meant a
+	survivor standing in a doorway with a menu on their screen, still shootable,
+	still counted by the wipe check, still expected to revive somebody. A menu
+	that looks like leaving and is not is worse than no exit at all.
+
+	It does not leave the SERVER. Leaving is what the Roblox menu is for, and the
+	mode entries on the main menu are how a player moves servers here; this is
+	the smaller thing — stop playing this round, stay for the next one. The round
+	carries on behind it, stated on the button rather than hidden.
+
+	The server decides what leaving means to a body: see SurvivorService.
+	leaveRound. It is deliberately not a death — a player who quits must not be
+	able to fake a team wipe.
 ]]
 
 local Players = game:GetService("Players")
@@ -37,6 +47,7 @@ local AudioConfig = require(Shared.Config.AudioConfig)
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
@@ -94,7 +105,9 @@ local ENTRIES = {
 	     quest system stops being part of the game. ]]
 	{ id = "Career", title = "CAREER", line = "Level, orders, the pass." },
 	{ id = "Settings", title = "SETTINGS", line = "Graphics, audio, controls, difficulty." },
-	{ id = "Menu", title = "RETURN TO MAIN MENU", line = "The round keeps going without you." },
+	--[[ A real exit, and the line says the part that matters: this ends YOUR
+	     round, not the server's. See the header. ]]
+	{ id = "Menu", title = "LEAVE MATCH", line = "You drop out. The round goes on without you." },
 }
 
 local PauseController = {}
@@ -235,6 +248,11 @@ local function activate(id: string)
 		PauseController:close()
 		callController("SettingsController", "open")
 	elseif id == "Menu" then
+		--[[ Asked before the menu opens, so the round has already let go by the
+		     time the player is looking at the lobby. The server ignores it when
+		     no round is running, which is what makes it safe to send from a pause
+		     menu that can be opened between rounds. ]]
+		Remotes.Event.LeaveMatch:FireServer()
 		PauseController:close()
 		callController("MainMenuController", "open")
 	end

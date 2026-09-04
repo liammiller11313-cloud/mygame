@@ -66,6 +66,7 @@ local PHASE = table.freeze({
 
 local WAVE_COUNT = GameModeConfig.getWaveCount()
 local PREP_DURATION = GameModeConfig.Classic.PrepDuration
+local READY_CAP = GameModeConfig.Classic.ReadyCap
 
 local BLOCK_WIDTH = 300
 local PIP_HEIGHT = 4
@@ -364,9 +365,20 @@ end
 --[[ How long the phase now running lasts, straight out of the schedule. The
      client knows the whole wave table, so the fraction of a phase already spent
      is arithmetic rather than another attribute. ]]
+--[[ Whether wave 1 is still waiting on the team to ready up. RoundService owns
+     the answer and publishes it; this file only draws differently while it is
+     true. See GameModeConfig.ReadyCap. ]]
+local function holding(): boolean
+	return Workspace:GetAttribute(GA.ReadyHold) == true
+end
+
 local function phaseDuration(): number
 	if state.phase == PHASE.Prep then
-		return PREP_DURATION
+		--[[ The cap, not the prep clock, while the round is holding — because the
+		     stamp the bar is measured against is the cap during the hold, and a
+		     fraction computed from the wrong denominator draws a bar that is
+		     already most of the way full the moment it appears. ]]
+		return if holding() then READY_CAP else PREP_DURATION
 	end
 	local wave = GameModeConfig.getWave(state.waveIndex)
 	if state.phase == PHASE.Active then
@@ -438,7 +450,7 @@ local function refresh()
 	state.clockWhole = -1
 
 	if state.phase == PHASE.Prep then
-		waveLabel.Text = "PREPARE"
+		waveLabel.Text = if holding() then "READY UP" else "PREPARE"
 		waveLabel.TextColor3 = COLOR.TextSecondary
 	elseif state.phase == PHASE.Breather then
 		waveLabel.Text = string.format("WAVE %d CLEARED", state.waveIndex)
@@ -640,8 +652,11 @@ local function update(dt: number)
 
 		local caption = if finale
 			then "HOLD"
-			elseif tense then "BRACE"
-			elseif state.phase == PHASE.Prep then "FIRST WAVE IN"
+			elseif tense then "BRACE" --[[ "STARTS IN" rather than "FIRST WAVE IN" during the hold: the
+			     number underneath is when the round STOPS WAITING, and the team
+			     can end it sooner by readying. ]]
+
+			elseif state.phase == PHASE.Prep then (if holding() then "STARTS IN" else "FIRST WAVE IN")
 			else "NEXT WAVE IN"
 		if caption ~= state.captionText then
 			state.captionText = caption
@@ -732,6 +747,10 @@ function WaveController:start()
 	     signal for the first, onInitialState's refresh for the second — and
 	     neither on its own is. ]]
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.Modifier), refresh)
+	--[[ The gate lifting changes the caption, the label and the bar's
+	     denominator all at once. Without this the banner sits on "READY UP"
+	     through the whole of prep. ]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.ReadyHold), refresh)
 	trove:connect(RunService.RenderStepped, update)
 
 	-- The HUD was laid out before this block existed, so it is told rather than

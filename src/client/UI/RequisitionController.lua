@@ -57,6 +57,10 @@ local PA = Attributes.Player
 
 local player = Players.LocalPlayer
 
+--[[ Wide enough for "WAITING…" over "3 / 4 READY" without either wrapping, and
+     PANEL.RowHeightTouch tall so it is a real target on a phone. ]]
+local READY_WIDTH = 168
+
 local PANEL_WIDTH = 660
 local PANEL_MAX_HEIGHT = 560
 local HEADER_HEIGHT = PANEL.HeaderHeight
@@ -86,9 +90,22 @@ local list: ScrollingFrame
 local footRule: Frame
 local hint: TextLabel
 
+--[[ The ready gate's corner of the footer. Built with the panel and shown only
+     while the round is actually holding — see `build`. ]]
+local readyRoot: Frame
+local readyButton: TextButton
+local readyStroke: UIStroke
+local readyLabel: TextLabel
+local readyCount: TextLabel
+
 local state = {
 	open = false,
 	suppressed = false,
+	--[[ Whether the panel opened ITSELF for the pre-round window, as opposed to
+	     the player opening it. Only a self-opened panel closes itself again when
+	     the gate lifts: a player who deliberately opened the shop should not have
+	     it shut in their face because somebody else pressed READY. ]]
+	autoOpened = false,
 }
 
 local restore = {
@@ -194,8 +211,26 @@ local function boundToPanel(keyCode: Enum.KeyCode): boolean
 	return false
 end
 
+--[[ Whether wave 1 is still waiting on the team. The one fact this panel's
+     ready corner is driven by; RoundService owns it and publishes it, so four
+     clients cannot disagree about whether the round has started. ]]
+local function holding(): boolean
+	return Workspace:GetAttribute(GA.ReadyHold) == true
+end
+
 local function windowOpen(): boolean
-	if Workspace:GetAttribute(GA.RoundState) ~= Enums.RoundState.InProgress then
+	--[[
+		Starting counts, and that is the fix rather than a loosening.
+
+		PREP has been in the list below since this file was written — the window
+		before wave 1 is the one time a team is standing still together with a
+		decision to make — but the round is in RoundState.Starting during prep,
+		not InProgress, so the guard above rejected every prep purchase and the
+		pre-round window silently never worked. The phase test underneath is
+		still what decides: Starting only ever happens during prep.
+	]]
+	local round = Workspace:GetAttribute(GA.RoundState)
+	if round ~= Enums.RoundState.InProgress and round ~= Enums.RoundState.Starting then
 		return false
 	end
 	local phase = Workspace:GetAttribute(GA.WavePhase)
@@ -253,9 +288,28 @@ local function refresh()
 		row.button.Selectable = row.button.Active
 	end
 
-	hint.Text = if open
-		then "REQUISITIONS ARE OPEN. ONE PAYS, EVERYONE GETS IT, FOR THE REST OF THE ROUND."
-		else "REQUISITIONS OPEN BETWEEN WAVES. READ NOW, BUY IN THE BREATHER."
+	local hold = holding()
+	readyRoot.Visible = hold
+	if hold then
+		local mine = Attributes.get(player, PA.Ready, false) == true
+		local ready = tonumber(Workspace:GetAttribute(GA.ReadyCount)) or 0
+		local needed = tonumber(Workspace:GetAttribute(GA.ReadyNeeded)) or 0
+		readyLabel.Text = if mine then "WAITING…" else "READY"
+		readyLabel.TextColor3 = if mine then COLOR.TextDim else COLOR.TextPrimary
+		readyCount.Text = string.format("%d / %d READY", ready, needed)
+		readyStroke.Color = if mine then COLOR.Accent else COLOR.BorderBright
+	end
+
+	--[[ Three lines, because the window means three different things. Before
+	     wave 1 it is a decision the whole team is standing still for; between
+	     waves it is a shop; the rest of the time it is a catalogue to read. ]]
+	if hold then
+		hint.Text = "SPEND BEFORE WAVE 1. ONE PAYS, EVERYONE GETS IT — THEN READY UP."
+	elseif open then
+		hint.Text = "REQUISITIONS ARE OPEN. ONE PAYS, EVERYONE GETS IT, FOR THE REST OF THE ROUND."
+	else
+		hint.Text = "REQUISITIONS OPEN BETWEEN WAVES. READ NOW, BUY IN THE BREATHER."
+	end
 	hint.TextColor3 = if open then COLOR.TextSecondary else COLOR.TextDim
 end
 
@@ -396,6 +450,48 @@ local function build()
 	hint.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, 0)
 	hint.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, PANEL.FooterHeight)
 
+	--[[
+		The ready button, and the only reason it lives on THIS panel.
+
+		The gate and the requisitions are one decision. The team is being held
+		before wave 1 precisely so it can read five options and agree who pays,
+		and "we are done deciding" is the answer to that question — so the button
+		that ends the wait belongs next to the thing being decided, not on a
+		separate prompt somewhere else on the screen.
+
+		Hidden outside the hold. Between waves this panel is the same shop it
+		always was and there is nothing to be ready for.
+	]]
+	readyRoot = Widgets.frame(panel, "Ready", COLOR.Panel, 1)
+	readyRoot.AnchorPoint = Vector2.new(1, 1)
+	readyRoot.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, -PANEL.FooterHeight)
+	readyRoot.Size = UDim2.fromOffset(READY_WIDTH, PANEL.RowHeightTouch)
+	readyRoot.Visible = false
+
+	readyButton = Widgets.button(readyRoot, "Button")
+	readyButton.Size = UDim2.fromScale(1, 1)
+	readyButton.BackgroundColor3 = COLOR.PanelRaised
+	readyButton.BackgroundTransparency = 0.1
+	readyStroke = Widgets.stroke(readyButton, COLOR.BorderBright)
+
+	readyLabel = Widgets.label(readyButton, "Label", FONT.Heading, TEXT.Small, COLOR.TextPrimary)
+	readyLabel.Position = UDim2.fromOffset(0, 4)
+	readyLabel.Size = UDim2.new(1, 0, 0, TEXT.Small + 2)
+	readyLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+	readyCount = Widgets.label(readyButton, "Count", FONT.Numeric, TEXT.Tiny, COLOR.TextDim)
+	readyCount.Position = UDim2.new(0, 0, 0, TEXT.Small + 7)
+	readyCount.Size = UDim2.new(1, 0, 0, TEXT.Tiny + 2)
+	readyCount.TextXAlignment = Enum.TextXAlignment.Center
+
+	trove:connect(readyButton.Activated, function()
+		--[[ A toggle, so a player who readied by accident while three others are
+		     still reading is not the reason the round started. ]]
+		local mine = Attributes.get(player, PA.Ready, false) == true
+		Remotes.Event.SetReady:FireServer(not mine)
+		UiSound.play(if mine then AudioConfig.UI.MenuBack else AudioConfig.UI.MenuConfirm)
+	end)
+
 	applyTouchSizing()
 	refreshPanelSize()
 end
@@ -425,6 +521,9 @@ function RequisitionController:close()
 	if not state.open then
 		return
 	end
+	--[[ Closing it by hand hands the panel back to the player. The gate will not
+	     re-open it and will not close it again on their behalf. ]]
+	state.autoOpened = false
 	state.open = false
 	gui.Enabled = false
 	GamepadFocus.release(closeButton)
@@ -460,7 +559,36 @@ function RequisitionController:start()
 	end
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.WavePhase), refresh)
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), refresh)
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.ReadyCount), refresh)
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.ReadyNeeded), refresh)
 	trove:connect(player:GetAttributeChangedSignal(PA.Scrip), refresh)
+	trove:connect(player:GetAttributeChangedSignal(PA.Ready), refresh)
+
+	--[[
+		The pre-round window opens the panel by itself.
+
+		A choice nobody is shown is not a choice. Requisitions were reachable
+		only by a key most players will never press, which was tolerable when the
+		window was a breather between waves — you are already alive and looking
+		around — and is not when the whole point of the pause before wave 1 is
+		that the team is deciding something together.
+
+		It closes itself again when the gate lifts, but only if it was the one
+		that opened it: a player who deliberately opened the shop should not have
+		it shut in their face because somebody else pressed READY.
+	]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.ReadyHold), function()
+		if holding() then
+			if not state.open then
+				state.autoOpened = true
+				self:open()
+			end
+		elseif state.autoOpened then
+			state.autoOpened = false
+			self:close()
+		end
+		refresh()
+	end)
 
 	--[[ A refusal is the only thing this has to hear. A successful purchase
 	     arrives as an attribute and as a subtitle, both of which say it better

@@ -95,7 +95,18 @@ end
      into it, so this cannot be wrong about the phase in a way RoundService is
      not — there is one clock and this reads it. ]]
 local function inBuyWindow(): boolean
-	if Workspace:GetAttribute(GA.RoundState) ~= Enums.RoundState.InProgress then
+	--[[
+		Starting counts, and that is the fix rather than a loosening.
+
+		PREP has been in the list below since this file was written — the window
+		before wave 1 is the one time a team is standing still together with a
+		decision to make — but the round is in RoundState.Starting during prep,
+		not InProgress, so the guard above rejected every prep purchase and the
+		pre-round window silently never worked. The phase test underneath is
+		still what decides: Starting only ever happens during prep.
+	]]
+	local state = Workspace:GetAttribute(GA.RoundState)
+	if state ~= Enums.RoundState.InProgress and state ~= Enums.RoundState.Starting then
 		return false
 	end
 	local phase = Workspace:GetAttribute(GA.WavePhase)

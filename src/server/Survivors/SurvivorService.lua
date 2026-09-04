@@ -730,6 +730,46 @@ function SurvivorService:getUseSpeedMultiplier(player: Player): number
 	return 1
 end
 
+--[[
+	Takes a player out of the running round without taking them off the server.
+
+	What the pause menu's LEAVE MATCH does. They stop being a survivor, their
+	body goes, and they are a spectator until the next round spawns them again —
+	which is exactly the state a player who joined mid-round is already in, so
+	nothing downstream needs a new case for it.
+
+	Deliberately NOT a death. A death is an outcome: it feeds the wipe check as a
+	casualty, it is worth a callout, it leaves a body to defib and it counts
+	against the team. Someone choosing to stop playing is none of those, and
+	scoring it as one would let a player fake a team wipe by quitting.
+
+	The wipe check still ends the round if this was the last one standing — but
+	it ends it because the roster is empty, not because anybody was killed.
+]]
+function SurvivorService:leaveRound(player: Player): boolean
+	local record = records[player]
+	if not record or record.state == STATE.Spectating then
+		return false
+	end
+
+	--[[ Any interaction in flight is cancelled first. A player who leaves halfway
+	     through reviving a teammate must not leave a revive running against a
+	     survivor who is no longer there to finish it. ]]
+	self:_cancelInteraction(record)
+	self:_cancelHelp(record)
+	self:_setState(record, STATE.Spectating)
+
+	--[[ The body goes rather than being left standing. A character with no
+	     player behind it is a thing the horde will path to, shoot at and pile on
+	     — an unattended lure that the team then has to fight around. ]]
+	local character = player.Character
+	if character then
+		player.Character = nil
+		character:Destroy()
+	end
+	return true
+end
+
 function SurvivorService:getAliveSurvivors(): { Player }
 	local alive = {}
 	for player, record in records do

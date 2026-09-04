@@ -297,6 +297,30 @@ GameModeConfig.Waves = {
 
 GameModeConfig.Classic = table.freeze({
 	PrepDuration = 15, -- the calm before wave 1: pick up a gun, find your team
+
+	--[[
+		How long wave 1 will wait for the team to ready up, before it stops
+		waiting.
+
+		The gate exists so the pre-round REQUISITION window is a decision rather
+		than a scramble: five options to read, a shared currency to spend, and
+		four people who have to agree who is paying. Fifteen seconds of prep is
+		not enough time to have that conversation, and a countdown that runs out
+		mid-argument turns a team choice into whoever clicked fastest.
+
+		Capped, and the cap is the whole reason this is safe. One player who
+		alt-tabbed cannot hold three others hostage — the round starts without
+		them, exactly as it would have before the gate existed. Forty-five
+		seconds is long enough to read five cards and argue about two of them,
+		and short enough that waiting it out is worse than pressing the button.
+
+		The clock the client counts down during the hold is this, not
+		PrepDuration: readying early does not shorten the round, it just gets
+		everyone to the same starting line sooner. Prep still runs its own
+		fifteen seconds afterwards, so there is always a moment to find a gun
+		between agreeing and being shot at.
+	]]
+	ReadyCap = 45,
 	TotalDuration = 1020, -- 17:00, the number the round timer counts down from
 	MaxPlayers = 8,
 	MinPlayersToStart = 1, -- solo is allowed; the Director scales down for it

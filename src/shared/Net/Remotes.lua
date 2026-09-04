@@ -189,6 +189,21 @@ local EVENTS: { string } = {
 	     goes to the whole server: somebody just spent their own currency on the
 	     rest of the team and the team should see who. ]]
 	"RequisitionResult", -- {id, ok: boolean, reason: string, buyer: string?, cost: number?}
+
+	-- ── The pre-round ready gate ────────────────────────────────────────────
+	--[[ Wave 1 waits on the team. This is the only thing the client sends about
+	     it; who is ready and whether the round is still holding ride
+	     Attributes.Player.Ready and Attributes.Game.Ready*, because four clients
+	     all need to see the same answer and an attribute replicates to all of
+	     them for the price of one write. ]]
+	"SetReady", -- C->S (ready: boolean)
+
+	-- ── Leaving a match in progress ─────────────────────────────────────────
+	--[[ Drops the sender out of the running round and back into the lobby, where
+	     they can pick a mode or wait for the next one. It does NOT leave the
+	     server: that is what the Roblox menu is for, and the mode entries on the
+	     main menu are how a player moves servers here. ]]
+	"LeaveMatch", -- C->S ()
 }
 
 -- Every RemoteFunction. Keep this list SHORT: remote functions block and can be

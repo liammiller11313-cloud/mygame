@@ -1116,6 +1116,18 @@ local function dismissResults()
 	if not state.results then
 		return
 	end
+	--[[
+		A real exit, the same one the pause menu's LEAVE MATCH sends.
+
+		Almost always a no-op: the round that produced this screen has already
+		ended, and the server ignores the ask when nothing is running. It matters
+		in the case the results screen is up while a NEW round has already
+		started underneath it — a wipe on a busy server can put the next prep
+		window behind this poster — where dismissing it used to drop the player
+		straight into a match they never chose to join, mid-prep, with a menu
+		fading off their screen.
+	]]
+	Remotes.Event.LeaveMatch:FireServer()
 	state.results = false
 	confetti:clear()
 	UiSound.play(AudioConfig.UI.MenuBack)
@@ -1246,7 +1258,7 @@ local function update(dt: number)
 	local remaining = math.max(math.ceil(state.returnAt - now), 0)
 	if remaining ~= state.returnShown then
 		state.returnShown = remaining
-		resultReturn.Text = string.format("BACK TO THE MENU IN %d", remaining)
+		resultReturn.Text = string.format("BACK TO THE LOBBY IN %d", remaining)
 	end
 	if remaining <= 0 then
 		dismissResults()
@@ -1924,7 +1936,10 @@ local function buildResults()
 	resultContinue.Position = UDim2.fromOffset(0, LAYOUT.PanelPadding)
 	resultContinue.Size = UDim2.new(1, 0, 0, TEXT.Display + 4)
 	resultContinue.ZIndex = 2
-	resultContinue.Text = "MAIN MENU"
+	--[[ Named for what it does rather than where it goes. The player is being
+	     put back in the lobby, and the round — if one is somehow still running —
+	     is being left. ]]
+	resultContinue.Text = "RETURN TO LOBBY"
 
 	trove:connect(continue.MouseEnter, function()
 		resultContinue.TextColor3 = COLOR.AccentBright

@@ -28,6 +28,11 @@ Attributes.Player = table.freeze({
 	IsBlackAndWhite = "FL_BlackAndWhite", -- boolean, one more down = death
 	ReviveProgress = "FL_ReviveProgress", -- number 0-1, drives the teammate ring
 	PinnedBy = "FL_PinnedBy", -- string, Enums.Infected or "" when free
+	--[[ boolean, whether this survivor has readied up in the pre-round window.
+	     On the Player rather than the character because the window opens before
+	     anyone has finished spawning, and cleared by RoundService at the start of
+	     every prep so last round's answer is never mistaken for this one's. ]]
+	Ready = "FL_Ready",
 	--[[ number, an absolute GetServerTimeNow stamp the bile clears at, or 0.
 	     Absolute rather than a countdown for the same reason the wave clock is:
 	     the client renders a smooth fade from a value that only changes when the
@@ -177,6 +182,15 @@ Attributes.Game = table.freeze({
 	InfectedAlive = "FL_InfectedAlive", -- number
 	TankActive = "FL_TankActive", -- boolean, drives the tank music
 	ObjectiveText = "FL_Objective", -- string
+
+	--[[ The pre-round ready gate. `ReadyHold` is true while wave 1 is waiting on
+	     the team; the two counts are published rather than left for each client
+	     to derive, because "who counts as a survivor right now" is a question
+	     SurvivorService already owns and four clients reimplementing it is four
+	     chances to disagree with the server about whether the round can start. ]]
+	ReadyHold = "FL_ReadyHold", -- boolean
+	ReadyCount = "FL_ReadyCount", -- number, survivors who have readied
+	ReadyNeeded = "FL_ReadyNeeded", -- number, survivors the gate is waiting on
 
 	-- Round structure. The two *EndsAt fields are absolute
 	-- workspace:GetServerTimeNow() stamps rather than remaining seconds, so the
