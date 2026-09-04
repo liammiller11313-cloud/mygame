@@ -331,7 +331,13 @@ local function stepHold(model: Model, brain: any, state: State, root: BasePart, 
 
 	if now >= state.nextHitAt then
 		state.nextHitAt = now + ATTACK.cooldown
-		Support.damage(model, character, victimRoot, root.Position, ATTACK.damage)
+		Support.damage(
+			model,
+			character,
+			victimRoot,
+			root.Position,
+			Support.scaledDamage(model, ATTACK.damage)
+		)
 	end
 end
 

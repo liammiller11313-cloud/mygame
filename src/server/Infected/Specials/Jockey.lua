@@ -400,7 +400,7 @@ local function claw(model: Model, root: BasePart, victimCharacter: Model, victim
 
 	damageService:applyDamage(
 		victimCharacter,
-		ATTACK.damage,
+		Support.scaledDamage(model, ATTACK.damage),
 		Types.newDamageContext({
 			attackerModel = model,
 			damageType = Enums.DamageType.Special,

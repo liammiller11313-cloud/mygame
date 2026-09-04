@@ -261,10 +261,14 @@ local function releaseVictim(model: Model, brain: any, state: State, delay: numb
 	backToStalk(model, brain, state, delay, keepSpeed)
 end
 
-local function pounceDamage(travelled: number): number
+local function pounceDamage(model: Model, travelled: number): number
 	local reach = math.clamp(travelled / POUNCE_FULL_DISTANCE, 0, 1)
 	local multiplier = POUNCE_MIN_MULTIPLIER + (POUNCE_MAX_MULTIPLIER - POUNCE_MIN_MULTIPLIER) * reach
-	return ATTACK.damage * multiplier
+	--[[ Scaled for an elite body, on top of the distance ramp. A special's
+	     scripted attacks do not go through the brain's claw, which is the only
+	     place the multiplier is applied automatically — so every one of them has
+	     to ask. See Support.eliteOf. ]]
+	return Support.scaledDamage(model, ATTACK.damage) * multiplier
 end
 
 local function claw(
@@ -366,7 +370,7 @@ local function land(model: Model, brain: any, state: State, root: BasePart, play
 		return
 	end
 
-	local damage = pounceDamage(travelled)
+	local damage = pounceDamage(model, travelled)
 
 	-- setPinned refuses anyone who is not upright. Somebody who went down while
 	-- the Hunter was in the air still eats the landing; they just are not pinned,
@@ -517,7 +521,7 @@ local function stepPin(model: Model, brain: any, state: State, root: BasePart, n
 
 	if now >= state.nextClaw then
 		state.nextClaw = now + ATTACK.cooldown
-		claw(model, root, character, victimRoot, ATTACK.damage)
+		claw(model, root, character, victimRoot, Support.scaledDamage(model, ATTACK.damage))
 	end
 end
 

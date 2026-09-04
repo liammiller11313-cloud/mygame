@@ -560,7 +560,7 @@ local function sweepLane(model: Model, state: State, root: BasePart)
 		-- up beside the charge rather than punted along it — somebody directly in
 		-- front, with no lateral offset to use, goes over whichever shoulder the
 		-- lane's perpendicular points at.
-		Support.damage(model, character, victimRoot, origin, ATTACK.damage)
+		Support.damage(model, character, victimRoot, origin, Support.scaledDamage(model, ATTACK.damage))
 		local flatDelta = Vector3.new(delta.X, 0, delta.Z)
 		local lateral = flatDelta - state.heading * flatDelta:Dot(state.heading)
 		local push = if lateral.Magnitude > 0.5 then lateral.Unit else state.heading:Cross(Vector3.yAxis).Unit
@@ -614,7 +614,13 @@ local function slam(model: Model, brain: any, state: State, root: BasePart)
 	-- there for the pummel.
 	endCarry(state)
 
-	Support.damage(model, character, victimRoot, root.Position, ATTACK.damage * SLAM_MULTIPLIER)
+	Support.damage(
+		model,
+		character,
+		victimRoot,
+		root.Position,
+		Support.scaledDamage(model, ATTACK.damage) * SLAM_MULTIPLIER
+	)
 	Remotes.Event.CameraImpulse:FireClient(victim, SLAM_CAMERA_IMPULSE)
 	Support.playSound("ChargerCharge", root)
 
@@ -778,7 +784,13 @@ local function stepPummel(model: Model, brain: any, state: State, root: BasePart
 
 	if now >= state.nextPummel then
 		state.nextPummel = now + ATTACK.cooldown
-		Support.damage(model, character, victimRoot, root.Position, ATTACK.damage)
+		Support.damage(
+			model,
+			character,
+			victimRoot,
+			root.Position,
+			Support.scaledDamage(model, ATTACK.damage)
+		)
 		Remotes.Event.CameraImpulse:FireClient(victim, IMPACT_CAMERA_IMPULSE)
 	end
 end

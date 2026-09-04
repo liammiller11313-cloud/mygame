@@ -262,13 +262,19 @@ local function build(position: Vector3, facing: Vector3): (Model, BasePart, Base
 end
 
 local function retire(turret: Emplacement, index: number, destroyed: boolean)
+	--[[ Read BEFORE the destroy. A destroyed part still answers .Position today,
+	     which is why this worked, but it is reading a locked instance to find out
+	     where a thing that no longer exists used to be — and the broadcast below
+	     is the only reason the position is wanted at all. ]]
+	local at = turret.root.Position
+
 	if turret.model.Parent then
 		turret.model:Destroy()
 	end
 	table.remove(turrets, index)
 	AbilitySupport.broadcast("TurretDown", {
 		player = turret.player,
-		position = turret.root.Position,
+		position = at,
 		destroyed = destroyed,
 	})
 end
