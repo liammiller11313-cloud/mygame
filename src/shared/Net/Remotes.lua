@@ -214,6 +214,9 @@ local EVENTS: { string } = {
 	     The generated values, the order and the answer are on the SERVER only
 	     and appear in none of these payloads. What the client knows about this
 	     puzzle is what is printed on four props. ]]
+	"CollectClue", -- C->S (clue: Instance)
+	"ClueResult", -- S->asker {ok, order, found, total, text?, headline?, reason?}
+	"ClueFound", -- S->all {player, order, found, total, prompt}
 	"SubmitVaultCode", -- C->S {code: string}
 	"VaultCodeResult", -- S->asker {ok: boolean, reason: string, retryAt: number}
 	"VaultOpened", -- S->all {player: Player, position: Vector3?}

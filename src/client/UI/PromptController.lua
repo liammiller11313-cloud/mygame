@@ -355,7 +355,14 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 		end
 		if CollectionService:HasTag(node, PuzzleConfig.ClueTag) then
 			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "DOCUMENT")
-			return node, "READ", label, false, COLOR.TextPrimary
+			--[[ A clue already in the team's hands is a document you re-read; one
+			     that is not is a thing you pick up. Same key, same remote, and the
+			     server decides which it actually was — this only changes the word,
+			     so a player can tell at a glance what they have already been to. ]]
+			local order = tonumber(node:GetAttribute(PUZZLE.ClueOrder)) or 0
+			local held = tonumber(Attributes.get(Workspace, GA.CluesFound, 0)) or 0
+			local colour = if order <= held then COLOR.TextDim else COLOR.Accent
+			return node, "READ", label, false, colour
 		end
 		if CollectionService:HasTag(node, BODY_TAG) then
 			-- A body is only a prompt while you are carrying the thing that
@@ -545,7 +552,12 @@ local function handlePuzzlePress(): boolean
 		return true
 	end
 	if state.verb == "READ" then
-		callController("VaultController", "openDocument", target)
+		--[[ Asked rather than opened. Picking a clue up is ORDERED and the server
+		     owns the order, so the document is shown by whatever comes back —
+		     including the refusal that names the clue they should have found
+		     first. Opening it here would show a page of redactions and no reason
+		     for them. ]]
+		Remotes.Event.CollectClue:FireServer(target)
 		return true
 	end
 	return false

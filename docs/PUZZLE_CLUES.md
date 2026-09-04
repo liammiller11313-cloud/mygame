@@ -10,68 +10,116 @@ This is four props and a model you already have.
 
 ---
 
-## How many models do I need?
-
-**Four.** Everything else already exists.
-
-| # | Object | Status | What it is |
-|---|---|---|---|
-| 1 | **Clipboard** | you supply | A clipboard with a sheet of paper on it, lying on a desk or counter |
-| 2 | **Room Sign** | you supply | A small plaque or sign, screwed to a wall beside a door |
-| 3 | **Badge** | you supply | An ID card, dropped on the floor or left on a surface |
-| 4 | **Procedure** | you supply | A laminated sheet or taped-up notice, on a wall or a desk |
-| — | **KFC Code Door** | **already in your map** | The free-model door assembly, used as-is |
-| — | **Door** | **already in your map** | The part inside it that opens |
-
-They can be anything — a Part with a flat face is enough. The game prints the
-text onto them; you supply the object the text is printed on.
-
----
-
-## Naming and placement
-
-Name them exactly these, anywhere in the Clinton model:
+## Where the clues go
 
 ```
-Clipboard
-Room Sign
-Badge
-Procedure
+Clinton
+├── KFC Code Door          ← already there, untouched
+│   ├── Door
+│   └── (the keypad face, B0-B9, Clear, Enter)
+└── Puzzle                 ← make this folder
+    ├── Clipboard          clue 1
+    ├── House Number       clue 2
+    ├── ID Card            clue 3
+    └── Note               clue 4
 ```
 
-Naming is forgiving in the same way the ammo crate and medkit folders are: case,
-spaces, punctuation and a trailing plural are all folded away, so `RoomSign`,
-`room sign` and `Room Signs` are the same object.
+Make a **Folder** called `Puzzle` directly under `Clinton` and drag the four
+models into it. The folder is optional — the whole map is searched as a fallback
+— but it keeps them together and makes the search cheaper.
 
-**Optionally** put all four in a folder called `Puzzle` — the game looks there
-first and then searches the whole map, so a tidy map stays tidy and an untidy one
-still works. Your `KFC Code Door` stays exactly where it is, directly under
-`Clinton`; it does not have to move into a folder.
+`KFC Code Door` **stays exactly where it is.** It does not move into the folder.
 
-You do **not** tag anything. The game finds them by name when a round starts and
-tags them itself.
+Naming is forgiving: case, spaces, punctuation and a trailing plural are all
+folded away, so `IDCard`, `id card` and `ID Cards` are the same object. You do
+not tag anything; the game tags them itself when a round starts.
 
 ---
 
-## What each prop needs
+## The four clues, in order
 
-| Prop | Face the text lands on | Suggested size | Where it goes |
+They must be collected **in this order**. Interacting with one out of turn is
+refused and the counter tells the player which one they are missing.
+
+| # | Object | What it is | The digit sits in |
 |---|---|---|---|
-| Clipboard | **Top** | ~1.6 × 2.2 studs | Flat on a desk, counter or the manager's office |
-| Room Sign | **Front** | ~2.5 × 1.5 studs | Beside the locked door, at head height |
-| Badge | **Front** | ~0.9 × 0.6 studs | On the floor, a shelf, or beside a body |
-| Procedure | **Top** | ~1.8 × 2.4 studs | Taped near the keypad, or in the back office |
+| 1 | `Clipboard` | Security report on a clipboard | `SQUAD ASSIGNMENT: 6` |
+| 2 | `House Number` | Room sign on a wall | `ROOM 2` |
+| 3 | `ID Card` | Officer's badge | `ID: 9` |
+| 4 | `Note` | Handwritten post-it | `squad, room, id, then 4.` |
 
-- The face is set per prop in `PuzzleConfig` (`face = "Top"` / `"Front"`). If
-  your model's readable surface points somewhere else, change that one word.
-- **A Model needs a `PrimaryPart`.** That is the part the text is printed on. A
-  single Part is fine too — the game wraps it for you.
-- **Do not put `FL_Slot` on a clue prop.** That attribute is the instant-pickup
-  path: any survivor within 10 studs would pocket the document and destroy it.
-- Do not ship a `Script`, `ProximityPrompt` or `ClickDetector` inside them —
-  see below.
+The code is those four digits **in that order**. All four change every round.
+
+### The digits are hidden until collected
+
+Every document is legible from the first second of the round, but the one field
+that matters reads `[ REDACTED ]` until that clue is picked up. That is what
+makes the order mean anything — with all four digits readable from across the
+room, the counter and the sequence would be decoration.
+
+### Where the text goes
+
+| Prop | Has a TextLabel already? | What happens |
+|---|---|---|
+| `Note` | yes — `Post Note > SurfaceGui > TextLabel` | **your label is used**, only `.Text` is written |
+| `House Number` | yes — `SurfaceGui > SIGN` | **your label is used**, only `.Text` is written |
+| `Clipboard` | no | a SurfaceGui is made on the **Top** face |
+| `ID Card` | no | a SurfaceGui is made on the **Front** face |
+
+A label you built always wins — it is positioned against geometry the code has
+never seen, and covering it would throw away the only work that knew where the
+text should sit.
+
+For the two that need one made: set the model's `PrimaryPart` to the flat part
+you want the text printed on. If the face comes out wrong, change `face = "Top"`
+to `"Front"` (or `Back`, `Left`, `Right`, `Bottom`) for that clue in
+`src/shared/Config/PuzzleConfig.lua`.
+
+**Do not put `FL_Slot` on a clue prop.** That is the instant-pickup path — any
+survivor within 10 studs would pocket the document and destroy it.
 
 ---
+
+## The counter
+
+A card appears at the top of the screen for the whole team on Clinton:
+
+```
+CLUES  0/4
+SEARCH THE BUILDING
+```
+
+It moves for everybody when anybody finds one, and whoever found it is named in
+the subtitle line. At 4/4 it reads:
+
+```
+CLUES  4/4
+HEAD TO THE CODE DOOR AT KFC
+```
+
+Out of order, it says which clue you actually need:
+
+```
+COLLECT THE SECOND CLUE FIRST — ROOM SIGN
+```
+
+It sits faded and brightens for a second and a half whenever it changes, and it
+disappears the moment the vault opens — what happens after that is a horde, and
+a clue counter is the least useful thing on the screen during one.
+
+---
+
+## What happens when the code goes in
+
+1. `ACCESS GRANTED`, the lock sound plays on the keypad.
+2. The `Door` part fades out and stops colliding.
+3. The whole team is paid in Dollars, and the map's item spawns restock.
+4. **The horde comes.** `DirectorService:triggerPanicEvent` fires at the door —
+   the same crescendo a panic trigger runs: three waves of 22 over 45 seconds,
+   spawning around the vault rather than around the team.
+
+A supply room you have to hold is a decision. A supply room you walk into is a
+vending machine.
 
 ## Your existing KFC Code Door
 

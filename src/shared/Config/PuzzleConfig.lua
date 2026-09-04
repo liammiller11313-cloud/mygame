@@ -78,8 +78,15 @@ PuzzleConfig.KeypadTag = "FL_PuzzleKeypad"
 PuzzleConfig.ClueTag = "FL_PuzzleClue"
 
 export type ClueSlot = {
+	--[[ Where this clue sits in the chain, 1 through 4. Collecting them out of
+	     order is refused — see PuzzleService — and this is the number the refusal
+	     names back at the player. ]]
+	order: number,
 	--[[ The object's name inside the puzzle folder. Also matched forgivingly. ]]
 	object: string,
+	--[[ The line the HUD shows when this one is picked up. Written per clue
+	     because "CLUE FOUND" four times says nothing about what was found. ]]
+	found: string,
 	--[[ What the surface says. `{squad}`, `{room}`, `{officer}`, `{officerName}`,
 	     `{officerInitial}`, `{area}`, `{date}`, `{first}`, `{second}`, `{third}`
 	     and `{note}` are replaced from the rolled values; anything else is left
@@ -187,34 +194,34 @@ PuzzleConfig.Notes = table.freeze({
 })
 
 --[[
-	The three credentials, in the order a template lists them.
+	The four clues, in the order they must be collected.
 
-	The ORDER is what makes this an investigation rather than three lookups: a
-	player who finds all three numbers still has six ways to arrange them, and the
-	procedure document is the fourth clue precisely because it is the one that
-	turns information into an answer.
+	One digit each, and the code is those four digits in THIS order — which is
+	why there is no separate document telling you the arrangement any more. The
+	order is the hunt: you cannot take the note off the wall until you have the
+	badge, and you cannot take the badge until you have the sign.
 
-	Digit widths are 1, 2, 1 — so every permutation is four digits and the keypad
-	never has to change shape. That is a constraint on the values, not a
-	coincidence: see the template.
+	── AND THE DIGIT IS HIDDEN UNTIL IT IS FOUND ───────────────────────────────
+	Every prop is printed with its document from the moment the round starts, but
+	the one field that matters reads REDACTED until that clue is collected. That
+	is what makes the ordering mean anything: with all four digits legible from
+	across the room, the counter and the sequence would be decoration and a
+	player could read the code off the walls without ever touching a clue.
+
+	It also happens to be the most honest possible reason for a number to be
+	missing from a security file.
 ]]
-PuzzleConfig.Credentials = table.freeze({
-	table.freeze({ key = "squad", label = "SQUAD", digits = 1, min = 1, max = 9 }),
-	table.freeze({ key = "room", label = "ROOM", digits = 2, min = 10, max = 99 }),
-	table.freeze({ key = "officer", label = "OFFICER", digits = 1, min = 1, max = 9 }),
-})
+PuzzleConfig.Redacted = "[ REDACTED ]"
 
---[[ Every way the three can be ordered. Written out rather than permuted at
-     runtime: six rows is smaller than the code that would generate them, and a
-     designer who wants to drop a confusing one deletes a line. ]]
-PuzzleConfig.Orders = table.freeze({
-	table.freeze({ "squad", "room", "officer" }),
-	table.freeze({ "squad", "officer", "room" }),
-	table.freeze({ "room", "squad", "officer" }),
-	table.freeze({ "room", "officer", "squad" }),
-	table.freeze({ "officer", "squad", "room" }),
-	table.freeze({ "officer", "room", "squad" }),
-})
+--[[ 0 through 9, one per clue. Ten thousand codes, and every digit is somewhere
+     a player has to walk to. ]]
+PuzzleConfig.DigitMin = 0
+PuzzleConfig.DigitMax = 9
+
+--[[ How many clues there are, which is also how many digits the code has. One
+     number rather than two, because a keypad that takes five digits from four
+     clues is a keypad nobody can satisfy. ]]
+PuzzleConfig.Digits = 4
 
 local DEFINITIONS: { PuzzleDefinition } = {
 	table.freeze({
@@ -237,65 +244,67 @@ local DEFINITIONS: { PuzzleDefinition } = {
 		door = "Door",
 
 		clues = table.freeze({
+			--[[ FIRST. A form with one field filled in is a puzzle prop; a form
+			     with six is a document that happens to contain a number. ]]
 			table.freeze({
+				order = 1,
 				object = "Clipboard",
 				face = "Top",
 				pixelsPerStud = 90,
 				textSize = 22,
 				prompt = "SECURITY REPORT",
-				--[[ The squad number is one line in a form. Everything around it is
-				     doing the real work: a form with one field filled in is a puzzle
-				     prop, and a form with six is a document that happens to contain a
-				     number. ]]
+				found = "SQUAD ASSIGNMENT LOGGED",
 				text = "FRIED CHICKEN SECURITY REPORT\n\n"
 					.. "DATE: {date}\n\n"
-					.. "SQUAD ASSIGNMENT: {squad}\n\n"
+					.. "SQUAD ASSIGNMENT: {digit}\n\n"
 					.. "AREA: {area}\n\n"
 					.. "STATUS:\n{note}\n\n"
 					.. "AUTHORIZED BY:\n{officerInitial}. {officerLast}",
 			}),
+			--[[ SECOND. A sign somebody screwed to a wall, which says nothing
+			     about a code — a room number is a room number, and the player is
+			     the one who decides it is also a digit. ]]
 			table.freeze({
-				object = "Room Sign",
+				order = 2,
+				object = "House Number",
 				face = "Front",
 				pixelsPerStud = 70,
 				textSize = 34,
 				prompt = "ROOM SIGN",
-				--[[ It has to read as a sign somebody screwed to a wall in 1998, not
-				     as a clue. No mention of a code, no mention of a vault: a room
-				     number is a room number, and the player is the one who decides it
-				     is also a credential. ]]
-				text = "ROOM {room}\n\nSUPPLY STORAGE\n\nAUTHORIZED\nPERSONNEL ONLY",
+				found = "ROOM NUMBER NOTED",
+				text = "ROOM {digit}\n\nSUPPLY STORAGE\n\nAUTHORIZED\nPERSONNEL ONLY",
 			}),
+			--[[ THIRD. Named for the same officer who signed the report — the one
+			     cross-reference in the set, and the cheapest possible way to say
+			     these papers came from one building and one person. ]]
 			table.freeze({
-				object = "Badge",
+				order = 3,
+				object = "ID Card",
 				face = "Front",
 				pixelsPerStud = 220,
 				textSize = 16,
 				prompt = "SECURITY BADGE",
-				--[[ Named for the same officer who signed the report. That is the
-				     one cross-reference in the whole puzzle and it is free: it costs a
-				     field and it tells the player these documents are about a person. ]]
+				found = "OFFICER ID RECOVERED",
 				text = "THE FRIED CHICKEN\nSECURITY DIVISION\n\n"
 					.. "OFFICER:\n{officerFirst} {officerLast}\n\n"
-					.. "ID:\n{officer}\n\n"
+					.. "ID:\n{digit}\n\n"
 					.. "CLEARANCE:\nSUPPLY VAULT",
 			}),
+			--[[ LAST, and the only one written by hand. It states the order the
+			     player has just walked, which turns four digits they are carrying
+			     into a code they can enter. ]]
 			table.freeze({
-				object = "Procedure",
-				face = "Top",
-				pixelsPerStud = 90,
-				textSize = 22,
-				prompt = "VAULT PROCEDURE",
-				--[[ The fourth clue, and the only one that is about the other three.
-				     It never names a number — it names the ORDER, which is useless
-				     until you have been to the other three objects and useless to
-				     anyone who skipped it. ]]
-				text = "EMERGENCY SUPPLY VAULT PROCEDURE\n\n"
-					.. "If the main systems fail, the vault\nmust be opened manually.\n\n"
-					.. "Enter the credentials in this order:\n\n"
-					.. "1. {first}\n2. {second}\n3. {third}\n\n"
-					.. "DO NOT REVERSE THE ORDER.\n\n"
-					.. "\226\128\148 SECURITY",
+				order = 4,
+				object = "Note",
+				face = "Front",
+				pixelsPerStud = 110,
+				textSize = 20,
+				prompt = "HANDWRITTEN NOTE",
+				found = "THE LAST DIGIT",
+				text = "if you got this far you have\nthe other three.\n\n"
+					.. "squad, room, id, then {digit}.\n\n"
+					.. "same order you found them.\n\n"
+					.. "dont let anyone else in.\n\n- {officerInitial}H",
 			}),
 		}),
 
@@ -324,15 +333,25 @@ function PuzzleConfig.forMap(mapId: string?): PuzzleDefinition?
 	return nil
 end
 
---[[ A credential row by key, so a template can ask "how wide is `room`" without
-     knowing the order of the list. ]]
-function PuzzleConfig.credential(key: string): any?
-	for _, entry in PuzzleConfig.Credentials do
-		if entry.key == key then
-			return entry
+--[[ The clue that sits at a given position in the chain, or nil. Used by the
+     server to name the one a player skipped, and by the HUD to say what is
+     still missing. ]]
+function PuzzleConfig.clueAt(definition: PuzzleDefinition, order: number): ClueSlot?
+	for _, clue in definition.clues do
+		if clue.order == order then
+			return clue
 		end
 	end
 	return nil
+end
+
+--[[ "first", "second", "third", "fourth" — for the refusal a player reads when
+     they try to take the note before the clipboard. A number would be correct
+     and would read like an error code. ]]
+local ORDINALS = table.freeze({ "FIRST", "SECOND", "THIRD", "FOURTH" })
+
+function PuzzleConfig.ordinal(order: number): string
+	return ORDINALS[order] or tostring(order)
 end
 
 --[[

@@ -88,11 +88,30 @@ local state = {
 	     round must never inherit an open vault. ]]
 	doorLooks = {} :: { [BasePart]: number },
 	clues = {} :: { Model },
+	--[[ The rolled values, kept so a collection can re-print every prop with one
+	     more digit revealed. Never leaves this process. ]]
+	values = nil :: any,
+	--[[ How many clues the TEAM has, 0 through 4. Team-wide rather than per
+	     player because this is one objective four people are working on: a
+	     counter that reset for whoever walked in second would be four separate
+	     puzzles in one building. ]]
+	found = 0,
+	--[[ Two views of the same four props: by config name, so repaint can find
+	     the model for a clue; and by model, so the instance a player interacted
+	     with can be turned back into "which clue is this, and what number is
+	     it". Both are rebuilt from scratch on every arm. ]]
+	props = {} :: { [string]: Model },
+	clueOf = {} :: { [Model]: any },
 }
 
 --[[ Per-player, and cleared when they leave. `at` is the last attempt and
      `wrong` is the run of consecutive misses that drives the lockout. ]]
 local attempts: { [Player]: { at: number, wrong: number, lockedUntil: number } } = {}
+
+--[[ The floor between two collect requests from one player. Short, because
+     picking clues up is not a thing anybody spams for advantage — it exists so
+     a crafted client cannot turn one socket into unlimited replies. ]]
+local COLLECT_INTERVAL = 0.25
 
 local function serverNow(): number
 	return Workspace:GetServerTimeNow()
@@ -238,9 +257,31 @@ local function paint(model: Model, clue: any, text: string)
 		return
 	end
 
+	--[[
+		A label the designer already built wins.
+
+		Two of the four supplied props ship their own SurfaceGui and TextLabel,
+		positioned and sized against geometry this code has never seen — the
+		note's paper and the sign's face. Covering those with a generated one
+		would throw away the only person's work that knew where the text should
+		sit. So: if the prop already has a TextLabel under a SurfaceGui, this
+		writes into it and touches nothing else.
+
+		Only the props with nowhere to print get one made for them.
+	]]
+	local supplied = model:FindFirstChildWhichIsA("SurfaceGui", true)
+	local suppliedLabel = supplied and supplied:FindFirstChildWhichIsA("TextLabel", true)
+	if suppliedLabel and supplied.Name ~= "FL_Clue" then
+		suppliedLabel.Text = text
+		suppliedLabel.RichText = false
+		model:SetAttribute(PZ.ClueText, text)
+		model:SetAttribute(PZ.CluePrompt, clue.prompt)
+		return
+	end
+
 	--[[ Replaced rather than reused. A round re-arming has to overwrite last
 	     round's document, and a second SurfaceGui on the same face would leave
-	     both codes legible at once. ]]
+	     both legible at once. ]]
 	local existing = surface:FindFirstChild("FL_Clue")
 	if existing then
 		existing:Destroy()
@@ -283,6 +324,30 @@ local function paint(model: Model, clue: any, text: string)
 
 	model:SetAttribute(PZ.ClueText, text)
 	model:SetAttribute(PZ.CluePrompt, clue.prompt)
+end
+
+--[[
+	Re-prints every prop for the number of clues the team now holds.
+
+	Called once at arm and once per collection. The template decides what a prop
+	says at a given count — this only carries the answer to the surface — so a
+	future template that reveals something other than a digit needs no change
+	here.
+]]
+local function repaint()
+	local definition = state.definition
+	local template = definition and TEMPLATES[definition.template]
+	if not definition or not template or not state.values then
+		return
+	end
+	local surfaces = template.surfaces(definition, state.values, state.found)
+	for _, clue in definition.clues do
+		local model = state.props[clue.object]
+		local text = surfaces[clue.object]
+		if model and model.Parent and text then
+			paint(model, clue, text)
+		end
+	end
 end
 
 -- ── the door ────────────────────────────────────────────────────────────────
@@ -397,6 +462,7 @@ function PuzzleService:clear()
 			CollectionService:RemoveTag(model, PuzzleConfig.ClueTag)
 			model:SetAttribute(PZ.ClueText, nil)
 			model:SetAttribute(PZ.CluePrompt, nil)
+			model:SetAttribute(PZ.ClueOrder, nil)
 		end
 	end
 	if state.keypad and state.keypad.Parent then
@@ -405,14 +471,20 @@ function PuzzleService:clear()
 
 	state.definition = nil
 	state.answer = ""
+	state.values = nil
+	state.found = 0
 	state.solved = false
 	state.keypad = nil
 	state.door = nil
 	table.clear(state.clues)
+	table.clear(state.props)
+	table.clear(state.clueOf)
 	table.clear(attempts)
 
 	Workspace:SetAttribute(GA.VaultPresent, false)
 	Workspace:SetAttribute(GA.VaultSolved, false)
+	Workspace:SetAttribute(GA.CluesFound, 0)
+	Workspace:SetAttribute(GA.CluesTotal, 0)
 end
 
 --[[
@@ -523,6 +595,13 @@ function PuzzleService:arm(random: Random?)
 
 	Workspace:SetAttribute(GA.VaultPresent, true)
 	Workspace:SetAttribute(GA.VaultSolved, false)
+	Workspace:SetAttribute(GA.CluesFound, 0)
+	Workspace:SetAttribute(GA.CluesTotal, #definition.clues)
+
+	--[[ Printed only now that every prop is in the maps, and printed with the
+	     count at zero — so all four documents are legible from the first second
+	     of the round and all four digits are redacted. ]]
+	repaint()
 
 	print(
 		string.format("[PuzzleService] %s armed with %d/%d clues", definition.id, painted, #definition.clues)
@@ -598,6 +677,29 @@ local function onSubmit(player: Player, payload: any)
 	setDoorOpen(true)
 	payOut()
 
+	--[[
+		And then they hear it.
+
+		Opening the vault is loud, and the building has been listening. This is
+		DirectorService's own crescendo — the same three waves a panic trigger
+		fires — so the horde that answers the door is the horde the game already
+		knows how to throw, spawned around the door rather than around the team.
+
+		It is also what stops the reward being free: a supply room you have to
+		hold for forty-five seconds is a decision, and a supply room you walk
+		into is a vending machine.
+	]]
+	local director = Registry.find("DirectorService")
+	if director and typeof(director.triggerPanicEvent) == "function" then
+		local at = if state.door then state.door:GetPivot().Position else nil
+		if not at and state.keypad then
+			at = state.keypad:GetPivot().Position
+		end
+		if at then
+			pcall(director.triggerPanicEvent, director, at)
+		end
+	end
+
 	--[[ Announced to the whole server, not just the solver. Somebody found the
 	     badge, somebody else found the sign, and the door opening is the moment
 	     that was for. ]]
@@ -615,6 +717,101 @@ local function onSubmit(player: Player, payload: any)
 	if audio and typeof(audio.playOn) == "function" and speaker then
 		pcall(audio.playOn, audio, AudioConfig.UI.MenuConfirm, speaker)
 	end
+end
+
+--[[
+	A player picking a clue up.
+
+	Ordered, and the order is the whole hunt: clue three is refused until clue
+	two is in, and the refusal names the one they are missing rather than saying
+	no. A player standing over the note with three clues left to find should be
+	told "COLLECT THE FIRST CLUE" — "denied" would read as the prop being broken.
+
+	Team-wide. Four survivors are working one objective; a counter that started
+	again for whoever walked in second would be four separate puzzles in one
+	building, and the player who found the badge would have nothing to tell
+	anybody.
+]]
+local function onCollect(player: Player, target: any)
+	if typeof(target) ~= "Instance" or not state.definition then
+		return
+	end
+
+	local entry = record(player)
+	local now = serverNow()
+	--[[ The rate check first, before anything touches the world — every branch
+	     below answers with a FireClient, and an unthrottled handler that answers
+	     is an outbound amplifier. ]]
+	if now - entry.at < COLLECT_INTERVAL then
+		return
+	end
+	entry.at = now
+
+	local clue = state.clueOf[target]
+	if not clue then
+		return
+	end
+
+	--[[ Already in. Silent rather than refused: walking back past a clipboard
+	     you have read is not a mistake and does not deserve a message. ]]
+	if clue.order <= state.found then
+		Remotes.Event.ClueResult:FireClient(player, {
+			ok = true,
+			order = clue.order,
+			found = state.found,
+			total = #state.definition.clues,
+			text = target:GetAttribute(PZ.ClueText),
+			repeated = true,
+		})
+		return
+	end
+
+	local wanted = state.found + 1
+	if clue.order ~= wanted then
+		local missing = PuzzleConfig.clueAt(state.definition, wanted)
+		Remotes.Event.ClueResult:FireClient(player, {
+			ok = false,
+			order = clue.order,
+			found = state.found,
+			total = #state.definition.clues,
+			reason = string.format(
+				"COLLECT THE %s CLUE FIRST\n%s",
+				PuzzleConfig.ordinal(wanted),
+				if missing then missing.prompt else ""
+			),
+		})
+		return
+	end
+
+	--[[ Counted, then re-printed. The digit on THIS prop appears at the same
+	     moment the counter moves, because they are the same event: the team now
+	     holds a number it did not hold a frame ago. ]]
+	state.found = wanted
+	Workspace:SetAttribute(GA.CluesFound, state.found)
+	repaint()
+
+	local template = TEMPLATES[state.definition.template]
+	Remotes.Event.ClueResult:FireClient(player, {
+		ok = true,
+		order = clue.order,
+		found = state.found,
+		total = #state.definition.clues,
+		text = target:GetAttribute(PZ.ClueText),
+		headline = if template and typeof(template.prompt) == "function"
+			then template.prompt(clue, state.values)
+			else clue.found,
+	})
+
+	--[[ Announced to everyone. One player is holding the badge; the other three
+	     need to know the counter moved and who moved it, because the next clue
+	     is somewhere none of them have been. ]]
+	Remotes.Event.ClueFound:FireAllClients({
+		player = player,
+		order = clue.order,
+		found = state.found,
+		total = #state.definition.clues,
+		prompt = clue.prompt,
+	})
 end
 
 -- ── public reads ────────────────────────────────────────────────────────────
@@ -635,6 +832,7 @@ function PuzzleService:init() end
 
 function PuzzleService:start()
 	serviceTrove:connect(Remotes.Event.SubmitVaultCode.OnServerEvent, onSubmit)
+	serviceTrove:connect(Remotes.Event.CollectClue.OnServerEvent, onCollect)
 
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		attempts[player] = nil

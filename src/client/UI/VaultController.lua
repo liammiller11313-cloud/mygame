@@ -28,6 +28,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -68,6 +70,21 @@ local DOC_HEIGHT = 560
      the horde has not stopped for it. ]]
 local VAULT_LINE_SECONDS = 5
 
+--[[ Shorter than the vault line: a clue landing is news, not the payoff, and
+     four of them over ten minutes should not each hold the subtitle bar. ]]
+local CLUE_LINE_SECONDS = 3
+
+--[[ The clue counter, top-centre under the wave banner. Its own small card
+     rather than a line in the objective, because the objective is rewritten on
+     every wave edge and a side objective that got overwritten by "WAVE 4" would
+     be a counter nobody could rely on. ]]
+local TRACKER_WIDTH = 250
+local TRACKER_HEIGHT = 52
+local TRACKER_Y = 96
+local TRACKER_FLASH = 1.6
+local TRACKER_IDLE = 0.45
+local TRACKER_LIVE = 0.0
+
 local KEY_GAP = 8
 local READOUT_HEIGHT = 64
 
@@ -96,6 +113,11 @@ local statusLabel: TextLabel
 local docText: TextLabel
 local keyButtons: { [string]: TextButton } = {}
 
+local trackerGui: ScreenGui
+local trackerCard: CanvasGroup
+local trackerCount: TextLabel
+local trackerLine: TextLabel
+
 --[[ The panel's OWN restore slot. FreeCursor's contract: these screens nest, so
      a shared one would have an inner panel hand back an outer panel's camera. ]]
 local restore = {}
@@ -113,6 +135,10 @@ local state = {
 	     cannot drift and cannot arrive stale. ]]
 	retryAt = 0,
 	suppressed = false,
+	--[[ Absolute clock the counter stops being bright at, or 0. It sits faded
+	     the rest of the time: a permanent panel at the top of the screen for a
+	     side objective is a panel in the way of the horde. ]]
+	flashUntil = 0,
 }
 
 -- ── helpers ─────────────────────────────────────────────────────────────────
@@ -229,6 +255,58 @@ local function press(key: string)
 	UiSound.play(AudioConfig.UI.MenuHover)
 end
 
+--[[
+	Redraws the counter from the two attributes the server publishes.
+
+	Hidden entirely when no puzzle is armed, which is two maps out of three and
+	the whole lobby — a 0/4 counter on a map with no clues in it would be an
+	objective the player can never satisfy.
+]]
+local function refreshTracker()
+	local total = tonumber(Attributes.get(Workspace, GA.CluesTotal, 0)) or 0
+	local found = tonumber(Attributes.get(Workspace, GA.CluesFound, 0)) or 0
+	local solved = Attributes.get(Workspace, GA.VaultSolved, false) == true
+
+	--[[ The counter's job ends when the door opens. What happens after that is a
+	     horde, and a card counting clues through it would be the least useful
+	     thing on the screen. ]]
+	local wanted = total > 0 and not solved
+	trackerGui.Enabled = wanted
+	if not wanted then
+		return
+	end
+
+	trackerCount.Text = string.format("CLUES  %d/%d", found, total)
+	if found >= total then
+		trackerCount.TextColor3 = COLOR.HealthGood
+		trackerLine.Text = "HEAD TO THE CODE DOOR AT KFC"
+		trackerLine.TextColor3 = COLOR.AccentBright
+	else
+		trackerCount.TextColor3 = COLOR.AccentBright
+		trackerLine.Text = "SEARCH THE BUILDING"
+		trackerLine.TextColor3 = COLOR.TextSecondary
+	end
+end
+
+--[[ Brightens the card for a moment, on a change the player caused. Fired for a
+     collection and for a refusal alike: both are answers to something they just
+     did, and both are worth looking up for. ]]
+local function flashTracker()
+	state.flashUntil = os.clock() + TRACKER_FLASH
+	TweenService:Create(trackerCard, TweenInfo.new(0.12), { GroupTransparency = TRACKER_LIVE }):Play()
+end
+
+--[[ The only per-frame work in this file, and it does nothing on all but one
+     frame in a hundred: it exists to end a flash. A tween cannot schedule its
+     own reversal without a second tween that would fight the first when two
+     clues are picked up a second apart. ]]
+local function stepTracker()
+	if state.flashUntil > 0 and os.clock() >= state.flashUntil then
+		state.flashUntil = 0
+		TweenService:Create(trackerCard, TweenInfo.new(0.5), { GroupTransparency = TRACKER_IDLE }):Play()
+	end
+end
+
 -- ── build ───────────────────────────────────────────────────────────────────
 
 local function buildKeypad(parent: Instance)
@@ -312,6 +390,52 @@ local function buildDocument(parent: Instance)
 	docText.TextWrapped = true
 end
 
+--[[
+	The clue counter.
+
+	CLUES 2/4 while there is hunting left, and one line telling the team what to
+	do about it — which at 4/4 is the only instruction that matters: the code
+	door. A CanvasGroup so the whole card fades together; a Frame's transparency
+	does not touch its children, so fading one would leave the numbers at full
+	strength over a faded box.
+]]
+local function buildTracker()
+	trackerGui = Instance.new("ScreenGui")
+	trackerGui.Name = "FL_ClueTracker"
+	trackerGui.ResetOnSpawn = false
+	trackerGui.IgnoreGuiInset = true
+	trackerGui.DisplayOrder = UITheme.DisplayOrder.Hud
+	trackerGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	trackerGui.Enabled = false
+	trackerGui.Parent = player:WaitForChild("PlayerGui")
+	trove:add(trackerGui)
+
+	local layer = ScaleLayer.new(trackerGui, "Scaled")
+
+	trackerCard = Instance.new("CanvasGroup")
+	trackerCard.Name = "Card"
+	trackerCard.AnchorPoint = Vector2.new(0.5, 0)
+	trackerCard.Position = UDim2.new(0.5, 0, 0, TRACKER_Y)
+	trackerCard.Size = UDim2.fromOffset(TRACKER_WIDTH, TRACKER_HEIGHT)
+	trackerCard.BackgroundColor3 = COLOR.Panel
+	trackerCard.BackgroundTransparency = 0.3
+	trackerCard.BorderSizePixel = 0
+	trackerCard.GroupTransparency = TRACKER_IDLE
+	trackerCard.Parent = layer
+	Widgets.stroke(trackerCard, COLOR.Border)
+
+	trackerCount = Widgets.label(trackerCard, "Count", FONT.Heading, TEXT.Body, COLOR.AccentBright)
+	trackerCount.Position = UDim2.fromOffset(0, 6)
+	trackerCount.Size = UDim2.new(1, 0, 0, TEXT.Body + 2)
+	trackerCount.TextXAlignment = Enum.TextXAlignment.Center
+
+	trackerLine = Widgets.label(trackerCard, "Line", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
+	trackerLine.Position = UDim2.fromOffset(6, 6 + TEXT.Body + 4)
+	trackerLine.Size = UDim2.new(1, -12, 0, TEXT.Tiny + 2)
+	trackerLine.TextXAlignment = Enum.TextXAlignment.Center
+	trackerLine.TextTruncate = Enum.TextTruncate.AtEnd
+end
+
 local function build()
 	gui = Instance.new("ScreenGui")
 	gui.Name = "FL_Vault"
@@ -333,6 +457,7 @@ local function build()
 
 	buildKeypad(panel)
 	buildDocument(panel)
+	buildTracker()
 end
 
 -- ── public ──────────────────────────────────────────────────────────────────
@@ -474,11 +599,79 @@ function VaultController:start()
 		)
 	end)
 
+	--[[
+		A clue the player just tried to pick up.
+
+		Three answers, and each one puts something different on screen. Picked
+		up: the document opens with its digit now legible, and the counter moves.
+		Out of order: the counter says which one they should have found first and
+		no page opens — a document full of redactions with no explanation reads as
+		a bug. Already had it: the page opens and nothing else happens.
+	]]
+	trove:connect(Remotes.Event.ClueResult.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refreshTracker()
+		flashTracker()
+
+		if payload.ok ~= true then
+			--[[ Newlines folded to a dash: the refusal is two lines on the server so
+			     a page could show it, and one line here because the counter is one
+			     line tall. ]]
+			local reason = string.gsub(tostring(payload.reason or "NOT YET"), "\n", " \226\128\148 ")
+			trackerLine.Text = reason
+			trackerLine.TextColor3 = COLOR.Danger
+			UiSound.play(AudioConfig.UI.MenuBack)
+			return
+		end
+
+		if typeof(payload.text) == "string" and payload.text ~= "" and not state.open then
+			docText.Text = payload.text
+			show("document", DOC_WIDTH, DOC_HEIGHT, tostring(payload.headline or "DOCUMENT"))
+		end
+		if payload.repeated ~= true then
+			UiSound.play(AudioConfig.UI.MenuConfirm)
+		end
+	end)
+
+	--[[ Somebody else found one. The counter is the team's, so it moves on every
+	     screen — the player three rooms away needs to know the hunt advanced and
+	     that the next clue is somewhere they have not been. ]]
+	trove:connect(Remotes.Event.ClueFound.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refreshTracker()
+		flashTracker()
+		local who = payload.player
+		if typeof(who) == "Instance" and who:IsA("Player") and who ~= player then
+			callController(
+				"SubtitleController",
+				"say",
+				who.DisplayName,
+				string.format(
+					"%s. %d of %d.",
+					tostring(payload.prompt or "Got one"),
+					payload.found,
+					payload.total
+				),
+				CLUE_LINE_SECONDS
+			)
+		end
+	end)
+
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.CluesFound), refreshTracker)
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.CluesTotal), refreshTracker)
+	trove:connect(RunService.Heartbeat, stepTracker)
+	refreshTracker()
+
 	--[[ Somebody else got it. The panel closes rather than sitting on a keypad
 	     for a door that is already open — and the closing IS the notification,
 	     because a player staring at a number pad is a player who was working on
 	     exactly this. ]]
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.VaultSolved), function()
+		refreshTracker()
 		if Workspace:GetAttribute(GA.VaultSolved) == true and state.open and state.mode == "keypad" then
 			VaultController:close()
 		end

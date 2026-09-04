@@ -185,6 +185,7 @@ Attributes.Puzzle = table.freeze({
 	ClueText = "FL_ClueText", -- string, the document as printed
 	CluePrompt = "FL_CluePrompt", -- string, what the interact prompt calls it
 	Digits = "FL_PuzzleDigits", -- number, how long the keypad's code is
+	ClueOrder = "FL_ClueOrder", -- number, where this prop sits in the chain
 })
 
 -- Written on Workspace. Global, read by the music system and the debug overlay.
@@ -206,6 +207,12 @@ Attributes.Game = table.freeze({
 	     map at all — two of the three maps never set it — and Solved is what the
 	     keypad UI reads to stop offering a code for a door that is already open. ]]
 	VaultPresent = "FL_VaultPresent", -- boolean
+	--[[ How many of the vault's clues the TEAM holds, and how many there are.
+	     Team-wide on Workspace rather than per player, because four survivors
+	     are working one objective — a counter that started again for whoever
+	     walked in second would be four separate puzzles in one building. ]]
+	CluesFound = "FL_CluesFound", -- number
+	CluesTotal = "FL_CluesTotal", -- number, 0 when no puzzle is armed
 	VaultSolved = "FL_VaultSolved", -- boolean
 
 	ReadyHold = "FL_ReadyHold", -- boolean
