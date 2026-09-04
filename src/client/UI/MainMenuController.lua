@@ -89,6 +89,7 @@ local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
 local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
@@ -1284,6 +1285,30 @@ local function buildTitle()
 	titleLight.Position = UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE)
 	titleLight.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	titleLight.Text = "LIGHT"
+
+	--[[
+		The version, bottom-right, dim.
+
+		Down there rather than under the title because it is a footnote, not part
+		of the identity. On the RIGHT because the nav row already occupies the
+		bottom of this column and its rule is drawn at the left edge of it — a
+		left-aligned version label lands in a six-pixel band under that rule and
+		reads as something that fell off it.
+
+		Right-aligned to 1 - COLUMN_X rather than to the screen edge, so it lines
+		up with the end of the nav row instead of hanging past the content column
+		into the margin.
+
+		Dim enough to ignore and legible enough to quote in a bug report, which is
+		the only two things it has to be. The text comes from GameConfig so this
+		and anything else that ever shows a version cannot drift apart.
+	]]
+	local version = Widgets.label(menuLayer, "Version", FONT.Body, TEXT.Tiny, COLOR.TextDim)
+	version.AnchorPoint = Vector2.new(1, 1)
+	version.Position = UDim2.new(1 - COLUMN_X, 0, 1, -LAYOUT.ScreenMargin)
+	version.Size = UDim2.new(0.5, 0, 0, TEXT.Body)
+	version.TextXAlignment = Enum.TextXAlignment.Right
+	version.Text = GameConfig.Version
 
 	titleRule = Widgets.rule(menuLayer, "TitleRule", COLOR.Accent)
 	titleRule.Position =

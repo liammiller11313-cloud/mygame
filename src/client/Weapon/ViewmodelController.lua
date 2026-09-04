@@ -168,10 +168,40 @@ local CLASS_POSE: { [string]: Pose } = {
 		tilt = math.rad(-5),
 		length = 1.35,
 	},
+	--[[
+		Melee, and the numbers are measured rather than felt.
+
+		A pose's offset only means something as an ANGLE from the lens, because
+		the camera is 70 degrees vertical: an x of 0.95 at z = -1.3 is a much
+		wider angle than the same x at z = -1.85. Written out, every gun sits at
+		about 29 degrees horizontal and 25 vertical, in a tight band —
+
+		    Pistol 30.3/27.3 · SMG 29.7/26.6 · Rifle 28.0/25.1
+		    Marksman 26.7/24.0 · Shotgun 27.9/25.2 · LMG 26.4/24.9
+		    Launcher 31.7/17.9 · Special 30.7/28.9
+
+		— and melee was at 36.2 horizontal and 34.7 VERTICAL. The vertical half of
+		the frame is 35 degrees, so the pivot was sitting three tenths of a degree
+		from the bottom edge with the whole blade hanging below it. Not "hard to
+		see": off screen, and further off on a phone, where the horizontal half
+		drops from 51 to 43 degrees.
+
+		So this is the guns' own average, worked back into offsets at z = -1.35:
+		x = 1.35·tan(29°) = 0.75, y = -1.35·tan(26°) = -0.66. A melee weapon is
+		now framed exactly where a gun is, which is what was asked for.
+
+		The tilt comes back with it. -14 degrees was nearly twice the steepest
+		gun's, and it was tipping the blade further out of a frame it was already
+		leaving.
+	]]
 	Melee = {
-		hip = Vector3.new(0.95, -0.9, -1.3),
-		aim = Vector3.new(0.75, -0.7, -1.2),
-		tilt = math.rad(-14),
+		hip = Vector3.new(0.75, -0.66, -1.35),
+		--[[ Melee never aims, but the value is still blended toward whenever
+		     something else pulls the pose in — so it sits slightly inboard of the
+		     hip, the way every gun's does, rather than somewhere the weapon would
+		     lurch to. ]]
+		aim = Vector3.new(0.62, -0.55, -1.25),
+		tilt = math.rad(-8),
 		length = 1.6,
 	},
 }
@@ -995,7 +1025,21 @@ local function buildArms(built: Model, definition: any)
 		"Right Arm"
 	)
 
-	if definition and definition.class == "Pistol" then
+	--[[
+		One hand for a pistol, and one for melee.
+
+		The support hand is placed against a GUN'S geometry — forward along the
+		model by SUPPORT_FORWARD, where a forestock is. A blade has nothing there,
+		so a two-handed melee put a floating left hand somewhere past the tip.
+		Nobody saw it while the melee pose was off the bottom of the frame; the
+		moment that was fixed it was the first thing on screen.
+
+		All five melee weapons share one class, so this cannot be per weapon
+		without a new field, and one-handed is the right default of the two: a bat
+		or an axe swung one-handed reads as a choice, and a hand hovering in front
+		of a knife reads as a bug.
+	]]
+	if definition and (definition.class == "Pistol" or definition.fireMode == "Melee") then
 		return
 	end
 

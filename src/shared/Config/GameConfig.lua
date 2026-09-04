@@ -26,7 +26,19 @@ local GameConfig = {}
 	none. If it is stale, the log says so honestly: the code in Studio is at least
 	as new as this date, and no newer than the push that set it.
 ]]
-GameConfig.BuildStamp = "2026-09-04e"
+GameConfig.BuildStamp = "2026-09-04f"
+
+--[[
+	What the game calls itself, on screen.
+
+	Separate from BuildStamp above, and the two answer different questions.
+	BuildStamp is for the developer — a date in the server log that says how new
+	the code in Studio is. This is for the PLAYER: it goes in the corner of the
+	main menu and its whole job is to set an expectation before anybody presses
+	PLAY. Somebody who knows they are in an alpha reports a bug; somebody who
+	thinks they are in a finished game leaves.
+]]
+GameConfig.Version = "0.9 ALPHA TESTING"
 
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true
