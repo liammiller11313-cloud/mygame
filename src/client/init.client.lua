@@ -91,6 +91,10 @@ local CONTROLLERS = {
 	-- Beside ProfileController and for the same reason: a mirror of server state
 	-- that several screens read, loaded before any of them.
 	"UI/ProgressionController",
+	--[[ After ProgressionController, whose Scrip mirror it reads to decide what
+	     the player can afford. A panel like the shop, on the same layer, and
+	     never open at the same time as one. ]]
+	"UI/RequisitionController",
 	"UI/ShopController",
 	"UI/LoadoutController",
 	--[[ A panel like those two, and reachable from the pause menu the same way

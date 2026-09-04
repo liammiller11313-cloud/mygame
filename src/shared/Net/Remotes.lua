@@ -156,6 +156,17 @@ local EVENTS: { string } = {
 	"MapVoteResult", -- {winner: string, tally: {[string]: number}}
 	"MapLoading", -- {mapId: string, phase: string}  "Unload" | "Load" | "Ready"
 	"AmmoCrateUsed", -- {player, crate: Instance, index, respawnAt: number, given: number}
+
+	-- ── Requisitions ────────────────────────────────────────────────────────
+	--[[ One player pays Scrip, the whole team gets it for the round. The state
+	     itself rides Attributes.Game.Req* on Workspace, which replicates to
+	     everybody — see the header of Shared/Net/Attributes. These two carry
+	     what an attribute cannot: the ask, and who paid for it. ]]
+	"RequestRequisition", -- C->S (id: string)
+	--[[ Broadcast, not a reply. A refusal goes only to the asker, but a PURCHASE
+	     goes to the whole server: somebody just spent their own currency on the
+	     rest of the team and the team should see who. ]]
+	"RequisitionResult", -- {id, ok: boolean, reason: string, buyer: string?, cost: number?}
 }
 
 -- Every RemoteFunction. Keep this list SHORT: remote functions block and can be

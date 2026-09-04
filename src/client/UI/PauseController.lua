@@ -84,6 +84,9 @@ local ENTRIES = {
 	     and a player who paused to find that out should not have to read past
 	     the battle pass to get to it. ]]
 	{ id = "Backpack", title = "BACKPACK", line = "Your kit, and what the squad is carrying." },
+	--[[ Next to BACKPACK because it is the other thing that is about the round
+	     you are standing in rather than the account you are building. ]]
+	{ id = "Requisitions", title = "REQUISITIONS", line = "Spend Scrip on something the whole team gets." },
 	--[[ Above SETTINGS because it is about the round you are in the middle of.
 	     Today's orders are things you do DURING a round — "revive four teammates"
 	     is a decision you make at wave three, not one you plan in a menu — and
@@ -217,6 +220,10 @@ local function activate(id: string)
 		-- Closed first, for the same reason SETTINGS is. See below.
 		PauseController:close()
 		callController("BackpackController", "open")
+	elseif id == "Requisitions" then
+		-- Closed first, for the same reason SETTINGS is. See below.
+		PauseController:close()
+		callController("RequisitionController", "open")
 	elseif id == "Career" then
 		-- Closed first, for the same reason SETTINGS is. See below.
 		PauseController:close()

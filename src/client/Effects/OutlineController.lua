@@ -50,12 +50,15 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Device = require(Shared.Util.Device)
 local Enums = require(Shared.Enums)
+local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
+local RequisitionConfig = require(Shared.Config.RequisitionConfig)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
 local OUTLINE = UITheme.Outline
 local PA = Attributes.Player
+local IA = Attributes.Infected
 local PICKUP = Attributes.Pickup
 local STATE = Enums.SurvivorState
 
@@ -97,7 +100,18 @@ local ITEM_RESCAN_INTERVAL = 1.0
      teammate outranks a healthy one, and any teammate outranks a medkit. ]]
 local RANK_TROUBLE = 0
 local RANK_TEAMMATE = 1
-local RANK_ITEM = 2
+--[[ Above pickups, below teammates. A special coming for you matters more than
+     a medkit on a shelf and less than the person bleeding out at your feet —
+     and the cap is spent from the top, so when the screen is full it is the
+     ammo box that stops being outlined and not the Hunter. ]]
+local RANK_THREAT = 2
+local RANK_ITEM = 3
+
+--[[ How far a spotted special is drawn from. Shorter than the teammate range on
+     purpose: this is meant to answer "what is about to reach me", not to hand
+     the team a map of every special on the level, which would turn the horde
+     into a to-do list and delete the tension the specials exist to create. ]]
+local THREAT_MAX_DISTANCE = 140
 
 -- Sub-frame transparency changes are invisible and are not worth a write.
 local TRANSPARENCY_EPSILON = 0.01
@@ -139,6 +153,11 @@ local candidates: { Candidate } = {}
 local candidateCount = 0
 local pulsing: { Record } = {}
 local pulsingCount = 0
+--[[ Every special and boss currently alive, kept by ChildAdded rather than
+     rescanned. See collectThreats: the Infected folder is mostly Commons and
+     filtering it every tick would be the most expensive thing in this file. ]]
+local threats: { [Model]: true } = {}
+
 local pickups: { Instance } = {}
 local pickupCount = 0
 local seen: { [Instance]: boolean } = {}
@@ -369,6 +388,42 @@ local function collectTeammates(eye: Vector3)
 	end
 end
 
+--[[
+	Specials and bosses, when the team has bought SPOTTER.
+
+	The only requisition with no gameplay effect at all — it changes nothing
+	about damage, speed, health or ammunition, and that is exactly why it is the
+	one that most changes how a round is played. Knowing there is a Hunter above
+	you and to the left is not power, it is the information the whole special
+	roster is built on withholding, and buying it back is a real decision.
+
+	The watched set is maintained on ChildAdded rather than rescanned like the
+	pickups are, because during a horde the Infected folder holds sixty bodies
+	and fifty-eight of them are Commons that must never be outlined. Filtering
+	that list once a second would be the most expensive thing in this file.
+]]
+local function collectThreats(eye: Vector3)
+	if not RequisitionConfig.isActive(Workspace, "Spotter") then
+		return
+	end
+	for model in threats do
+		if not model.Parent or Attributes.get(model, IA.IsDead, false) == true then
+			continue
+		end
+		local root = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
+		if not root or not root:IsA("BasePart") then
+			continue
+		end
+		local distance = (root.Position - eye).Magnitude
+		if distance > THREAT_MAX_DISTANCE then
+			continue
+		end
+		local definition = InfectedConfig.get(Attributes.get(model, IA.Kind, "") :: string)
+		local color = if definition then definition.outlineColor else OUTLINE.PinnedColor
+		pushCandidate(model, RANK_THREAT, distance, color, OUTLINE.TeammateTransparency, false)
+	end
+end
+
 local function collectPickups(eye: Vector3)
 	local maxDistance = OUTLINE.ItemMaxDistance
 	for index = 1, pickupCount do
@@ -468,6 +523,7 @@ local function scan()
 
 	candidateCount = 0
 	collectTeammates(eye)
+	collectThreats(eye)
 	collectPickups(eye)
 
 	-- Trailing entries keep stale instance references alive; clear them so a
@@ -571,7 +627,50 @@ function OutlineController:init()
 	trove:add(Device.changed:connect(adoptHighlightCap))
 end
 
+--[[ Adds a body to the spotted set if it is one of the things worth spotting.
+     Read off the definition rather than a list of kind names, so a special added
+     to InfectedConfig is spotted without anybody remembering to come here. ]]
+local function considerThreat(child: Instance)
+	if not child:IsA("Model") then
+		return
+	end
+	local definition = InfectedConfig.get(Attributes.get(child, IA.Kind, "") :: string)
+	if definition and (definition.isSpecial or definition.isBoss) then
+		threats[child] = true
+	end
+end
+
+local function watchInfected(infectedFolder: Instance)
+	table.clear(threats)
+	for _, child in infectedFolder:GetChildren() do
+		considerThreat(child)
+	end
+	trove:connect(infectedFolder.ChildAdded, considerThreat)
+	trove:connect(infectedFolder.ChildRemoved, function(child: Instance)
+		if child:IsA("Model") then
+			threats[child :: Model] = nil
+		end
+	end)
+end
+
 function OutlineController:start()
+	--[[ The Infected folder is made by InfectedService on the first spawn, which
+	     on a fresh server is after the client has booted. One connection, dropped
+	     the moment it fires. ]]
+	local infectedFolder = Workspace:FindFirstChild("Infected")
+	if infectedFolder then
+		watchInfected(infectedFolder)
+	else
+		local connection: RBXScriptConnection
+		connection = Workspace.ChildAdded:Connect(function(child: Instance)
+			if child.Name == "Infected" then
+				connection:Disconnect()
+				watchInfected(child)
+			end
+		end)
+		trove:add(connection)
+	end
+
 	trove:connect(Players.PlayerRemoving, function(leaving: Player)
 		local character = leaving.Character
 		local record = if character then records[character] else nil
@@ -588,6 +687,7 @@ function OutlineController:destroy()
 	trove:destroy()
 	table.clear(free)
 	table.clear(candidates)
+	table.clear(threats)
 	table.clear(pulsing)
 	table.clear(pickups)
 	table.clear(seen)

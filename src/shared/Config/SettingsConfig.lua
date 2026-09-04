@@ -256,6 +256,14 @@ SettingsConfig.Definitions = table.freeze({
 		default = "",
 		action = "Backpack",
 	},
+	{
+		key = "bindRequisitions",
+		label = "REQUISITIONS",
+		category = "CONTROLS",
+		kind = "keybind",
+		default = "",
+		action = "Requisitions",
+	},
 
 	-- ── gameplay ────────────────────────────────────────────────────────────
 	{

@@ -98,6 +98,11 @@ local MODULES = {
 	"Level/MapService",
 	"Round/MapVoteService",
 	"Round/RoundService",
+	--[[ After RoundService, whose roundEnded signal it subscribes to and whose
+	     phase attributes decide whether buying is open. Before the services that
+	     read the requisition switches — they read them off Workspace at the
+	     moment they matter, so only the CLEAR has to have happened first. ]]
+	"Round/RequisitionService",
 	"Round/VersusService",
 	"Round/MatchmakingService",
 	-- After it: LobbyService asks MatchmakingService for the browser rows rather

@@ -727,6 +727,39 @@ function ProfileService:addScrip(player: Player, amount: number): number
 	return profile.scrip
 end
 
+--[[
+	Takes Scrip, and says whether it could.
+
+	Separate from addScrip with a negative amount, and the difference is the
+	whole point: this one REFUSES rather than clamping. A price the player cannot
+	afford has to come back as a false the caller can turn into "you cannot
+	afford that", not as a silent clamp to zero that spends everything they had
+	and gives them the thing anyway.
+]]
+function ProfileService:spendScrip(player: Player, amount: number): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+	if typeof(amount) ~= "number" or amount ~= amount or amount <= 0 then
+		return false
+	end
+	local price = math.floor(amount)
+	if profile.scrip < price then
+		return false
+	end
+	profile.scrip -= price
+	publishProgression(player, profile)
+	--[[ Not structural. `structural` pushes a full ProfileSynced, which carries
+	     dollars, owned items and loadouts and does NOT carry Scrip — Scrip rides
+	     Attributes.Player and ProgressionSynced, both of which publishProgression
+	     has already sent. Asking for one here would be a whole profile over the
+	     wire to tell the client something it was not going to read. Same call
+	     addScrip makes, for the same reason. ]]
+	markChanged(player, profile, false)
+	return true
+end
+
 --[[ Today's counters, and the day they are for. Handed out by reference on
      purpose — every caller is on the server and reads it to draw or to compare;
      a clone per HUD update would be a table per kill. ]]

@@ -62,6 +62,7 @@ local GameConfig = require(Shared.Config.GameConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
+local RequisitionConfig = require(Shared.Config.RequisitionConfig)
 local ShotPattern = require(Shared.Util.ShotPattern)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
@@ -70,6 +71,21 @@ local WeaponConfig = require(Shared.Config.WeaponConfig)
 local LA = Attributes.Loadout
 local PA = Attributes.Player
 local STATE = Enums.SurvivorState
+
+--[[ Reload timings, with the FIELD DRILL requisition applied if the team bought
+     one. These are the client's PREDICTION of a clock the server also runs —
+     see the matching pair in InventoryService — so both sides read the multiplier
+     from RequisitionConfig rather than each deciding what a drill is worth. Get
+     that wrong and the magazine appears at a different moment on each machine,
+     which the player experiences as a shot the server refused after the reload
+     visibly finished. ]]
+local function reloadTimeFor(definition: any): number
+	return definition.reloadTime * RequisitionConfig.reloadScale(Workspace)
+end
+
+local function shellTimeFor(definition: any): number
+	return definition.reloadPerShell * RequisitionConfig.reloadScale(Workspace)
+end
 
 --[[ Mirrors BallisticsService's own movement test exactly, including the
      velocity fallback for a survivor who is being carried or shoved. ]]
@@ -787,8 +803,9 @@ local function stepReload(dt: number)
 	if reload.phase == "Load" then
 		if reload.perShell then
 			-- A long frame must commit every shell it earned, not just one.
-			while reload.timer >= definition.reloadPerShell do
-				reload.timer -= definition.reloadPerShell
+			local shell = shellTimeFor(definition)
+			while shell > 0 and reload.timer >= shell do
+				reload.timer -= shell
 				if state.ammo >= definition.magSize or state.reserve == 0 then
 					reload.phase = "Tail"
 					reload.timer = 0
@@ -810,7 +827,7 @@ local function stepReload(dt: number)
 					break
 				end
 			end
-		elseif reload.timer >= definition.reloadTime then
+		elseif reload.timer >= reloadTimeFor(definition) then
 			local need = definition.magSize - state.ammo
 			local taken = need
 			if state.reserve >= 0 then
@@ -826,7 +843,7 @@ local function stepReload(dt: number)
 		end
 	end
 
-	if reload.phase == "Tail" and reload.timer >= definition.reloadTime then
+	if reload.phase == "Tail" and reload.timer >= reloadTimeFor(definition) then
 		playLocal(AudioConfig.WeaponReload.Pump)
 		if viewmodel then
 			viewmodel:onPump()
@@ -925,7 +942,7 @@ function WeaponController:getReloadProgress(): number
 	if reload.phase ~= "Load" then
 		return 1
 	end
-	local step = if reload.perShell then definition.reloadPerShell else definition.reloadTime
+	local step = if reload.perShell then shellTimeFor(definition) else reloadTimeFor(definition)
 	if step <= 0 then
 		return 1
 	end

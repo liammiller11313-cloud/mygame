@@ -35,6 +35,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
@@ -47,6 +48,7 @@ local InfectedConfig = require(Shared.Config.InfectedConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
+local RequisitionConfig = require(Shared.Config.RequisitionConfig)
 local RigUtil = require(Shared.Util.RigUtil)
 local SettingsConfig = require(Shared.Config.SettingsConfig)
 local Signal = require(Shared.Util.Signal)
@@ -557,6 +559,42 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 		if gore and typeof(gore.spawnBlood) == "function" then
 			local scale = math.clamp(result.dealt / math.max(humanoid.MaxHealth, 1), MIN_BLOOD_SCALE, 1)
 			gore:spawnBlood(ctx.hitPosition, ctx.hitNormal, ctx.direction, scale)
+		end
+	end
+
+	--[[
+		── INCENDIARY ROUNDS ────────────────────────────────────────────────────
+		The team bought fire, so a survivor's bullet lights what it hits.
+
+		Here rather than in BallisticsService because this is the funnel every
+		bullet and pellet already comes through, with the attacker, the damage
+		type and the target's kind all resolved. Doing it at the muzzle would
+		mean re-deciding all three.
+
+		Three guards, and each one is load-bearing:
+		  * BULLETS ONLY. A melee swing, a molotov, an explosion and a special's
+		    claw all reach this function too, and "your machete sets things
+		    alight" is a different purchase nobody bought.
+		  * NEVER A BOSS. A Tank's burnDamagePerSecond is 150 against everything
+		    else's 25-45, because fire is the intended answer to a Tank and a
+		    molotov is what delivers it. Keeping one permanently alight for the
+		    price of shooting it is 150 free damage a second — 80 seconds of the
+		    Apex's 144-second wave. See RequisitionConfig.IncendiarySkipsBosses.
+		  * AFTER THE DAMAGE. Igniting a body the shot already killed is wasted
+		    work and a flame on a corpse.
+	]]
+	if
+		not isSurvivor
+		and result.dealt > 0
+		and not result.killed
+		and (ctx.damageType == Enums.DamageType.Bullet or ctx.damageType == Enums.DamageType.Pellet)
+		and ctx.attacker ~= nil
+		and RequisitionConfig.isActive(Workspace, "Incendiary")
+		and not (RequisitionConfig.IncendiarySkipsBosses and infectedDefinition and infectedDefinition.isBoss)
+	then
+		local infected = Registry.find("InfectedService")
+		if infected and typeof(infected.ignite) == "function" then
+			pcall(infected.ignite, infected, target, ctx.attacker)
 		end
 	end
 

@@ -80,6 +80,9 @@ local Action = table.freeze({
 	     readout nobody can find is a readout that does not exist. Keyboard only:
 	     see the binding row. ]]
 	Backpack = "Backpack",
+	--[[ Opens the requisition panel. Same reasoning as Backpack: a verb rather
+	     than a hard-coded key, so it shows in the controls screen and rebinds. ]]
+	Requisitions = "Requisitions",
 })
 
 --[[
@@ -200,6 +203,10 @@ local BINDINGS: { Binding } = {
 	     deliberately six buttons, because a screen covered in them is a screen
 	     you cannot see a Hunter through. ]]
 	{ action = Action.Backpack, keys = { Enum.KeyCode.B } },
+	--[[ Keyboard only, for the same reasons BACKPACK is: no pad button is free
+	     and the touch pad is deliberately six. Both panels sit in the pause menu,
+	     which is how a controller and a phone reach them. ]]
+	{ action = Action.Requisitions, keys = { Enum.KeyCode.T } },
 }
 
 -- CAS binds under one namespace so nothing here can collide with a Roblox
@@ -727,6 +734,12 @@ local function forward(action: string)
 		local backpack = Registry.find("BackpackController")
 		if backpack and typeof(backpack.open) == "function" then
 			pcall(backpack.open, backpack)
+		end
+	elseif action == Action.Requisitions then
+		-- Opens only, for the same reason. See above.
+		local requisitions = Registry.find("RequisitionController")
+		if requisitions and typeof(requisitions.open) == "function" then
+			pcall(requisitions.open, requisitions)
 		end
 	end
 end

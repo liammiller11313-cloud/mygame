@@ -167,6 +167,31 @@ Attributes.Game = table.freeze({
 	Difficulty = "FL_Difficulty", -- string, DirectorConfig.Difficulty key
 	CurrentMap = "FL_CurrentMap", -- string, MapConfig map id
 	MapPhase = "FL_MapPhase", -- string, "Ready" | "Unload" | "Load"
+
+	--[[
+		Requisitions: what the team has bought into this round.
+
+		One boolean each rather than a packed list, and on WORKSPACE rather than
+		on a Player, because a requisition is bought by ONE person and belongs to
+		EVERYBODY — see Round/RequisitionService. Workspace attributes replicate
+		to every client for free, which is what lets a client predict a reload at
+		the drilled speed and lets the outline system light up specials without
+		either of them asking the server anything.
+
+		Boolean-per-id rather than a comma-joined string because the incendiary
+		test runs on every bullet that lands. A GetAttribute is a hash lookup; a
+		string split is garbage, sixty times a second, during a horde.
+	]]
+	ReqIncendiary = "FL_ReqIncendiary", -- boolean
+	ReqSpotter = "FL_ReqSpotter", -- boolean
+	ReqDrill = "FL_ReqDrill", -- boolean
+	ReqSurplus = "FL_ReqSurplus", -- boolean
+	--[[ AIRDROP fires once and leaves no state behind, so nothing READS this one.
+	     It exists so the purchase is visible: without it the panel cannot tell a
+	     bought airdrop from an unbought one and offers it forever, and the player
+	     finds out by spending a click on a refusal. One switch per requisition,
+	     with no exceptions, is also one fewer branch everywhere else. ]]
+	ReqAirdrop = "FL_ReqAirdrop", -- boolean
 })
 
 --[[ Written on an ammo crate model. The client reads Spent to grey out a crate

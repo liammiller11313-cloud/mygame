@@ -1,0 +1,533 @@
+--!nonstrict
+--[[
+	RequisitionController — the between-waves shop.
+
+	Five rows, a Scrip balance, and a line saying whether the window is open. See
+	Shared/Config/RequisitionConfig for what is on sale and the argument for why
+	it is those five and not a stat shop, and Round/RequisitionService for the
+	transaction.
+
+	── IT IS READABLE ALWAYS AND BUYABLE SOMETIMES ─────────────────────────────
+	The panel opens whenever the player wants it. The BUY buttons only work
+	during prep and the breathers. Those are different questions and conflating
+	them was the obvious mistake here: a player who cannot even LOOK at the list
+	mid-wave cannot plan what to buy in the ten seconds they will get, and ten
+	seconds is not long enough to read five things for the first time.
+
+	So the rows are always there and always priced, and the footer says when.
+
+	── AND THE STATE COMES OFF WORKSPACE ───────────────────────────────────────
+	What is already bought rides Attributes.Game.Req* on Workspace, which
+	replicates to every client, so this screen is correct for a player who joined
+	thirty seconds ago and never saw the purchase happen. It does not track the
+	broadcast and it does not ask the server — the attribute IS the answer, and a
+	panel that remembered its own version of it would be a second truth that
+	could drift.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
+local AudioConfig = require(Shared.Config.AudioConfig)
+local Enums = require(Shared.Enums)
+local ProgressionConfig = require(Shared.Config.ProgressionConfig)
+local Registry = require(Shared.Util.Registry)
+local Remotes = require(Shared.Net.Remotes)
+local RequisitionConfig = require(Shared.Config.RequisitionConfig)
+local Trove = require(Shared.Util.Trove)
+local UITheme = require(Shared.Config.UITheme)
+
+local FreeCursor = require(script.Parent.FreeCursor)
+local GamepadFocus = require(script.Parent.GamepadFocus)
+local ScaleLayer = require(script.Parent.ScaleLayer)
+local UiSound = require(script.Parent.UiSound)
+local Widgets = require(script.Parent.Widgets)
+
+local COLOR = UITheme.Color
+local FONT = UITheme.Font
+local LAYOUT = UITheme.Layout
+local PANEL = UITheme.Panel
+local TEXT = UITheme.TextSize
+local GA = Attributes.Game
+local PA = Attributes.Player
+
+local player = Players.LocalPlayer
+
+local PANEL_WIDTH = 660
+local PANEL_MAX_HEIGHT = 560
+local HEADER_HEIGHT = PANEL.HeaderHeight
+local BALANCE_HEIGHT = 24
+local BODY_TOP = HEADER_HEIGHT + LAYOUT.PanelPadding + BALANCE_HEIGHT
+
+--[[ A row is a name, a line of prose and a price, plus a BUY button that has to
+     be hittable with a thumb. The touch height is the project's standard rather
+     than derived from the type, because unlike the backpack's rows this one IS
+     a tap target. ]]
+local ROW_HEIGHT = 62
+local ROW_HEIGHT_TOUCH = PANEL.RowHeightTouch + 14
+local BUY_WIDTH = 108
+
+local PHASE_PREP = "Prep"
+local PHASE_BREATHER = "Breather"
+
+local RequisitionController = {}
+
+local trove = Trove.new()
+
+local gui: ScreenGui
+local panel: Frame
+local closeButton: TextButton
+local balanceLabel: TextLabel
+local list: ScrollingFrame
+local footRule: Frame
+local hint: TextLabel
+
+local state = {
+	open = false,
+	suppressed = false,
+}
+
+local restore = {
+	cameraMode = nil :: any,
+	cameraZoom = nil :: any,
+	cameraMinZoom = nil :: any,
+	mouseIcon = nil :: any,
+}
+
+type Row = {
+	entry: any,
+	frame: Frame,
+	button: TextButton,
+	buyLabel: TextLabel,
+	price: TextLabel,
+	title: TextLabel,
+	blurb: TextLabel,
+	stroke: UIStroke,
+}
+local rows: { Row } = {}
+
+-- ── helpers ─────────────────────────────────────────────────────────────────
+
+local function callController(name: string, method: string, ...: any)
+	local controller = Registry.find(name)
+	if controller and typeof(controller[method]) == "function" then
+		pcall(controller[method], controller, ...)
+	end
+end
+
+local function isTouch(): boolean
+	local input = Registry.find("InputController")
+	if not input or typeof(input.isTouchScheme) ~= "function" then
+		return false
+	end
+	local ok, touch = pcall(input.isTouchScheme, input)
+	return ok and touch == true
+end
+
+local function menuIsOpen(): boolean
+	local menu = Registry.find("MainMenuController")
+	if not menu or typeof(menu.isOpen) ~= "function" then
+		return false
+	end
+	local ok, open = pcall(menu.isOpen, menu)
+	return ok and open == true
+end
+
+local function setSuppressed(value: boolean)
+	if state.suppressed == value then
+		return
+	end
+	state.suppressed = value
+	callController("InputController", "setEnabled", not value)
+	callController("CrosshairController", "setVisible", not value)
+	callController("PromptController", "setEnabled", not value)
+	callController("TouchController", "setVisible", not value)
+end
+
+local function claimCursor(value: boolean)
+	if value then
+		FreeCursor.take(restore)
+	else
+		FreeCursor.giveBack(restore)
+	end
+end
+
+--[[ Scrip, from ProgressionController's mirror when it has one and from the
+     attribute otherwise. Both are the same number; the mirror is simply the one
+     that is already correct on the frame a purchase lands. ]]
+local function scrip(): number
+	local progression = Registry.find("ProgressionController")
+	if progression and typeof(progression.getScrip) == "function" then
+		local ok, value = pcall(progression.getScrip, progression)
+		if ok and typeof(value) == "number" then
+			return value
+		end
+	end
+	return tonumber(Attributes.get(player, PA.Scrip, 0)) or 0
+end
+
+--[[ Whether a key is the one that opens this panel. Asked rather than assumed,
+     because the binding is rebindable: a player who moved REQUISITIONS off T
+     should still be able to press their own key to put it away. ]]
+local function boundToPanel(keyCode: Enum.KeyCode): boolean
+	local controller = Registry.find("InputController")
+	if not controller or typeof(controller.getBindings) ~= "function" then
+		return false
+	end
+	local ok, bindings = pcall(controller.getBindings, controller)
+	if not ok or typeof(bindings) ~= "table" then
+		return false
+	end
+	for _, binding in bindings do
+		if binding.action == "Requisitions" then
+			for _, key in binding.keys do
+				if key == keyCode then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+local function windowOpen(): boolean
+	if Workspace:GetAttribute(GA.RoundState) ~= Enums.RoundState.InProgress then
+		return false
+	end
+	local phase = Workspace:GetAttribute(GA.WavePhase)
+	return phase == PHASE_PREP or phase == PHASE_BREATHER
+end
+
+-- ── drawing ─────────────────────────────────────────────────────────────────
+
+local function refresh()
+	if not state.open then
+		return
+	end
+
+	local balance = scrip()
+	balanceLabel.Text = string.format("%s %d", ProgressionConfig.CurrencySymbol, balance)
+
+	local open = windowOpen()
+	for _, row in rows do
+		local bought = RequisitionConfig.isActive(Workspace, row.entry.id)
+		local affordable = balance >= row.entry.cost
+
+		--[[ AIRDROP sets no attribute — it fires once and leaves no state — so
+		     the panel cannot tell from Workspace whether it has been bought. It
+		     stays offerable, which is the honest answer: the server is the thing
+		     that knows, and it refuses a second one. ]]
+		if bought then
+			row.buyLabel.Text = "ACTIVE"
+			row.buyLabel.TextColor3 = COLOR.Accent
+			row.button.Active = false
+			row.price.TextColor3 = COLOR.TextDim
+			row.stroke.Color = COLOR.Accent
+			row.title.TextColor3 = COLOR.Accent
+		elseif not open then
+			row.buyLabel.Text = "LOCKED"
+			row.buyLabel.TextColor3 = COLOR.TextDim
+			row.button.Active = false
+			row.price.TextColor3 = COLOR.TextDim
+			row.stroke.Color = COLOR.Border
+			row.title.TextColor3 = COLOR.TextSecondary
+		elseif not affordable then
+			row.buyLabel.Text = "SHORT"
+			row.buyLabel.TextColor3 = COLOR.Danger
+			row.button.Active = false
+			row.price.TextColor3 = COLOR.Danger
+			row.stroke.Color = COLOR.Border
+			row.title.TextColor3 = COLOR.TextSecondary
+		else
+			row.buyLabel.Text = "REQUISITION"
+			row.buyLabel.TextColor3 = COLOR.TextPrimary
+			row.button.Active = true
+			row.price.TextColor3 = COLOR.TextSecondary
+			row.stroke.Color = COLOR.BorderBright
+			row.title.TextColor3 = COLOR.TextPrimary
+		end
+		row.button.Selectable = row.button.Active
+	end
+
+	hint.Text = if open
+		then "REQUISITIONS ARE OPEN. ONE PAYS, EVERYONE GETS IT, FOR THE REST OF THE ROUND."
+		else "REQUISITIONS OPEN BETWEEN WAVES. READ NOW, BUY IN THE BREATHER."
+	hint.TextColor3 = if open then COLOR.TextSecondary else COLOR.TextDim
+end
+
+-- ── build ───────────────────────────────────────────────────────────────────
+
+local function applyTouchSizing()
+	local height = if isTouch() then ROW_HEIGHT_TOUCH else ROW_HEIGHT
+	for _, row in rows do
+		row.frame.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, height)
+		row.button.Size = UDim2.fromOffset(BUY_WIDTH, height - 16)
+	end
+	if list then
+		list.Size =
+			UDim2.new(1, -LAYOUT.PanelPadding * 2, 1, -(BODY_TOP + PANEL.FooterHeight + LAYOUT.PanelPadding))
+	end
+end
+
+local function refreshPanelSize()
+	if not panel then
+		return
+	end
+	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+	local viewport = if camera and factor > 0 then camera.ViewportSize / factor else nil
+	local width = math.min(
+		PANEL_WIDTH,
+		math.max((if viewport then viewport.X else PANEL_WIDTH) - LAYOUT.ScreenMargin * 2, 300)
+	)
+	local height =
+		math.min(PANEL_MAX_HEIGHT, (if viewport then viewport.Y else PANEL_MAX_HEIGHT) * PANEL.HeightScale)
+	panel.Size = UDim2.fromOffset(width, height)
+end
+
+local function buildRow(entry: any)
+	local row = Widgets.frame(list, entry.id, COLOR.PanelRaised, PANEL.RaisedFill)
+	row.LayoutOrder = entry.order
+	row.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, ROW_HEIGHT)
+	local stroke = Widgets.stroke(row, COLOR.Border)
+
+	local edge = Widgets.frame(row, "Edge", COLOR.Accent, 0)
+	edge.Size = UDim2.new(0, LAYOUT.BorderThickness * 2, 1, 0)
+
+	local title = Widgets.label(row, "Title", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	title.Position = UDim2.fromOffset(LAYOUT.PanelPadding + 4, 8)
+	title.Size = UDim2.new(1, -(BUY_WIDTH + LAYOUT.PanelPadding * 3), 0, TEXT.Body + 2)
+	title.TextTruncate = Enum.TextTruncate.AtEnd
+	title.Text = entry.displayName
+
+	local blurb = Widgets.label(row, "Blurb", FONT.Body, TEXT.Small, COLOR.TextSecondary)
+	blurb.Position = UDim2.fromOffset(LAYOUT.PanelPadding + 4, 8 + TEXT.Body + 4)
+	blurb.Size = UDim2.new(1, -(BUY_WIDTH + LAYOUT.PanelPadding * 3), 0, TEXT.Small + 2)
+	blurb.TextTruncate = Enum.TextTruncate.AtEnd
+	blurb.Text = entry.blurb
+
+	local price = Widgets.label(row, "Price", FONT.Numeric, TEXT.Small, COLOR.TextSecondary)
+	price.AnchorPoint = Vector2.new(1, 1)
+	price.Position = UDim2.new(1, -LAYOUT.PanelPadding, 1, -6)
+	price.Size = UDim2.fromOffset(BUY_WIDTH, TEXT.Small + 2)
+	price.TextXAlignment = Enum.TextXAlignment.Center
+	price.Text = string.format("%s %d", ProgressionConfig.CurrencySymbol, entry.cost)
+
+	local button = Widgets.button(row, "Buy")
+	button.AnchorPoint = Vector2.new(1, 0)
+	button.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 6)
+	button.Size = UDim2.fromOffset(BUY_WIDTH, ROW_HEIGHT - 16)
+	button.BackgroundColor3 = COLOR.PanelRaised
+	button.BackgroundTransparency = PANEL.ActionFill
+	Widgets.stroke(button, COLOR.Border)
+
+	local buyLabel = Widgets.label(button, "Label", FONT.Heading, TEXT.Tiny, COLOR.TextPrimary)
+	buyLabel.Size = UDim2.fromScale(1, 1)
+	buyLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+	trove:connect(button.Activated, function()
+		--[[ Asked anyway when the row looks unbuyable, because `Active` is a
+		     drawing decision made on the last refresh and the server is the only
+		     thing that decides. It refuses politely. ]]
+		Remotes.Event.RequestRequisition:FireServer(entry.id)
+		UiSound.play(AudioConfig.UI.MenuConfirm)
+	end)
+
+	table.insert(rows, {
+		entry = entry,
+		frame = row,
+		button = button,
+		buyLabel = buyLabel,
+		price = price,
+		title = title,
+		blurb = blurb,
+		stroke = stroke,
+	})
+end
+
+local function build()
+	gui = Instance.new("ScreenGui")
+	gui.Name = "FL_Requisitions"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = UITheme.DisplayOrder.Settings
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Enabled = false
+	gui.Parent = player:WaitForChild("PlayerGui")
+	trove:add(gui)
+
+	local layer = ScaleLayer.new(gui, "Scaled")
+	local chrome = Widgets.panel(layer, trove, "REQUISITIONS", function()
+		RequisitionController:close()
+	end)
+	panel = chrome.frame
+	closeButton = chrome.close
+
+	balanceLabel = Widgets.label(panel, "Balance", FONT.Numeric, TEXT.Body, COLOR.Accent)
+	balanceLabel.AnchorPoint = Vector2.new(1, 0)
+	balanceLabel.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, HEADER_HEIGHT + LAYOUT.PanelPadding)
+	balanceLabel.Size = UDim2.new(0.4, 0, 0, BALANCE_HEIGHT)
+	balanceLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+	local caption = Widgets.label(panel, "Caption", FONT.Heading, TEXT.Small, COLOR.TextDim)
+	caption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, HEADER_HEIGHT + LAYOUT.PanelPadding)
+	caption.Size = UDim2.new(0.6, 0, 0, BALANCE_HEIGHT)
+	caption.Text = "PAID BY ONE, CARRIED BY ALL"
+
+	list = Widgets.scroller(panel, "List")
+	list.Position = UDim2.fromOffset(LAYOUT.PanelPadding, BODY_TOP)
+	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	Widgets.list(list, LAYOUT.ElementGap)
+	for _, entry in RequisitionConfig.Catalogue do
+		buildRow(entry)
+	end
+
+	footRule = Widgets.frame(panel, "FootRule", COLOR.Border, 0)
+	footRule.AnchorPoint = Vector2.new(0, 1)
+	footRule.Position = UDim2.new(0, 0, 1, -PANEL.FooterHeight)
+	footRule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
+
+	hint = Widgets.label(panel, "Hint", FONT.Body, TEXT.Small, COLOR.TextDim)
+	hint.AnchorPoint = Vector2.new(0, 1)
+	hint.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, 0)
+	hint.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, PANEL.FooterHeight)
+
+	applyTouchSizing()
+	refreshPanelSize()
+end
+
+-- ── public API ──────────────────────────────────────────────────────────────
+
+function RequisitionController:isOpen(): boolean
+	return state.open
+end
+
+function RequisitionController:open()
+	if state.open then
+		return
+	end
+	state.open = true
+	gui.Enabled = true
+	applyTouchSizing()
+	refreshPanelSize()
+	refresh()
+	setSuppressed(not menuIsOpen())
+	claimCursor(true)
+	GamepadFocus.capture(closeButton)
+	UiSound.play(AudioConfig.UI.MenuConfirm)
+end
+
+function RequisitionController:close()
+	if not state.open then
+		return
+	end
+	state.open = false
+	gui.Enabled = false
+	GamepadFocus.release(closeButton)
+	setSuppressed(false)
+	claimCursor(false)
+	if menuIsOpen() then
+		callController("MainMenuController", "reassertSuppression")
+	end
+	UiSound.play(AudioConfig.UI.MenuBack)
+end
+
+function RequisitionController:toggle()
+	if state.open then
+		self:close()
+	else
+		self:open()
+	end
+end
+
+-- ── lifecycle ───────────────────────────────────────────────────────────────
+
+function RequisitionController:init()
+	build()
+end
+
+function RequisitionController:start()
+	--[[ Everything this screen draws is an attribute with a changed signal, so
+	     it redraws on the change rather than on a clock: a teammate's purchase,
+	     a wave ending, and the Scrip a purchase cost all land the moment they
+	     happen and cost nothing while nothing is happening. ]]
+	for _, name in RequisitionConfig.attributes() do
+		trove:connect(Workspace:GetAttributeChangedSignal(name), refresh)
+	end
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.WavePhase), refresh)
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), refresh)
+	trove:connect(player:GetAttributeChangedSignal(PA.Scrip), refresh)
+
+	--[[ A refusal is the only thing this has to hear. A successful purchase
+	     arrives as an attribute and as a subtitle, both of which say it better
+	     than a panel that may not even be open. ]]
+	trove:connect(Remotes.Event.RequisitionResult.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refresh()
+		if payload.ok == false and typeof(payload.reason) == "string" then
+			hint.Text = string.upper(payload.reason)
+			hint.TextColor3 = COLOR.Danger
+			UiSound.play(AudioConfig.UI.MenuBack)
+		end
+	end)
+
+	--[[
+		Closing, and only closing.
+
+		OPENING is Action.Requisitions in InputController — a real binding, so it
+		appears in the controls screen and can be rebound. That binding cannot
+		close the panel: this screen suppresses InputController while it is up,
+		as every screen does, so the action is unbound for exactly as long as
+		there is something to close. Same arrangement as the backpack.
+	]]
+	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
+		if not state.open then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.ButtonB then
+			RequisitionController:close()
+			return
+		end
+		if processed then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Escape or boundToPanel(input.KeyCode) then
+			RequisitionController:close()
+		end
+	end)
+
+	local viewportConnection: RBXScriptConnection? = nil
+	local function watchViewport()
+		if viewportConnection then
+			viewportConnection:Disconnect()
+			viewportConnection = nil
+		end
+		local camera = Workspace.CurrentCamera
+		if camera then
+			viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(refreshPanelSize)
+		end
+		refreshPanelSize()
+	end
+	trove:add(function()
+		if viewportConnection then
+			viewportConnection:Disconnect()
+		end
+	end)
+	trove:connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), watchViewport)
+	watchViewport()
+end
+
+function RequisitionController:destroy()
+	trove:destroy()
+	table.clear(rows)
+end
+
+Registry.register("RequisitionController", RequisitionController)
+
+return RequisitionController

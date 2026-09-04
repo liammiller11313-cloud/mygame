@@ -26,6 +26,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 
@@ -35,9 +36,27 @@ local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
+local RequisitionConfig = require(Shared.Config.RequisitionConfig)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
+
+--[[ How long this weapon's reload takes, with the FIELD DRILL requisition
+     applied if the team bought one. The client predicts a reload against the
+     same function in WeaponController — see RequisitionConfig.reloadScale — so
+     the two clocks cannot disagree about what a drilled reload costs, which
+     would show up as a magazine that appears late or a shot that is refused
+     after the animation finished. ]]
+local function reloadTimeFor(definition: any): number
+	return definition.reloadTime * RequisitionConfig.reloadScale(Workspace)
+end
+
+--[[ And the same for a shotgun, which reloads a shell at a time. A drill that
+     sped up every weapon except the two that reload slowest would be the drill
+     failing exactly where it is worth buying. ]]
+local function shellTimeFor(definition: any): number
+	return definition.reloadPerShell * RequisitionConfig.reloadScale(Workspace)
+end
 
 local S = GameConfig.Survivor
 local LA = Attributes.Loadout
@@ -272,9 +291,10 @@ function InventoryService:giveWeapon(
 	local record = self:_ensureRecord(player)
 	local slot = definition.slot
 	local magazine = math.clamp(ammo or definition.magSize, 0, math.max(definition.magSize, 0))
-	local spare = reserve or definition.reserveMax
-	if definition.reserveMax >= 0 then
-		spare = math.clamp(spare, 0, definition.reserveMax)
+	local cap = RequisitionConfig.reserveCap(Workspace, definition.reserveMax)
+	local spare = reserve or cap
+	if cap >= 0 then
+		spare = math.clamp(spare, 0, cap)
 	else
 		spare = -1
 	end
@@ -612,9 +632,10 @@ function InventoryService:refillReserve(player: Player, fraction: number, alsoMa
 			continue
 		end
 
-		local missingReserve = definition.reserveMax - entry.reserve
+		local cap = RequisitionConfig.reserveCap(Workspace, definition.reserveMax)
+		local missingReserve = cap - entry.reserve
 		if missingReserve > 0 then
-			local amount = math.floor(definition.reserveMax * share + 0.5)
+			local amount = math.floor(cap * share + 0.5)
 			amount = math.min(amount, missingReserve)
 			entry.reserve += amount
 			given += amount
@@ -876,8 +897,9 @@ function InventoryService:_stepReload(record, dt: number)
 	if reload.phase == PHASE_LOAD then
 		if reload.perShell then
 			-- A long frame must commit every shell it earned, not just one.
-			while reload.timer >= definition.reloadPerShell do
-				reload.timer -= definition.reloadPerShell
+			local shell = shellTimeFor(definition)
+			while shell > 0 and reload.timer >= shell do
+				reload.timer -= shell
 				if not self:_loadShell(record, entry, definition) then
 					reload.phase = PHASE_TAIL
 					reload.timer = 0
@@ -889,14 +911,14 @@ function InventoryService:_stepReload(record, dt: number)
 					break
 				end
 			end
-		elseif reload.timer >= definition.reloadTime then
+		elseif reload.timer >= reloadTimeFor(definition) then
 			self:_loadMagazine(record, entry, definition)
 			self:_endReload(record)
 			return
 		end
 	end
 
-	if reload.phase == PHASE_TAIL and reload.timer >= definition.reloadTime then
+	if reload.phase == PHASE_TAIL and reload.timer >= reloadTimeFor(definition) then
 		playAt(AudioConfig.WeaponReload.Pump, rootOf(record.player))
 		self:_endReload(record)
 	end
