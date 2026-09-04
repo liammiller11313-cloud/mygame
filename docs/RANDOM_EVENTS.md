@@ -116,7 +116,7 @@ nothing: 2.46 events per round with the rule, 2.45 without.
 |---|---|
 | Rain / fog / storm | `AtmosphereService:setWeather` — a mood, like the boss mood |
 | Zombie surge | `DirectorService:triggerPanicEvent` — the existing horde |
-| Supply drop | `ItemPlacer:spawnPickup` — the existing pickups |
+| Supply drop | `ItemPlacer:spawnPickup` — the existing pickups, and the map's own medkit model |
 | Broadcast, drop callout | `RoundService:announce` — the existing subtitle voice |
 | Every announcement | the banner, plus `AudioConfig.Event.Siren` |
 
