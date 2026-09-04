@@ -289,6 +289,14 @@ function InfectedBrain.new(model: Model, definition: any)
 		then ModifierConfig.commonSpeedScale(Workspace)
 		else 1
 
+	--[[ CRYO BLAST's hold on this body: a multiplier and the clock it expires on.
+	     Separate from speedScale rather than folded into it, because they are
+	     different lifetimes — the modifier's scale is fixed for the whole round
+	     and this one is a few seconds — and multiplying them keeps a chilled
+	     Common under FAST ZOMBIES correctly both. ]]
+	self.chillScale = 1
+	self.chillUntil = 0
+
 	self.chaseSpeed = if self.sprints then definition.runSpeed else definition.walkSpeed
 
 	-- One Path instance per brain, reused for every ComputeAsync. Creating one
@@ -447,6 +455,36 @@ end
 	which the shove path and the specials both go through; the caller has
 	already scaled the duration by stumbleResistance.
 ]]
+--[[
+	Slows this body for a while. `scale` is a multiplier on every speed it sets,
+	`duration` is how long in seconds.
+
+	Deliberately not a stagger. A stagger interrupts what the body is DOING —
+	it is the answer to a shove and it stops an attack mid-swing — and a chilled
+	infected is still coming, still swinging, just slowly. That difference is the
+	whole of CRYO BLAST: an enemy frozen solid stops being frightening and starts
+	being scenery.
+
+	The strongest chill wins rather than the newest, so a second blast landing on
+	a body already deep in the first cannot thaw it. The clock, though, always
+	extends: standing in two overlapping fields should last longer than one.
+]]
+function InfectedBrain:chill(scale: number, duration: number)
+	if typeof(scale) ~= "number" or scale ~= scale or typeof(duration) ~= "number" then
+		return
+	end
+	local now = os.clock()
+	local clamped = math.clamp(scale, 0.05, 1)
+	if now >= self.chillUntil or clamped < self.chillScale then
+		self.chillScale = clamped
+	end
+	self.chillUntil = math.max(self.chillUntil, now + math.max(duration, 0))
+	--[[ Re-asserted now rather than on the next state change. A body already
+	     walking would otherwise keep its old speed until it happened to want a
+	     new one, which for a Common chasing somebody can be several seconds. ]]
+	self:_setSpeed(self.speed / math.max(self.speedScale * self.chillScale, 1e-3) * self.chillScale)
+end
+
 function InfectedBrain:stagger(duration: number)
 	if duration <= 0 then
 		return
@@ -570,6 +608,14 @@ function InfectedBrain:update(dt: number, snapshot: any)
 	local root = self.root
 	if not root or not root.Parent then
 		return
+	end
+
+	--[[ A chill wearing off. Here rather than on a timer of its own: this runs
+	     every tick anyway, and a body that thaws needs its speed re-asserted at
+	     the moment it thaws rather than whenever it next changes state. ]]
+	if self.chillScale < 1 and os.clock() >= self.chillUntil then
+		self.chillScale = 1
+		self:_setSpeed(self.baseSpeed)
 	end
 
 	--[[
@@ -1108,7 +1154,7 @@ function InfectedBrain:_setState(state: string)
 end
 
 function InfectedBrain:_setSpeed(speed: number)
-	local scaled = speed * self.speedScale
+	local scaled = speed * self.speedScale * self.chillScale
 	-- Humanoid.WalkSpeed replicates on every assignment. During a horde that is
 	-- 46 property replications a frame for values that did not change.
 	if math.abs(self.speed - scaled) < 0.01 then

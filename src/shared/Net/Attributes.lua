@@ -59,6 +59,29 @@ Attributes.Player = table.freeze({
 	     needs to know how far through today's quests you are. ]]
 	Level = "FL_Level", -- number, server-owned, see ProgressionService
 	Scrip = "FL_Scrip", -- number, the pass currency
+
+	--[[
+		Abilities: what is in each slot, and when each slot is next usable.
+
+		One pair per slot, indexed by AbilityConfig.MaxSlots — see
+		Shared/Config/AbilityConfig.attributesFor. On the PLAYER rather than in a
+		remote for the same reason the loadout is: the HUD reads its own, and a
+		teammate's slots are readable by everybody for free, which is what lets a
+		future squad panel say who is carrying a medic without a single packet.
+
+		`ReadyAt` is an ABSOLUTE workspace:GetServerTimeNow() stamp, not seconds
+		remaining. The client renders a perfectly smooth countdown from a value
+		that only changes when the ability is actually used, so a cooldown costs
+		one attribute write rather than one a second — and it cannot drift.
+	]]
+	Ability1Id = "FL_Ability1Id", -- string, an Enums.Ability id or ""
+	Ability1ReadyAt = "FL_Ability1ReadyAt", -- number, server time
+	Ability2Id = "FL_Ability2Id",
+	Ability2ReadyAt = "FL_Ability2ReadyAt",
+	Ability3Id = "FL_Ability3Id",
+	Ability3ReadyAt = "FL_Ability3ReadyAt",
+	Ability4Id = "FL_Ability4Id",
+	Ability4ReadyAt = "FL_Ability4ReadyAt",
 	Callsign = "FL_Callsign", -- string, a ProgressionConfig reward id or ""
 	Accent = "FL_Accent", -- string, a ProgressionConfig reward id or ""
 })

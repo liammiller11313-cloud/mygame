@@ -108,6 +108,22 @@ Enums.HealthItem = table.freeze({
 	Defibrillator = "Defibrillator",
 })
 
+--[[
+	Permanent abilities. Unlocked once, equipped before a match, activated during
+	one — see Shared/Config/AbilityConfig for the whole argument about how these
+	differ from a requisition and from a modifier.
+
+	Ids are stable strings because they are persisted in a player's profile and
+	sent over a remote. Renaming one orphans everybody who owned it.
+]]
+Enums.Ability = table.freeze({
+	Shield = "Shield",
+	Turret = "Turret",
+	FieldMedic = "FieldMedic",
+	CryoBlast = "CryoBlast",
+	Airstrike = "Airstrike",
+})
+
 Enums.PillItem = table.freeze({
 	PainPills = "PainPills",
 	Adrenaline = "Adrenaline",

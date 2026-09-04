@@ -1,0 +1,268 @@
+--!strict
+--[[
+	AbilityConfig — the permanent unlocks, and every number the five of them read.
+
+	── WHAT AN ABILITY IS, AND WHAT IT IS NOT ──────────────────────────────────
+	This game now has three things that change a round, and they are deliberately
+	not the same thing. Keeping them apart is the whole reason this file exists
+	separately from the other two:
+
+	  ABILITY      bought once with Dollars, owned forever, equipped BEFORE a
+	               match, and actively pressed during one. It is a verb the
+	               player performs. This file.
+	  REQUISITION  bought with Scrip DURING a match, at a breather, applies to
+	               the whole team for the rest of that round, and then is gone.
+	               Shared/Config/RequisitionConfig.
+	  MODIFIER     not bought at all. One rule rolled at the top of a round that
+	               changes what the round IS.
+	               Shared/Config/ModifierConfig.
+
+	A player can be under FAST ZOMBIES (modifier), holding INCENDIARY ROUNDS the
+	team bought at wave 4 (requisition), and pressing TURRET (ability) in the
+	same second. None of the three knows the others exist.
+
+	── AND WHY ABILITIES ARE PAID FOR IN DOLLARS ───────────────────────────────
+	Because they are permanent unlocks, and Dollars is what this game already
+	charges for permanent unlocks — the whole weapon roster. Scrip buys things
+	that are spent (the pass track, a round's requisitions); Dollars buys things
+	you keep. Putting abilities on the other currency would have made the two
+	mean nothing in particular.
+
+	They are priced WELL under the guns on purpose. The cheapest weapon is $900
+	and the roster is $157,000; the whole ability set is $6,500. An ability
+	changes how you play and a rifle changes what you can kill, and a player
+	should be able to reach the first one early enough that it shapes how they
+	learn the game.
+
+	── ADDING ONE ─────────────────────────────────────────────────────────────
+	A definition here, a module under server/Abilities/Abilities named for its
+	id, and an Enums.Ability entry. Nothing else: the shop, the loadout screen,
+	the HUD, the cooldown clock and the input dispatch are all driven off this
+	table. `tuning` is deliberately an opaque table — the service never reads
+	inside it, only the ability's own module does — so a new ability's numbers
+	cannot require a change to anything that is not that ability.
+]]
+
+local Attributes = require(script.Parent.Parent.Net.Attributes)
+local Enums = require(script.Parent.Parent.Enums)
+
+local PA = Attributes.Player
+
+export type Ability = {
+	id: string,
+	displayName: string,
+	blurb: string, -- one line, what it DOES; read on a shop row
+	price: number, -- Dollars
+	cooldown: number, -- seconds, and the server owns the clock
+	--[[ Whether activating it needs a point on the ground. The two that do put
+	     the client into a targeting mode first; the three that do not fire on
+	     the keypress. The SERVER re-validates the point either way. ]]
+	targeted: boolean,
+	--[[ How far from the player a target may be. Meaningless for an untargeted
+	     ability, and the server clamps to it rather than refusing — a player who
+	     aimed slightly too far gets the edge of their range, not nothing. ]]
+	range: number,
+	-- Read only by this ability's own module. See ADDING ONE.
+	tuning: { [string]: any },
+}
+
+local AbilityConfig = {}
+
+--[[
+	How many abilities a player may take into a match.
+
+	Two, and it is here rather than spelled out anywhere else: the loadout, the
+	HUD, the input dispatch and the server's slot validation all read this. The
+	one place that cannot be fully derived from it is the keymap, which needs a
+	physical key per slot — InputController holds a list of them and binds
+	`math.min(MaxSlots, #keys)`, so raising this is a one-line change there and
+	nothing at all anywhere else.
+]]
+AbilityConfig.MaxSlots = 2
+
+--[[ The ceiling the attribute names go up to. Raising MaxSlots past this needs
+     new Attributes.Player rows, which is the one thing that cannot be generated
+     — an attribute name is a literal string on both sides of the wire. ]]
+AbilityConfig.SlotCeiling = 4
+
+local DEFINITIONS: { Ability } = {
+	table.freeze({
+		id = Enums.Ability.Shield,
+		displayName = "SHIELD",
+		blurb = "A bubble that eats damage for you. Not for long.",
+		price = 500,
+		cooldown = 30,
+		targeted = false,
+		range = 0,
+		tuning = table.freeze({
+			Duration = 6.0,
+			--[[ How much damage it swallows before it pops. 120 against a
+			     survivor's 100 health is deliberately more than one life: the
+			     shield is for the ten seconds you spend being wrong, not for a
+			     fight you were always going to win. It ends on whichever comes
+			     first, the damage or the clock. ]]
+			DamageAbsorption = 120,
+			Radius = 6.5,
+		}),
+	}),
+	table.freeze({
+		id = Enums.Ability.Turret,
+		displayName = "TURRET",
+		blurb = "Drops a gun that watches an angle you cannot.",
+		price = 1_000,
+		cooldown = 45,
+		targeted = false,
+		range = 0,
+		tuning = table.freeze({
+			--[[ 14 a shot at 3 a second is 42 a second, which kills a Common in
+			     just over a second and does nothing meaningful to a Tank. That
+			     is the intent: a turret holds a corridor against the horde and
+			     is never the answer to a boss. ]]
+			Damage = 14,
+			FireRate = 3.0,
+			Range = 70,
+			Health = 250,
+			Lifetime = 30,
+			--[[ Per player, not per server. Two players who both took Turret
+			     should get two turrets; one player should not get four by
+			     waiting out a cooldown twice. ]]
+			MaximumActiveTurrets = 1,
+		}),
+	}),
+	table.freeze({
+		id = Enums.Ability.FieldMedic,
+		displayName = "FIELD MEDIC",
+		blurb = "Patches up everyone standing near you, including you.",
+		price = 1_000,
+		cooldown = 40,
+		targeted = false,
+		range = 0,
+		tuning = table.freeze({
+			--[[ 35 is a third of a health bar, and it is PERMANENT health rather
+			     than the draining kind pills give. That is what stops this being
+			     a worse medkit: a medkit heals one person for most of a bar and
+			     costs a slot and five seconds standing still, and this heals
+			     four people for a third of one, instantly, from cover. ]]
+			HealAmount = 35,
+			Radius = 26,
+		}),
+	}),
+	table.freeze({
+		id = Enums.Ability.CryoBlast,
+		displayName = "CRYO BLAST",
+		blurb = "Freezes a doorway solid. Buys the seconds you needed.",
+		price = 2_000,
+		cooldown = 50,
+		targeted = true,
+		range = 90,
+		tuning = table.freeze({
+			Radius = 22,
+			--[[ 0.82 leaves a Common at about 4 studs a second — crawling, still
+			     coming, still shootable. Not zero: an enemy frozen in place
+			     stops being frightening and starts being scenery, and the point
+			     of this is that the horde is still arriving, slowly. ]]
+			SlowPercent = 0.82,
+			Duration = 7.0,
+			--[[ A Tank keeps most of its legs. The counter to a Tank is running,
+			     and an ability that simply switched one off would replace that
+			     with a button. It still slows — being able to buy four seconds
+			     against a Tank is worth a slot — it just does not stop one. ]]
+			BossResistance = 0.65,
+		}),
+	}),
+	table.freeze({
+		id = Enums.Ability.Airstrike,
+		displayName = "AIRSTRIKE",
+		blurb = "Marks a spot. Everything standing on it stops standing.",
+		price = 3_000,
+		cooldown = 90,
+		targeted = true,
+		range = 140,
+		tuning = table.freeze({
+			Damage = 260,
+			Radius = 16,
+			NumberOfExplosions = 5,
+			--[[ Two and a half seconds of a marker on the ground before the
+			     first one lands. That window is the entire balance of this
+			     ability: it is long enough that a Tank walks out of it, which is
+			     why the answer to a Tank is still a Tank's answer, and long
+			     enough that a team standing in it has been warned. ]]
+			WarningTime = 2.5,
+			SpreadTime = 1.1, -- the explosions walk across the area, not at once
+		}),
+	}),
+}
+
+AbilityConfig.Definitions = table.freeze(DEFINITIONS) :: { Ability }
+
+local BY_ID: { [string]: Ability } = {}
+for _, entry in DEFINITIONS do
+	BY_ID[entry.id] = entry
+end
+
+--[[ Looks one up, nil for an unknown id. Ids arrive from remotes and from
+     stored profiles, so an unknown one must be a plain nil. ]]
+function AbilityConfig.get(id: any): Ability?
+	if typeof(id) ~= "string" or id == "" then
+		return nil
+	end
+	return BY_ID[id]
+end
+
+--[[ The two attribute names for a slot, or nil for a slot outside the ceiling.
+     Generated from the index so the HUD, the service and the client mirror
+     cannot disagree about which attribute a slot writes. ]]
+function AbilityConfig.attributesFor(slot: number): (string?, string?)
+	if typeof(slot) ~= "number" or slot ~= slot then
+		return nil, nil
+	end
+	local index = math.floor(slot)
+	if index < 1 or index > AbilityConfig.SlotCeiling then
+		return nil, nil
+	end
+	return (PA :: any)["Ability" .. index .. "Id"], (PA :: any)["Ability" .. index .. "ReadyAt"]
+end
+
+--[[ Whether a slot number is one this game actually has. The single test every
+     path uses — the remote handler, the loadout setter and the HUD — so a slot
+     that is legal in one is legal in all of them. ]]
+function AbilityConfig.isSlot(slot: any): boolean
+	return typeof(slot) == "number"
+		and slot == slot
+		and slot >= 1
+		and slot <= AbilityConfig.MaxSlots
+		and math.floor(slot) == slot
+end
+
+--[[ A stored or received slot list, made safe: the right length, every entry a
+     real ability id or "", and no ability equipped in two slots at once.
+     `owned` filters it when supplied — a profile that lost an ability should
+     not keep it equipped, and a client asking for one it does not own is the
+     thing this exists to refuse. ]]
+function AbilityConfig.sanitiseSlots(slots: any, owned: { [string]: boolean }?): { string }
+	local result: { string } = {}
+	local seen: { [string]: boolean } = {}
+	for index = 1, AbilityConfig.MaxSlots do
+		local id = if typeof(slots) == "table" then slots[index] else nil
+		local entry = AbilityConfig.get(id)
+		local ok = entry ~= nil and not seen[id]
+		if ok and owned and not owned[id] then
+			ok = false
+		end
+		if ok then
+			seen[id] = true
+			result[index] = id
+		else
+			result[index] = ""
+		end
+	end
+	return result
+end
+
+--[[ Every ability a fresh profile has. Empty: nothing is free, and the first
+     one costing $500 is what makes it a decision rather than a default. ]]
+function AbilityConfig.defaultOwned(): { [string]: boolean }
+	return {}
+end
+
+return AbilityConfig

@@ -817,6 +817,33 @@ function SurvivorService:damage(player: Player, amount: number, ctx): any
 		amount *= multiplier
 	end
 
+	--[[
+		The SHIELD ability, and it is the only thing this file knows about
+		abilities.
+
+		After friendly fire is scaled and before anything is applied, because a
+		shield should eat the number that was actually going to land rather than
+		the one before the rules were applied to it. AbilityService returns the
+		REMAINDER — a shield with ten points left against a forty-point swing
+		takes ten and lets thirty through — so a hit that is fully absorbed comes
+		back as zero and stops here.
+
+		Asked through the Registry and guarded, so a server whose ability service
+		failed to boot still takes damage normally rather than becoming
+		invulnerable, which is the failure mode that would be least obvious and
+		most damaging.
+	]]
+	local abilities = Registry.find("AbilityService")
+	if abilities and typeof(abilities.absorb) == "function" then
+		local ok, remaining = pcall(abilities.absorb, abilities, player, amount)
+		if ok and typeof(remaining) == "number" then
+			amount = remaining
+		end
+	end
+	if amount <= 0 then
+		return Types.blockedResult(self:_effective(record))
+	end
+
 	-- Being hit interrupts anything anyone is holding on you, or you on them.
 	self:_breakInteractionsInvolving(player)
 

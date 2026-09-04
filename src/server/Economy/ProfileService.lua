@@ -71,6 +71,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
+local AbilityConfig = require(Shared.Config.AbilityConfig)
 local LoadoutConfig = require(Shared.Config.LoadoutConfig)
 local ProgressionConfig = require(Shared.Config.ProgressionConfig)
 local Registry = require(Shared.Util.Registry)
@@ -134,6 +135,13 @@ export type Profile = {
 	owned: { [string]: boolean },
 	loadouts: { LoadoutConfig.Loadout },
 	active: number,
+	--[[ Permanent abilities: what is unlocked, and what is equipped. A SEPARATE
+	     set from `owned` on purpose — that one is validated against
+	     EconomyConfig on load and drops anything it does not recognise, so an
+	     ability id stored there would be deleted on the next join. Two
+	     catalogues, two sets, one save. ]]
+	abilities: { [string]: boolean },
+	abilitySlots: { string },
 	xp: number,
 	scrip: number,
 	--[[ Today's quest progress, keyed by quest id, and the day number it belongs
@@ -195,6 +203,8 @@ local function blankProfile(): Profile
 		owned = EconomyConfig.defaultOwned(),
 		loadouts = LoadoutConfig.sanitiseAll(nil, nil),
 		active = 1,
+		abilities = AbilityConfig.defaultOwned(),
+		abilitySlots = AbilityConfig.sanitiseSlots(nil, nil),
 		xp = 0,
 		scrip = 0,
 		quests = {},
@@ -259,6 +269,18 @@ local function migrate(stored: any): Profile
 		profile.owned[id] = true
 	end
 
+	if typeof(stored.abilities) == "table" then
+		for id, value in stored.abilities do
+			-- Dropped rather than kept, for the same reason an unknown weapon is.
+			if value == true and AbilityConfig.get(id) then
+				profile.abilities[id] = true
+			end
+		end
+	end
+	--[[ Filtered against what survived above, so a profile cannot come back with
+	     an ability equipped that it no longer owns. ]]
+	profile.abilitySlots = AbilityConfig.sanitiseSlots(stored.abilitySlots, profile.abilities)
+
 	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, profile.owned)
 	profile.active = LoadoutConfig.clampIndex(stored.active)
 
@@ -311,6 +333,8 @@ local function serialise(profile: Profile, lock: any): any
 		owned = profile.owned,
 		loadouts = profile.loadouts,
 		active = profile.active,
+		abilities = profile.abilities,
+		abilitySlots = profile.abilitySlots,
 		xp = math.clamp(math.floor(profile.xp), 0, ProgressionConfig.MaxXp),
 		scrip = math.clamp(math.floor(profile.scrip), 0, ProgressionConfig.MaxScrip),
 		quests = profile.quests,
@@ -421,6 +445,12 @@ function ProfileService:sync(player: Player)
 		owned = profile.owned,
 		loadouts = profile.loadouts,
 		active = profile.active,
+		--[[ Carried on the existing sync rather than through a remote of their
+		     own. Every screen that reads this payload already needs all of it,
+		     and a second "here is your profile, the ability half" event is a
+		     second thing that can arrive out of order with the first. ]]
+		abilities = profile.abilities,
+		abilitySlots = profile.abilitySlots,
 		degraded = profile.degraded,
 	})
 end
@@ -915,6 +945,74 @@ function ProfileService:grant(player: Player, itemId: string): boolean
 		return false
 	end
 	profile.owned[itemId] = true
+	markChanged(player, profile, true)
+	return true
+end
+
+-- ── abilities ───────────────────────────────────────────────────────────────
+
+function ProfileService:ownsAbility(player: Player, id: string): boolean
+	local profile = profiles[player]
+	return profile ~= nil and profile.abilities[id] == true
+end
+
+--[[ The unlocked set, by reference. Callers on the server read it to filter or
+     to sanitise; nothing mutates it except grantAbility. ]]
+function ProfileService:getAbilities(player: Player): { [string]: boolean }
+	local profile = profiles[player]
+	return if profile then profile.abilities else {}
+end
+
+--[[ Unlocks one permanently. False when the profile is missing, the id is not
+     an ability, or it was already owned — the last one matters, because a
+     caller that has already taken the money needs to know it did not have to. ]]
+function ProfileService:grantAbility(player: Player, id: string): boolean
+	local profile = profiles[player]
+	if not profile or not AbilityConfig.get(id) or profile.abilities[id] then
+		return false
+	end
+	profile.abilities[id] = true
+	markChanged(player, profile, true)
+	return true
+end
+
+function ProfileService:getAbilitySlots(player: Player): { string }
+	local profile = profiles[player]
+	return if profile then profile.abilitySlots else AbilityConfig.sanitiseSlots(nil, nil)
+end
+
+--[[
+	Equips an ability in a slot, or clears it with "".
+
+	Re-sanitised against what the player OWNS rather than trusting the caller,
+	because the caller is a remote handler and the id came off the wire. The
+	whole list goes through sanitiseSlots rather than just the one entry, so
+	equipping an ability that is already in the other slot moves it instead of
+	duplicating it.
+]]
+function ProfileService:setAbilitySlot(player: Player, slot: number, id: string): boolean
+	local profile = profiles[player]
+	if not profile or not AbilityConfig.isSlot(slot) then
+		return false
+	end
+	if id ~= "" and not profile.abilities[id] then
+		return false
+	end
+
+	local next_ = table.clone(profile.abilitySlots)
+	--[[ Cleared from wherever it already was first. Without this, equipping
+	     slot 1's ability into slot 2 leaves it in both and sanitiseSlots — which
+	     keeps the FIRST occurrence — silently undoes the move. ]]
+	if id ~= "" then
+		for index, existing in next_ do
+			if existing == id then
+				next_[index] = ""
+			end
+		end
+	end
+	next_[slot] = id
+
+	profile.abilitySlots = AbilityConfig.sanitiseSlots(next_, profile.abilities)
 	markChanged(player, profile, true)
 	return true
 end

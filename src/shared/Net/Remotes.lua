@@ -149,6 +149,28 @@ local EVENTS: { string } = {
 	"ClaimPassTier", -- C->S ()
 	"SetWornReward", -- C->S (kind: "Callsign"|"Accent", id: string)
 
+	-- ── Abilities ───────────────────────────────────────────────────────────
+	--[[ Permanent unlocks, equipped before a match and activated during one.
+	     What is EQUIPPED and how long each slot has left ride Attributes.Player,
+	     because the HUD reads them every frame and a teammate's are worth
+	     knowing — see Shared/Net/Attributes. These carry what an attribute
+	     cannot: the ask, the answer, and what everybody's screen should draw. ]]
+	"PurchaseAbility", -- C->S (id: string)
+	--[[ What is OWNED rides ProfileSynced, which every screen that cares already
+	     listens to — see ProfileService:sync. A second "here is your profile, the
+	     ability half" event would be a second thing that can arrive out of order
+	     with the first. ]]
+	"SetAbilitySlot", -- C->S {slot: number, id: string}  ("" clears the slot)
+	--[[ The request carries a slot and, for the two abilities that need one, a
+	     target point. The server re-validates the point against range and line
+	     of sight: a position that crossed the wire is a position somebody chose. ]]
+	"RequestAbility", -- C->S {slot: number, target: Vector3?}
+	"AbilityResult", -- {slot, id, ok: boolean, reason: string}
+	--[[ Broadcast so every client can draw the effect. Nothing here is
+	     authoritative: the damage, the healing and the spawning have already
+	     happened on the server by the time this goes out. ]]
+	"AbilityEvent", -- {kind: string, id: string, player: Player?, position: Vector3?, ...}
+
 	-- ── Maps, crates and the map vote ───────────────────────────────────────
 	"MapVoteStarted", -- {options: {{id, displayName, blurb, image?}}, endsAt: number}
 	"CastMapVote", -- C->S (mapId: string)

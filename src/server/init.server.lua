@@ -133,6 +133,11 @@ local MODULES = {
 	-- Reads what ProfileService loaded and what StatsService counted; registers
 	-- before either is asked for anything, and only listens once started.
 	"Economy/ProgressionService",
+	--[[ After ProfileService, whose ability set and slot list it reads and writes,
+	     and after ProgressionService for tidiness rather than need. Abilities are
+	     bought with Dollars through ProfileService's own spend, so this does not
+	     go near EconomyService. ]]
+	"Abilities/AbilityService",
 	"Survivors/LoadoutService",
 	"Survivors/SurvivorService",
 	"Survivors/InventoryService",
