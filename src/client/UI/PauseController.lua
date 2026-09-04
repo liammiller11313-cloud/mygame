@@ -15,11 +15,25 @@
 	EVERY platform and settings is one press deeper. `O` still opens settings
 	directly, because a shortcut that already worked should keep working.
 
-	── NOTHING IS ACTUALLY PAUSED ───────────────────────────────────────────────
+	── ALONE IT PAUSES. IN COMPANY IT SAYS SO ───────────────────────────────────
 	Roblox has no pause in a multiplayer game and pretending otherwise would be a
-	lie told to one player while three others fight. What this does is the same
-	thing every other menu in this game does: suppress input, free the cursor,
-	and dim the world. The horde keeps coming. The overlay says so.
+	lie told to one player while three others fight. That was the whole of it for
+	a long time, and it quietly assumed a case that Classic does not require:
+	MinPlayersToStart is 1, so the player can be the only person in the server,
+	and a pause told to nobody is not a lie.
+
+	So this asks, every time it opens, and the SERVER decides — see PauseService,
+	which counts the players itself and grants it only to somebody who is alone.
+	Granted, the horde stops, the Director stops and the round's clock stops, and
+	the overlay says PAUSED. Refused, the attribute simply never changes and the
+	overlay says the round is still running, which it is.
+
+	There is no reply remote and there does not need to be one: the answer is
+	Attributes.Game.Paused, which every client watches anyway. A refusal is the
+	attribute not changing.
+
+	Either way the menu still does what every other menu here does — suppress
+	input, free the cursor, dim the world.
 
 	── LEAVE MATCH ──────────────────────────────────────────────────────────────
 	Takes the player OUT of the round and back to the lobby. It used to open the
@@ -41,6 +55,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AudioConfig = require(Shared.Config.AudioConfig)
@@ -63,6 +78,7 @@ local LAYOUT = UITheme.Layout
 local PANEL = UITheme.Panel
 local TEXT = UITheme.TextSize
 local PA = Attributes.Player
+local GA = Attributes.Game
 local STATE = Enums.SurvivorState
 
 local player = Players.LocalPlayer
@@ -216,6 +232,46 @@ end
 	camera only comes back when the second of them lets go, whichever order that
 	happens in.
 ]]
+--[[
+	The one line under the title, and the only place this interface makes a claim
+	about what is happening behind it.
+
+	Three answers, in the order they matter. A paused round says so, because that
+	is now sometimes true and a player who cannot tell a real pause from a menu
+	over a live game gets no benefit from the real one. A downed player is told
+	the floor does not wait — the most expensive misunderstanding available here,
+	and worth its own line above the general case. Everything else is the honest
+	default this menu has always shown.
+
+	Read from the attribute rather than from anything this client decided, so it
+	says PAUSED when and only when the server has actually stopped the world.
+]]
+local function refreshSubtitle()
+	if not subtitle then
+		return
+	end
+	if Workspace:GetAttribute(GA.Paused) == true then
+		subtitle.Text = "PAUSED. YOU ARE ALONE IN THIS SERVER."
+		return
+	end
+
+	--[[ Between rounds this menu opens over a lobby, and the line it used to show
+	     there said the round was still running when there was no round at all.
+	     Nobody was ever misled into danger by it, which is why it survived — but
+	     a pause menu whose one job is to be honest about what is happening behind
+	     it should not be wrong in the one state where nothing is. ]]
+	local round = Workspace:GetAttribute(GA.RoundState)
+	if round ~= Enums.RoundState.InProgress and round ~= Enums.RoundState.Starting then
+		subtitle.Text = "NO ROUND IS RUNNING."
+		return
+	end
+
+	local downed = Attributes.get(player, PA.State, STATE.Spectating) == STATE.Incapacitated
+	subtitle.Text = if downed
+		then "YOU ARE STILL ON THE FLOOR. THIS DOES NOT STOP ANYTHING."
+		else "THE ROUND IS STILL RUNNING."
+end
+
 local function claimCursor(value: boolean)
 	if value then
 		FreeCursor.take(restore)
@@ -401,13 +457,12 @@ function PauseController:open()
 	state.open = true
 	gui.Enabled = true
 
-	--[[ Said out loud, because it is the one thing a pause menu in a multiplayer
-	     game has to be honest about. A player who believes the game is paused and
-	     walks away comes back to a corpse. ]]
-	local downed = Attributes.get(player, PA.State, STATE.Spectating) == STATE.Incapacitated
-	subtitle.Text = if downed
-		then "YOU ARE STILL ON THE FLOOR. THIS DOES NOT STOP ANYTHING."
-		else "THE ROUND IS STILL RUNNING."
+	--[[ Asked before the line is written, so a granted pause is already true by
+	     the time the first frame of the menu is drawn rather than correcting
+	     itself a moment later. The server refuses in company and the line below
+	     stays honest on its own. ]]
+	Remotes.Event.SetPause:FireServer(true)
+	refreshSubtitle()
 
 	setSuppressed(not menuIsOpen())
 	claimCursor(true)
@@ -422,6 +477,11 @@ function PauseController:close()
 	end
 	state.open = false
 	gui.Enabled = false
+	--[[ Unconditional. Asking the server to release a pause it never granted is
+	     a no-op there, and the alternative — only releasing when this client
+	     believes it is paused — is how a client and a server end up disagreeing
+	     about whether the horde is allowed to move. ]]
+	Remotes.Event.SetPause:FireServer(false)
 	GamepadFocus.release(entries[1] and entries[1].button)
 	setSuppressed(false)
 	claimCursor(false)
@@ -450,6 +510,17 @@ function PauseController:init()
 end
 
 function PauseController:start()
+	--[[ The grant lands a round trip after the ask, so the line is rewritten when
+	     it arrives rather than guessed at when the menu opened. It also catches
+	     the pause being lifted OUT from under an open menu — a second player
+	     joining does exactly that — where the overlay would otherwise go on
+	     claiming the game was stopped while the horde moved behind it. ]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.Paused), function()
+		if state.open then
+			refreshSubtitle()
+		end
+	end)
+
 	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
 		--[[ B and P close it before the processed guard: the overlay is focused
 		     while it is up, so its own presses arrive marked processed, and a

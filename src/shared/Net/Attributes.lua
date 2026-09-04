@@ -22,6 +22,12 @@ local Attributes = {}
 -- keep rendering a teammate's slot while they are dead and awaiting a defib.
 Attributes.Player = table.freeze({
 	State = "FL_State", -- string, Enums.SurvivorState
+	--[[ Set on a player who chose to leave the match, and cleared when they pick
+	     a mode again. It is what makes RETURN TO MAIN MENU mean it: without it
+	     the next round spawns everybody in the server, which pulls somebody who
+	     is sitting reading the menu back into a match they walked out of. See
+	     RoundService's LeaveMatch handler. ]]
+	LeftMatch = "FL_LeftMatch", -- boolean
 	Health = "FL_Health", -- number, 0-100 permanent health
 	TempHealth = "FL_TempHealth", -- number, decaying pills/adrenaline buffer
 	IncapCount = "FL_IncapCount", -- number, incaps this map; drives black & white
@@ -188,6 +194,19 @@ Attributes.Puzzle = table.freeze({
 	ClueOrder = "FL_ClueOrder", -- number, where this prop sits in the chain
 })
 
+--[[
+	Written on the wood the horde can break, by BarricadeService.
+
+	Both numbers rather than a fraction: the fraction is what a crack overlay
+	wants and the raw pair is what anything deciding whether a swing finishes the
+	job wants, and deriving the second from the first means every reader carrying
+	its own rounding.
+]]
+Attributes.Barricade = table.freeze({
+	Health = "FL_BarricadeHealth", -- number, what is left of it
+	MaxHealth = "FL_BarricadeMaxHealth", -- number, what it was armed with
+})
+
 -- Written on Workspace. Global, read by the music system and the debug overlay.
 Attributes.Game = table.freeze({
 	RoundState = "FL_RoundState", -- string, Enums.RoundState
@@ -197,6 +216,12 @@ Attributes.Game = table.freeze({
 	InfectedAlive = "FL_InfectedAlive", -- number
 	TankActive = "FL_TankActive", -- boolean, drives the tank music
 	ObjectiveText = "FL_Objective", -- string
+
+	--[[ True while a solo player has the round genuinely stopped. On Workspace
+	     rather than on the player, because everything that has to stand still
+	     reads it from one place and because the day this game grows a second way
+	     to pause, it should set the same flag. ]]
+	Paused = "FL_Paused", -- boolean
 
 	--[[ The pre-round ready gate. `ReadyHold` is true while wave 1 is waiting on
 	     the team; the two counts are published rather than left for each client

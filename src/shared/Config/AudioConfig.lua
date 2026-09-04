@@ -327,6 +327,25 @@ AudioConfig.Impact = {
 } :: { [string]: SoundDefinition }
 
 --[[
+	Wood coming apart under the horde.
+
+	Both rows are the existing impact sample, and deliberately so: a break is the
+	same material making the same kind of noise, louder and lower. Swapping in a
+	dedicated splintering sample later is two ids here and nothing else, which is
+	the point of the row existing at all rather than the service reaching for
+	Impact.Wood itself.
+
+	The hit is quiet and low priority — six bodies on one door is six of these a
+	second, and at full volume that is a wall of clicking rather than an event.
+	The break is loud and high priority because it happens once and it is the
+	thing the team has to hear over the horde that caused it.
+]]
+AudioConfig.Barricade = {
+	Hit = sound(ID.ImpactWood, 0.42, 0.86, 1.12, 90, 1),
+	Break = sound(ID.ImpactWood, 0.95, 0.55, 0.68, 170, 6),
+} :: { [string]: SoundDefinition }
+
+--[[
 	What a melee sounds like landing on a body, by what did the landing.
 
 	Every melee hit used to play Impact.Flesh — the same generic body-shot sample

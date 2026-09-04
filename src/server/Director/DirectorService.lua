@@ -345,14 +345,55 @@ end
 --  Lifecycle
 -- ════════════════════════════════════════════════════════════════════════════
 
+--[[
+	The Director's own clock, which stops while the game is paused.
+
+	Every deadline this service holds — the next spawn, the next special, the
+	panic event's waves, the pacing state's dwell time — is an absolute stamp in
+	this clock's space. Freezing the clock therefore freezes all of them at once,
+	with no list of fields to remember to shift and no chance of forgetting the
+	one that was added last week. That is the whole reason it exists rather than
+	a resume() that walks a dozen numbers forward.
+
+	os.clock rather than server time, unchanged: none of these stamps leaves the
+	server, so none of them has to agree with a client about anything.
+]]
+function DirectorService:_now(): number
+	if self._pausedAt > 0 then
+		return self._pausedAt - self._pauseOffset
+	end
+	return os.clock() - self._pauseOffset
+end
+
+--[[ Stops the Director dead. Nothing spawns, nothing escalates, and the clock
+     above stops moving so the round resumes into the same decision it was about
+     to make rather than into a backlog of them. ]]
+function DirectorService:setPaused(on: boolean)
+	local wanted = on == true
+	if wanted == (self._pausedAt > 0) then
+		return
+	end
+	if wanted then
+		self._pausedAt = os.clock()
+	else
+		self._pauseOffset += os.clock() - self._pausedAt
+		self._pausedAt = 0
+	end
+end
+
 function DirectorService:init()
 	self._trove = Trove.new()
+
+	--[[ Declared before anything reads the clock, because _now subtracts them and
+	     the very next line is the first read. ]]
+	self._pausedAt = 0
+	self._pauseOffset = 0
 
 	self._difficulty = DirectorConfig.DefaultDifficulty
 	self._profile = DirectorConfig.Difficulty[DirectorConfig.DefaultDifficulty]
 
 	self._state = STATE.Relax
-	self._stateEnteredAt = os.clock()
+	self._stateEnteredAt = self:_now()
 	self._stateIntensity = 0
 	self._teamIntensity = 0
 
@@ -578,7 +619,7 @@ function DirectorService:start()
 		)
 	end
 
-	local now = os.clock()
+	local now = self:_now()
 	self._stateEnteredAt = now
 	self._lastSpecialAt = now
 	self._specialRoll = self:_rollSpecialInterval()
@@ -614,13 +655,23 @@ function DirectorService:start()
 
 	-- THE loop. One connection for the entire Director.
 	self._trove:connect(RunService.Heartbeat, function(delta)
+		--[[ The accumulator is thrown away rather than kept, and that is the point:
+		     a frozen clock alone would stop every DEADLINE firing but would still
+		     hand _tick a dt of however long the pause lasted, and the intensity
+		     decay reads dt directly. Sixty seconds of decay in one step is a team
+		     that comes back from a pause looking calm to a Director that was
+		     about to send a horde. ]]
+		if self._pausedAt > 0 then
+			self._accumulator = 0
+			return
+		end
 		self._accumulator += delta
 		if self._accumulator < TICK_INTERVAL then
 			return
 		end
 		local step = math.min(self._accumulator, MAX_TICK_DELTA)
 		self._accumulator = 0
-		self:_tick(step, os.clock())
+		self:_tick(step, self:_now())
 	end)
 end
 
@@ -767,7 +818,7 @@ function DirectorService:setWaveBudget(budget: WaveBudget?)
 	-- _setState only does this when the state actually moved, and a budget change
 	-- inside the same state still invalidates every request sized for the old one.
 	self:_dropQueued(SOURCE_POPULATION)
-	self._nextPopulationAt = os.clock()
+	self._nextPopulationAt = self:_now()
 end
 
 --[[ A copy, never the live table: a caller that mutated this would be changing
@@ -992,7 +1043,7 @@ function DirectorService:_setState(newState: string)
 		return
 	end
 
-	local now = os.clock()
+	local now = self:_now()
 	self._state = newState
 	self._stateEnteredAt = now
 	self._stateIntensity = self._teamIntensity
@@ -1535,7 +1586,7 @@ function DirectorService:releaseBoss(kind: string, elite: string?): Model?
 		return nil
 	end
 
-	local now = os.clock()
+	local now = self:_now()
 	local anchor, radius = self:_bossAnchor(self:_survivorFlow())
 	local position, failure =
 		self:_placeFor({ source = SOURCE_BOSS, kind = kind, anchor = anchor, radius = radius }, now)
@@ -1593,7 +1644,7 @@ function DirectorService:triggerPanicEvent(position: Vector3, waves: number?)
 		return
 	end
 	local requested = math.clamp(math.floor(tonumber(waves) or PANIC.WaveCount), 1, PANIC.WaveCount)
-	local now = os.clock()
+	local now = self:_now()
 	local panic = self._panic
 
 	panic.position = position

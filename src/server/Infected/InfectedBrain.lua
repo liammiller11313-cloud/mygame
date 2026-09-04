@@ -70,6 +70,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local BarricadeConfig = require(Shared.Config.BarricadeConfig)
 local Enums = require(Shared.Enums)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local ModifierConfig = require(Shared.Config.ModifierConfig)
@@ -263,6 +264,24 @@ function InfectedBrain.new(model: Model, definition: any)
 		windupEnds = 0,
 		posed = false,
 		armMotors = nil,
+		--[[ The wood this body is currently swinging at, if the thing in its way
+		     is wood rather than a person. Set for exactly the length of one
+		     windup: it is what tells the landing which of the two swings this
+		     was, and _cancelSwing drops it along with everything else. ]]
+		barricade = nil :: BasePart?,
+		--[[ And WHERE it was aiming when it committed — the survivor's position at
+		     the moment the probe found the wood.
+
+		     Kept because the landing re-probes, and a re-probe down a different
+		     line than the one that chose the target is a swing that can miss what
+		     it is standing against. Facing the part's own Position instead looks
+		     obvious and is wrong for a big one: the centre of a thirty-stud wall
+		     is off to the side, a body turning to face it aims along a diagonal,
+		     and the wall's surface down that diagonal can be further away than its
+		     reach. The probe then finds nothing, no damage is paid, and the next
+		     tick starts the identical swing — a body beating on a wall forever
+		     without ever marking it. ]]
+		barricadeAim = nil :: Vector3?,
 
 		staggerUntil = 0,
 		lurePosition = nil :: Vector3?,
@@ -813,11 +832,46 @@ function InfectedBrain:_chase(target: Model, targetRoot: BasePart, now: number, 
 
 	-- Mid-windup: hold position, keep facing, and land or whiff when it expires.
 	if self.swinging then
+		--[[ A swing already committed to wood finishes against the wood. Falling
+		     through to the survivor here would land a claw on somebody standing
+		     safely behind a door this body has not got through yet. ]]
+		local wood = self.barricade
+		if wood then
+			--[[ Along the line the probe used, not at the part's centre. See
+			     barricadeAim. It is also the better-looking of the two: a body
+			     swinging at what is between it and you, rather than turning to
+			     address the middle of a wall. ]]
+			self:faceTowards(self.barricadeAim or wood.Position, dt)
+			if now >= self.windupEnds then
+				self:_landBarricadeSwing(wood, now)
+			end
+			return
+		end
 		self:faceTowards(targetRoot.Position, dt)
 		if now >= self.windupEnds then
 			self:_landSwing(target, targetRoot, now, distance)
 		end
 		return
+	end
+
+	--[[
+		Wood in the way outranks the survivor behind it, and it is tested BEFORE
+		the range check rather than after.
+
+		After would mean a survivor standing on the far side of a door, within
+		claw range through it, being hit through the door — which is both the
+		obvious exploit and the obvious bug report. Ahead of it, the only thing
+		this body can reach is the thing actually between them.
+	]]
+	if now >= self.attackReadyAt then
+		local aim = targetRoot.Position
+		local wood = self:_blockingBarricade(aim)
+		if wood then
+			self.barricade = wood
+			self.barricadeAim = aim
+			self:_beginSwing(wood, now, dt)
+			return
+		end
 	end
 
 	if distance <= attack.range and now >= self.attackReadyAt then
@@ -864,6 +918,8 @@ end
 
 function InfectedBrain:_landSwing(target: Model, targetRoot: BasePart, now: number, distance: number)
 	self.swinging = false
+	self.barricade = nil
+	self.barricadeAim = nil
 	self:_setSwingPose(false)
 	self:_setAutoRotate(true)
 	self.attackReadyAt = now + self.definition.attack.cooldown
@@ -901,6 +957,75 @@ function InfectedBrain:_landSwing(target: Model, targetRoot: BasePart, now: numb
 	)
 end
 
+--[[
+	The breakable thing between this body and whoever it is chasing.
+
+	BarricadeService owns the raycast and the include-list; this only decides how
+	far to look. Reach rather than sight: a door across the room is not something
+	to stop and swing at, and the config's own probe range caps it so a Tank's
+	long arms cannot start chewing on carpentry from further away than the
+	feature was designed for.
+
+	Nil whenever the service is absent, which is the honest answer during a boot
+	that has not reached Level/BarricadeService yet.
+]]
+function InfectedBrain:_blockingBarricade(targetPosition: Vector3): BasePart?
+	local service = Registry.find("BarricadeService")
+	if not service then
+		return nil
+	end
+	local reach =
+		math.min(self.definition.attack.range + BarricadeConfig.ReachBonus, BarricadeConfig.ProbeRange)
+	return service:blocking(self.root.Position, targetPosition, reach)
+end
+
+--[[
+	A landed swing against wood.
+
+	Re-probed at the moment of impact rather than trusting the part chosen at the
+	start of the windup, for exactly the reason the swing at a survivor re-checks
+	its distance: the windup is a real telegraph and the world is allowed to
+	change during it. Somebody else's swing can finish the door first, and paying
+	damage into a barricade that is already down would let a horde keep eating a
+	hole that is no longer there.
+
+	Along the body's own LookVector, because it spent the whole windup turning to
+	face this thing.
+]]
+function InfectedBrain:_landBarricadeSwing(part: BasePart, now: number)
+	local aim = self.barricadeAim
+	self.swinging = false
+	self.barricade = nil
+	self.barricadeAim = nil
+	self:_setSwingPose(false)
+	self:_setAutoRotate(true)
+	self.attackReadyAt = now + self.definition.attack.cooldown
+	self:_setState(State.Chase)
+	self:_setSpeed(self.chaseSpeed)
+
+	local service = Registry.find("BarricadeService")
+	if not service or not part.Parent then
+		return
+	end
+
+	local origin = self.root.Position
+	local reach =
+		math.min(self.definition.attack.range + BarricadeConfig.ReachBonus, BarricadeConfig.ProbeRange)
+	--[[ Down the same line the probe used when it chose this, so a swing that was
+	     legitimate when it started cannot miss on geometry alone. See
+	     barricadeAim; the LookVector is only the fallback for a swing that
+	     somehow arrived here without one. ]]
+	local towards = aim or (origin + self.root.CFrame.LookVector * reach)
+	local still = service:blocking(origin, towards, reach)
+	if still ~= part then
+		return
+	end
+
+	--[[ Scaled from what this body would do to a person, so the roster's own
+	     hierarchy carries over without a second damage table to keep in step. ]]
+	service:damage(part, self.attackDamage * BarricadeConfig.InfectedDamageScale)
+end
+
 --[[ Aborts a windup without paying its damage — used by stagger, pause and
      death, all of which must leave the arms where they started. ]]
 function InfectedBrain:_cancelSwing()
@@ -908,6 +1033,8 @@ function InfectedBrain:_cancelSwing()
 		return
 	end
 	self.swinging = false
+	self.barricade = nil
+	self.barricadeAim = nil
 	self:_setSwingPose(false)
 	self:_setAutoRotate(true)
 end

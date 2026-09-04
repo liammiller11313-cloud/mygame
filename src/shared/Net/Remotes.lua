@@ -205,6 +205,18 @@ local EVENTS: { string } = {
 	     main menu are how a player moves servers here. ]]
 	"LeaveMatch", -- C->S ()
 
+	-- ── Pausing, and only when there is nobody to pause on ──────────────────
+	--[[ Asks the server to stop the round. It is granted only when the sender is
+	     ALONE in the server, because a pause is a thing you do to a world and
+	     three other people are also in this one — see PauseService.
+
+	     No reply remote. The answer is Attributes.Game.Paused, which every client
+	     has to see anyway: the requester learns whether it was granted by
+	     watching the same attribute as everybody else, and a refusal is simply
+	     the attribute not changing. One authority, one signal, nothing to keep in
+	     step. ]]
+	"SetPause", -- C->S (paused: boolean)
+
 	-- ── The vault puzzle ────────────────────────────────────────────────────
 	--[[ The optional side objective. The code the player typed goes up, one
 	     answer comes back to them alone, and the door opening is announced to

@@ -108,6 +108,10 @@ local MODULES = {
 	-- After it: LobbyService asks MatchmakingService for the browser rows rather
 	-- than keeping a second copy of the joinability rule.
 	"Round/LobbyService",
+	--[[ After RoundService, whose clock it holds, and it reaches the Director and
+	     InfectedService by registry name at call time rather than at load, so it
+	     does not need to be below either. ]]
+	"Round/PauseService",
 
 	"Audio/AudioService",
 	"Assets/PlaceholderFactory",
@@ -120,6 +124,11 @@ local MODULES = {
 	     MapService, whose loaded map it searches for props. It arms itself off
 	     the round-state attribute rather than being driven by anything here. ]]
 	"Level/PuzzleService",
+	--[[ After MapService for the same reason the puzzle is: it scans the loaded
+	     map. Before InfectedService, whose brains ask it what is in their way —
+	     ordering only for tidiness there, since the lookup is by registry name at
+	     call time rather than at load. ]]
+	"Level/BarricadeService",
 	--[[ Before anything that reads what a player owns. ProfileService is the only
 	     thing in the game that persists, and a purchase or a spawn that happened
 	     before it finished loading would be made against an empty profile. ]]

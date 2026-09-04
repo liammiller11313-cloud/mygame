@@ -236,6 +236,7 @@ function InfectedService:init()
 	self._records = {} :: { [Model]: any }
 	self._alive = {} :: { any } -- dense array of records; the round-robin walks it
 	self._priority = {} :: { any } -- specials and bosses; ticked every frame
+	self._paused = false -- see setPaused: the whole horde, stood down
 	self._countByKind = {} :: { [string]: number }
 	self._cursor = 0
 
@@ -1462,7 +1463,34 @@ end
 --  The shared update loop
 -- ════════════════════════════════════════════════════════════════════════════
 
+--[[
+	Stands the whole horde down while the game is genuinely paused.
+
+	One flag on the loop rather than a pause on each brain, and that is a
+	deliberate choice rather than the lazy one: InfectedBrain.pause is ALREADY
+	owned by the specials, which use it to take over their own bodies for a
+	pounce or a charge. Pausing every brain here would be fine; RESUMING every
+	brain here would hand a mid-pounce Hunter back to the common AI, and the
+	pounce would never finish. The loop not running is the same freeze with
+	nothing to put back.
+
+	Burning stops with it, because _stepBurn is ticked from this loop — which is
+	the honest reading of a pause: a player who paused while on fire should not
+	come back to a corpse.
+]]
+function InfectedService:setPaused(on: boolean)
+	self._paused = on == true
+end
+
+function InfectedService:isPaused(): boolean
+	return self._paused == true
+end
+
 function InfectedService:_step()
+	if self._paused then
+		return
+	end
+
 	local now = os.clock()
 	self:_refreshSnapshot(now)
 

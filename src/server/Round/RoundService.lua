@@ -142,6 +142,11 @@ local activeModifier: any = nil
 	from the gap between steps rather than accumulated per frame, so a server
 	hitch during the hold does not quietly eat seconds off the round.
 ]]
+--[[ When the round's clock stopped, or 0. Owned by PauseService, which decides
+     WHETHER a pause is allowed; this only knows how to hold the schedule still
+     while one is on. ]]
+local pausedSince = 0
+
 local holdUntil = 0
 local holdSince = 0
 
@@ -789,8 +794,38 @@ end
 --[[ Starts a round. `mode` is a GameModeConfig.Modes key; the wave schedule is
      the same in every mode, which is what makes Versus fair — both teams are
      measured against the same fifteen waves. ]]
+--[[ Whoever in this server has not walked out. The roster a round is actually
+     for, as opposed to everybody connected to it. ]]
+local function playersInTheMatch(): number
+	local count = 0
+	for _, player in Players:GetPlayers() do
+		if player:GetAttribute(Attributes.Player.LeftMatch) ~= true then
+			count += 1
+		end
+	end
+	return count
+end
+
 function RoundService:startRound(requestedMode: string?)
 	if roundState == Enums.RoundState.Starting or roundState == Enums.RoundState.InProgress then
+		return
+	end
+
+	--[[
+		A round with nobody in it never starts, and this is the guard that keeps
+		LeftMatch from being worse than the bug it fixes.
+
+		Skipping the spawn for a player who walked out means `sawLivingSurvivor`
+		never becomes true, and the wipe check reads that — correctly — as "the
+		round has not begun yet" rather than as a wipe. So a round started for a
+		server where everyone had left would not end: it would run its full
+		seventeen minutes with a Director sending waves at an empty map, and only
+		the clock would stop it.
+
+		Staying in the lobby is the honest answer. Somebody picking a mode clears
+		their own flag and the next tick starts the round properly.
+	]]
+	if playersInTheMatch() == 0 then
 		return
 	end
 
@@ -803,6 +838,7 @@ function RoundService:startRound(requestedMode: string?)
 
 	schedule = buildSchedule()
 	cursor = 1
+	pausedSince = 0
 	startedAt = serverNow()
 	roundEndsAt = startedAt + CLASSIC.TotalDuration
 	sawLivingSurvivor = false
@@ -875,12 +911,18 @@ function RoundService:startRound(requestedMode: string?)
 		level:placeSurvivors()
 	end
 
-	-- Everyone starts this round on their feet, including whoever was dead when
-	-- the last one ended.
+	--[[ Everyone starts this round on their feet, including whoever was dead when
+	     the last one ended — but NOT whoever walked out. A player sitting in the
+	     main menu having deliberately left is the one person in the server who
+	     has said they do not want this, and spawning them anyway is how "return
+	     to main menu" turned out to mean "return to main menu until the next
+	     round starts". They come back by picking a mode. ]]
 	local survivors = Registry.find("SurvivorService")
 	if survivors then
 		for _, player in Players:GetPlayers() do
-			survivors:spawnSurvivor(player)
+			if player:GetAttribute(Attributes.Player.LeftMatch) ~= true then
+				survivors:spawnSurvivor(player)
+			end
 		end
 	end
 
@@ -1035,6 +1077,7 @@ function RoundService:_returnToLobby()
 	     next. ]]
 	holdUntil = 0
 	holdSince = 0
+	pausedSince = 0
 	publishReady(false)
 
 	setGameAttribute(Attributes.Game.WaveIndex, 0)
@@ -1191,6 +1234,67 @@ end
 	The push is measured between steps rather than added per frame, so a hitch
 	during the hold cannot quietly cost the round seconds.
 ]]
+--[[
+	Holds the entire schedule still while the game is paused.
+
+	The same trick the ready gate uses, and reusing it is the reason a pause did
+	not need a single line of new arithmetic anywhere downstream: every wave
+	boundary, every boss release and the round's own end are offsets from
+	`startedAt`, so pushing that forward pushes all of them together. See
+	_stepHold, which explains it at length and has been carrying it since before
+	pausing existed.
+
+	Measured between steps rather than added per frame, so a hitch during a pause
+	cannot quietly cost the round seconds — and so a pause that outlives a server
+	hiccup is still exactly as long as it looked.
+]]
+function RoundService:_stepPause(): boolean
+	if pausedSince == 0 then
+		return false
+	end
+
+	local now = serverNow()
+	local shift = math.max(now - pausedSince, 0)
+	pausedSince = now
+	startedAt += shift
+	roundEndsAt += shift
+	phaseEndsAt += shift
+	--[[ The ready gate can be up when the pause starts — a solo player pausing
+	     during prep is the single most likely time for this to happen at all —
+	     and its own deadline is in the same clock. ]]
+	if holdUntil > 0 then
+		holdUntil += shift
+		holdSince += shift
+	end
+
+	setGameAttribute(Attributes.Game.RoundEndsAt, roundEndsAt)
+	setGameAttribute(Attributes.Game.WaveEndsAt, if holdUntil > 0 then holdUntil else phaseEndsAt)
+	return true
+end
+
+--[[ Starts and stops the hold above. PauseService owns the policy — who may
+     pause, and when — and calls this; RoundService owns nothing but the clock. ]]
+function RoundService:setClockPaused(on: boolean)
+	if on == true then
+		if pausedSince == 0 then
+			pausedSince = serverNow()
+		end
+		return
+	end
+
+	if pausedSince == 0 then
+		return
+	end
+	--[[ One last shift on the way out, so the tail of the pause between the most
+	     recent step and this moment is paid for as well. Without it every pause
+	     quietly costs the round up to one tick — bounded rather than
+	     accumulating, but a player who pauses often enough would still be handed
+	     a shorter round than one who never does, and there is no reason to make
+	     them pay for it. ]]
+	self:_stepPause()
+	pausedSince = 0
+end
+
 function RoundService:_stepHold(): boolean
 	if holdUntil <= 0 then
 		return false
@@ -1249,6 +1353,14 @@ function RoundService:_step()
 	-- dropping into the middle of one nobody played.
 	if #Players:GetPlayers() == 0 then
 		self:_returnToLobby()
+		return
+	end
+
+	--[[ Ahead of the wipe check on purpose. Nothing can hurt anybody while the
+	     game is paused, so the only thing _checkWipe could do with a paused round
+	     is trip its own grace timer on a team that went down before the pause and
+	     call it a wipe they never had a chance to answer. ]]
+	if self:_stepPause() then
 		return
 	end
 
@@ -1401,13 +1513,34 @@ function RoundService:start()
 		it would have if they had died.
 	]]
 	serviceTrove:connect(Remotes.Event.LeaveMatch.OnServerEvent, function(player: Player)
-		if not self:isRunning() then
-			return
-		end
+		--[[
+			Marked BEFORE the running check, and that ordering is the whole fix.
+
+			The guard used to cover this entire handler, which meant leaving was a
+			no-op in exactly the state a player is most likely to do it from: the
+			result screen after a wipe. RoundState is TeamWipe there, isRunning is
+			false, nothing happened — and then the next round started and spawned
+			everybody in the server, which put somebody who had walked out back in
+			a match with the menu still fading off their screen.
+
+			The flag is what makes RETURN TO MAIN MENU mean it. It outlives the
+			round, and picking a mode again is what clears it — see
+			MatchmakingService.requestMode. Leaving is a decision, so coming back
+			is one too.
+		]]
+		player:SetAttribute(Attributes.Player.LeftMatch, true)
+
 		--[[ Their vote no longer counts toward the gate. Without this, one player
 		     leaving during prep could leave the tally at 3/4 forever — the
 		     denominator drops with them, but only if it is recounted. ]]
 		player:SetAttribute(Attributes.Player.Ready, false)
+
+		--[[ And the body only when there IS a round to take one out of. Everything
+		     above is bookkeeping that is correct in any state; this is the half
+		     that needs one running. ]]
+		if not self:isRunning() then
+			return
+		end
 
 		local survivors = Registry.find("SurvivorService")
 		if survivors and typeof(survivors.leaveRound) == "function" then

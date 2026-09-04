@@ -40,6 +40,7 @@ local TeleportService = game:GetService("TeleportService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
@@ -825,6 +826,13 @@ function MatchmakingService:requestMode(player: Player, requested: string): bool
 	if teleporting[player] then
 		return false
 	end
+
+	--[[ Picking a mode is how somebody who walked out of a match comes back. The
+	     flag survives the round they left and nothing else clears it, so this is
+	     the one place that has to — leaving is a decision the player made, and
+	     asking to play again is the decision that undoes it. See RoundService's
+	     LeaveMatch handler. ]]
+	player:SetAttribute(Attributes.Player.LeftMatch, false)
 
 	desired[player] = mode
 	refreshClaim()
