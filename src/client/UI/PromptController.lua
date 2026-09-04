@@ -36,6 +36,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local MapConfig = require(Shared.Config.MapConfig)
+local PuzzleConfig = require(Shared.Config.PuzzleConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
@@ -69,6 +70,18 @@ local MAX_HEALTH = GameConfig.Survivor.MaxHealth
 local BODY_TAG = "FL_SurvivorBody"
 local AMMO_CRATE_TAG = MapConfig.AmmoCrates.Tag
 local CRATE = Attributes.Crate
+local GA = Attributes.Game
+local PUZZLE = Attributes.Puzzle
+
+--[[ Asks another controller to do something, if it is there. The puzzle screens
+     are optional — a build with the vault turned off has no VaultController —
+     so this must be a lookup that can come back empty rather than a require. ]]
+local function callController(name: string, method: string, ...: any)
+	local controller = Registry.find(name)
+	if controller and typeof(controller[method]) == "function" then
+		pcall(controller[method], controller, ...)
+	end
+end
 local CLOSET_TAG = "FL_RescueCloset"
 
 -- Ten scans a second. A prompt that appears a frame late is imperceptible; a
@@ -320,6 +333,30 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 			end
 			return node, "RESUPPLY", "AMMO", true, COLOR.Accent
 		end
+		--[[
+			The vault puzzle: a keypad and four documents somebody left behind.
+
+			Both are INSTANT and both are answered here rather than on the server,
+			which is why neither has a branch in SurvivorService._classify. Reading
+			a document and opening a number pad are things that happen on one
+			player's screen; they grant nothing, move nothing and cost nothing, so
+			there is nothing for a server to validate. The moment something is
+			actually at stake — the code itself — it goes up as its own remote and
+			PuzzleService is the only thing that decides.
+
+			A solved vault stops prompting. The door is already open; offering to
+			type a code into it would be offering to do nothing.
+		]]
+		if CollectionService:HasTag(node, PuzzleConfig.KeypadTag) then
+			if Attributes.get(Workspace, GA.VaultSolved, false) == true then
+				return nil, nil, nil, false, nil
+			end
+			return node, "KEYPAD", "SECURITY VAULT", false, COLOR.Accent
+		end
+		if CollectionService:HasTag(node, PuzzleConfig.ClueTag) then
+			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "DOCUMENT")
+			return node, "READ", label, false, COLOR.TextPrimary
+		end
 		if CollectionService:HasTag(node, BODY_TAG) then
 			-- A body is only a prompt while you are carrying the thing that
 			-- answers it; without a defibrillator it is scenery.
@@ -488,8 +525,37 @@ end
 
 -- ── input ───────────────────────────────────────────────────────────────────
 
+--[[
+	Whether this press was the puzzle's, in which case it never reaches the wire.
+
+	The two puzzle verbs open a screen and nothing else. Sending BeginInteract
+	for them would ask SurvivorService to classify an instance its own if-chain
+	has never heard of, get refused, and clear the prompt the player is currently
+	looking at — so the press is answered here and the remote is not fired.
+
+	Returns true when it handled the press, so beginInteract can stop.
+]]
+local function handlePuzzlePress(): boolean
+	local target = state.target
+	if not target then
+		return false
+	end
+	if state.verb == "KEYPAD" then
+		callController("VaultController", "openKeypad", target)
+		return true
+	end
+	if state.verb == "READ" then
+		callController("VaultController", "openDocument", target)
+		return true
+	end
+	return false
+end
+
 local function beginInteract()
 	if not state.enabled or state.cinematic or not state.target then
+		return
+	end
+	if handlePuzzlePress() then
 		return
 	end
 	state.lastRequest = os.clock()

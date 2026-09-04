@@ -126,6 +126,10 @@ local CONTROLLERS = {
 	     and today's orders while they are being earned. After
 	     ProgressionController for the same reason every other reader is. ]]
 	"UI/OrdersController",
+	--[[ The vault keypad and its document reader. After PromptController, which
+	     is what opens both — a world interaction rather than a keybind, so this
+	     has no binding of its own. ]]
+	"UI/VaultController",
 	--[[ After the screens it can open, and after the HUD whose corner it shares. ]]
 	--[[ Before MainMenuController, which attaches it in its own build(). Order
 	     is belt and braces — every controller is required before any init() runs

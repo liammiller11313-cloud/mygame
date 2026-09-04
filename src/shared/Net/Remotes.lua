@@ -204,6 +204,19 @@ local EVENTS: { string } = {
 	     server: that is what the Roblox menu is for, and the mode entries on the
 	     main menu are how a player moves servers here. ]]
 	"LeaveMatch", -- C->S ()
+
+	-- ── The vault puzzle ────────────────────────────────────────────────────
+	--[[ The optional side objective. The code the player typed goes up, one
+	     answer comes back to them alone, and the door opening is announced to
+	     everybody — somebody found the badge and somebody else found the sign,
+	     and the lock letting go is the moment that was for.
+
+	     The generated values, the order and the answer are on the SERVER only
+	     and appear in none of these payloads. What the client knows about this
+	     puzzle is what is printed on four props. ]]
+	"SubmitVaultCode", -- C->S {code: string}
+	"VaultCodeResult", -- S->asker {ok: boolean, reason: string, retryAt: number}
+	"VaultOpened", -- S->all {player: Player, position: Vector3?}
 }
 
 -- Every RemoteFunction. Keep this list SHORT: remote functions block and can be

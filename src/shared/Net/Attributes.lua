@@ -173,6 +173,20 @@ Attributes.Pickup = table.freeze({
 	Reserve = "FL_Reserve", -- number
 })
 
+--[[
+	Written on the puzzle props themselves, by PuzzleService, once a round.
+
+	The clue TEXT rides an attribute as well as the SurfaceGui it is printed on:
+	the close-up reader needs the string, and digging a TextLabel out of a
+	designer's own instance tree by name is coupling that breaks the first time
+	somebody renames a part. One source — the template — and two renderings.
+]]
+Attributes.Puzzle = table.freeze({
+	ClueText = "FL_ClueText", -- string, the document as printed
+	CluePrompt = "FL_CluePrompt", -- string, what the interact prompt calls it
+	Digits = "FL_PuzzleDigits", -- number, how long the keypad's code is
+})
+
 -- Written on Workspace. Global, read by the music system and the debug overlay.
 Attributes.Game = table.freeze({
 	RoundState = "FL_RoundState", -- string, Enums.RoundState
@@ -188,6 +202,12 @@ Attributes.Game = table.freeze({
 	     to derive, because "who counts as a survivor right now" is a question
 	     SurvivorService already owns and four clients reimplementing it is four
 	     chances to disagree with the server about whether the round can start. ]]
+	--[[ The optional vault side objective. Present says a puzzle is armed in this
+	     map at all — two of the three maps never set it — and Solved is what the
+	     keypad UI reads to stop offering a code for a door that is already open. ]]
+	VaultPresent = "FL_VaultPresent", -- boolean
+	VaultSolved = "FL_VaultSolved", -- boolean
+
 	ReadyHold = "FL_ReadyHold", -- boolean
 	ReadyCount = "FL_ReadyCount", -- number, survivors who have readied
 	ReadyNeeded = "FL_ReadyNeeded", -- number, survivors the gate is waiting on

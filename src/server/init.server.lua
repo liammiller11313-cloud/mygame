@@ -116,6 +116,10 @@ local MODULES = {
 	"Assets/AmmoFactory",
 	"Level/LevelService",
 	"Level/AmmoCrateService",
+	--[[ After LevelService, whose restock the vault reward calls, and after
+	     MapService, whose loaded map it searches for props. It arms itself off
+	     the round-state attribute rather than being driven by anything here. ]]
+	"Level/PuzzleService",
 	--[[ Before anything that reads what a player owns. ProfileService is the only
 	     thing in the game that persists, and a purchase or a spawn that happened
 	     before it finished loading would be made against an empty profile. ]]
