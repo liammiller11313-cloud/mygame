@@ -73,6 +73,25 @@ local PuzzleService = {}
 local serviceTrove = Trove.new()
 local doorTrove = Trove.new()
 
+--[[
+	A spare flamethrower, and why one is needed.
+
+	InventoryService:pickup DESTROYS the world model — correct for a gun somebody
+	dropped, and a problem for the one thing in the game that exists exactly
+	once. MapService:ensure is a no-op when the team votes for the map already
+	loaded, so a Clinton round followed by another Clinton round does not reload
+	the map: the flamethrower was taken, the model is gone, and the vault of the
+	second round is empty.
+
+	So the first time one is seen it is cloned aside, with the place it was
+	standing. Any later arm that cannot find one puts it back. Held out of the
+	DataModel by a plain reference rather than parked in ServerStorage, because a
+	template that is a descendant of nothing cannot be found by any of the tag
+	sweeps or folder walks that would otherwise trip over it.
+]]
+local weaponStash: Model? = nil
+local weaponHome: CFrame? = nil
+
 --[[ Everything about the puzzle currently armed, or a dead table when there is
      none. One table so `clear` is one assignment and there is no way to leave
      half a puzzle behind. ]]
@@ -729,6 +748,24 @@ function PuzzleService:arm(random: Random?)
 	     a couple of attribute writes rather than a search. ]]
 	local loot = definition.loot
 	state.weaponDrop = if loot and loot.weapon then findNamed(folder, root, loot.weapon.object) else nil
+
+	--[[ Kept, or put back. See weaponStash: the pickup destroys the model, and a
+	     map that is not reloaded between rounds never brings it back on its
+	     own. ]]
+	if loot and loot.weapon then
+		if state.weaponDrop then
+			if not weaponStash and state.weaponDrop:IsA("Model") then
+				weaponStash = state.weaponDrop:Clone()
+				weaponHome = state.weaponDrop:GetPivot()
+			end
+		elseif weaponStash and weaponHome then
+			local restored = weaponStash:Clone()
+			restored:PivotTo(weaponHome)
+			restored.Parent = folder or root
+			state.weaponDrop = restored
+			print("[PuzzleService] restored the vault weapon a previous round removed")
+		end
+	end
 	state.stockpile = if loot and loot.stockpile then findNamed(folder, root, loot.stockpile.object) else nil
 	state.stockpileClaimed = false
 
@@ -1098,6 +1135,11 @@ function PuzzleService:start()
 end
 
 function PuzzleService:destroy()
+	if weaponStash then
+		weaponStash:Destroy()
+		weaponStash = nil
+	end
+	weaponHome = nil
 	serviceTrove:destroy()
 	doorTrove:destroy()
 	self:clear()

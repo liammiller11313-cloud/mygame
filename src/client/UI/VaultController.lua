@@ -685,7 +685,10 @@ function VaultController:start()
 			"SubtitleController",
 			"say",
 			name,
-			string.format("Split the stockpile. %s each.", EconomyConfig.format(payload.dollars or 0)),
+			--[[ "each", not "split" — the pile pays everybody the same amount and
+			     saying otherwise would have the line contradict the number beside
+			     it. ]]
+			string.format("Cracked the stockpile. %s each.", EconomyConfig.format(payload.dollars or 0)),
 			CLUE_LINE_SECONDS
 		)
 	end)

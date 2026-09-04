@@ -160,11 +160,49 @@ kept permanently alight is 150 free damage a second.
 
 Never sold, never on an item pad, `floorOnly = true`. It exists in one place.
 
-**Model:** put it in `ReplicatedStorage/Assets/Weapons/Flamethrower` so it has a
-viewmodel when held. The one in the loot room is the world pickup.
+**It comes back.** Picking a weapon up destroys the world model, and a Clinton
+round followed by another Clinton round does not reload the map — so the second
+vault would have been empty. The first one seen is cloned aside and put back if
+a later round cannot find it.
 
-**Sound:** `AudioConfig.Id.FlamethrowerLoop` is empty — drop an asset id in when
-you have one, same as every other sound in the game.
+#### The held model — you do NOT need two copies
+
+```
+ServerStorage/                    (ReplicatedStorage works too)
+└── Assets/
+    └── Weapons/
+        └── Flamethrower          ← one model, that is all
+```
+
+A first-person model **falls back to the world model automatically**. Put one
+copy in `Assets/Weapons/Flamethrower` and it is used for the gun in your hands,
+the gun on your back, and the gun other players see.
+
+Only add `Assets/Viewmodels/Flamethrower` if you deliberately want a *different*
+first-person model — lower-poly, or posed for a hand. The fallback goes one way
+only: a Viewmodels entry is never used as the world model, because a prop built
+for the first-person camera is the wrong thing for everyone else to look at.
+
+The model in the loot room is separate from both. That one is the pickup lying
+on the floor; these are what you hold once you have it.
+
+#### Sounds it needs
+
+One id, in `AudioConfig.Id`:
+
+| Key | What to search for | What it should sound like |
+|---|---|---|
+| `FlamethrowerLoop` | `flamethrower`, `flame burst`, `blowtorch`, `gas burner` | A **held roar**, not a shot. Low, continuous, with air in it. It plays ten times a second while the trigger is down, so it wants to be **short (0.15–0.4s) and seamless** — a sample with a hard attack will machine-gun. Think a burner igniting and holding, not a gunshot. |
+
+It is already wired at volume 0.62, rolloff 120 studs and a voice budget of 2 —
+much shorter reach than a rifle, because nobody two streets away should hear a
+flamethrower.
+
+The burning it causes already has sound: that is the existing fire system the
+molotov uses, and it needs nothing new.
+
+**Optional but worth it:** if you want the ignition to land harder, the fire
+sounds are `AudioConfig` rows the molotov already reads. Nothing to add.
 
 ### Dollar Stockpile
 
