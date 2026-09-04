@@ -62,6 +62,10 @@ export type Ability = {
 	     ability, and the server clamps to it rather than refusing — a player who
 	     aimed slightly too far gets the edge of their range, not nothing. ]]
 	range: number,
+	--[[ The Assets/Abilities model to draw as a ghost while choosing a spot, or
+	     nil to show only the reticle. Deployables have one; a cryo field and an
+	     airstrike are marks on the floor and do not. ]]
+	preview: string?,
 	-- Read only by this ability's own module. See ADDING ONE.
 	tuning: { [string]: any },
 }
@@ -111,8 +115,20 @@ local DEFINITIONS: { Ability } = {
 		blurb = "Drops a gun that watches an angle you cannot.",
 		price = 1_000,
 		cooldown = 45,
-		targeted = false,
-		range = 0,
+		--[[ Targeted, so it is PLACED rather than dropped at your feet. Where a
+		     turret stands is the whole skill of the ability — an angle it can see
+		     and the horde cannot reach — and an ability that put it in front of
+		     you took that decision away.
+
+		     A short range on purpose. This is "just there", not "across the
+		     street": a turret you can post somewhere you are not is a turret
+		     covering a flank you never have to walk to. ]]
+		targeted = true,
+		range = 45,
+		--[[ The model to show as a placement ghost, under
+		     ReplicatedStorage/Assets/Abilities. Nil for the abilities whose
+		     target is a patch of ground rather than an object. ]]
+		preview = "Turret",
 		tuning = table.freeze({
 			--[[ 14 a shot at 3 a second is 42 a second, which kills a Common in
 			     just over a second and does nothing meaningful to a Tank. That

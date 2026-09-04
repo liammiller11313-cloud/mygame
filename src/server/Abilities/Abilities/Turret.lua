@@ -38,15 +38,24 @@ local RigUtil = require(Shared.Util.RigUtil)
 local Types = require(Shared.Types)
 local UITheme = require(Shared.Config.UITheme)
 
+local AbilityAssets = require(Shared.Util.AbilityAssets)
 local AbilitySupport = require(script.Parent.Parent.AbilitySupport)
+
+--[[ The folder name under Assets/Abilities. The enum id, so a model named for
+     the ability is found without a second table mapping one to the other. ]]
+local TURRET_ASSET = Enums.Ability.Turret
 
 local Turret = {}
 
---[[ How far in front of the player it lands, and how far above the ground the
-     barrel sits. Placed rather than dropped at the feet so it never spawns
-     inside the person deploying it. ]]
-local PLACE_AHEAD = 5.5
+--[[ How far above the ground the procedural barrel sits. Only the grey-box
+     body uses it; a supplied model brings its own geometry. ]]
 local BARREL_HEIGHT = 3.0
+
+--[[ Half the procedural base's height, so its underside lands exactly on the
+     floor deploy found. The supplied model matches it by bounding box rather
+     than by this number — see buildSupplied — but both end up resting ON the
+     ground rather than sunk into it or hovering over it. ]]
+local GROUND_LIFT = 0.4
 
 --[[ How far a body has to be to start chewing on it, and how fast. 14 a second
      means four Commons take it apart in about four seconds, which is roughly
@@ -64,6 +73,15 @@ type Emplacement = {
 	model: Model,
 	root: BasePart,
 	head: BasePart,
+	--[[ What actually swings, which is NOT always `head`. A supplied `gun` can
+	     be a Model of several parts; rotating the one BasePart `head` resolved
+	     to would leave the rest of the barrel behind. Pivoted rather than
+	     CFramed, so a PivotOffset set at the model's rotation joint is
+	     honoured. ]]
+	aim: PVInstance,
+	--[[ Where shots leave from, or nil when the model did not supply one. See
+	     `fire`: nil is a fallback rather than a fault. ]]
+	muzzle: Attachment?,
 	health: number,
 	maxHealth: number,
 	expiresAt: number,
@@ -90,10 +108,89 @@ local function countFor(player: Player): number
 	return total
 end
 
---[[ A procedural body rather than an asset, for the same reason the specials
-     have placeholder rigs: it must exist and be readable on a server where
-     nobody has uploaded a turret model, and a supplied one can be dressed over
-     it later. ]]
+--[[
+	The supplied model, if there is one.
+
+	ReplicatedStorage/Assets/Abilities/Turret, with `gun` as the part that swings
+	and an Attachment named `Muzzle` at the end of the barrel. Both are optional
+	and each degrades on its own: no `gun` and the model sits still, no `Muzzle`
+	and shots leave from the gun's own position. A model that is only geometry
+	still deploys and still shoots.
+
+	Returns the same four things the procedural body below does — the model, the
+	part it stands on, the part shots leave from, and the thing that swings — so
+	nothing downstream knows which one it got. The last two are separate because
+	a supplied `gun` can be a Model: the whole Model turns, while a single part
+	inside it is where the muzzle and the line-of-sight test live.
+]]
+local function buildSupplied(position: Vector3, facing: Vector3): (Model?, BasePart?, BasePart?, PVInstance?)
+	local template = AbilityAssets.find(TURRET_ASSET)
+	if not template then
+		return nil, nil, nil, nil
+	end
+	local clone = template:Clone()
+
+	--[[ Anchored and non-colliding throughout. A turret that can be walked into
+	     blocks the doorway it is defending, and an unanchored one gets shoved
+	     down a stairwell by the first Charger. ]]
+	for _, part in clone:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanQuery = false
+		end
+	end
+
+	local baseChild = clone:FindFirstChild("base", true)
+	local gunChild = clone:FindFirstChild("gun", true)
+	local root = if baseChild and baseChild:IsA("BasePart")
+		then baseChild :: BasePart
+		else clone.PrimaryPart or clone:FindFirstChildWhichIsA("BasePart", true)
+	if not root then
+		--[[ No BasePart anywhere. Rather than guess, fall through to the
+		     procedural body: this is not a model that can be placed. ]]
+		clone:Destroy()
+		return nil, nil, nil, nil
+	end
+	clone.PrimaryPart = root
+	--[[ Renamed to match the grey-box body. Nothing looks a turret up by name,
+	     but a Workspace with three things called "Turret" in it — the deployed
+	     ones and whatever the model was dragged out of — is a Workspace nobody
+	     can read. ]]
+	clone.Name = "FL_Turret"
+
+	--[[ Seated through the shared helper, which is the SAME call the placement
+	     ghost makes — so where the preview stood is where the turret stands. A
+	     supplied model can be any size and any of its parts can be the lowest
+	     one, so its underside is measured rather than assumed. ]]
+	AbilityAssets.seat(clone, position - Vector3.new(0, GROUND_LIFT, 0), facing)
+
+	clone.Parent = Workspace
+
+	--[[ Resolved once here so the step loop never has to ask what `gun` was.
+	     `head` is a part — where the muzzle hangs and where sight lines are
+	     traced from — and `aim` is whatever has to turn to point it, which for a
+	     multi-part gun is the Model rather than the part. ]]
+	local head: BasePart? = nil
+	local aim: PVInstance? = nil
+	if gunChild and gunChild:IsA("BasePart") then
+		head = gunChild :: BasePart
+		aim = gunChild :: BasePart
+	elseif gunChild and gunChild:IsA("Model") then
+		head = (gunChild :: Model).PrimaryPart or gunChild:FindFirstChildWhichIsA("BasePart", true)
+		aim = gunChild :: Model
+	end
+
+	--[[ A model with no `gun` still deploys. It stands still and shoots from its
+	     base, which looks wrong but plays correctly — better than refusing a
+	     model somebody has already placed in the game. ]]
+	return clone, root, head or root, aim or head or root
+end
+
+--[[ A procedural body, for a place where nobody has supplied a model. Same
+     reason the specials have placeholder rigs: the ability has to be playable
+     on a fresh install, and a supplied model is an upgrade rather than a
+     prerequisite. ]]
 local function build(position: Vector3, facing: Vector3): (Model, BasePart, BasePart)
 	local model = Instance.new("Model")
 	model.Name = "FL_Turret"
@@ -147,8 +244,11 @@ local function retire(turret: Emplacement, index: number, destroyed: boolean)
 end
 
 local function fire(turret: Emplacement, target: Model, targetRoot: BasePart, damage: number)
-	local origin = turret.head.Position
-	turret.head.CFrame = CFrame.lookAt(origin, targetRoot.Position)
+	--[[ From the barrel, not from the middle of the gun. `Muzzle` is an
+	     Attachment the model may supply; without one the gun's own position is
+	     the honest fallback, and the tracer simply starts a little further back
+	     than it should rather than not being drawn. ]]
+	local origin = if turret.muzzle then turret.muzzle.WorldPosition else turret.head.Position
 
 	local infected: any = Registry.find("InfectedService")
 	if infected and typeof(infected.damage) == "function" then
@@ -224,25 +324,43 @@ function Turret.activate(context: any): boolean
 		return false
 	end
 
-	local facing = root.CFrame.LookVector
-	local flat = Vector3.new(facing.X, 0, facing.Z)
-	facing = if flat.Magnitude > 0.05 then flat.Unit else Vector3.zAxis
+	--[[ Where the player put it. AbilityService has already validated the point
+	     and clamped it to the ability's range, so this is a spot they chose
+	     rather than a spot the game chose for them — which is the whole reason
+	     the turret is a targeted ability. ]]
+	local wanted = context.target
 
-	--[[ Dropped to the floor in front of the player rather than placed at their
-	     eye height. groundAt is the same helper the Director uses to keep a
-	     spawn out of the geometry, so a turret on a staircase sits on the stair. ]]
-	local wanted = root.Position + facing * PLACE_AHEAD
+	--[[ Dropped to the floor rather than left at whatever height the ray hit.
+	     groundAt is the same helper the Director uses to keep a spawn out of the
+	     geometry, so a turret placed on a staircase sits on the stair. ]]
 	local ground = RaycastUtil.groundAt(wanted, 12, { character })
 	if not ground then
 		return false
 	end
 
-	local model, base, head = build(ground + Vector3.new(0, 0.4, 0), facing)
+	--[[ Facing away from the player who placed it. You put a turret down to
+	     cover the direction you are looking, and turning it to face you would be
+	     wrong every single time. ]]
+	local heading = Vector3.new(ground.X - root.Position.X, 0, ground.Z - root.Position.Z)
+	local facing = if heading.Magnitude > 0.05 then heading.Unit else root.CFrame.LookVector
+	local flatFacing = Vector3.new(facing.X, 0, facing.Z)
+	facing = if flatFacing.Magnitude > 0.05 then flatFacing.Unit else Vector3.zAxis
+
+	--[[ The player's model first, the grey box second. Nothing after this line
+	     knows which one it got. ]]
+	local at = ground + Vector3.new(0, GROUND_LIFT, 0)
+	local model, base, head, aim = buildSupplied(at, facing)
+	if not model or not base or not head or not aim then
+		model, base, head = build(at, facing)
+		aim = head
+	end
 	table.insert(turrets, {
 		player = player,
 		model = model,
 		root = base,
 		head = head,
+		aim = aim,
+		muzzle = head:FindFirstChild("Muzzle") :: Attachment?,
 		health = tuning.Health,
 		maxHealth = tuning.Health,
 		expiresAt = os.clock() + tuning.Lifetime,
@@ -299,10 +417,26 @@ function Turret.step(dt: number)
 			continue
 		end
 
-		--[[ Aimed every frame even between shots, so the barrel tracks rather
-		     than snapping at the moment it fires. It is the only thing that makes
-		     a static box read as a machine that is paying attention. ]]
-		turret.head.CFrame = CFrame.lookAt(turret.head.Position, targetRoot.Position)
+		--[[
+			Aimed every frame even between shots, so the barrel tracks rather than
+			snapping at the moment it fires. It is the only thing that makes a
+			static box read as a machine paying attention.
+
+			YAW ONLY. A supplied model's gun is a child sitting on a base, and
+			pitching it at a Common's chest three studs away would tip the whole
+			assembly onto its face. Real emplacements traverse; they do not roll
+			over. The flat heading also keeps the muzzle at a sane height, which
+			is what the tracer is drawn from.
+		]]
+		local flat = Vector3.new(
+			targetRoot.Position.X - turret.head.Position.X,
+			0,
+			targetRoot.Position.Z - turret.head.Position.Z
+		)
+		if flat.Magnitude > 0.05 then
+			local at = turret.aim:GetPivot().Position
+			turret.aim:PivotTo(CFrame.lookAt(at, at + flat.Unit))
+		end
 
 		if now >= turret.nextShotAt then
 			turret.nextShotAt = now + 1 / math.max(TUNING.FireRate, 0.01)
