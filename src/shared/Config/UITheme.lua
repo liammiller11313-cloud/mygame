@@ -134,6 +134,81 @@ UITheme.Grime = table.freeze({
 	Rotation = 90,
 })
 
+--[[
+	── THE MENU BACKDROP ───────────────────────────────────────────────────────
+	A bare bulb in the dark, behind the main menu, flickering.
+
+	The game is called Fading Light. The one image the menu can afford to carry
+	should be the title as a picture, and a bulb that will not hold steady is
+	that — it is the thing the survivors are trying to keep on, it is what the
+	round's whole atmosphere ramp is about, and it costs one texture.
+
+	── EVERY NUMBER BELOW IS A TREATMENT, NOT THE IMAGE ────────────────────────
+	Nothing here edits the asset. The look comes from what is stacked on top of
+	it: a tint that pulls the bulb into the interface's own orange and drops its
+	brightness, a scrim heavy enough that white type stays readable over it, a
+	four-sided vignette, a drift so it is never a still frame, and a flicker that
+	drives all of it. That is deliberate — the source stays a clean photograph
+	and the grade lives somewhere a person can change it without re-uploading
+	anything.
+
+	── THE SCRIM IS NOT DECORATION ─────────────────────────────────────────────
+	`DimBright` is the LIGHTEST the backdrop is ever allowed to be, and it is
+	still 60% black. The menu draws white headline type straight over this, and a
+	background that looks beautiful in isolation and eats the word PLAY is a
+	background that has failed. Raise it and check the title, not the picture.
+]]
+UITheme.Backdrop = table.freeze({
+	Image = "rbxassetid://88999880172157",
+
+	--[[ Multiplied into the image, so it both grades and darkens. Warm, because
+	     the bulb is the only warm thing left in this game's palette and the round
+	     spends seventeen minutes taking it away. ]]
+	Tint = Color3.fromRGB(178, 138, 96),
+
+	--[[ How black the sheet over the image sits, at the bulb's darkest and its
+	     brightest. Transparency, so the BIGGER number is the brighter screen.
+
+	     Lighter than it looks like it should be, because the sheet is not what
+	     makes the type readable — the vignette is. See VignetteExtent. ]]
+	DimDark = 0.18,
+	DimBright = 0.44,
+
+	--[[ How much of the tint the flicker takes away at its lowest. Not all of it:
+	     a bulb that goes to pure black reads as the game crashing, and the
+	     interesting part of a dying filament is that it never quite lets go. ]]
+	FlickerDepth = 0.65,
+
+	--[[
+		The vignette: how far in from each edge the darkness reaches, and how
+		black it is at the very edge.
+
+		These two are the readability pass, and the extent is chosen against the
+		menu's own layout rather than by eye. MainMenuController puts its left
+		column at COLUMN_X = 0.09 and its right one at 0.91, so both sit deep
+		inside a 0.34 vignette — at 9% across the falloff is still about 70%
+		black, which is plenty under white headline type.
+
+		That is why the flat sheet above can afford to be light. The centre band,
+		where the bulb actually is and where the menu writes nothing, gets only
+		the sheet — so the picture is brightest exactly where there is nothing to
+		read over it and darkest exactly where there is.
+
+		Anything that moves COLUMN_X has to come back to this number.
+	]]
+	VignetteExtent = 0.34,
+	VignetteStrength = 0.06,
+
+	--[[ The drift. The image is drawn oversized so there is somewhere to move to
+	     — without the overscan a pan would show the screen behind it — and moves
+	     within a fraction of a screen on two slow, deliberately non-harmonic
+	     periods so the loop never lines back up and reads as a loop. ]]
+	Overscan = 1.09,
+	DriftAmount = 0.018,
+	DriftPeriodX = 37.0,
+	DriftPeriodY = 53.0,
+})
+
 UITheme.SurvivorColors = table.freeze({
 	Color3.fromRGB(226, 148, 44), -- orange
 	Color3.fromRGB(240, 236, 228), -- white

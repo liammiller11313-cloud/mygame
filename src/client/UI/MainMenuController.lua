@@ -544,6 +544,11 @@ local function refreshVisibility()
 
 	gui.Enabled = state.open or state.results or state.teleporting
 	menuRoot.Visible = lobbyVisible
+	--[[ The backdrop's flicker runs off RenderStepped, so it is told when it is
+	     on screen rather than left running: the menu is hidden for the whole
+	     seventeen minutes of a round, and a per-frame connection behind a hidden
+	     frame is work per frame for nobody. ]]
+	callController("MenuBackdrop", "setActive", lobbyVisible)
 	resultsRoot.Visible = state.results
 	teleportRoot.Visible = state.teleporting
 	setSuppressed(state.open or state.results)
@@ -2244,6 +2249,13 @@ local function build()
 	menuRoot = Widgets.frame(gui, "Menu", COLOR.Background, MENU_SCRIM)
 	menuRoot.Size = UDim2.fromScale(1, 1)
 	menuRoot.Visible = false
+	--[[ Between the root and the content layer, and that ordering is the whole
+	     of what puts it behind the interface: ZIndexBehavior is Sibling, so
+	     equal-ZIndex siblings draw in creation order. Reached through the
+	     Registry rather than required, because this file is 182 top-level locals
+	     against audit.py's ceiling of 185 and a backdrop is not worth one of the
+	     three that are left. ]]
+	callController("MenuBackdrop", "attach", menuRoot)
 	menuLayer = newLayer(menuRoot)
 
 	trove:add(function()

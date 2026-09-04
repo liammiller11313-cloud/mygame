@@ -111,6 +111,12 @@ local CONTROLLERS = {
 	-- rather than inside it, so neither has to wait for the other.
 	"UI/AwardController",
 	--[[ After the screens it can open, and after the HUD whose corner it shares. ]]
+	--[[ Before MainMenuController, which attaches it in its own build(). Order
+	     is belt and braces — every controller is required before any init() runs
+	     — but a module found by Registry should be listed before the one that
+	     looks for it, or the next person has to prove the bootstrap for
+	     themselves. ]]
+	"UI/MenuBackdrop",
 	"UI/PauseController",
 	"UI/MainMenuController",
 }
