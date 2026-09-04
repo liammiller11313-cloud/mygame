@@ -122,6 +122,10 @@ local CONTROLLERS = {
 	-- Reads ProgressionController the same way; draws over the results card
 	-- rather than inside it, so neither has to wait for the other.
 	"UI/AwardController",
+	--[[ Reads the same mirror, on the HUD rather than over the results: level
+	     and today's orders while they are being earned. After
+	     ProgressionController for the same reason every other reader is. ]]
+	"UI/OrdersController",
 	--[[ After the screens it can open, and after the HUD whose corner it shares. ]]
 	--[[ Before MainMenuController, which attaches it in its own build(). Order
 	     is belt and braces — every controller is required before any init() runs
