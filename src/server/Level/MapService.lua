@@ -281,7 +281,7 @@ end
 --[[ Lifts a map's sky and music out of the model and into the services that can
      actually use them. See the note on AMBIENCE_STASH for why either has to
      move at all. ]]
-local function installAmbience(clone: Model)
+local function installAmbience(clone: Model, definition: any)
 	for _, child in clone:GetChildren() do
 		if child:IsA("Sky") and not installedSky then
 			--[[ Anything already up there steps aside first. Two Skies in Lighting
@@ -297,9 +297,21 @@ local function installAmbience(clone: Model)
 		elseif child:IsA("Sound") and not installedMusic then
 			--[[ Looped without asking. A background track that plays once and
 			     stops leaves the rest of a seventeen-minute round in silence,
-			     which is never what a map's music was for. Volume is left exactly
-			     as authored — that is a mix decision and it is theirs. ]]
+			     which is never what a map's music was for. ]]
 			child.Looped = true
+
+			--[[ And scaled, when the map asks for it. Volume used to be left
+			     exactly as authored on the argument that the mix was the author's
+			     decision — which is right in isolation and wrong in a round: a
+			     track written on its own has never been heard under a horde, a
+			     Tank and thirty gunshots. MapConfig.musicVolume is where that gets
+			     reconciled, as a SCALE, so the author's own choices survive it and
+			     a map that does not ask is untouched. ]]
+			local scale = definition and definition.musicVolume
+			if typeof(scale) == "number" and scale >= 0 then
+				child.Volume *= scale
+			end
+
 			child.Parent = SoundService
 			child:Play()
 			installedMusic = child
@@ -382,7 +394,10 @@ function MapService:load(mapId: string): boolean
 	clone.Parent = liveFolder()
 	--[[ After parenting, so the sky and the music are lifted out of a model that
 	     is already live rather than out of one still being assembled. ]]
-	installAmbience(clone)
+	--[[ The definition rides along so the map's own mix preferences — currently
+	     just musicVolume — are applied at the moment its Sound is adopted, rather
+	     than needing a second pass that would have to find it again. ]]
+	installAmbience(clone, MapConfig.get(mapId))
 
 	currentRoot = clone
 	currentId = mapId

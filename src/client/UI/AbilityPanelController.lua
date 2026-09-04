@@ -58,12 +58,27 @@ local PANEL_WIDTH = 700
 local PANEL_MAX_HEIGHT = 600
 local HEADER_HEIGHT = PANEL.HeaderHeight
 
+--[[ The slot selector is a TAP TARGET, so on touch it takes the project's row
+     standard rather than the desktop height: a phone draws the whole interface
+     at ScaleLayer's 0.75 floor, which turns 46 reference pixels into 34.5 real
+     ones against a 42-pixel standard. ]]
 local SLOTBAR_HEIGHT = 46
-local BODY_TOP = HEADER_HEIGHT + LAYOUT.PanelPadding + SLOTBAR_HEIGHT + LAYOUT.PanelPadding
+local SLOTBAR_HEIGHT_TOUCH = PANEL.RowHeightTouch
+--[[ Sized against the TALLER of the two, so the list below starts in the same
+     place on both and the slot bar never overlaps it. The few pixels a desktop
+     loses are cheaper than a second layout pass that has to move the scroller
+     every time the input scheme changes. ]]
+local BODY_TOP = HEADER_HEIGHT + LAYOUT.PanelPadding + SLOTBAR_HEIGHT_TOUCH + LAYOUT.PanelPadding
 
 local ROW_HEIGHT = 62
 local ROW_HEIGHT_TOUCH = PANEL.RowHeightTouch + 14
 local ACTION_WIDTH = 116
+--[[ How much shorter than its row the action button is. Smaller on touch: at
+     the desktop inset the button inside a 70-pixel row came to 54 reference
+     pixels, which is 40.5 real ones — under the standard, on the one control
+     that spends money. ]]
+local ACTION_INSET = 16
+local ACTION_INSET_TOUCH = 8
 
 local AbilityPanelController = {}
 
@@ -251,10 +266,19 @@ end
 -- ── build ───────────────────────────────────────────────────────────────────
 
 local function applyTouchSizing()
-	local height = if isTouch() then ROW_HEIGHT_TOUCH else ROW_HEIGHT
+	local touch = isTouch()
+	local height = if touch then ROW_HEIGHT_TOUCH else ROW_HEIGHT
+	local inset = if touch then ACTION_INSET_TOUCH else ACTION_INSET
 	for _, row in rows do
 		row.frame.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, height)
-		row.button.Size = UDim2.fromOffset(ACTION_WIDTH, height - 16)
+		row.button.Size = UDim2.fromOffset(ACTION_WIDTH, height - inset)
+		row.button.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, inset * 0.5)
+	end
+
+	local barHeight = if touch then SLOTBAR_HEIGHT_TOUCH else SLOTBAR_HEIGHT
+	slotBar.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, barHeight)
+	for _, slotButton in slotButtons do
+		slotButton.button.Size = UDim2.new(0, slotButton.button.Size.X.Offset, 0, barHeight)
 	end
 	if list then
 		list.Size =

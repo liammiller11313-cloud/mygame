@@ -582,6 +582,11 @@ UITheme.DisplayOrder = table.freeze({
 	     meant to escape is worse than no pause menu. ]]
 	Pause = 90,
 	Fade = 91,
+	--[[ Above everything, including the fade. It is the first thing the game
+	     draws and the only thing on screen while it runs: a splash with any layer
+	     over it is a splash with somebody's HUD bleeding through the studio
+	     logo. ]]
+	Splash = 100,
 })
 
 --[[

@@ -49,6 +49,11 @@ local BAR = string.rep("=", 72)
 	ScreenGui already, or the menu opens over a HUD that is still visible.
 ]]
 local CONTROLLERS = {
+	--[[ First, and it has to be: it draws black over everything at
+	     DisplayOrder.Splash while the rest of the client boots behind it, so the
+	     player never sees a half-built menu assembling itself. Nothing else
+	     depends on it and it depends on nothing. ]]
+	"UI/SplashController",
 	"Input/InputController",
 	"Effects/CameraController",
 	"Weapon/WeaponController",

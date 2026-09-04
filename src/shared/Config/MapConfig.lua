@@ -32,6 +32,17 @@ export type MapDefinition = {
 		blank in-game and the id is right, that is the first thing to check.
 	]]
 	image: string?,
+	--[[
+		A scale on whatever volume the map's own background Sound was authored at,
+		or nil to leave it alone.
+
+		A map that ships its own music is mixing against nothing — the author
+		hears it on its own, not under a horde, a Tank's roar and thirty
+		gunshots. This is the one number that reconciles the two without going
+		back into the map and re-saving the Sound, and it is a SCALE rather than
+		an absolute so the author's own relative choices survive it.
+	]]
+	musicVolume: number?,
 }
 
 MapConfig.Maps = {
@@ -56,6 +67,11 @@ MapConfig.Maps = {
 		     the way the other two blurbs name what you should bring. ]]
 		blurb = "Four ways in. Four ways out. Watch all of them.",
 		image = "rbxassetid://111409477664761",
+		--[[ Its own track came in loud enough to sit on top of the round rather
+		     than under it. Just under half, which puts it where the other two
+		     maps' silence leaves the horde: audible, and not the thing you are
+		     listening to. Tune it here rather than in the map. ]]
+		musicVolume = 0.45,
 	},
 } :: { MapDefinition }
 

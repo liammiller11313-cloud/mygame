@@ -1753,7 +1753,13 @@ local NAV_ENTRIES = {
 	},
 }
 
-local NAV_HEIGHT = 46
+--[[ 56, up from 46. These are tap targets and a phone draws the whole menu at
+     ScaleLayer's 0.75 floor, so 46 reference pixels was 34.5 real ones against
+     the project's 42-pixel standard — the five things a player has to press to
+     get anywhere were all under it. Unconditional rather than input-dependent:
+     ten pixels is invisible on a desktop and the row would otherwise have to be
+     re-laid-out every time somebody picked up a controller. ]]
+local NAV_HEIGHT = 56
 local NAV_GAP = 0.015
 --[[ Derived from the entry count rather than fixed, and it had to be: four
      entries at a flat 0.21 sat inside the row with a tenth of it spare, and a

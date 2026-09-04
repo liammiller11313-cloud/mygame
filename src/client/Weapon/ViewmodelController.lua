@@ -248,9 +248,35 @@ local KICK_ROTATION_DAMPING = 0.55
 -- Peak displacement of a critically damped spring kicked with velocity v0 is
 -- v0/(w*e). Pre-multiplying by w*e makes the config number the actual peak.
 local IMPULSE_GAIN = math.exp(1)
--- Degrees of muzzle rise per stud of kickback. Pure feel; the camera's real
--- recoil is CameraController's and comes from WeaponConfig.
-local KICK_PITCH_PER_STUD = 26
+--[[
+	Degrees of muzzle rise per stud of kickback. Pure feel; the camera's real
+	recoil is CameraController's and comes from WeaponConfig.
+
+	── 11, DOWN FROM 26 ───────────────────────────────────────────────────────
+	At 26 this was the reason the game felt like it aimed at the sky, and it was
+	not the recoil system — the CAMERA only moves 1 to 3 degrees on a shot and
+	about 4 under sustained fire, which is modest. It was the gun in your hands.
+
+	Simulated against the spring below (speed 17, damping 0.55, and the same
+	IMPULSE_GAIN pre-multiply), a single shot pitched the VIEWMODEL:
+
+	    RPG-7      24.9 deg        Magnum .357   17.1 deg
+	    Shotgun    22.1 deg        M24           16.0 deg
+	    M1A EBR    17.8 deg        AKM           15.1 deg held
+
+	Twenty-five degrees is the barrel leaving the top of the frame. The comment
+	on KICK_AIM_SCALE below already flagged the shape of this — thirteen degrees
+	across a 34-degree aimed frame, "the sights leave the screen entirely between
+	shots" — and treated it as an aiming problem, which meant the same number was
+	still doing it from the hip where nobody had measured it.
+
+	11 puts the same weapons at 10.5, 9.3, 7.5, 7.2, 6.8 and 6.4. The heavy guns
+	still throw the muzzle further than the light ones, in the same order and by
+	the same ratios, because this scales all of them — nothing about the roster's
+	relative feel moved. What went is the part where the gun pointed upward far
+	enough to become the thing you were looking at.
+]]
+local KICK_PITCH_PER_STUD = 11
 --[[ Down the sights the weapon is shouldered, and the M1A EBR's 0.5-stud kick
      would otherwise throw thirteen degrees of pitch across a 34-degree frame —
      the sights leave the screen entirely between shots. Braced, the same shot
