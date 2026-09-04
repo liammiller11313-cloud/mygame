@@ -67,6 +67,7 @@ local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local RigUtil = require(Shared.Util.RigUtil)
@@ -341,8 +342,11 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?,
 		end
 	end
 
-	-- The Director owns the population budget, but the server owns the truth.
-	if (self._countByKind[kind] or 0) >= definition.maxAlive then
+	--[[ The Director owns the population budget, but the server owns the truth.
+	     The ceiling is asked for rather than read, because EXPLODER INVASION
+	     raises the Boomer's — and this is the check that would otherwise refuse
+	     the third one while the Director cheerfully kept asking. ]]
+	if (self._countByKind[kind] or 0) >= ModifierConfig.maxAliveFor(Workspace, kind, definition.maxAlive) then
 		return nil
 	end
 
@@ -410,10 +414,21 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?,
 	if elite then
 		health = math.floor(health * elite.health + 0.5)
 	end
+	--[[ ARMORED. Commons only: the modifier is about the horde, and a Tank that
+	     had also doubled would be a different modifier nobody asked for. It
+	     stacks on top of the tier multiplier rather than replacing it, so a riot
+	     body under ARMORED is the hardest thing in the game that is not a boss —
+	     and a headshot still kills it in one, because headshotAlwaysKills sits
+	     above every multiplier here. ]]
+	if kind == Enums.Infected.Common then
+		health = math.floor(health * ModifierConfig.commonHealthScale(Workspace) + 0.5)
+	end
 
 	humanoid.MaxHealth = health
 	humanoid.Health = health
-	humanoid.WalkSpeed = definition.walkSpeed * (if elite then elite.speed else 1)
+	humanoid.WalkSpeed = definition.walkSpeed
+		* (if elite then elite.speed else 1)
+		* (if kind == Enums.Infected.Common then ModifierConfig.commonSpeedScale(Workspace) else 1)
 	humanoid.UseJumpPower = true
 	humanoid.JumpPower = definition.jumpPower
 	humanoid.AutoRotate = true

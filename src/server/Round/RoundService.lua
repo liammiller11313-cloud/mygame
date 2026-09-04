@@ -49,6 +49,7 @@ local Enums = require(Shared.Enums)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
 local MapConfig = require(Shared.Config.MapConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
@@ -122,6 +123,11 @@ local phaseEndsAt = 0 -- absolute server time the current phase ends
 local schedule: { any } = {}
 local cursor = 0
 local generation = 0 -- invalidates every delayed callback from an older round
+
+--[[ The round's one condition, or nil. Kept alongside the attribute so this
+     file can announce it and read its flags without a lookup per wave; the
+     ATTRIBUTE is what every other file reads. ]]
+local activeModifier: any = nil
 
 --[[ False until every module's start() has run. _startIfReady refuses to do
      anything before then; see the comment there for why that matters. ]]
@@ -240,9 +246,14 @@ local function setWaveBudget(
 
 	-- A fresh table per phase change (roughly fifteen a round, never in a hot
 	-- path), because the Director is entitled to hold on to the one it is given.
+	--[[ The round's modifier, applied HERE rather than inside the Director. This
+	     is the one place a wave's numbers cross from the schedule into the thing
+	     that spends them, so a modifier that scales the horde only has to be
+	     right once — and the Director keeps its own clamps, which is what stops
+	     DOUBLE SPAWN asking for more Commons than the roster can produce. ]]
 	director:setWaveBudget({
-		populationScale = populationScale,
-		spawnRateScale = spawnRateScale,
+		populationScale = populationScale * ModifierConfig.populationScale(Workspace),
+		spawnRateScale = spawnRateScale * ModifierConfig.spawnRateScale(Workspace),
 		maxSpecialsAlive = maxSpecials,
 		specialInterval = specialInterval,
 		waveIndex = waveIndex,
@@ -267,6 +278,29 @@ local function setDirectorActive(active: boolean)
 		return
 	end
 	director:setActive(active)
+end
+
+--[[
+	Rolls the round's one condition, publishes it, and lets everything that cares
+	read it off Workspace.
+
+	Classic only. Versus works because both halves face the same fifteen waves,
+	and a modifier rolled per half would measure two teams against two different
+	games — see the header of Shared/Config/ModifierConfig. It is cleared rather
+	than left, so a Versus match that follows a Classic round on the same server
+	does not inherit one.
+
+	Called from startRound BEFORE the schedule is built and before anybody
+	spawns, because the atmosphere, the Director's budget and the first Common's
+	health all read it and all of them happen after.
+]]
+local function rollModifier()
+	local chosen: any = nil
+	if mode == GameModeConfig.Modes.Classic then
+		chosen = ModifierConfig.roll(random)
+	end
+	setGameAttribute(Attributes.Game.Modifier, if chosen then chosen.id else "")
+	activeModifier = chosen
 end
 
 --[[ Asks the Director to place a boss. It picks the FL_BossZone, honours the
@@ -312,7 +346,9 @@ local function bossCallout(bosses: { string }, elite: string?): string?
 		local definition = InfectedConfig.get(kind)
 		local name = string.upper(if definition then definition.displayName else kind)
 		if eliteTier then
-			name = string.upper(eliteTier.displayName)
+			name = string.upper(
+				eliteTier.titlePrefix .. " " .. (if definition then definition.displayName else kind)
+			)
 		end
 		if counts[kind] > 1 then
 			table.insert(parts, string.format("%s! %d of them.", name, counts[kind]))
@@ -424,6 +460,14 @@ function RoundService:_enterPrep(entry)
 		SAY_ANNOUNCE
 	)
 
+	--[[ And what is different about tonight. After the opening line rather than
+	     instead of it: the first says what the round IS and is the same every
+	     time, and this says what it is not. A modifier a player finds out about
+	     by being caught by it is a modifier that reads as the game being broken. ]]
+	if activeModifier then
+		say("", string.upper(activeModifier.displayName) .. " — " .. activeModifier.blurb, SAY_ANNOUNCE)
+	end
+
 	-- The one stocking pass that is not a breather roll: the prep window is
 	-- worthless if there is nothing on the shelves to pick up.
 	local level = Registry.find("LevelService")
@@ -475,7 +519,13 @@ function RoundService:_enterWave(entry)
 		--[[ The wave's own elite tier, applied to every boss it releases. Only
 		     the finale sets one; everywhere else it is nil and the Director
 		     places an ordinary body. ]]
+		--[[ The wave's own tier, or ELITE WAVE's, whichever exists. The modifier
+		     does not override a wave that already asks for one — wave 15 is
+		     already an Apex and there is nothing above it. ]]
 		local elite = wave.bossTier
+		if not elite and ModifierConfig.eliteBosses(Workspace) then
+			elite = "Apex"
+		end
 		for order, kind in wave.bosses do
 			if order == 1 then
 				releaseBoss(kind, elite)
@@ -547,7 +597,10 @@ function RoundService:_restock(wave)
 	-- The wave's own odds decide whether the map gets anything back. Wave 5 (the
 	-- first Tank) is 0.7 and wave 15 is 0, which is the difficulty curve doing its
 	-- work quietly rather than through a number on the screen.
-	if random:NextNumber() < wave.itemDropChance then
+	--[[ NO AMMO DROPS suppresses this and only this. The AIRDROP requisition
+	     calls restockItems directly and still works, which is the point: the
+	     modifier makes it worth buying rather than making it impossible. ]]
+	if not ModifierConfig.blocksRestock(Workspace) and random:NextNumber() < wave.itemDropChance then
 		local level = Registry.find("LevelService")
 		if level and typeof(level.restockItems) == "function" then
 			local placed = level:restockItems()
@@ -660,6 +713,7 @@ function RoundService:startRound(requestedMode: string?)
 		else GameModeConfig.DefaultMode
 
 	generation += 1
+	rollModifier()
 
 	schedule = buildSchedule()
 	cursor = 1

@@ -40,6 +40,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -132,6 +133,7 @@ local root: Frame
 local block: Frame
 local waveLabel: TextLabel
 local clockLabel: TextLabel
+local modifierLabel: TextLabel
 local pips: { { track: Frame, fill: Frame } } = {}
 
 local callout: Frame
@@ -210,7 +212,12 @@ end
 
 local LABEL_HEIGHT = TEXT.Small + 4
 local CLOCK_HEIGHT = TEXT.Heading + 4
-local BLOCK_HEIGHT = LABEL_HEIGHT + CLOCK_HEIGHT + PIP_HEIGHT + LAYOUT.ElementGap * 2
+--[[ The round's modifier, under the pips. Reserved whether or not there IS one
+     so the block is a fixed height: getReservedTopHeight feeds the HUD's
+     objective line and the boss bar's position, and a block that changed size
+     when a round happened to roll a modifier would shuffle both. ]]
+local MODIFIER_HEIGHT = TEXT.Tiny + 4
+local BLOCK_HEIGHT = LABEL_HEIGHT + CLOCK_HEIGHT + PIP_HEIGHT + MODIFIER_HEIGHT + LAYOUT.ElementGap * 2
 
 local function buildBlock()
 	block = newFrame(root, "Round", COLOR.Panel, 1)
@@ -227,9 +234,20 @@ local function buildBlock()
 	clockLabel.Position = UDim2.new(0, 0, 0, LABEL_HEIGHT + LAYOUT.ElementGap)
 	clockLabel.Size = UDim2.new(1, 0, 0, CLOCK_HEIGHT)
 
+	--[[ What is different about this round, permanently on screen. The prep
+	     callout says it once and a player who joined at wave 6 never heard it —
+	     and "why are they so fast" is a question the interface should never
+	     leave anybody asking. ]]
+	modifierLabel = newLabel(block, "Modifier", FONT.Heading, TEXT.Tiny, COLOR.Warning)
+	modifierLabel.AnchorPoint = Vector2.new(0.5, 1)
+	modifierLabel.Position = UDim2.new(0.5, 0, 1, 0)
+	modifierLabel.Size = UDim2.new(1, 0, 0, MODIFIER_HEIGHT)
+	modifierLabel.TextXAlignment = Enum.TextXAlignment.Center
+	modifierLabel.Text = ""
+
 	local row = newFrame(block, "Pips", COLOR.Panel, 1)
 	row.AnchorPoint = Vector2.new(0.5, 1)
-	row.Position = UDim2.new(0.5, 0, 1, 0)
+	row.Position = UDim2.new(0.5, 0, 1, -MODIFIER_HEIGHT)
 	row.Size = UDim2.fromOffset(WAVE_COUNT * PIP_WIDTH + (WAVE_COUNT - 1) * PIP_GAP, PIP_HEIGHT)
 
 	local layout = Instance.new("UIListLayout")
@@ -410,6 +428,13 @@ local function refresh()
 	state.phaseDuration = phaseDuration()
 
 	block.Visible = state.active
+
+	--[[ Read off Workspace rather than tracked, so a player who joined mid-round
+	     is correct on their first frame. RoundService writes it once at the top
+	     of the round and never again. ]]
+	local modifier = ModifierConfig.active(Workspace)
+	modifierLabel.Text = if modifier then modifier.displayName else ""
+
 	state.clockWhole = -1
 
 	if state.phase == PHASE.Prep then
@@ -701,6 +726,12 @@ end
 
 function WaveController:start()
 	trove:connect(Remotes.Event.WaveChanged.OnClientEvent, onWaveChanged)
+	--[[ The modifier is written once at the top of a round, which for a client
+	     already in the lobby is BEFORE the first WaveChanged and for one joining
+	     mid-round is before they arrive. Both cases are covered — the changed
+	     signal for the first, onInitialState's refresh for the second — and
+	     neither on its own is. ]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.Modifier), refresh)
 	trove:connect(RunService.RenderStepped, update)
 
 	-- The HUD was laid out before this block existed, so it is told rather than

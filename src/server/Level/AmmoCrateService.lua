@@ -29,6 +29,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local MapConfig = require(Shared.Config.MapConfig)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -278,6 +279,15 @@ function AmmoCrateService:getCrates(): { Model }
 end
 
 function AmmoCrateService:_step()
+	--[[ NO AMMO DROPS holds every spent crate spent, and it is enforced HERE
+	     rather than by writing an unreachable respawn time. The stamp stays
+	     truthful — it is what the crate is still counting down to and it goes out
+	     over AmmoCrateUsed — the tick simply refuses to act on it. That also
+	     means a modifier cleared at the end of a round releases the crates
+	     rather than leaving a map full of permanently dead ones. ]]
+	if ModifierConfig.blocksCrateRespawn(Workspace) then
+		return
+	end
 	local now = serverNow()
 	for _, record in crates do
 		if record.spentUntil > 0 and now >= record.spentUntil then

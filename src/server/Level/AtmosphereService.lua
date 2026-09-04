@@ -74,6 +74,7 @@ local Attributes = require(Shared.Net.Attributes)
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 
@@ -255,11 +256,26 @@ local VIS_DENSITY = 0.7 -- inverted: more visibility means less atmosphere
 	Five complete looks. `anchor` is the wave whose start the keyframe sits on;
 	"start" and "end" are the ends of the round.
 
-	The shape of the round in light: waves 1-2 are a long orange evening where you
-	can still see a street. Wave 3 puts the sun on the horizon. Wave 5 — the Witch
-	— lands in blue hour, when everything is legible but nothing is coloured. By
-	the finale the sun is gone, the fog is at its floor, and the only reason you can
-	see anything at all is the map's own fixtures.
+	The shape of the round in light: waves 1-4 are a long orange evening where you
+	can still see a street. Wave 5 — the first Tank — puts the sun on the horizon.
+	Wave 10 lands in blue hour, when everything is legible but nothing is
+	coloured. By the finale the sun is gone, the fog is at its floor, and the only
+	reason you can see anything at all is the map's own fixtures.
+
+	── THESE ANCHORS ARE WAVE NUMBERS, AND THAT IS A TRAP ──────────────────────
+	They were 3, 5 and 7 for a seven-wave round, which put them at 0.24, 0.51 and
+	0.82 of the way through. When the schedule became fifteen waves the same three
+	numbers landed at 0.11, 0.21 and 0.33 — the whole evening collapsed into the
+	first third of the round and the remaining eleven minutes were one flat
+	interpolation to black.
+
+	Nothing failed. The guard below only catches keyframes that land out of ORDER,
+	which these did not; they were merely all at the start. The round simply got
+	dark early and then stopped changing, which is the arc this file exists to
+	produce being quietly deleted by an edit in another file.
+
+	5, 10 and 14 put them back at 0.21, 0.51 and 0.78. scripts/audit.py check 17
+	fails the build if they ever bunch up again.
 ]]
 local KEYFRAMES = {
 	{
@@ -285,7 +301,7 @@ local KEYFRAMES = {
 		envSpecular = 0.60,
 	},
 	{
-		anchor = 3,
+		anchor = 5,
 		-- Sun on the horizon. Colour is draining out of everything but the sky.
 		clock = 18.05,
 		brightness = 2.0,
@@ -306,7 +322,7 @@ local KEYFRAMES = {
 		envSpecular = 0.55,
 	},
 	{
-		anchor = 5,
+		anchor = 10,
 		--[[ Blue hour, turning. Shapes without colour is the most useful horror
 		     light there is — a silhouette at 200 studs could be anything — and
 		     from here the sky stops being merely blue and starts being WRONG:
@@ -331,7 +347,7 @@ local KEYFRAMES = {
 		envSpecular = 0.50,
 	},
 	{
-		anchor = 7,
+		anchor = 14,
 		-- Night. The finale opens here, already dark, so wave 15 does not have to
 		-- announce itself twice.
 		clock = 20.4,
@@ -878,7 +894,22 @@ function AtmosphereService:setPhaseFromRound(elapsed: number, total: number)
 		return
 	end
 
-	progress = math.clamp(elapsed / total, 0, 1)
+	--[[
+		DARKNESS starts the round further down its own ramp.
+
+		The floor is a REMAP, not a clamp: the round still travels from the floor
+		to full night across the same seventeen minutes rather than sitting at one
+		look for all of them. That matters more than it sounds — the whole reason
+		this file exists is that losing the light gradually is frightening and
+		being handed a dark room is merely dark, and a modifier that flattened the
+		curve would delete the thing it is named after about four minutes in.
+
+		At 0.66 the round opens at roughly the look wave ten usually has, and the
+		finale is darker than any unmodified round ever gets.
+	]]
+	local raw = math.clamp(elapsed / total, 0, 1)
+	local floor = math.clamp(ModifierConfig.atmosphereFloor(Workspace), 0, 0.95)
+	progress = floor + raw * (1 - floor)
 	mode = MODE.Round
 end
 

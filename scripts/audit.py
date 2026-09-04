@@ -1230,6 +1230,60 @@ if _weapons:
                 f"class that needed its own"
             )
 
+# ── 17. The lighting keyframes must still be spread across the round ────────
+# The bug this exists for: AtmosphereService anchors its five lighting keyframes
+# to WAVE NUMBERS — 3, 5 and 7 for a seven-wave round, which put them at 0.24,
+# 0.51 and 0.82 of the way through. The schedule then became fifteen waves and
+# the same three numbers landed at 0.11, 0.21 and 0.33: the whole evening
+# collapsed into the first third and the remaining eleven minutes were one flat
+# interpolation to black.
+#
+# Nothing failed. The file's own runtime guard only catches keyframes that land
+# out of ORDER, which these did not — they were merely all at the start. The
+# round just got dark early and then stopped changing, which is the entire arc
+# the file exists to produce, silently deleted by a change in another file.
+#
+# So: the numeric anchors have to keep spanning the round. Anything that retunes
+# the wave schedule has to come back and re-anchor them.
+_atm = read(SRC / "server/Level/AtmosphereService.lua")
+_gm = read(SRC / "shared/Config/GameModeConfig.lua")
+_anchors = [int(m) for m in re.findall(r"^\t\tanchor = (\d+),", _atm, re.M)]
+_durations = [
+    (int(a), int(b))
+    for a, b in re.findall(r"^\t\tduration = (\d+),\n\t\tbreather = (\d+),", _gm, re.M)
+]
+_prep = re.search(r"PrepDuration = (\d+)", _gm)
+_total = re.search(r"TotalDuration = (\d+)", _gm)
+if _anchors and _durations and _prep and _total:
+    _prep, _total = int(_prep.group(1)), int(_total.group(1))
+
+    def _wave_t(index):
+        seconds = _prep
+        for d, b in _durations[: index - 1]:
+            seconds += d + b
+        return seconds / _total
+
+    _ts = [_wave_t(a) for a in _anchors]
+    # The last numeric keyframe is the one that says "it is night now". Landing
+    # it before two thirds through leaves the rest of the round with nowhere to
+    # go, which is what a stale anchor looks like.
+    if _ts[-1] < 0.6:
+        problems.append(
+            f"AtmosphereService's last wave-anchored lighting keyframe (wave {_anchors[-1]}) is "
+            f"{_ts[-1]:.2f} of the way through the round — the light finishes changing in the "
+            f"first half and the rest of the round is flat. Re-anchor the keyframes against the "
+            f"current wave schedule; see the note above KEYFRAMES"
+        )
+    # And they must not bunch: five looks crammed into a quarter of the round is
+    # the same failure in a less obvious shape.
+    if _ts[-1] - _ts[0] < 0.4:
+        problems.append(
+            f"AtmosphereService's wave-anchored lighting keyframes span only "
+            f"{_ts[-1] - _ts[0]:.2f} of the round (waves {_anchors[0]} to {_anchors[-1]}) — they "
+            f"are bunched rather than spread, so the round changes light all at once and then "
+            f"holds. Re-anchor them against the current wave schedule"
+        )
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

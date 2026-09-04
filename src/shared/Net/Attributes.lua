@@ -192,6 +192,12 @@ Attributes.Game = table.freeze({
 	     finds out by spending a click on a refusal. One switch per requisition,
 	     with no exceptions, is also one fewer branch everywhere else. ]]
 	ReqAirdrop = "FL_ReqAirdrop", -- boolean
+
+	--[[ The one condition this round is fought under, or "". See
+	     Shared/Config/ModifierConfig: it is read by the Director, the atmosphere,
+	     the spawner, the crates and the HUD, which is exactly why it lives on
+	     Workspace rather than being handed to each of them. ]]
+	Modifier = "FL_Modifier", -- string, a ModifierConfig id or ""
 })
 
 --[[ Written on an ammo crate model. The client reads Spent to grey out a crate

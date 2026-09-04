@@ -96,6 +96,7 @@ local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
@@ -1255,10 +1256,20 @@ function DirectorService:_pickSpecial(): string?
 		if not definition then
 			continue
 		end
-		if infected and infected:getCount(id) >= definition.maxAlive then
+		--[[ The roster's ceiling, or the modifier's. EXPLODER INVASION lets five
+		     Boomers be alive against the config's two, and this is the test that
+		     would otherwise keep picking the third one and having
+		     InfectedService refuse it. ]]
+		local ceiling = ModifierConfig.maxAliveFor(Workspace, id, definition.maxAlive)
+		if infected and infected:getCount(id) >= ceiling then
 			continue
 		end
-		local weight = 1 / math.max(definition.spawnCost, 1)
+		--[[ And the modifier's thumb on the scale. A weight rather than a
+		     replacement, so EXPLODER INVASION is a round where Boomers dominate
+		     rather than a round with only Boomers in it — the other five still
+		     turn up, and a team that has stopped expecting a Hunter is a team a
+		     Hunter kills. ]]
+		local weight = ModifierConfig.specialWeightScale(Workspace, id) / math.max(definition.spawnCost, 1)
 		total += weight
 		table.insert(weights, { id = id, weight = weight })
 	end

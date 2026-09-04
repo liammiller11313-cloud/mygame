@@ -66,11 +66,13 @@
 local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
+local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local InfectedAnimator = require(script.Parent.InfectedAnimator)
 local RigUtil = require(Shared.Util.RigUtil)
@@ -224,10 +226,13 @@ function InfectedBrain.new(model: Model, definition: any)
 		-- for a while rather than instantly forgotten.
 		lastAwareAt = 0,
 
-		-- sprintChance is rolled ONCE, here. The mix of shamblers and sprinters
-		-- inside one crowd is what makes a horde read as a crowd rather than a
-		-- formation, and a zombie that changes its mind mid-street breaks it.
-		sprints = random:NextNumber() < (definition.sprintChance or 0),
+		--[[ sprintChance is rolled ONCE, here. The mix of shamblers and sprinters
+		     inside one crowd is what makes a horde read as a crowd rather than a
+		     formation, and a zombie that changes its mind mid-street breaks it.
+
+		     FAST ZOMBIES replaces the odds rather than nudging them: at 1.0 there
+		     is no mix left, which is the modifier saying so out loud. ]]
+		sprints = random:NextNumber() < ModifierConfig.sprintChance(Workspace, definition.sprintChance or 0),
 
 		-- Timers, all jittered so a batch of zombies spawned on one frame never
 		-- does the same expensive thing on the same later frame.
@@ -266,6 +271,23 @@ function InfectedBrain.new(model: Model, definition: any)
 		speed = -1,
 		autoRotate = true,
 	}, InfectedBrain)
+
+	--[[
+		FAST ZOMBIES, applied at the ONE place every speed this brain sets passes
+		through — see _setSpeed.
+
+		InfectedService scales the Humanoid's WalkSpeed at spawn, and that write
+		would be gone within a frame: the brain re-asserts a speed off the
+		definition every time it changes state, so a modifier applied only at
+		spawn is a modifier that lasts until the body first sees somebody. It has
+		to live on the brain because the brain is what keeps writing.
+
+		Commons only. The specials drive their own bodies through their own
+		modules and a Charger at 53 studs a second is not a horde modifier.
+	]]
+	self.speedScale = if definition.id == Enums.Infected.Common
+		then ModifierConfig.commonSpeedScale(Workspace)
+		else 1
 
 	self.chaseSpeed = if self.sprints then definition.runSpeed else definition.walkSpeed
 
@@ -570,7 +592,8 @@ function InfectedBrain:update(dt: number, snapshot: any)
 		One vector compare per body per tick, on the loop that is already running.
 	]]
 	if self.animator then
-		self.animator:update(self.definition.runSpeed)
+		-- Scaled with the body, or a sprinting Common under FAST ZOMBIES skates.
+		self.animator:update(self.definition.runSpeed * self.speedScale)
 	end
 
 	if self.paused then
@@ -1085,13 +1108,14 @@ function InfectedBrain:_setState(state: string)
 end
 
 function InfectedBrain:_setSpeed(speed: number)
+	local scaled = speed * self.speedScale
 	-- Humanoid.WalkSpeed replicates on every assignment. During a horde that is
 	-- 46 property replications a frame for values that did not change.
-	if math.abs(self.speed - speed) < 0.01 then
+	if math.abs(self.speed - scaled) < 0.01 then
 		return
 	end
-	self.speed = speed
-	self.humanoid.WalkSpeed = speed
+	self.speed = scaled
+	self.humanoid.WalkSpeed = scaled
 end
 
 function InfectedBrain:_setAutoRotate(enabled: boolean)

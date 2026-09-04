@@ -575,7 +575,11 @@ InfectedConfig.CommonTiers = table.freeze({
 ]]
 export type EliteTier = {
 	id: string,
-	displayName: string,
+	--[[ A PREFIX, not a name. It used to be "Apex Tank" because the finale was
+	     the only user; the ELITE WAVE modifier applies the same tier to a Witch,
+	     and a Witch announced as an Apex Tank is a callout that gets somebody
+	     killed. Composed with the kind's own displayName at every read. ]]
+	titlePrefix: string,
 	health: number, -- multiplier on the kind's health
 	damage: number, -- multiplier on the kind's attack damage
 	scale: number, -- multiplier on the kind's rig scale
@@ -586,7 +590,7 @@ export type EliteTier = {
 InfectedConfig.EliteTiers = table.freeze({
 	Apex = table.freeze({
 		id = "Apex",
-		displayName = "Apex Tank",
+		titlePrefix = "Apex",
 		health = 3.0,
 		damage = 1.35,
 		scale = 1.12,

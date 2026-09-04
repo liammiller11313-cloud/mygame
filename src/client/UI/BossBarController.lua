@@ -107,12 +107,13 @@ local state = {
 --[[ What this Tank is called. An Apex is called an Apex: a team that reads
      "TANK" on the finale brings the plan that worked on wave 5. ]]
 local function titleFor(model: Model): string
+	local definition = InfectedConfig.get(Attributes.get(model, IA.Kind, "") :: string)
+	local name = if definition then definition.displayName else "Tank"
 	local elite = InfectedConfig.elite(Attributes.get(model, IA.Elite, "") :: string)
 	if elite then
-		return string.upper(elite.displayName)
+		name = elite.titlePrefix .. " " .. name
 	end
-	local definition = InfectedConfig.get(Attributes.get(model, IA.Kind, "") :: string)
-	return string.upper(if definition then definition.displayName else "TANK")
+	return string.upper(name)
 end
 
 local function accentFor(model: Model): Color3
