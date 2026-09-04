@@ -138,6 +138,37 @@ for p, text in sources.items():
             if m.group(1) not in attr_groups[group]:
                 problems.append(f"{rel(p)}:{lineno(text, m.start())}  {alias}.{m.group(1)} (Attributes.{group}) does not exist")
 
+# ── 3b. UITheme, through an alias ───────────────────────────────────────────
+# The bug this exists for: `local LAYOUT = UITheme.Layout` and then
+# `LAYOUT.RowHeightTouch`, which lives on UITheme.Panel. Luau is happy — a
+# missing key is nil — and the failure lands three lines later as
+# `UDim2.fromOffset(138, nil)`, which throws at BUILD time and takes the whole
+# controller with it. stylua parses it, selene sees a defined name, and the
+# check that would have caught it only knew about Attributes.
+#
+# Same shape as check 3 above, and for the same reason: a theme table is a
+# frozen namespace read through a short alias in forty files, which is exactly
+# the shape where a key drifts to a neighbouring table and nothing notices.
+theme_text = read(SRC / "shared/Config/UITheme.lua")
+theme_groups = {}
+for m in re.finditer(r"UITheme\.(\w+)\s*=\s*table\.freeze\(\{(.*?)\n\}\)", theme_text, re.S):
+    theme_groups[m.group(1)] = set(re.findall(r"^\t(\w+)\s*=", m.group(2), re.M))
+
+theme_alias_re = re.compile(r"^local\s+(\w+)\s*=\s*UITheme\.(\w+)\s*$", re.M)
+for p, text in sources.items():
+    body = strip_comments(text)
+    for alias, group in theme_alias_re.findall(text):
+        if group not in theme_groups or not theme_groups[group]: continue
+        for m in re.finditer(rf"\b{alias}\.(\w+)", body):
+            key = m.group(1)
+            if key in theme_groups[group]: continue
+            owner = [g for g, keys in theme_groups.items() if key in keys]
+            where = f" — it is on UITheme.{owner[0]}" if owner else ""
+            problems.append(
+                f"{rel(p)}:{lineno(body, m.start())}  {alias}.{key} "
+                f"(UITheme.{group}) does not exist{where}"
+            )
+
 # ── 4. Registry ─────────────────────────────────────────────────────────────
 registered = collections.Counter()
 for p, text in sources.items():

@@ -71,6 +71,7 @@ local CANNOT_PLACE: { [string]: boolean } = {
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local LAYOUT = UITheme.Layout
+local PANEL = UITheme.Panel
 local TEXT = UITheme.TextSize
 
 local player = Players.LocalPlayer
@@ -78,12 +79,12 @@ local player = Players.LocalPlayer
 --[[ The card. Two lines — what it is, and whether you can use it — because
      under pressure a player reads the second one and nothing else. ]]
 local CARD_WIDTH = 138
---[[ LAYOUT.RowHeightTouch, not a number of its own, because on a phone the card
+--[[ PANEL.RowHeightTouch, not a number of its own, because on a phone the card
      IS the button — see `touch` in buildCard. A phone draws the whole interface
      at the 0.75 scale floor, so 56 reference pixels is 42 real ones, which is
      the smallest target this project asks a thumb to hit. It was 44, which is 33
      real: under the standard everything else on touch is held to. ]]
-local CARD_HEIGHT = LAYOUT.RowHeightTouch
+local CARD_HEIGHT = PANEL.RowHeightTouch
 local CARD_GAP = 6
 
 --[[ Where the stack sits: bottom-left, above the health block, opposite the
@@ -756,7 +757,7 @@ local function build()
 	reticleCancel = Widgets.button(reticle, "Cancel")
 	reticleCancel.AnchorPoint = Vector2.new(0.5, 0)
 	reticleCancel.Position = UDim2.new(0.5, 0, 1, LAYOUT.ElementGap)
-	reticleCancel.Size = UDim2.fromOffset(140, LAYOUT.RowHeightTouch)
+	reticleCancel.Size = UDim2.fromOffset(140, PANEL.RowHeightTouch)
 	reticleCancel.BackgroundColor3 = COLOR.PanelRaised
 	reticleCancel.BackgroundTransparency = 0.15
 	reticleCancel.Text = "CANCEL"
