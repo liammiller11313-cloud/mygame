@@ -37,6 +37,7 @@
 	pause away, where there is room to think about it.
 ]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -70,6 +71,22 @@ local player = Players.LocalPlayer
      owns the centre. ]]
 local CARD_WIDTH = 208
 
+--[[
+	Air between Roblox's own chrome and the top of this card.
+
+	The card is in the top-left corner and so is Roblox's unibar — the logo
+	button, the chat toggle, the party icons — and the HUD's ScreenGuis all set
+	IgnoreGuiInset, which is right for a crosshair and a vignette and wrong for
+	the one element that lives exactly where the platform draws its own.
+
+	So this element, alone, puts the inset back. GetGuiInset is asked at build
+	and again on every resize rather than hard-coded, because the answer is not a
+	constant: it is taller on a phone with a notch than on a desktop, and Roblox
+	has changed it more than once. The extra few pixels on top of it are so the
+	card sits UNDER the chrome rather than flush against it.
+]]
+local TOP_BAR_GAP = 6
+
 local LEVEL_HEIGHT = 18
 local BAR_HEIGHT = 4
 local ORDER_HEIGHT = 26
@@ -96,6 +113,21 @@ local FADE_SECONDS = 0.5
      Constant: it is the card's weight relative to its contents, and that ratio
      should not change when the card brightens. ]]
 local CARD_TRANSPARENCY = 0.3
+
+--[[
+	Where the card sits, in the scaled layer's reference pixels.
+
+	Roblox's inset arrives in REAL pixels and everything inside a ScaleLayer is
+	in reference pixels, so it has to be divided by the factor before it can be
+	added to a margin — adding the two spaces together is how a card ends up
+	correctly placed on a desktop and half a topbar too high on a phone.
+]]
+local function cardPosition(): UDim2
+	local inset = GuiService:GetGuiInset()
+	local factor = math.max(ScaleLayer.getFactor(), 0.01)
+	local top = LAYOUT.ScreenMargin + inset.Y / factor + TOP_BAR_GAP
+	return UDim2.fromOffset(LAYOUT.ScreenMargin, math.floor(top + 0.5))
+end
 
 local OrdersController = {}
 
@@ -281,7 +313,7 @@ local function build()
 	card.BackgroundTransparency = CARD_TRANSPARENCY
 	card.BorderSizePixel = 0
 	card.GroupTransparency = IDLE_TRANSPARENCY
-	card.Position = UDim2.fromOffset(LAYOUT.ScreenMargin, LAYOUT.ScreenMargin)
+	card.Position = cardPosition()
 	--[[ Height is the header plus three orders, written out of the same numbers
 	     the rows are built from rather than typed — the last three times a row
 	     changed shape in this project, a hand-written parent height did not. ]]
@@ -374,6 +406,32 @@ function OrdersController:init()
 end
 
 function OrdersController:start()
+	--[[ Re-placed on both of the things that can move it. The viewport changing
+	     changes the ScaleLayer factor the inset is divided by; the inset itself
+	     changes when Roblox's own chrome does, which it does on a phone rotating
+	     and has done between engine versions. Neither is frequent and both leave
+	     the card sitting under the platform's buttons if nothing listens. ]]
+	local function replace()
+		if card then
+			card.Position = cardPosition()
+		end
+	end
+	local camera = Workspace.CurrentCamera
+	if camera then
+		trove:connect(camera:GetPropertyChangedSignal("ViewportSize"), replace)
+	end
+	--[[ Guarded because TopbarInset is a property Roblox added, and asking for a
+	     changed signal on a name the running engine does not have throws. The
+	     card is placed correctly at build with or without this; the signal only
+	     keeps it correct when the platform's own chrome resizes underneath it, so
+	     losing it costs a re-place and not the controller. ]]
+	local ok, signal = pcall(function()
+		return GuiService:GetPropertyChangedSignal("TopbarInset")
+	end)
+	if ok and signal then
+		trove:connect(signal, replace)
+	end
+
 	--[[ Everything this draws is a mirror with a signal, so it redraws on the
 	     change rather than on a clock. `changed` covers a sync, a level, a Scrip
 	     spend and — through StatsUpdated — an order advancing. ]]

@@ -124,9 +124,8 @@ local function publishCooldown(player: Player, slot: number, readyAt: number)
 	end
 end
 
---[[ Every cooldown back to zero. A round ending has to clear them, or a player
-     who used a turret in the last ten seconds of one starts the next still
-     waiting for it. ]]
+--[[ Every cooldown back to zero, or a player who used a turret in the last ten
+     seconds of a round starts the next one still waiting for it. ]]
 local function clearCooldowns(player: Player)
 	cooldowns[player] = nil
 	for index = 1, AbilityConfig.SlotCeiling do
@@ -398,6 +397,30 @@ function AbilityService:start()
 	trove:connect(Players.PlayerRemoving, function(player: Player)
 		cooldowns[player] = nil
 		lastRequestAt[player] = nil
+	end)
+
+	--[[
+		And every round STARTS everybody clean, which the roundEnded handler below
+		does not cover on its own.
+
+		That one fires from endRound — a wipe or a victory — and is the normal
+		path. It is not the only one: a server that empties returns to the lobby
+		without ending a round, a player can leave a match and come back to a
+		fresh one, and a cooldown charged in either case survives into the next
+		round with nothing to clear it.
+
+		Cheap insurance while cooldowns were thirty seconds, and worth being sure
+		about at five minutes: against a seventeen-minute round, carrying one over
+		is a third of the next match spent waiting for something the player spent
+		the last one on.
+	]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
+		if Workspace:GetAttribute(GA.RoundState) ~= Enums.RoundState.Starting then
+			return
+		end
+		for _, player in Players:GetPlayers() do
+			clearCooldowns(player)
+		end
 	end)
 
 	--[[ A profile finishing its load is what makes the slots real. Without this

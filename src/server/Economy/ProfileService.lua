@@ -244,6 +244,24 @@ end
 	If a weapon's price is ever dropped to zero, everybody gets it immediately,
 	and a profile saved before that weapon existed is not permanently missing it.
 ]]
+--[[
+	Re-derives the cached equipped-ability pair from the active loadout.
+
+	`abilitySlots` is no longer the storage — the active loadout is — but it is
+	still what goes down the profile sync and into the save, because the ability
+	panel and every client that reads the payload already speak that shape. So it
+	is a MIRROR, and every path that can change which abilities are equipped has
+	to refresh it: equipping one, editing a loadout, and switching between them.
+
+	Kept rather than computed at the two payload sites so there is one place that
+	can be wrong instead of several, and so the saved profile carries a pair that
+	an older client — or a rollback — can still read.
+]]
+local function syncAbilityMirror(profile: Profile)
+	profile.abilitySlots =
+		LoadoutConfig.abilitiesOf(profile.loadouts[LoadoutConfig.clampIndex(profile.active)])
+end
+
 local function migrate(stored: any): Profile
 	local profile = blankProfile()
 	if typeof(stored) ~= "table" then
@@ -281,8 +299,43 @@ local function migrate(stored: any): Profile
 	     an ability equipped that it no longer owns. ]]
 	profile.abilitySlots = AbilityConfig.sanitiseSlots(stored.abilitySlots, profile.abilities)
 
-	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, profile.owned)
+	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, profile.owned, profile.abilities)
 	profile.active = LoadoutConfig.clampIndex(stored.active)
+
+	--[[
+		Abilities used to be one pair for the account and are now per loadout, and
+		this is the one line of migration that needed.
+
+		A profile saved before the change has loadouts with no ability keys at
+		all, which sanitise above turned into three loadouts of empty slots — so a
+		player who had bought and equipped two abilities would log in to find both
+		unequipped and nothing saying why. Seeding every loadout from the old
+		global pair means they log in with what they had, three times over, and
+		can then make them differ.
+
+		Only when a loadout has NOTHING equipped, so this cannot overwrite a
+		choice somebody has already made on a newer save. It stops mattering once
+		every profile has been through it, and costs one comparison until then.
+	]]
+	for index, loadout in profile.loadouts do
+		local empty = true
+		for _, id in LoadoutConfig.abilitiesOf(loadout) do
+			if id ~= LoadoutConfig.NoAbility then
+				empty = false
+				break
+			end
+		end
+		if empty then
+			local seeded = loadout
+			for slot, id in profile.abilitySlots do
+				if id ~= "" then
+					seeded = LoadoutConfig.withAbility(seeded, slot, id)
+				end
+			end
+			profile.loadouts[index] = LoadoutConfig.sanitise(seeded, profile.owned, profile.abilities)
+		end
+	end
+	syncAbilityMirror(profile)
 
 	profile.xp = storedNumber(stored.xp, ProgressionConfig.MaxXp)
 	profile.scrip = storedNumber(stored.scrip, ProgressionConfig.MaxScrip)
@@ -976,9 +1029,12 @@ function ProfileService:grantAbility(player: Player, id: string): boolean
 	return true
 end
 
+--[[ What the player takes into a round, which is now a property of the loadout
+     they are taking rather than of the account. Everything that asks this — the
+     HUD, the input dispatch, AbilityService's own validation — keeps asking the
+     same question and gets an answer that changes when they switch kits. ]]
 function ProfileService:getAbilitySlots(player: Player): { string }
-	local profile = profiles[player]
-	return if profile then profile.abilitySlots else AbilityConfig.sanitiseSlots(nil, nil)
+	return LoadoutConfig.abilitiesOf(self:activeLoadout(player))
 end
 
 --[[
@@ -999,20 +1055,22 @@ function ProfileService:setAbilitySlot(player: Player, slot: number, id: string)
 		return false
 	end
 
-	local next_ = table.clone(profile.abilitySlots)
-	--[[ Cleared from wherever it already was first. Without this, equipping
-	     slot 1's ability into slot 2 leaves it in both and sanitiseSlots — which
-	     keeps the FIRST occurrence — silently undoes the move. ]]
-	if id ~= "" then
-		for index, existing in next_ do
-			if existing == id then
-				next_[index] = ""
-			end
-		end
-	end
-	next_[slot] = id
+	--[[ Written into the ACTIVE loadout, which is where equipped abilities live.
+	     The ability panel and the loadout screen therefore edit the same thing
+	     through two different doors, and neither has to know the other exists.
 
-	profile.abilitySlots = AbilityConfig.sanitiseSlots(next_, profile.abilities)
+	     withAbility owns the move-rather-than-duplicate rule; sanitise re-checks
+	     ownership against the profile rather than trusting the caller, because
+	     the id came off a wire. ]]
+	local index = LoadoutConfig.clampIndex(profile.active)
+	local next_ = LoadoutConfig.withAbility(profile.loadouts[index], slot, id)
+	local cleaned = LoadoutConfig.sanitise(next_, profile.owned, profile.abilities)
+	if LoadoutConfig.equal(profile.loadouts[index], cleaned) then
+		return false
+	end
+
+	profile.loadouts[index] = cleaned
+	syncAbilityMirror(profile)
 	markChanged(player, profile, true)
 	return true
 end
@@ -1031,7 +1089,7 @@ function ProfileService:activeLoadout(player: Player): LoadoutConfig.Loadout
 	if not profile then
 		return LoadoutConfig.sanitise(nil, nil)
 	end
-	return LoadoutConfig.sanitise(profile.loadouts[profile.active], profile.owned)
+	return LoadoutConfig.sanitise(profile.loadouts[profile.active], profile.owned, profile.abilities)
 end
 
 function ProfileService:setLoadout(player: Player, index: number, loadout: any): boolean
@@ -1040,11 +1098,17 @@ function ProfileService:setLoadout(player: Player, index: number, loadout: any):
 		return false
 	end
 	local slot = LoadoutConfig.clampIndex(index)
-	local cleaned = LoadoutConfig.sanitise(loadout, profile.owned)
+	local cleaned = LoadoutConfig.sanitise(loadout, profile.owned, profile.abilities)
 	if LoadoutConfig.equal(profile.loadouts[slot], cleaned) then
 		return false
 	end
 	profile.loadouts[slot] = cleaned
+	--[[ An edit to the ACTIVE loadout can have changed its abilities, and the
+	     mirror is what the ability panel is reading. Refreshed unconditionally
+	     rather than only when slot == active: the cost is two table reads and
+	     the alternative is a branch that is wrong the first time somebody makes
+	     the active index change in the same breath. ]]
+	syncAbilityMirror(profile)
 	markChanged(player, profile, true)
 	return true
 end
@@ -1059,6 +1123,10 @@ function ProfileService:setActiveLoadout(player: Player, index: number): boolean
 		return false
 	end
 	profile.active = wanted
+	--[[ Switching kits switches abilities with them — that is the whole point of
+	     them living on the loadout — so the mirror the ability panel and the HUD
+	     read has to follow the switch. ]]
+	syncAbilityMirror(profile)
 	markChanged(player, profile, true)
 	return true
 end

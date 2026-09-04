@@ -37,6 +37,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local AbilityConfig = require(Shared.Config.AbilityConfig)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
@@ -52,6 +53,29 @@ LoadoutConfig.MaxLoadouts = 3
      they are drawn — which is also the order they are drawn from, longest reach
      to shortest. ]]
 LoadoutConfig.Slots = table.freeze({ Enums.Slot.Primary, Enums.Slot.Secondary, Enums.Slot.Melee })
+
+--[[
+	And the ability slots, which live in the same flat table as the weapons.
+
+	One map of key -> id rather than a weapons table beside an abilities table,
+	because everything that already exists for a loadout — the wire format, the
+	save, sanitise, equal, the copy-on-edit in the UI — then covers abilities for
+	free. Nothing had to learn that a loadout has two kinds of thing in it.
+
+	The keys are built from AbilityConfig.MaxSlots rather than written out, so
+	the day a third ability slot is allowed the loadout carries it without an
+	edit here.
+]]
+local ABILITY_SLOTS: { string } = {}
+for index = 1, AbilityConfig.MaxSlots do
+	table.insert(ABILITY_SLOTS, string.format("Ability%d", index))
+end
+LoadoutConfig.AbilitySlots = table.freeze(ABILITY_SLOTS)
+
+--[[ What an ability slot holds when it holds nothing. "" rather than nil, so a
+     loadout is always a complete table and the wire never has to distinguish
+     "empty" from "the field was dropped in transit". ]]
+LoadoutConfig.NoAbility = ""
 
 --[[
 	What everybody starts with, and what an invalid loadout falls back to.
@@ -130,7 +154,11 @@ end
 
 	Always returns a complete, legal loadout. There is no failure case by design.
 ]]
-function LoadoutConfig.sanitise(loadout: any, owned: { [string]: boolean }?): Loadout
+function LoadoutConfig.sanitise(
+	loadout: any,
+	owned: { [string]: boolean }?,
+	abilitiesOwned: { [string]: boolean }?
+): Loadout
 	local out: Loadout = {}
 	local source = if typeof(loadout) == "table" then loadout else {}
 
@@ -142,17 +170,83 @@ function LoadoutConfig.sanitise(loadout: any, owned: { [string]: boolean }?): Lo
 		out[slot] = if legal then wanted else LoadoutConfig.Default[slot]
 	end
 
+	--[[ Abilities go through AbilityConfig's own list sanitiser rather than being
+	     checked one at a time here, because the rule that matters is about the
+	     PAIR: the same ability must not end up in both slots. Checking each key
+	     in isolation cannot see that, and a loadout with Shield twice is a player
+	     who has silently thrown away a slot.
+
+	     Empty is a legal answer for an ability and is not for a weapon, which is
+	     the one place these two halves genuinely differ: everybody spawns with a
+	     gun, and nobody starts owning an ability. ]]
+	local pair = {}
+	for index, key in LoadoutConfig.AbilitySlots do
+		pair[index] = source[key]
+	end
+	local cleaned = AbilityConfig.sanitiseSlots(pair, abilitiesOwned)
+	for index, key in LoadoutConfig.AbilitySlots do
+		out[key] = cleaned[index] or LoadoutConfig.NoAbility
+	end
+
+	return out
+end
+
+--[[ A loadout's abilities in the array shape AbilityConfig and the HUD think
+     in. One direction only: the loadout is the storage, this is the view. ]]
+function LoadoutConfig.abilitiesOf(loadout: Loadout?): { string }
+	local out: { string } = {}
+	for index, key in LoadoutConfig.AbilitySlots do
+		local id = if loadout then loadout[key] else nil
+		out[index] = if typeof(id) == "string" then id else LoadoutConfig.NoAbility
+	end
+	return out
+end
+
+--[[
+	A COPY of `loadout` with one ability slot set, or cleared with "".
+
+	Copied rather than written in place for the reason the whole loadout screen
+	is: nothing edits a stored loadout, it builds a new one and sends it, so a
+	refused edit leaves nothing half-changed behind it.
+
+	Clearing the id from wherever it already was is what makes equipping slot 1's
+	ability into slot 2 a MOVE. Without it the id sits in both, and sanitiseSlots
+	— which keeps the first occurrence — silently undoes the half the player
+	actually asked for.
+]]
+function LoadoutConfig.withAbility(loadout: Loadout?, slot: number, id: string): Loadout
+	local out: Loadout = {}
+	for key, value in (loadout or {}) do
+		out[key] = value
+	end
+
+	if id ~= LoadoutConfig.NoAbility then
+		for _, key in LoadoutConfig.AbilitySlots do
+			if out[key] == id then
+				out[key] = LoadoutConfig.NoAbility
+			end
+		end
+	end
+
+	local key = LoadoutConfig.AbilitySlots[slot]
+	if key then
+		out[key] = id
+	end
 	return out
 end
 
 --[[ Three sanitised loadouts, whatever was stored. A profile with one loadout,
      five, or a string where a table should be all come back as exactly
      MaxLoadouts legal ones. ]]
-function LoadoutConfig.sanitiseAll(loadouts: any, owned: { [string]: boolean }?): { Loadout }
+function LoadoutConfig.sanitiseAll(
+	loadouts: any,
+	owned: { [string]: boolean }?,
+	abilitiesOwned: { [string]: boolean }?
+): { Loadout }
 	local out = {}
 	local source = if typeof(loadouts) == "table" then loadouts else {}
 	for index = 1, LoadoutConfig.MaxLoadouts do
-		out[index] = LoadoutConfig.sanitise(source[index], owned)
+		out[index] = LoadoutConfig.sanitise(source[index], owned, abilitiesOwned)
 	end
 	return out
 end
@@ -175,6 +269,14 @@ function LoadoutConfig.equal(a: Loadout?, b: Loadout?): boolean
 	end
 	for _, slot in LoadoutConfig.Slots do
 		if a[slot] ~= b[slot] then
+			return false
+		end
+	end
+	--[[ Abilities count. Without this an edit that changed ONLY an ability
+	     compared equal to what was stored, setLoadout returned false as "no
+	     change", and the slot the player just picked was never saved. ]]
+	for _, key in LoadoutConfig.AbilitySlots do
+		if a[key] ~= b[key] then
 			return false
 		end
 	end

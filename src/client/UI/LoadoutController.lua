@@ -37,6 +37,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local AbilityConfig = require(Shared.Config.AbilityConfig)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
@@ -83,6 +84,11 @@ local CARD_GAP = 10
 local BADGE_WIDTH = 46
 
 local SLOT_HEIGHT = 52
+--[[ Between two slot rows. A constant now rather than a 6 written into the
+     position expression, because the canvas the rows scroll inside has to add
+     it up and a gap that lives in two places is a gap that stops matching. ]]
+local ROW_GAP = 6
+local ACTIVE_HEIGHT = 38
 local PICK_ROW_HEIGHT = 38
 --[[
 	The touch sizes on this screen, measured rather than guessed.
@@ -210,6 +216,18 @@ local right: Frame
 local preview: WeaponPreview.Preview
 local previewMissing: TextLabel
 local slotRows: { any } = {}
+--[[ The rows scroll.
+
+     Three weapon slots fitted under the preview with the SET ACTIVE button
+     below them, and the comment on PREVIEW_HEIGHT records how tight that
+     already was on a phone — the bottom row "landed exactly on the SET ACTIVE
+     button" when melee made it three. Abilities make it five, and no amount of
+     shaving the picture makes five rows fit a 430-pixel panel.
+
+     So the rows live in a scroller sized to whatever space there is. It costs
+     one frame and stops this being a question every time the game grows another
+     thing worth carrying. ]]
+local slotScroll: ScrollingFrame
 local cards: { any } = {}
 local pickList: ScrollingFrame
 local pickTitle: TextLabel
@@ -307,6 +325,43 @@ local SLOT_LABEL = {
 	[Enums.Slot.Melee] = "MELEE",
 }
 
+--[[
+	Every row in the right-hand column, weapons then abilities.
+
+	One descriptor list rather than two loops, because a row is a row: the same
+	button, the same chevron, the same picker taking over the column when it is
+	pressed. What differs is where the id comes from and what the picker lists,
+	and that is two branches rather than a second half of this screen.
+
+	Abilities last and labelled by number. They are the part of a kit you choose
+	after the guns — and, unlike the guns, a slot is allowed to be empty.
+]]
+local ROWS: { { key: string, ability: number? } } = {}
+for _, slot in LoadoutConfig.Slots do
+	table.insert(ROWS, { key = slot, ability = nil })
+end
+for index, key in LoadoutConfig.AbilitySlots do
+	table.insert(ROWS, { key = key, ability = index })
+	SLOT_LABEL[key] = string.format("ABILITY %d", index)
+end
+
+--[[ The descriptor for a row key, or nil. The picker holds a KEY in
+     state.choosing and has to get back from it to what kind of thing it is
+     choosing. ]]
+local function rowFor(key: string): any
+	for _, entry in ROWS do
+		if entry.key == key then
+			return entry
+		end
+	end
+	return nil
+end
+
+--[[ What an empty ability slot reads as. Not "NONE" on its own: a row that says
+     nothing looks broken rather than available, and the whole point of showing
+     an empty slot is that it is an invitation. ]]
+local EMPTY_ABILITY = "— EMPTY —"
+
 local function slotLabel(slot: string): string
 	return SLOT_LABEL[slot] or string.upper(slot)
 end
@@ -360,17 +415,32 @@ end
 local function refreshSlots()
 	local loadout = editing()
 	for _, row in slotRows do
-		local weaponId = loadout[row.slot]
-		row.value.Text = weaponName(weaponId)
-		local definition = WeaponConfig.get(weaponId)
-		row.detail.Text = if definition
-			then string.format(
-				"%s · %d DMG · %d RPM",
-				string.upper(definition.class),
-				definition.damage,
-				definition.rpm
-			)
-			else ""
+		if row.ability then
+			--[[ An ability row shows its cooldown rather than its damage. That is
+			     the number a player is actually choosing between: what an ability
+			     does is one word they already know, and how often they get it is
+			     the decision. ]]
+			local id = loadout[row.slot]
+			local definition = if typeof(id) == "string" and id ~= "" then AbilityConfig.get(id) else nil
+			row.value.Text = if definition then definition.displayName else EMPTY_ABILITY
+			row.value.TextColor3 = if definition then COLOR.TextPrimary else COLOR.TextDim
+			row.detail.Text = if definition
+				then string.format("%d MIN COOLDOWN", math.max(definition.cooldown // 60, 1))
+				else "NOTHING EQUIPPED"
+		else
+			local weaponId = loadout[row.slot]
+			row.value.Text = weaponName(weaponId)
+			row.value.TextColor3 = COLOR.TextPrimary
+			local definition = WeaponConfig.get(weaponId)
+			row.detail.Text = if definition
+				then string.format(
+					"%s · %d DMG · %d RPM",
+					string.upper(definition.class),
+					definition.damage,
+					definition.rpm
+				)
+				else ""
+		end
 	end
 	--[[ The primary is what the preview shows by default: it is the weapon a
 	     player spends the round holding, and a sidearm in the window while the
@@ -396,15 +466,108 @@ local function chooseWeapon(slot: string, weaponId: string)
 	if not store or not store:owns(weaponId) then
 		return
 	end
+	--[[ Every key copied, not just the weapon slots. A loadout carries its two
+	     abilities in the same flat table, and a rebuild that walked only
+	     LoadoutConfig.Slots would send a loadout with no abilities in it — which
+	     sanitise would accept, and which would silently unequip both of them
+	     every time somebody changed a gun. ]]
 	local next_: LoadoutConfig.Loadout = {}
-	for _, each in LoadoutConfig.Slots do
-		next_[each] = editing()[each]
+	for key, value in editing() do
+		next_[key] = value
 	end
 	next_[slot] = weaponId
 
 	store:setLoadout(state.editing, next_)
 	UiSound.play(AudioConfig.UI.MenuConfirm)
 	LoadoutController:_closePicker()
+end
+
+--[[ The same job as chooseWeapon for the other half of a kit. withAbility owns
+     the copy and the move-rather-than-duplicate rule, so this is only the
+     ownership check and the send. "" is always allowed: clearing a slot is not
+     equipping anything and needs nothing to be owned. ]]
+local function chooseAbility(slot: number, abilityId: string)
+	local store = profile()
+	if not store then
+		return
+	end
+	if abilityId ~= LoadoutConfig.NoAbility and not store:ownsAbility(abilityId) then
+		return
+	end
+
+	store:setLoadout(state.editing, LoadoutConfig.withAbility(editing(), slot, abilityId))
+	UiSound.play(AudioConfig.UI.MenuConfirm)
+	LoadoutController:_closePicker()
+end
+
+--[[
+	One row of the ability picker.
+
+	Deliberately the same shape as the weapon row above it — name on the left,
+	state on the right, a locked row that opens the shop — because they are the
+	same question asked about a different noun, and a player who has learned one
+	list should not have to learn the other.
+
+	The blurb is the detail line rather than the price, because five abilities is
+	a short enough list to explain itself and a player choosing between SHIELD
+	and CRYO BLAST is choosing between two sentences.
+]]
+local function buildAbilityPickRow(slot: number, abilityId: string, index: number)
+	local store = profile()
+	local empty = abilityId == LoadoutConfig.NoAbility
+	local definition = if empty then nil else AbilityConfig.get(abilityId)
+	local owned = empty or (store ~= nil and store:ownsAbility(abilityId))
+	local height = if isTouch() then PICK_ROW_HEIGHT_TOUCH else PICK_ROW_HEIGHT
+
+	local button = Widgets.button(pickList, if empty then "None" else abilityId)
+	button.Size = UDim2.new(1, -(PANEL.ScrollBarWidth + LAYOUT.ElementGap), 0, height)
+	button.LayoutOrder = index
+	button.BackgroundColor3 = COLOR.TextPrimary
+	button.Selectable = owned == true
+
+	local name = Widgets.label(button, "Name", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	name.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 0)
+	name.Size = UDim2.new(0.42, 0, 1, 0)
+	name.Text = if definition then definition.displayName else EMPTY_ABILITY
+	name.TextColor3 = if owned then COLOR.TextPrimary else COLOR.TextDim
+
+	local status = Widgets.label(button, "Status", FONT.Body, TEXT.Small, COLOR.TextDim)
+	status.AnchorPoint = Vector2.new(1, 0)
+	status.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 0)
+	status.Size = UDim2.new(0.56, 0, 1, 0)
+	status.TextXAlignment = Enum.TextXAlignment.Right
+	status.TextTruncate = Enum.TextTruncate.AtEnd
+	if not owned and definition then
+		status.Text = "LOCKED · " .. EconomyConfig.format(definition.price)
+	elseif editing()[LoadoutConfig.AbilitySlots[slot]] == abilityId then
+		status.Text = "EQUIPPED"
+		status.TextColor3 = COLOR.Accent
+	elseif definition then
+		status.Text = definition.blurb
+	else
+		status.Text = "Carry nothing in this slot"
+	end
+
+	local rule = Widgets.frame(button, "Rule", COLOR.Border, 0.6)
+	rule.AnchorPoint = Vector2.new(0, 1)
+	rule.Position = UDim2.new(0, 0, 1, 0)
+	rule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
+
+	rowTrove:connect(button.Activated, function()
+		if owned then
+			chooseAbility(slot, abilityId)
+		else
+			--[[ Abilities are bought on their own panel, not in the weapon shop.
+			     Sending a player to the shop for one would be sending them to a
+			     screen that does not sell it. ]]
+			UiSound.play(AudioConfig.UI.MenuBack)
+			LoadoutController:close()
+			callController("AbilityPanelController", "open")
+		end
+	end)
+	if owned then
+		Widgets.rowHover(rowTrove, button)
+	end
 end
 
 local function buildPickRow(slot: string, weaponId: string, index: number)
@@ -470,22 +633,40 @@ function LoadoutController:_openPicker(slot: string)
 	state.choosing = slot
 	releasePickRows()
 
-	local candidates = LoadoutConfig.candidates(slot)
-	for index, weaponId in candidates do
-		buildPickRow(slot, weaponId, index)
+	local entry = rowFor(slot)
+	local count = 0
+	if entry and entry.ability then
+		--[[ Empty first, because it is the only row that is always available and
+		     because a player opening this to UNequip something should not have to
+		     scroll past five things they are not choosing. ]]
+		buildAbilityPickRow(entry.ability, LoadoutConfig.NoAbility, 1)
+		count = 1
+		for _, definition in AbilityConfig.Definitions do
+			count += 1
+			buildAbilityPickRow(entry.ability, definition.id, count)
+		end
+	else
+		local candidates = LoadoutConfig.candidates(slot)
+		for index, weaponId in candidates do
+			buildPickRow(slot, weaponId, index)
+		end
+		count = #candidates
 	end
 
 	local height = if isTouch() then PICK_ROW_HEIGHT_TOUCH else PICK_ROW_HEIGHT
 	pickList.CanvasPosition = Vector2.zero
-	pickList.CanvasSize = UDim2.fromOffset(0, #candidates * height)
-	pickTitle.Text = "CHOOSE A " .. slotLabel(slot)
+	pickList.CanvasSize = UDim2.fromOffset(0, count * height)
+	pickTitle.Text = "CHOOSE AN " .. slotLabel(slot)
+	if not (entry and entry.ability) then
+		pickTitle.Text = "CHOOSE A " .. slotLabel(slot)
+	end
 
 	pickList.Visible = true
 	pickTitle.Visible = true
 	pickBack.Visible = true
-	for _, row in slotRows do
-		row.button.Visible = false
-	end
+	--[[ The scroller goes, not just its rows: a hidden row inside a visible
+	     ScrollingFrame leaves an empty scrollbar down the side of the picker. ]]
+	slotScroll.Visible = false
 	activeButton.Visible = false
 
 	--[[
@@ -520,9 +701,7 @@ function LoadoutController:_closePicker()
 	pickList.Visible = false
 	pickTitle.Visible = false
 	pickBack.Visible = false
-	for _, row in slotRows do
-		row.button.Visible = true
-	end
+	slotScroll.Visible = true
 	activeButton.Visible = true
 
 	--[[ And back again, to the slot that was being edited rather than to nowhere.
@@ -762,9 +941,12 @@ local function buildCard(index: number, parent: Frame)
 	end)
 end
 
-local function buildSlotRow(index: number, slot: string)
-	local button = Widgets.button(right, "Slot" .. slot)
-	button.Position = UDim2.new(0, 0, PREVIEW_HEIGHT, (index - 1) * (SLOT_HEIGHT + 6))
+local function buildSlotRow(index: number, entry: any)
+	local slot = entry.key
+	local button = Widgets.button(slotScroll, "Slot" .. slot)
+	--[[ Offset only. The rows are inside a scroller now, so their y is measured
+	     from the top of the canvas rather than from a fraction of the column. ]]
+	button.Position = UDim2.fromOffset(0, (index - 1) * (SLOT_HEIGHT + ROW_GAP))
 	button.Size = UDim2.new(1, 0, 0, if isTouch() then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT)
 	button.BackgroundColor3 = COLOR.PanelRaised
 	button.BackgroundTransparency = PANEL.RaisedFill
@@ -792,16 +974,28 @@ local function buildSlotRow(index: number, slot: string)
 	chevron.TextXAlignment = Enum.TextXAlignment.Right
 	chevron.Text = ">"
 
-	slotRows[index] = { slot = slot, button = button, value = value, detail = detail, stroke = stroke }
+	slotRows[index] = {
+		slot = slot,
+		ability = entry.ability,
+		button = button,
+		value = value,
+		detail = detail,
+		stroke = stroke,
+	}
 
 	trove:connect(button.Activated, function()
 		UiSound.play(AudioConfig.UI.MenuHover)
 		LoadoutController:_openPicker(slot)
 	end)
 	Widgets.outlineHover(trove, button, stroke)
-	trove:connect(button.MouseEnter, function()
-		showPreviewFor(editing()[slot])
-	end)
+	--[[ Only a weapon row drives the preview. An ability has no model in
+	     Assets/Weapons, and asking for one would blank the window a player was
+	     using to look at the gun they had just picked. ]]
+	if not entry.ability then
+		trove:connect(button.MouseEnter, function()
+			showPreviewFor(editing()[slot])
+		end)
+	end
 end
 
 local function buildPanel(layer: Frame)
@@ -834,8 +1028,21 @@ local function buildPanel(layer: Frame)
 	previewMissing.TextXAlignment = Enum.TextXAlignment.Center
 	previewMissing.Visible = false
 
-	for index, slot in LoadoutConfig.Slots do
-		buildSlotRow(index, slot)
+	--[[ Sized to whatever is left between the preview and SET ACTIVE, and given a
+	     canvas the height of the rows themselves. Five rows do not fit a phone
+	     and the scroller is what makes that a scroll rather than a row drawn
+	     underneath a button. ]]
+	slotScroll = Widgets.scroller(right, "Slots")
+	slotScroll.Position = UDim2.new(0, 0, PREVIEW_HEIGHT, 0)
+	slotScroll.Size = UDim2.new(
+		1,
+		0,
+		1 - PREVIEW_HEIGHT,
+		-((if isTouch() then ACTIVE_HEIGHT_TOUCH else ACTIVE_HEIGHT) + LAYOUT.ElementGap)
+	)
+
+	for index, entry in ROWS do
+		buildSlotRow(index, entry)
 	end
 
 	activeButton = Widgets.button(right, "SetActive")
@@ -1221,15 +1428,34 @@ end
      on a desktop would otherwise get desktop-sized targets until they rejoin. ]]
 local function applyTouchSizing()
 	local touch = isTouch()
-	for _, row in slotRows do
-		row.button.Size = UDim2.new(1, 0, 0, if touch then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT)
+	local rowHeight = if touch then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT
+	local activeHeight = if touch then ACTIVE_HEIGHT_TOUCH else ACTIVE_HEIGHT
+
+	for index, row in slotRows do
+		row.button.Size = UDim2.new(1, 0, 0, rowHeight)
+		--[[ Re-POSITIONED as well as re-sized. The rows are laid out by offset
+		     from the top of the canvas, so a taller touch row that is not moved
+		     down is a row overlapping the one above it — which the three-row
+		     version got away with because 52 and 56 both fit inside the 58 it was
+		     spacing them by, and which stops being true the moment either number
+		     is touched. ]]
+		row.button.Position = UDim2.fromOffset(0, (index - 1) * (rowHeight + ROW_GAP))
 		local chevron = row.button:FindFirstChild("Chevron")
 		if chevron and chevron:IsA("GuiObject") then
-			chevron.Size = UDim2.fromOffset(16, if touch then SLOT_HEIGHT_TOUCH else SLOT_HEIGHT)
+			chevron.Size = UDim2.fromOffset(16, rowHeight)
 		end
 	end
+
+	--[[ And the canvas the rows scroll inside, which is the sum of them and has
+	     to be recomputed whenever either the count or the height changes. ]]
+	if slotScroll then
+		slotScroll.Size = UDim2.new(1, 0, 1 - PREVIEW_HEIGHT, -(activeHeight + LAYOUT.ElementGap))
+		slotScroll.CanvasSize =
+			UDim2.fromOffset(0, #slotRows * rowHeight + math.max(#slotRows - 1, 0) * ROW_GAP)
+	end
+
 	if activeButton then
-		activeButton.Size = UDim2.fromOffset(230, if touch then ACTIVE_HEIGHT_TOUCH else 38)
+		activeButton.Size = UDim2.fromOffset(230, activeHeight)
 	end
 	if pickBack then
 		pickBack.Size = if touch

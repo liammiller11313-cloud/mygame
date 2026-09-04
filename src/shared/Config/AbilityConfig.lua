@@ -53,7 +53,20 @@ export type Ability = {
 	displayName: string,
 	blurb: string, -- one line, what it DOES; read on a shop row
 	price: number, -- Dollars
-	cooldown: number, -- seconds, and the server owns the clock
+	--[[ Seconds, and the server owns the clock.
+
+	     Five minutes for all five, which against a 1020-second round is three or
+	     four uses of one ability in a whole match. That is the point: at
+	     thirty seconds a Shield was something you pressed whenever it was lit,
+	     and the interesting question about an ability is not whether to use it
+	     but WHEN. A number this long makes every activation a decision the
+	     player will remember making, and makes bringing two of them a real
+	     choice rather than a formality.
+
+	     It is per-ability rather than one shared constant so the spread can come
+	     back if it turns out an Airstrike and a Field Medic do not want the same
+	     clock. Today they all do. ]]
+	cooldown: number,
 	--[[ Whether activating it needs a point on the ground. The two that do put
 	     the client into a targeting mode first; the three that do not fire on
 	     the keypress. The SERVER re-validates the point either way. ]]
@@ -95,7 +108,7 @@ local DEFINITIONS: { Ability } = {
 		displayName = "SHIELD",
 		blurb = "A bubble that eats damage for you. Not for long.",
 		price = 500,
-		cooldown = 30,
+		cooldown = 300,
 		targeted = false,
 		range = 0,
 		tuning = table.freeze({
@@ -114,7 +127,7 @@ local DEFINITIONS: { Ability } = {
 		displayName = "TURRET",
 		blurb = "Drops a gun that watches an angle you cannot.",
 		price = 1_000,
-		cooldown = 45,
+		cooldown = 300,
 		--[[ Targeted, so it is PLACED rather than dropped at your feet. Where a
 		     turret stands is the whole skill of the ability — an angle it can see
 		     and the horde cannot reach — and an ability that put it in front of
@@ -150,7 +163,7 @@ local DEFINITIONS: { Ability } = {
 		displayName = "FIELD MEDIC",
 		blurb = "Patches up everyone standing near you, including you.",
 		price = 1_000,
-		cooldown = 40,
+		cooldown = 300,
 		targeted = false,
 		range = 0,
 		tuning = table.freeze({
@@ -168,7 +181,7 @@ local DEFINITIONS: { Ability } = {
 		displayName = "CRYO BLAST",
 		blurb = "Freezes a doorway solid. Buys the seconds you needed.",
 		price = 2_000,
-		cooldown = 50,
+		cooldown = 300,
 		targeted = true,
 		range = 90,
 		tuning = table.freeze({
@@ -191,7 +204,7 @@ local DEFINITIONS: { Ability } = {
 		displayName = "AIRSTRIKE",
 		blurb = "Marks a spot. Everything standing on it stops standing.",
 		price = 3_000,
-		cooldown = 90,
+		cooldown = 300,
 		targeted = true,
 		range = 140,
 		tuning = table.freeze({
