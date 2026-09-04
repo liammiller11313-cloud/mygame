@@ -207,8 +207,10 @@ local CLASS_POSE: { [string]: Pose } = {
 }
 
 --[[ Exceptions, keyed by weapon id, for the guns whose class pose is wrong for
-     them specifically. Kept as short as possible: an entry here is a promise to
-     retune it by hand every time the class pose moves. ]]
+     them specifically. Kept as short as possible: an entry written out here by
+     hand is a promise to retune it every time the class pose moves. The melee
+     family is added to this same table below, but GENERATED from one length
+     each, which is how five weapons avoid being five of those promises. ]]
 local WEAPON_POSE: { [string]: Pose } = {
 	-- A six-inch revolver is a hand longer than the 1911 and hangs heavier, so
 	-- it sits further out and further down than the rest of its class.
@@ -219,6 +221,71 @@ local WEAPON_POSE: { [string]: Pose } = {
 		length = 1.15,
 	},
 }
+
+--[[
+	How long each melee weapon actually is, in studs.
+
+	One class pose cannot serve these five, and the reason is `length` — which is
+	not decoration. It is what a SUPPLIED model is scaled to (see fitScale) and
+	what the grey-box is built to. With every melee weapon sharing the class's
+	1.6, a combat knife was fitted to the size of a machete and drawn as a slab
+	most of a metre long filling the bottom of the screen. That is the shape in
+	the report: not a pose problem, a units problem.
+
+	A bat is genuinely twice a knife, so the numbers are measured rather than
+	felt: a machete is about a forearm and a half, a fire axe and a bat are
+	two-handed tools most of a body-height long, a lead pipe sits between.
+]]
+local MELEE_LENGTH: { [string]: number } = {
+	[Enums.Weapon.Knife] = 0.9,
+	[Enums.Weapon.Machete] = 1.6,
+	[Enums.Weapon.LeadPipe] = 1.5,
+	[Enums.Weapon.FireAxe] = 2.0,
+	[Enums.Weapon.BaseballBat] = 2.1,
+}
+
+--[[
+	A melee pose for a weapon of that length, built rather than hand-written.
+
+	The angular argument in CLASS_POSE.Melee above is the whole point and it must
+	survive: every weapon in this game sits about 29 degrees off the centre line
+	horizontally and 26 vertically, and melee reads as a gun does because it obeys
+	that. So the ANGLES are fixed here and only the distance moves — a longer
+	weapon is pushed further from the eye, exactly as the LMG and the Marksman are
+	pushed past the rifle, and its offsets are then recomputed to hold the same
+	angle at the new distance.
+
+	Which means adding a sixth melee weapon is one number in the table above, and
+	moving the class pose is not a promise to retune five entries by hand.
+]]
+local MELEE_TAN_X = 0.554 -- tan(29°)
+local MELEE_TAN_Y = 0.488 -- tan(26°)
+--[[ Distance from the eye: a fixed near offset plus a share of the weapon's own
+     length. Fitted to the two poses that were already tuned by hand — the rifle
+     at 1.9/-1.6 and the LMG at 2.3/-1.85 — so the melee family lands in the same
+     band as the guns rather than in one of its own. ]]
+local MELEE_NEAR = 0.55
+local MELEE_REACH = 0.55
+--[[ Melee never aims, but the value is still blended toward whenever something
+     else pulls the pose in, so it sits slightly inboard of the hip the way every
+     gun's does. These are CLASS_POSE.Melee's own hip:aim ratios. ]]
+local MELEE_AIM_LATERAL = 0.83
+local MELEE_AIM_DEPTH = 0.93
+
+local function meleePose(length: number): Pose
+	local z = -(MELEE_NEAR + MELEE_REACH * length)
+	local hip = Vector3.new(-z * MELEE_TAN_X, z * MELEE_TAN_Y, z)
+	return {
+		hip = hip,
+		aim = Vector3.new(hip.X * MELEE_AIM_LATERAL, hip.Y * MELEE_AIM_LATERAL, hip.Z * MELEE_AIM_DEPTH),
+		tilt = CLASS_POSE.Melee.tilt,
+		length = length,
+	}
+end
+
+for weaponId, length in MELEE_LENGTH do
+	WEAPON_POSE[weaponId] = meleePose(length)
+end
 
 --[[ The pose for a weapon: its own if it has earned one, otherwise its class's.
      The class lookup is the one that must always resolve, so an unknown or
@@ -570,11 +637,14 @@ local function buildFallback(weaponId: string, definition: any, pose: Pose): Mod
 	if definition and definition.fireMode == "Melee" then
 		local grip =
 			block(built, "Handle", Vector3.new(0.16, 0.16, 0.25 * length), CFrame.new(), BLOCK_ACCENT)
+		--[[ Every dimension off `length`, including the blade's depth. It used to
+		     be a flat 0.42 studs tall whatever the weapon was, which is a machete's
+		     blade drawn on a combat knife. ]]
 		block(
 			built,
 			"Blade",
-			Vector3.new(0.06, 0.42, 0.75 * length),
-			CFrame.new(0, 0.12, -0.5 * length) * CFrame.Angles(math.rad(6), 0, 0),
+			Vector3.new(0.06, 0.26 * length, 0.75 * length),
+			CFrame.new(0, 0.075 * length, -0.5 * length) * CFrame.Angles(math.rad(6), 0, 0),
 			BLADE_COLOR
 		)
 		built.PrimaryPart = grip
@@ -648,7 +718,7 @@ local function asModel(entry: Instance?): Model?
 end
 
 --[[
-	The model for a weapon, out of ReplicatedStorage.Assets.Viewmodels.
+	The model for a weapon, out of ReplicatedStorage.Assets.
 
 	`modelName` is tried FIRST and that ordering is the entire reason the field
 	exists: the artist's PPSh is called "(71 Mag) PPSh-41", which matches neither
@@ -657,23 +727,26 @@ end
 	name follow for the grey-boxes PlaceholderFactory names after the enum, then
 	a whitespace- and case-insensitive sweep as a last resort for "AK 12" vs
 	"AK-12" and friends.
+
+	── AND THEN WEAPONS, IF VIEWMODELS HAS NOTHING ─────────────────────────────
+	Viewmodels first, always: an entry there is somebody deliberately authoring a
+	separate first-person model and it must win. But somebody who has built a
+	machete has built ONE machete, and the server already knows that — it falls
+	back to the world model when preparing a viewmodel for exactly this reason.
+
+	This is the same fallback on the reading side, and it exists because the two
+	halves could disagree. If anything at all stops the prepared viewmodel from
+	reaching Assets.Viewmodels — a name collision under park, a client that
+	resolved a weapon before the folder replicated — the user's own model is
+	sitting one folder over, already on this machine, and drawing a grey box
+	instead of using it is a worse answer than any argument for purity.
+
+	Safe because nothing here trusts what it finds: the clone is stripped of
+	scripts, anchored, made unqueryable and fitted to the pose regardless of which
+	folder it came out of. A world model is a prop; that is all either folder ever
+	holds.
 ]]
-local function findTemplate(weaponId: string, definition: any): Model?
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local folder = assets and assets:FindFirstChild("Viewmodels")
-	if not folder then
-		return nil
-	end
-
-	local keys = table.create(3)
-	if definition and definition.modelName then
-		table.insert(keys, definition.modelName)
-	end
-	table.insert(keys, weaponId)
-	if definition and definition.displayName then
-		table.insert(keys, definition.displayName)
-	end
-
+local function findIn(folder: Instance, keys: { string }): Model?
 	for _, key in keys do
 		local found = asModel(folder:FindFirstChild(key))
 		if found then
@@ -688,6 +761,33 @@ local function findTemplate(weaponId: string, definition: any): Model?
 	for _, child in folder:GetChildren() do
 		if wanted[normalise(child.Name)] then
 			local found = asModel(child)
+			if found then
+				return found
+			end
+		end
+	end
+	return nil
+end
+
+local function findTemplate(weaponId: string, definition: any): Model?
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	if not assets then
+		return nil
+	end
+
+	local keys = table.create(3)
+	if definition and definition.modelName then
+		table.insert(keys, definition.modelName)
+	end
+	table.insert(keys, weaponId)
+	if definition and definition.displayName then
+		table.insert(keys, definition.displayName)
+	end
+
+	for _, name in { "Viewmodels", "Weapons" } do
+		local folder = assets:FindFirstChild(name)
+		if folder then
+			local found = findIn(folder, keys)
 			if found then
 				return found
 			end

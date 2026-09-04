@@ -104,6 +104,15 @@ local variantRandom = Random.new()
 -- once at the end of ensureAssets: "12 of 16 weapons are yours" is the single
 -- most useful line in the output for somebody who has just dropped a folder of
 -- models in and wants to know whether the game found them.
+--[[ Which weapons fell back to a grey box, and what names were searched to get
+     there. The counts below say HOW MANY grey-boxed; this says WHICH, and with
+     what spelling — which is the only form of the answer a user can act on when
+     the model is sitting in the folder under a name nothing matches. ]]
+local greyBoxed: { [string]: { [string]: { string } } } = {
+	Weapons = {},
+	Viewmodels = {},
+}
+
 local resolved = {
 	Weapons = { real = 0, grey = 0 },
 	Viewmodels = { real = 0, grey = 0 },
@@ -2077,8 +2086,10 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 		driven by a CFrame every frame and leaving a world model loose to be welded
 		to a hand.
 	]]
+	local borrowed = false
 	if not supplied and viewmodel then
 		supplied = suppliedEntry("Weapons", names)
+		borrowed = supplied ~= nil
 	end
 
 	local prepared: Model? = nil
@@ -2106,6 +2117,17 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 		end
 		if prepared then
 			resolved[category].grey += 1
+			--[[ Deduped, because modelName and id are the same string for most of
+			     the roster and "searched for Knife, Knife, Combat Knife" reads as
+			     a bug in the message rather than as three spellings. ]]
+			local seen, tried = {}, {}
+			for _, name in { definition.modelName, definition.id, definition.displayName } do
+				if typeof(name) == "string" and name ~= "" and not seen[name] then
+					seen[name] = true
+					table.insert(tried, name)
+				end
+			end
+			greyBoxed[category][definition.id] = tried
 		end
 	end
 
@@ -2126,7 +2148,25 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 		grey-box, or a model kept in ServerStorage, is published — and a grey-box
 		is a handful of Parts.
 	]]
-	local reachable = supplied ~= nil and supplied:IsDescendantOf(ReplicatedStorage)
+	--[[
+		`borrowed` is why this is not just an IsDescendantOf test, and leaving it
+		out is what made "I gave you my melee models and I still cannot see them"
+		survive the fallback above.
+
+		The shortcut says: don't publish a second copy, the client can already
+		reach the user's own. True — but only for the folder the client actually
+		SEARCHES. ViewmodelController looks in Assets.Viewmodels and nowhere else,
+		so a machete supplied as Assets.Weapons.Machete inside ReplicatedStorage
+		took the fallback, prepared a perfectly good first-person model, counted
+		itself as real in the boot report, and then skipped publishing it — into
+		the one folder the first-person code reads. Grey box, no warning, and a
+		report line claiming the model had been found.
+
+		A borrowed viewmodel is therefore always published. It is not a duplicate
+		of anything the client can otherwise find: it is the only copy of that
+		model prepared for a hand rather than for the world.
+	]]
+	local reachable = not borrowed and supplied ~= nil and supplied:IsDescendantOf(ReplicatedStorage)
 	cache[definition.id] = park(category, definition.id, prepared, not reachable)
 	return prepared
 end
@@ -3575,6 +3615,38 @@ function PlaceholderFactory:ensureAssets()
 			table.concat(rigs, ", ")
 		)
 	)
+
+	--[[
+		WHICH weapons grey-boxed, and under what names they were looked for.
+
+		The count on the line above has never been enough to act on. "viewmodels
+		26 / 5" tells somebody who has just spent an evening building a machete
+		that five weapons are stand-ins and not which five, so the next step is
+		always to guess — and the usual answer, that the model is in the right
+		folder under a name nothing matches, is invisible from a number.
+
+		Printed for the first-person category only. A viewmodel falls back to the
+		world model, so anything listed here has no model in EITHER folder; adding
+		the world list as well would print most weapons twice and bury the one
+		list that is complete.
+	]]
+	local missingModels = {}
+	for weaponId, tried in greyBoxed.Viewmodels do
+		table.insert(missingModels, string.format("%s (searched: %s)", weaponId, table.concat(tried, ", ")))
+	end
+	if #missingModels > 0 then
+		table.sort(missingModels)
+		print(
+			string.format(
+				"[PlaceholderFactory] %d weapon(s) are drawn as grey-box stand-ins because no model "
+					.. "was found for them. Put yours in ServerStorage.Assets.Weapons (or "
+					.. "ReplicatedStorage.Assets.Weapons) named EXACTLY one of the names in brackets — "
+					.. "a Model or a Tool, either works. See docs/WEAPON_MODELS.md: %s",
+				#missingModels,
+				table.concat(missingModels, " · ")
+			)
+		)
+	end
 
 	--[[ Which rigs animate from their own clips and which fall back to this
 	     game's set. Both are correct; only one of them is visible from Studio. ]]

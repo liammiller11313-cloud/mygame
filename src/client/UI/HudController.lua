@@ -8,9 +8,10 @@
 	when it has something to say and then leaves. There is no minimap, no XP bar
 	and no border art, and that absence is the design, not an omission.
 
-	The top of the screen is shared: WaveController owns the round clock and the
-	wave pips up there and pushes its height down here through setTopInset, so
-	the objective line sits under the block instead of through it.
+	The top of the screen is shared, and TopStack is what shares it. WaveController
+	owns the round clock and the wave pips; the objective line claims a slot under
+	them and is told when a boss bar opens above it. See TopStack's header for why
+	that is a module and not three controllers adding numbers up.
 
 	── THE TWO-LAYER HEALTH BAR ────────────────────────────────────────────────
 	The single most recognisable element of the L4D HUD. Permanent health fills
@@ -43,9 +44,9 @@
 	── EVERYTHING IS DRAWN IN REFERENCE PIXELS ─────────────────────────────────
 	Every offset in this file is chosen against a 900px-tall viewport and drawn
 	inside a ScaleLayer, so it holds its proportions from a phone to a 4K
-	display. Parent new elements to `root`, never to `gui`. The pixel inset
-	WaveController pushes in through setTopInset is in the same space, which is
-	the only reason the two agree about where the top of the screen ends.
+	display. Parent new elements to `root`, never to `gui`. TopStack talks in the
+	same space, which is the only reason everything drawing at the top of the
+	screen agrees about where the top of the screen ends.
 
 	── PERFORMANCE ─────────────────────────────────────────────────────────────
 	One RenderStepped connection for the entire HUD. Bars chase their targets in
@@ -75,6 +76,7 @@ local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local TopStack = require(script.Parent.TopStack)
 local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
 
@@ -330,9 +332,6 @@ local state = {
 	     count sits still. Set by refreshAmmo, read by the frame loop. ]]
 	ammoEmpty = false,
 	objectiveText = "",
-	-- How much of the top of the screen WaveController has claimed. Pushed in
-	-- rather than read, so the HUD needs to know nothing about waves.
-	topInset = LAYOUT.ScreenMargin,
 	--[[ Set from InputController's scheme. The HUD is the same HUD on every
 	     device; this only moves things out from under the controls a touchscreen
 	     adds and drops the decoration a 390px-tall screen has no room for. ]]
@@ -1195,6 +1194,22 @@ end
 
 -- ── objective ───────────────────────────────────────────────────────────────
 
+--[[ Fixed, and claimed from TopStack whenever the line is on screen. The
+     progress bar underneath it is inside this height, so a line with a bar and a
+     line without one reserve the same strip and nothing below shuffles when a
+     wave objective happens to carry progress. ]]
+local OBJECTIVE_HEIGHT = 28
+
+--[[ Under whatever is above it right now — the wave block, plus a boss bar when
+     one is up. Re-read rather than remembered: a Tank arriving mid-wave moves
+     this line, and the alternative is the hand-passed pixel inset this replaced,
+     which only ever reached one of the three cards drawing up there. ]]
+local function positionObjective()
+	if objective then
+		objective.frame.Position = UDim2.new(0.5, 0, 0, TopStack.top("Objective"))
+	end
+end
+
 local function setObjective(text: string, progress: number?)
 	text = if typeof(text) == "string" then text else ""
 	local changed = text ~= state.objectiveText
@@ -1202,6 +1217,11 @@ local function setObjective(text: string, progress: number?)
 
 	objective.label.Text = string.upper(text)
 	objective.frame.Visible = text ~= ""
+	--[[ An empty objective gives its strip back, so the clue counter and the
+	     event banner close up under the clock instead of leaving a gap where a
+	     line used to be. ]]
+	TopStack.set("Objective", if text ~= "" then OBJECTIVE_HEIGHT else 0)
+	positionObjective()
 
 	--[[ The objective arrives twice — once as the attribute a late joiner reads,
 	     once as the remote that carries progress — and in either order. A call
@@ -1843,8 +1863,8 @@ end
 local function buildObjective()
 	local frame = Widgets.frame(root, "Objective", COLOR.Panel, 1)
 	frame.AnchorPoint = Vector2.new(0.5, 0)
-	frame.Position = UDim2.new(0.5, 0, 0, state.topInset)
-	frame.Size = UDim2.fromOffset(560, 28)
+	frame.Position = UDim2.new(0.5, 0, 0, TopStack.top("Objective"))
+	frame.Size = UDim2.fromOffset(560, OBJECTIVE_HEIGHT)
 	frame.Visible = false
 
 	local label = Widgets.label(frame, "Text", FONT.Heading, TEXT.Body, COLOR.Accent)
@@ -1967,23 +1987,13 @@ function HudController:setObjective(text: string, progress: number?)
 	setObjective(text, progress)
 end
 
---[[ Reserves the top of the screen for somebody else. WaveController's round
-     clock lives at the same margin the objective line used to own, and the
-     objective drops below whatever height it claims. ]]
-function HudController:setTopInset(pixels: number)
-	if typeof(pixels) ~= "number" then
-		return
-	end
-	state.topInset = math.max(pixels, LAYOUT.ScreenMargin) + LAYOUT.ElementGap
-	if objective then
-		objective.frame.Position = UDim2.new(0.5, 0, 0, state.topInset)
-	end
-end
-
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function HudController:init()
 	build()
+
+	-- Follow the wave block and the boss bar down whenever either moves.
+	trove:add(TopStack.onChanged(positionObjective))
 
 	for _, target in Players:GetPlayers() do
 		addPlayer(target)

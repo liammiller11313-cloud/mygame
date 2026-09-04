@@ -45,6 +45,7 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local TopStack = require(script.Parent.TopStack)
 local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
 
@@ -65,10 +66,6 @@ local FADE_SECONDS = 0.35
 
 local BANNER_WIDTH = 300
 local BANNER_HEIGHT = TEXT.Body + 14
-
---[[ How far below the round block it sits. Enough to read as a separate thing
-     rather than as a fourth line of the block. ]]
-local BANNER_GAP = 8
 
 --[[ Which events make it rain, and how hard. Fog is not here on purpose: fog is
      a grade on the sky and drawing particles for it as well would be the same
@@ -111,29 +108,13 @@ local hideAt = 0
 	wave 5, so a banner over a boss health bar was going to happen in most
 	rounds that saw both.
 
-	So the boss bar is asked how much room it is taking, which is 0 when no boss
-	is up. Recomputed on every show rather than cached, because a Tank can arrive
-	between two events.
+	TopStack settles it, and settles the other two cards that draw up here as
+	well. The banner takes the LAST slot on purpose: it lives for four seconds,
+	and a transient card above the objective line and the clue counter would shove
+	both of them down and back up again every time an event fired.
 ]]
 local function bannerY(): number
-	local reserved = LAYOUT.ScreenMargin + BANNER_HEIGHT
-	local waves = Registry.find("WaveController")
-	if waves and typeof(waves.getReservedTopHeight) == "function" then
-		local ok, height = pcall(waves.getReservedTopHeight, waves)
-		if ok and typeof(height) == "number" then
-			reserved = height
-		end
-	end
-
-	local boss = Registry.find("BossBarController")
-	if boss and typeof(boss.getReservedExtra) == "function" then
-		local ok, extra = pcall(boss.getReservedExtra, boss)
-		if ok and typeof(extra) == "number" then
-			reserved += extra
-		end
-	end
-
-	return reserved + BANNER_GAP
+	return TopStack.top("Event")
 end
 
 local function hide()
@@ -147,6 +128,7 @@ local function hide()
 		     would otherwise be taken down by the first one's timer. ]]
 		if banner and hideAt == 0 then
 			banner.Visible = false
+			TopStack.set("Event", 0)
 		end
 	end)
 end
@@ -156,6 +138,7 @@ local function show(name: string)
 		return
 	end
 	bannerLabel.Text = string.format("\240\159\154\168 RANDOM EVENT \240\159\154\168  %s", string.upper(name))
+	TopStack.set("Event", BANNER_HEIGHT)
 	banner.Position = UDim2.new(0.5, 0, 0, bannerY())
 	banner.Visible = true
 	banner.GroupTransparency = 1
@@ -354,6 +337,15 @@ function EventController:init()
 end
 
 function EventController:start()
+	--[[ A Tank can arrive during the banner's four seconds, and the boss bar
+	     opening above it moves everything below. Without this the banner would
+	     stay where it was posted and the bar would be drawn through it. ]]
+	trove:add(TopStack.onChanged(function()
+		if banner and banner.Visible then
+			banner.Position = UDim2.new(0.5, 0, 0, bannerY())
+		end
+	end))
+
 	trove:connect(Remotes.Event.RandomEvent.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" or typeof(payload.name) ~= "string" then
 			return

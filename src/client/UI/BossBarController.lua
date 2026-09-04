@@ -48,6 +48,7 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local TopStack = require(script.Parent.TopStack)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -121,34 +122,22 @@ local function accentFor(model: Model): Color3
 	return if elite then elite.outlineColor else COLOR.Danger
 end
 
---[[ Where the top of the screen ends. WaveController owns that number and the
-     HUD already asks it for the same one, so this asks too rather than adding a
-     third opinion about where the clock block finishes. ]]
-local function reservedTop(): number
-	local waves = Registry.find("WaveController")
-	if waves and typeof(waves.getReservedTopHeight) == "function" then
-		local ok, value = pcall(waves.getReservedTopHeight, waves)
-		if ok and typeof(value) == "number" then
-			return value
-		end
-	end
-	return LAYOUT.ScreenMargin
-end
+--[[ Claim the top strip while the bar is up, and give it back when it is not.
 
---[[ Push the objective line down past the bar while it is up, and let it back
-     when it is not. WaveController sets the resting value once at start and
-     never touches it again, so an additive push here is safe — but it is
-     RESTORED rather than remembered, so a fault that leaves this module wedged
-     cannot leave the HUD permanently indented. ]]
+     This used to reach into HudController and push a pixel inset at it by hand,
+     which worked for the objective line and for nothing else: the clue counter
+     and the event banner draw in the same strip and never heard about it. The
+     boss now claims a SLOT and everything below it is told, so a Tank arriving
+     moves all three instead of one.
+
+     Released rather than remembered, as before — a fault that leaves this module
+     wedged must not leave the rest of the HUD permanently indented. ]]
 local function pushInset(extra: number)
 	if state.inset == extra then
 		return
 	end
 	state.inset = extra
-	local hud = Registry.find("HudController")
-	if hud and typeof(hud.setTopInset) == "function" then
-		pcall(hud.setTopInset, hud, reservedTop() + extra)
-	end
+	TopStack.set("Boss", extra)
 end
 
 local function healthOf(model: Model): (number, number)
@@ -242,7 +231,8 @@ local function follow(model: Model?)
 	targetTrove:connect(model:GetAttributeChangedSignal(IA.MaxHealth), refreshHealth)
 
 	gui.Enabled = true
-	pushInset(BLOCK_HEIGHT + LAYOUT.ElementGap)
+	-- The height only. TopStack owns the gap between slots now.
+	pushInset(BLOCK_HEIGHT)
 end
 
 -- ── the folder ──────────────────────────────────────────────────────────────
@@ -385,20 +375,11 @@ end
      one is sized from the wave COUNT, so a schedule change moves it. ]]
 local function reposition()
 	if block then
-		block.Position = UDim2.new(0.5, 0, 0, reservedTop() + LAYOUT.ElementGap)
+		block.Position = UDim2.new(0.5, 0, 0, TopStack.top("Boss"))
 	end
 end
 
 -- ── lifecycle ───────────────────────────────────────────────────────────────
-
---[[ How much room this is taking under the wave block right now, or 0. Asked by
-     anything else that draws below it — see EventController's banner, which
-     would otherwise be laid straight over a Tank's health bar, since both anchor
-     to the same reserved top. Nobody has to know whether a boss is up; they ask
-     for a number and add it. ]]
-function BossBarController:getReservedExtra(): number
-	return state.inset
-end
 
 function BossBarController:init()
 	build()

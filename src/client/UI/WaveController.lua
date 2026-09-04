@@ -752,13 +752,6 @@ function WaveController:start()
 	     through the whole of prep. ]]
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.ReadyHold), refresh)
 	trove:connect(RunService.RenderStepped, update)
-
-	-- The HUD was laid out before this block existed, so it is told rather than
-	-- asked: it has no reason to know what a wave is.
-	local hud = Registry.find("HudController")
-	if hud and typeof(hud.setTopInset) == "function" then
-		pcall(hud.setTopInset, hud, self:getReservedTopHeight())
-	end
 end
 
 --[[ Attributes only fire their changed signal on the NEXT write, so a player

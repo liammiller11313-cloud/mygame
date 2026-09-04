@@ -104,15 +104,25 @@ local ORDER_GAP = 3
 	strength. A CanvasGroup composites the whole card and then fades the result,
 	which is the only way the numbers go quiet with the box they sit in.
 ]]
-local IDLE_TRANSPARENCY = 0.55
+--[[ Idle was 0.55, which reads beautifully against the inside of a building and
+     not at all against the sky. Clinton's street is bright cloud for most of its
+     height and the card sat on top of it at 45% — three order lines in dim grey
+     over white. Raised until it survives the worst background in the game, which
+     is the only background worth tuning it against; the gap to LIVE is still
+     wide enough to see the card answer you. ]]
+local IDLE_TRANSPARENCY = 0.42
 local LIVE_TRANSPARENCY = 0.0
 local PULSE_SECONDS = 2.2
 local FADE_SECONDS = 0.5
 
 --[[ The panel's own backing, which the group transparency is applied on top of.
      Constant: it is the card's weight relative to its contents, and that ratio
-     should not change when the card brightens. ]]
-local CARD_TRANSPARENCY = 0.3
+     should not change when the card brightens.
+
+     Darker than it was, for the same reason as above: the backing is what gives
+     the text something that is not sky to sit on, and at 0.3 under a 0.55 group
+     fade there was effectively nothing there. ]]
+local CARD_TRANSPARENCY = 0.2
 
 --[[
 	Where the card sits, in the scaled layer's reference pixels.

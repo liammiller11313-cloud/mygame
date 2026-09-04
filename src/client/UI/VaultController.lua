@@ -44,6 +44,7 @@ local UITheme = require(Shared.Config.UITheme)
 local FreeCursor = require(script.Parent.FreeCursor)
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
+local TopStack = require(script.Parent.TopStack)
 local UiSound = require(script.Parent.UiSound)
 local Widgets = require(script.Parent.Widgets)
 
@@ -78,10 +79,15 @@ local CLUE_LINE_SECONDS = 3
 --[[ The clue counter, top-centre under the wave banner. Its own small card
      rather than a line in the objective, because the objective is rewritten on
      every wave edge and a side objective that got overwritten by "WAVE 4" would
-     be a counter nobody could rely on. ]]
+     be a counter nobody could rely on.
+
+     Its Y used to be the literal number 96, which is how it came to be drawn
+     THROUGH the round block and the objective line at once — the wave block is
+     22 + 96 tall on its own before a modifier, so the card was landing inside it
+     rather than under it, and nothing about a fixed pixel could ever have
+     followed a boss bar opening above. It claims a TopStack slot now. ]]
 local TRACKER_WIDTH = 250
 local TRACKER_HEIGHT = 52
-local TRACKER_Y = 96
 local TRACKER_FLASH = 1.6
 local TRACKER_IDLE = 0.45
 local TRACKER_LIVE = 0.0
@@ -273,9 +279,13 @@ local function refreshTracker()
 	     thing on the screen. ]]
 	local wanted = total > 0 and not solved
 	trackerGui.Enabled = wanted
+	--[[ Claimed only while the card is on screen, so a map with no vault leaves
+	     the event banner sitting straight under the objective line. ]]
+	TopStack.set("Clues", if wanted then TRACKER_HEIGHT else 0)
 	if not wanted then
 		return
 	end
+	trackerCard.Position = UDim2.new(0.5, 0, 0, TopStack.top("Clues"))
 
 	trackerCount.Text = string.format("CLUES  %d/%d", found, total)
 	if found >= total then
@@ -422,7 +432,7 @@ local function buildTracker()
 	trackerCard = Instance.new("CanvasGroup")
 	trackerCard.Name = "Card"
 	trackerCard.AnchorPoint = Vector2.new(0.5, 0)
-	trackerCard.Position = UDim2.new(0.5, 0, 0, TRACKER_Y)
+	trackerCard.Position = UDim2.new(0.5, 0, 0, TopStack.top("Clues"))
 	trackerCard.Size = UDim2.fromOffset(TRACKER_WIDTH, TRACKER_HEIGHT)
 	trackerCard.BackgroundColor3 = COLOR.Panel
 	trackerCard.BackgroundTransparency = 0.3
@@ -554,6 +564,15 @@ end
 
 function VaultController:init()
 	build()
+
+	--[[ A boss bar or an objective line opening above the card moves it down.
+	     Only while it is up: a hidden card has claimed nothing and has nothing
+	     to reposition. ]]
+	trove:add(TopStack.onChanged(function()
+		if trackerCard and trackerGui and trackerGui.Enabled then
+			trackerCard.Position = UDim2.new(0.5, 0, 0, TopStack.top("Clues"))
+		end
+	end))
 end
 
 function VaultController:start()
