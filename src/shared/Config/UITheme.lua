@@ -166,13 +166,30 @@ UITheme.Backdrop = table.freeze({
 	     spends seventeen minutes taking it away. ]]
 	Tint = Color3.fromRGB(178, 138, 96),
 
-	--[[ How black the sheet over the image sits, at the bulb's darkest and its
-	     brightest. Transparency, so the BIGGER number is the brighter screen.
+	--[[
+		How black the sheet over the image sits, at the bulb's darkest and its
+		brightest. Transparency, so the BIGGER number is the brighter screen.
 
-	     Lighter than it looks like it should be, because the sheet is not what
-	     makes the type readable — the vignette is. See VignetteExtent. ]]
-	DimDark = 0.18,
-	DimBright = 0.44,
+		0.44 first, on the argument that the vignette is what makes the type
+		readable and the sheet could afford to be light. That argument holds at
+		the EDGES and does not hold in the middle: 56% darkened is fine behind
+		nothing and marginal behind anything the menu ever grows into the centre
+		band, and a background that looks good in isolation and costs a word of
+		the interface has failed.
+
+		0.32 takes the centre to 68% darkened and the two text columns to 90%.
+		The bulb is still clearly the brightest thing on the screen — it is a
+		light source against black, so it survives a lot of scrim — and the type
+		now has room whatever ends up drawn over it.
+
+		DimDark moves with it. What sells the flicker is the RATIO between these
+		two, not the gap: dropping only the bright end would have made every
+		stutter shallower as a side effect of a readability fix, which is the
+		kind of change nobody connects to the thing that caused it. 0.32/0.13 is
+		the 2.4 the first pass had.
+	]]
+	DimDark = 0.13,
+	DimBright = 0.32,
 
 	--[[ How much of the tint the flicker takes away at its lowest. Not all of it:
 	     a bulb that goes to pure black reads as the game crashing, and the
@@ -189,10 +206,11 @@ UITheme.Backdrop = table.freeze({
 		inside a 0.34 vignette — at 9% across the falloff is still about 70%
 		black, which is plenty under white headline type.
 
-		That is why the flat sheet above can afford to be light. The centre band,
-		where the bulb actually is and where the menu writes nothing, gets only
-		the sheet — so the picture is brightest exactly where there is nothing to
-		read over it and darkest exactly where there is.
+		The centre band, where the bulb actually is and where the menu writes
+		nothing, gets only the sheet — so the picture is brightest exactly where
+		there is nothing to read over it and darkest exactly where there is. With
+		the sheet at 0.32 that is 90% darkened under both columns against 68% in
+		the middle.
 
 		Anything that moves COLUMN_X has to come back to this number.
 	]]
