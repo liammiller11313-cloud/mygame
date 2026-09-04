@@ -264,6 +264,10 @@ AmmoConfig.Weapons = {
 	     that exists reads better than a right one that grey-boxes. ]]
 	[Enums.Weapon.M249] = { casing = "556", magazine = "DrumMag" },
 	[Enums.Weapon.M60E4] = { casing = "762", magazine = "DrumMag" },
+	--[[ Genuinely nothing. It burns fuel: there is no case to eject and no
+	     magazine to drop, and the empty row is how "has none" stays
+	     distinguishable from "was forgotten". ]]
+	[Enums.Weapon.Flamethrower] = { casing = "", magazine = "" },
 
 	[Enums.Weapon.ScopedMk18] = { casing = "556", magazine = "StanagMag" },
 	[Enums.Weapon.M1AEBR] = { casing = "762", magazine = "MarksmanMag" },

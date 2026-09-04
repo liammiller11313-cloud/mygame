@@ -217,6 +217,8 @@ local EVENTS: { string } = {
 	"CollectClue", -- C->S (clue: Instance)
 	"ClueResult", -- S->asker {ok, order, found, total, text?, headline?, reason?}
 	"ClueFound", -- S->all {player, order, found, total, prompt}
+	"ClaimStockpile", -- C->S (stockpile: Instance)
+	"StockpileClaimed", -- S->all {player: Player, dollars: number}
 	"SubmitVaultCode", -- C->S {code: string}
 	"VaultCodeResult", -- S->asker {ok: boolean, reason: string, retryAt: number}
 	"VaultOpened", -- S->all {player: Player, position: Vector3?}

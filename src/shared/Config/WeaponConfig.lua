@@ -118,10 +118,33 @@ export type WeaponDefinition = {
 	     ten won rounds, and a Director that hands one out free on a shelf has not
 	     made it a bit cheaper, it has made the price meaningless. ]]
 	placeable: boolean?,
+	--[[ Whether landing a shot sets the target on fire, through the same
+	     InfectedService:ignite the molotov and the Incendiary requisition use.
+	     Nil on every gun: bullets do not light people, and a flag that defaulted
+	     the other way would be a design change disguised as a type. ]]
+	ignites: boolean?,
+	--[[
+		Whether this weapon is FOUND rather than bought.
+
+		A floor-only weapon is deliberately absent from EconomyConfig.Catalogue —
+		it cannot be purchased, cannot be put in a loadout, and exists in exactly
+		one place in the world. InventoryService:pickup reads FL_Slot and
+		FL_ItemId and never asks whether the player owns anything, so the pickup
+		path works without a catalogue row; the LOADOUT path does not, which is
+		the whole point.
+
+		Declared rather than inferred, because "not in the catalogue" is far more
+		often a mistake than an intention — audit.py fails every other weapon for
+		it and honours this flag as the one way to say you meant it.
+	]]
+	floorOnly: boolean?,
 }
 
 local WHITE_HOT = Color3.fromRGB(255, 236, 190)
 local AMBER = Color3.fromRGB(255, 196, 92)
+--[[ Deeper and redder than a tracer, because it is not one. See the
+     Flamethrower: twelve fat short ones of these a shot is the flame. ]]
+local FLAME = Color3.fromRGB(255, 122, 40)
 
 local WeaponConfig = {}
 
@@ -2256,6 +2279,125 @@ WeaponConfig.Definitions = {
 		gibPower = 0.1,
 		dismemberPower = 0.85,
 		knockback = 18,
+	},
+	--[[
+		The flamethrower. Not sold anywhere, and the only weapon in the game whose
+		damage is mostly what happens after it hits.
+
+		── WHY IT IS AN "AUTO" AND NOT A FIFTH FIRE MODE ────────────────────────
+		A continuous stream sounds like new machinery and is not. Twelve pellets a
+		shot at 600rpm inside a 22-degree cone that stops at 42 studs IS a cone of
+		fire, drawn by the tracer pool that already exists, hit-tested by the
+		ballistics that already exist, and falling off at a range the config
+		already understands. A fifth firing path would have bought a slightly
+		better-looking flame and a second copy of every hit rule.
+
+		── THE DAMAGE IS DELIBERATELY BAD ──────────────────────────────────────
+		2 per pellet, eight pellets, ten times a second: 160 a second against a
+		body that is touching you. The shotgun does 288 and the M249 does 373, so
+		this is the WORST close-range weapon in the game measured the way weapons
+		are usually measured — and by 42 studs falloffMin has taken it to 24.
+
+		That is correct, and it is worth stating because the first version of
+		these numbers was 480 and quietly made a vault reward the best gun in the
+		building. The number that matters is `ignites`: a burning Common takes
+		25-45 a second until it dies whatever you do next, and eight pellets
+		cannot stack that because InfectedService:ignite refuses a body already
+		alight. The weapon's job is to set a crowd on fire and get out of the way,
+		not to kill the thing in front of it.
+
+		It cannot light a boss — DamageService refuses that for the same reason
+		the Incendiary requisition does, and the Apex is why.
+
+		── AND IT HOLDS 100 WITH NO RESERVE ────────────────────────────────────
+		A tank of fuel, and when it is gone it is gone: there is no flamethrower
+		ammunition anywhere in the game and an ammo crate will not refill it. One
+		vault, one tank, and the decision of which wave to spend it on.
+	]]
+	[Enums.Weapon.Flamethrower] = {
+		id = Enums.Weapon.Flamethrower,
+		displayName = "Flamethrower",
+		modelName = "Flamethrower",
+		slot = Enums.Slot.Primary,
+		class = "Special",
+		fireMode = "Auto",
+
+		damage = 2,
+		rpm = 600,
+		--[[ Eight, not twelve. The cone reads the same and the arithmetic does
+		     not: see the header for what twelve did. ]]
+		pellets = 8,
+		--[[ Ten seconds of fuel at 600rpm, and no way to get more. A burst of
+		     power you found once, spent on the wave you chose. ]]
+		magSize = 100,
+		--[[ Nothing. See the header: an ammo crate refills a reserve, and a
+		     flamethrower that could be topped up at a crate would be a permanent
+		     upgrade rather than a thing you found once. ]]
+		reserveMax = 0,
+		penetration = 3,
+		penetrationFalloff = 1.0,
+
+		--[[ Falls off almost immediately and is worthless past forty studs. Fire
+		     is a room-clearing weapon and a flamethrower that reached across a
+		     street would replace every other primary. ]]
+		falloffStart = 18,
+		falloffEnd = 42,
+		falloffMin = 0.15,
+		maxRange = 42,
+
+		--[[ A wide cone rather than a spread. Aiming does not tighten it much,
+		     because pointing a flamethrower carefully is not a skill the weapon
+		     has — the cone IS the weapon. ]]
+		spreadHip = 11.0,
+		spreadAim = 8.0,
+		spreadMoving = 12.0,
+		spreadMax = 13.0,
+		bloomPerShot = 0.0,
+		bloomRecovery = 8.0,
+
+		--[[ Almost no recoil. There is no bullet leaving it, and a kick would
+		     make the one thing it does — hold a cone on a doorway — fight the
+		     player holding it. ]]
+		recoilVertical = 0.12,
+		recoilHorizontal = 0.06,
+		recoilRecovery = 12.0,
+		kickback = 0.05,
+
+		reloadTime = 4.2,
+		reloadPerShell = 0,
+		drawTime = 1.0,
+		aimTime = 0.4,
+
+		walkSpeedScale = 0.9,
+		aimWalkSpeedScale = 0.6,
+		aimFov = 68,
+
+		shakeMagnitude = 0.35,
+		shakeRoughness = 6,
+		--[[ Fat, short and orange. Eight of these a shot inside a 22-degree cone
+		     is what makes the tracer pool read as fire rather than as gunfire. ]]
+		tracerWidth = 0.5,
+		tracerColor = FLAME,
+		muzzleFlashSize = 2.4,
+		shellEject = false,
+
+		--[[ It sets things alight and it does not blow them apart. A body that
+		     burned to death should be a charred body, which is what GoreConfig
+		     already draws for a burn kill. ]]
+		gibPower = 0.0,
+		dismemberPower = 0.0,
+		knockback = 4,
+
+		--[[ The whole point of the weapon, and the one line that makes it one.
+		     See DamageService: the same ignite the molotov uses. ]]
+		ignites = true,
+
+		--[[ Never on a shop shelf and never on an item pad. It exists in exactly
+		     one place — the floor of the vault — and putting it anywhere else
+		     would undo the reason anybody solves the puzzle. ]]
+		placeable = false,
+		floorOnly = true,
+		price = 0,
 	},
 } :: { [string]: WeaponDefinition }
 

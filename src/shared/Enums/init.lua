@@ -71,6 +71,12 @@ Enums.Weapon = table.freeze({
 	M249 = "M249",
 	M60E4 = "M60E4",
 
+	--[[ Primary: not a gun. It fires a short cone of burning fuel and sets
+	     everything it touches alight — the only weapon in the game whose damage
+	     is mostly what happens AFTER it hits. Never sold: it lies on the floor of
+	     the vault, behind the puzzle, and that is the whole of its distribution. ]]
+	Flamethrower = "Flamethrower",
+
 	-- Primary: marksman
 	ScopedMk18 = "ScopedMk18",
 	M1AEBR = "M1AEBR",

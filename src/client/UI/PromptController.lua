@@ -353,6 +353,12 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 			end
 			return node, "KEYPAD", "SECURITY VAULT", false, COLOR.Accent
 		end
+		--[[ The cash in the vault. Tagged only once the door is open, so before
+		     that it is scenery and there is nothing to offer. ]]
+		if CollectionService:HasTag(node, PuzzleConfig.StockpileTag) then
+			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "SUPPLIES")
+			return node, "TAKE", label, false, COLOR.Accent
+		end
 		if CollectionService:HasTag(node, PuzzleConfig.ClueTag) then
 			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "DOCUMENT")
 			--[[ A clue already in the team's hands is a document you re-read; one
@@ -549,6 +555,13 @@ local function handlePuzzlePress(): boolean
 	end
 	if state.verb == "KEYPAD" then
 		callController("VaultController", "openKeypad", target)
+		return true
+	end
+	--[[ TAKE is the pickup verb for a dropped weapon too, so the tag decides
+	     rather than the word: only a stockpile answers here, and everything else
+	     wearing TAKE falls through to the ordinary FL_Slot path on the server. ]]
+	if state.verb == "TAKE" and CollectionService:HasTag(target, PuzzleConfig.StockpileTag) then
+		Remotes.Event.ClaimStockpile:FireServer(target)
 		return true
 	end
 	if state.verb == "READ" then

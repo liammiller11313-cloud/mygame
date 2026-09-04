@@ -583,13 +583,23 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 		  * AFTER THE DAMAGE. Igniting a body the shot already killed is wasted
 		    work and a flame on a corpse.
 	]]
+	--[[ Two ways to set something alight, and they answer the same three rules.
+	     The requisition is a team-wide purchase that makes every bullet
+	     incendiary; the weapon flag is one gun that always was. Neither may light
+	     a boss, for the reason above. ]]
+	local weaponIgnites = false
+	if typeof(ctx.weaponId) == "string" then
+		local weapon = WeaponConfig.get(ctx.weaponId)
+		weaponIgnites = weapon ~= nil and weapon.ignites == true
+	end
+
 	if
 		not isSurvivor
 		and result.dealt > 0
 		and not result.killed
 		and (ctx.damageType == Enums.DamageType.Bullet or ctx.damageType == Enums.DamageType.Pellet)
 		and ctx.attacker ~= nil
-		and RequisitionConfig.isActive(Workspace, "Incendiary")
+		and (weaponIgnites or RequisitionConfig.isActive(Workspace, "Incendiary"))
 		and not (RequisitionConfig.IncendiarySkipsBosses and infectedDefinition and infectedDefinition.isBoss)
 	then
 		local infected = Registry.find("InfectedService")

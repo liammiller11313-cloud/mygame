@@ -34,6 +34,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local EconomyConfig = require(Shared.Config.EconomyConfig)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -671,6 +672,23 @@ function VaultController:start()
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.CluesTotal), refreshTracker)
 	trove:connect(RunService.Heartbeat, stepTracker)
 	refreshTracker()
+
+	--[[ The cash pile, which pays everybody at once — so everybody is told, not
+	     just whoever reached it. ]]
+	trove:connect(Remotes.Event.StockpileClaimed.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local who = payload.player
+		local name = if typeof(who) == "Instance" and who:IsA("Player") then who.DisplayName else ""
+		callController(
+			"SubtitleController",
+			"say",
+			name,
+			string.format("Split the stockpile. %s each.", EconomyConfig.format(payload.dollars or 0)),
+			CLUE_LINE_SECONDS
+		)
+	end)
 
 	--[[ Somebody else got it. The panel closes rather than sitting on a keypad
 	     for a door that is already open — and the closing IS the notification,

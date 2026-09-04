@@ -109,6 +109,72 @@ a clue counter is the least useful thing on the screen during one.
 
 ---
 
+## What is in the room
+
+Two more models, both **inert until the door opens** — no pickup attribute is
+written and no tag is applied until then, so a player who clips through a wall
+finds scenery.
+
+```
+Clinton
+└── Puzzle
+    ├── Clipboard          clue 1
+    ├── House Number       clue 2
+    ├── ID Card            clue 3
+    ├── Note               clue 4
+    ├── Flamethrower       loot — lying on the floor
+    └── Dollar Stockpile   loot — interact once, pays the team
+```
+
+Same rule as the clues: put them in the `Puzzle` folder, or leave them where
+they are in the loot room and the whole map is searched as a fallback. Names are
+matched forgivingly. Don't tag anything.
+
+### Flamethrower
+
+Walk up to it and press interact. It goes into your **Primary** slot through the
+ordinary floor-pickup path, so whatever you were carrying drops at your feet —
+exactly like picking up any other weapon.
+
+> **Not an ability slot.** The two ability slots hold permanent unlocks you buy
+> and choose before a match — Shield, Turret, Field Medic, Cryo Blast, Airstrike.
+> Putting a found weapon there would fight that system. Your description
+> ("equip it, it's in your hand, you use it as a flamethrower") is a weapon, and
+> Primary is where weapons live.
+
+| | |
+|---|---|
+| Damage | 2 × 8 pellets at 600rpm — **160 dps point blank, 24 at range** |
+| Range | 42 studs, useless past 40 |
+| Fuel | 100, **no reserve** — ammo crates will not refill it |
+| The point | **it sets things on fire** |
+
+It is the worst direct-damage weapon in the game on purpose. The shotgun does
+288 and the M249 does 373. What it does that they cannot is `ignites` — every
+pellet that lands lights the target through the same `InfectedService:ignite`
+the molotov uses, and a burning Common takes 25–45 a second until it dies
+whatever you do next. Set a crowd alight and back away.
+
+It cannot light a boss, for the same reason Incendiary Rounds cannot: an Apex
+kept permanently alight is 150 free damage a second.
+
+Never sold, never on an item pad, `floorOnly = true`. It exists in one place.
+
+**Model:** put it in `ReplicatedStorage/Assets/Weapons/Flamethrower` so it has a
+viewmodel when held. The one in the loot room is the world pickup.
+
+**Sound:** `AudioConfig.Id.FlamethrowerLoop` is empty — drop an asset id in when
+you have one, same as every other sound in the game.
+
+### Dollar Stockpile
+
+Interact once. **Everyone on the team gets 350 Dollars each** — not split, so
+the team is not poorer for having four people in it. Then it is spent: the tag
+comes off before a single dollar is paid, so two players reaching it on the same
+frame cannot claim it twice.
+
+---
+
 ## What happens when the code goes in
 
 1. `ACCESS GRANTED`, the lock sound plays on the keypad.

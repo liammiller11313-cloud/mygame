@@ -1236,6 +1236,14 @@ if _weapons:
     _pose_block = _vm[_vm.index("local CLASS_POSE"):_vm.index("local WEAPON_POSE")]
     _poses = set(re.findall(r"^\t(\w+) = \{", _pose_block, re.M))
 
+    # Weapons that declare themselves found-not-bought. Parsed off the same text
+    # the class map came from, so a flag added to a definition is seen here
+    # without a second list to keep in step.
+    _floor_only = set()
+    for _m in re.finditer(r"\[Enums\.Weapon\.(\w+)\]\s*=\s*\{(.*?)\n\t\},", _wc, re.S):
+        if re.search(r"^\s*floorOnly\s*=\s*true", _m.group(2), re.M):
+            _floor_only.add(_m.group(1))
+
     for _id, _class in sorted(_weapons.items()):
         if _id not in _fire:
             problems.append(
@@ -1249,10 +1257,22 @@ if _weapons:
                 f'{{ casing = "", magazine = "" }}, so "has none" is distinguishable from '
                 f"\"was forgotten\""
             )
-        if _id not in _shop:
+        # A weapon can legitimately be FOUND rather than bought, and then it is
+        # absent from the catalogue on purpose. InventoryService:pickup reads
+        # FL_Slot / FL_ItemId and never asks about ownership, so the pickup path
+        # works with no shop row; the loadout path does not, which is the point.
+        # `floorOnly = true` is the only way to say that — everything else that
+        # is missing from the catalogue is a mistake, and far more often.
+        if _id not in _shop and _id not in _floor_only:
             problems.append(
                 f"{_id} is in WeaponConfig but not in EconomyConfig.Catalogue — there is no way "
-                f"to own it, so nothing can ever equip it"
+                f"to buy it or put it in a loadout. If it is meant to be found on the floor "
+                f"instead, say so with floorOnly = true"
+            )
+        if _id in _shop and _id in _floor_only:
+            problems.append(
+                f"{_id} is floorOnly = true AND in EconomyConfig.Catalogue — it is either "
+                f"found or sold, and a weapon that is both makes the vault reward buyable"
             )
         if _class not in _poses:
             problems.append(

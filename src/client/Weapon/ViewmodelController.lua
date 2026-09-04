@@ -158,6 +158,16 @@ local CLASS_POSE: { [string]: Pose } = {
 		tilt = math.rad(-8),
 		length = 2.6,
 	},
+	--[[ Held like an LMG and carried lower, because the tank is the heavy part
+	     and it sits on the shoulder rather than in front of the eye. Short in
+	     `length`: what pokes forward is a nozzle, not a barrel, so the generic
+	     long-gun pose would push it a foot too far into the world. ]]
+	Special = {
+		hip = Vector3.new(0.86, -0.8, -1.45),
+		aim = Vector3.new(0, -0.36, -1.05),
+		tilt = math.rad(-5),
+		length = 1.35,
+	},
 	Melee = {
 		hip = Vector3.new(0.95, -0.9, -1.3),
 		aim = Vector3.new(0.75, -0.7, -1.2),

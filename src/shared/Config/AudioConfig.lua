@@ -87,6 +87,10 @@ local ID = table.freeze({
 	     is ever added, that entry needs splitting rather than sharing. ]]
 	ShotgunShell = "rbxassetid://799917192",
 	SmgFire = "rbxassetid://97897507846837",
+	--[[ The flamethrower's roar. Empty until somebody uploads one — the game
+	     warns once for a missing id and plays nothing, which is the house rule for
+	     every sound in this file. ]]
+	FlamethrowerLoop = "",
 	AkShot = "rbxassetid://1065188024",
 	M4Shot = "rbxassetid://18521643711",
 	SniperShot = "rbxassetid://135333708100426",
@@ -177,6 +181,11 @@ AudioConfig.Id = ID
 	M4 even before you upload distinct samples for them.
 ]]
 AudioConfig.WeaponFire = {
+	--[[ A held roar rather than a shot. Rolls off shorter than a rifle because
+	     the weapon does — nobody two streets away should hear a flamethrower —
+	     and the voice budget is low so twelve pellets a shot cannot each try to
+	     be a sound. ]]
+	[Enums.Weapon.Flamethrower] = sound(ID.FlamethrowerLoop, 0.62, 0.98, 1.02, 120, 2),
 	[Enums.Weapon.M1911A1] = sound(ID.PistolShot, 0.72, 0.97, 1.05, 320, 4),
 	[Enums.Weapon.Magnum357] = sound(ID.RevolverShot, 1.0, 0.94, 1.02, 560, 5),
 	--[[ These four shipped with no row and this table is indexed directly — no

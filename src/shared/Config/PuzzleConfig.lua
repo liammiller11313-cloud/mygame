@@ -76,6 +76,10 @@ PuzzleConfig.FolderName = "Puzzle"
      server that never saw it. ]]
 PuzzleConfig.KeypadTag = "FL_PuzzleKeypad"
 PuzzleConfig.ClueTag = "FL_PuzzleClue"
+--[[ The cash pile in the vault. Its own tag rather than a clue's, because it is
+     interacted with once and pays the whole team — nothing about it is a
+     document. ]]
+PuzzleConfig.StockpileTag = "FL_PuzzleStockpile"
 
 export type ClueSlot = {
 	--[[ Where this clue sits in the chain, 1 through 4. Collecting them out of
@@ -131,6 +135,13 @@ export type PuzzleDefinition = {
 	keypad: string,
 	door: string,
 	clues: { ClueSlot },
+
+	--[[ The physical contents of the vault, armed when the door opens. Optional:
+	     a puzzle with no loot table still pays through `reward`. ]]
+	loot: {
+		weapon: { object: string, itemId: string, slot: string }?,
+		stockpile: { object: string, dollars: number, prompt: string }?,
+	}?,
 
 	reward: {
 		--[[ Round dollars, split evenly across everyone still in the round —
@@ -319,6 +330,33 @@ local DEFINITIONS: { PuzzleDefinition } = {
 		     a meaningful step and a solo player is not paid four times for the same
 		     work. ]]
 		reward = table.freeze({ dollars = 3_000, restockItems = true }),
+
+		--[[
+			What is actually IN the room, as opposed to what opening it pays.
+
+			Both are armed only when the door opens — the flamethrower's pickup
+			attribute is not written and the stockpile is not tagged until then.
+			A reward reachable by clipping through a wall is a reward nobody needs
+			the puzzle for, and "the door is shut" is a promise about geometry
+			rather than a rule.
+		]]
+		loot = table.freeze({
+			--[[ Lying on the floor. Picked up through the ordinary FL_Slot path,
+			     so it lands in the primary slot exactly like any other weapon and
+			     the one already there drops where you stood. ]]
+			weapon = table.freeze({
+				object = "Flamethrower",
+				itemId = "Flamethrower",
+				slot = "Primary",
+			}),
+			--[[ One interaction, everybody paid, once. See PuzzleService: it is
+			     the team's find, not the finder's. ]]
+			stockpile = table.freeze({
+				object = "Dollar Stockpile",
+				dollars = 350,
+				prompt = "DOLLAR STOCKPILE",
+			}),
+		}),
 	}),
 }
 

@@ -46,6 +46,7 @@ local Enums = require(Shared.Enums)
 local MapConfig = require(Shared.Config.MapConfig)
 local PuzzleConfig = require(Shared.Config.PuzzleConfig)
 local Registry = require(Shared.Util.Registry)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
 
@@ -101,6 +102,11 @@ local state = {
 	     with can be turned back into "which clue is this, and what number is
 	     it". Both are rebuilt from scratch on every arm. ]]
 	props = {} :: { [string]: Model },
+	--[[ The two things actually in the room. Resolved at arm so they can be
+	     found, and armed only when the door opens — see armLoot. ]]
+	weaponDrop = nil :: Instance?,
+	stockpile = nil :: Instance?,
+	stockpileClaimed = false,
 	clueOf = {} :: { [Model]: any },
 }
 
@@ -421,6 +427,69 @@ local function setDoorOpen(open: boolean)
 	end
 end
 
+--[[
+	Turns the contents of the vault on, once the vault is open.
+
+	Nothing in the room is interactable until this runs. The flamethrower has no
+	FL_Slot until now, so walking up to it before the door opens offers nothing;
+	the stockpile has no tag, so it is scenery. That matters because "the door is
+	shut" is a promise about geometry, and a reward that could be reached by
+	clipping a wall is a reward the puzzle was optional for.
+
+	The flamethrower goes in through the ORDINARY pickup path — FL_Slot and
+	FL_ItemId, exactly what a dropped weapon carries — so it lands in the primary
+	slot the same way any gun does and whatever was there drops at the player's
+	feet. InventoryService needs no case for it.
+]]
+local function armLoot()
+	local definition = state.definition
+	local loot = definition and definition.loot
+	if not loot then
+		return
+	end
+
+	local weapon = loot.weapon
+	if weapon and state.weaponDrop and state.weaponDrop.Parent then
+		state.weaponDrop:SetAttribute(Attributes.Pickup.Slot, weapon.slot)
+		state.weaponDrop:SetAttribute(Attributes.Pickup.ItemId, weapon.itemId)
+		--[[ A full tank and no reserve. The weapon's own config says reserveMax
+		     is zero — an ammo crate will not refill it, and this is the only one
+		     that will ever exist. ]]
+		local definitionFor = WeaponConfig.get(weapon.itemId)
+		state.weaponDrop:SetAttribute(
+			Attributes.Pickup.Ammo,
+			if definitionFor then definitionFor.magSize else 0
+		)
+		state.weaponDrop:SetAttribute(Attributes.Pickup.Reserve, 0)
+	end
+
+	if loot.stockpile and state.stockpile and state.stockpile.Parent then
+		CollectionService:AddTag(state.stockpile, PuzzleConfig.StockpileTag)
+		state.stockpile:SetAttribute(PZ.CluePrompt, loot.stockpile.prompt)
+	end
+end
+
+--[[ And back off, so a round ending does not leave a loaded flamethrower lying
+     in an unlocked room for whoever spawns next. ]]
+local function disarmLoot()
+	if state.weaponDrop and state.weaponDrop.Parent then
+		for _, key in
+			{
+				Attributes.Pickup.Slot,
+				Attributes.Pickup.ItemId,
+				Attributes.Pickup.Ammo,
+				Attributes.Pickup.Reserve,
+			}
+		do
+			state.weaponDrop:SetAttribute(key, nil)
+		end
+	end
+	if state.stockpile and state.stockpile.Parent then
+		CollectionService:RemoveTag(state.stockpile, PuzzleConfig.StockpileTag)
+		state.stockpile:SetAttribute(PZ.CluePrompt, nil)
+	end
+end
+
 -- ── the reward ──────────────────────────────────────────────────────────────
 
 --[[
@@ -487,6 +556,7 @@ function PuzzleService:clear()
 	     as well, which meant two copies of that answer and a `false` branch in
 	     setDoorOpen nothing ever reached. ]]
 	setDoorOpen(false)
+	disarmLoot()
 	table.clear(state.doorLooks)
 
 	--[[
@@ -529,6 +599,9 @@ function PuzzleService:clear()
 	state.solved = false
 	state.keypad = nil
 	state.door = nil
+	state.weaponDrop = nil
+	state.stockpile = nil
+	state.stockpileClaimed = false
 	table.clear(state.clues)
 	table.clear(state.props)
 	table.clear(state.clueOf)
@@ -651,6 +724,14 @@ function PuzzleService:arm(random: Random?)
 	end
 
 	local surfaces = template.surfaces(definition, values)
+	--[[ Found now, armed later. Both live inside the room the door seals, so
+	     resolving them here costs nothing and means the moment the vault opens is
+	     a couple of attribute writes rather than a search. ]]
+	local loot = definition.loot
+	state.weaponDrop = if loot and loot.weapon then findNamed(folder, root, loot.weapon.object) else nil
+	state.stockpile = if loot and loot.stockpile then findNamed(folder, root, loot.stockpile.object) else nil
+	state.stockpileClaimed = false
+
 	local painted = 0
 	for _, clue in definition.clues do
 		local child = findNamed(folder, root, clue.object)
@@ -762,6 +843,7 @@ local function onSubmit(player: Player, payload: any)
 	reply(player, true, "ACCESS GRANTED", 0)
 
 	setDoorOpen(true)
+	armLoot()
 	payOut()
 
 	--[[
@@ -908,6 +990,75 @@ local function onCollect(player: Player, target: any)
 	})
 end
 
+--[[
+	The cash pile, claimed once for everybody.
+
+	One interaction pays the whole team and then the pile is spent — not "once
+	per player", which would make the reward scale with headcount and make the
+	last person to arrive the most valuable. Four survivors solved this together
+	and they are paid together.
+
+	Guarded on the tag rather than on the model, so a claim aimed at anything
+	else in the room is simply not this.
+]]
+local function onStockpile(player: Player, target: any)
+	if typeof(target) ~= "Instance" or not state.definition then
+		return
+	end
+	local loot = state.definition.loot
+	if not loot or not loot.stockpile then
+		return
+	end
+
+	local entry = record(player)
+	local now = serverNow()
+	if now - entry.tookAt < COLLECT_INTERVAL then
+		return
+	end
+	if target ~= state.stockpile or not CollectionService:HasTag(target, PuzzleConfig.StockpileTag) then
+		return
+	end
+	entry.tookAt = now
+
+	--[[ Untagged BEFORE anything is paid. Two players reaching it in the same
+	     frame would otherwise both pass the check and the team would be paid
+	     twice — the server is single-threaded, so removing the tag first is a
+	     complete answer rather than a narrowing of the window. ]]
+	if state.stockpileClaimed then
+		return
+	end
+	state.stockpileClaimed = true
+	CollectionService:RemoveTag(target, PuzzleConfig.StockpileTag)
+
+	local economy = Registry.find("EconomyService")
+	local survivors = Registry.find("SurvivorService")
+	local roster = {}
+	if survivors and typeof(survivors.getAliveSurvivors) == "function" then
+		local ok, alive = pcall(survivors.getAliveSurvivors, survivors)
+		if ok and typeof(alive) == "table" then
+			roster = alive
+		end
+	end
+	if #roster == 0 then
+		roster = Players:GetPlayers()
+	end
+
+	if economy and typeof(economy.award) == "function" then
+		for _, who in roster do
+			--[[ Each. Not split: the pile is a fixed find and the team should not
+			     be poorer for having four people in it. `award` clamps against
+			     the round's own earnings cap and can return less, which is
+			     correct and is why nothing here checks the total. ]]
+			pcall(economy.award, economy, who, loot.stockpile.dollars)
+		end
+	end
+
+	Remotes.Event.StockpileClaimed:FireAllClients({
+		player = player,
+		dollars = loot.stockpile.dollars,
+	})
+end
+
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function PuzzleService:init() end
@@ -915,6 +1066,7 @@ function PuzzleService:init() end
 function PuzzleService:start()
 	serviceTrove:connect(Remotes.Event.SubmitVaultCode.OnServerEvent, onSubmit)
 	serviceTrove:connect(Remotes.Event.CollectClue.OnServerEvent, onCollect)
+	serviceTrove:connect(Remotes.Event.ClaimStockpile.OnServerEvent, onStockpile)
 
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		attempts[player] = nil
