@@ -167,6 +167,17 @@ local ID = table.freeze({
 	MeleeDraw = "rbxassetid://117878219790008",
 	MenuPage = "rbxassetid://9120984892",
 
+	--[[ Random events. The siren is the one the whole system announces itself
+	     with and is a real upload; the other two are stand-ins named honestly —
+	     see AudioConfig.Event, which is where to put real ids when there are
+	     any. ]]
+	EventSiren = "rbxassetid://121756878891042",
+
+	--[[ Footsteps. Two ids, because a walk and a run are different sounds rather
+	     than the same sound played faster — see AudioConfig.Footstep. ]]
+	FootstepWalk = "rbxassetid://4416041299",
+	FootstepSprint = "rbxassetid://79250663775359",
+
 	HorrorAmbience = "rbxassetid://118673335791387",
 	ActionDrums = "rbxassetid://1837842521",
 	BossBattle = "rbxassetid://132347366936691",
@@ -340,6 +351,50 @@ AudioConfig.Impact = {
 	The break is loud and high priority because it happens once and it is the
 	thing the team has to hear over the horde that caused it.
 ]]
+--[[
+	Random events.
+
+	Siren is the announcement every event shares — one sound for "something is
+	happening", so the banner and the noise arrive together and a player who has
+	heard it once knows to read the top of the screen.
+
+	Thunder and Radio are STAND-INS, and named as such rather than quietly
+	borrowed: the sting is a low boom that passes for distant thunder and the
+	objective blip passes for a transmission opening. Both are one id here away
+	from being the real thing. Rain is deliberately SILENT rather than
+	approximated — there is no sample in this project that sounds like rain, and
+	a wrong loop running for two minutes is worse than none.
+]]
+AudioConfig.Event = {
+	Siren = sound(ID.EventSiren, 0.65, 0.98, 1.02, 200, 8),
+	Thunder = sound(ID.FailureSting, 0.8, 0.55, 0.75, 400, 6),
+	Radio = sound(ID.ObjectiveChange, 0.5, 0.9, 1.0, 90, 4),
+	RainLoop = sound(EMPTY, 0.5, 0.98, 1.02, 120, 2),
+} :: { [string]: SoundDefinition }
+AudioConfig.Event.RainLoop.looped = true
+
+--[[
+	Footsteps, replacing Roblox's default running sound.
+
+	Two loops rather than one pitched two ways. The default behaviour — one
+	sample whose PlaybackSpeed scales with velocity — is why every Roblox
+	character sounds like it is walking on the same floor at the same weight, and
+	the difference between a survivor moving carefully and one committing to a
+	run is most of what the crouch and sprint controls are FOR. Hearing it is how
+	a player knows a teammate just broke cover.
+
+	Quiet and short-ranged on purpose. This plays on every survivor in earshot at
+	once, continuously, and it is competing with gunfire and a horde — a footstep
+	that is loud enough to notice on its own is one that is far too loud when
+	four people are running.
+]]
+AudioConfig.Footstep = {
+	Walk = sound(ID.FootstepWalk, 0.35, 0.94, 1.06, 42, 1),
+	Sprint = sound(ID.FootstepSprint, 0.45, 0.96, 1.04, 60, 1),
+} :: { [string]: SoundDefinition }
+AudioConfig.Footstep.Walk.looped = true
+AudioConfig.Footstep.Sprint.looped = true
+
 AudioConfig.Barricade = {
 	Hit = sound(ID.ImpactWood, 0.42, 0.86, 1.12, 90, 1),
 	Break = sound(ID.ImpactWood, 0.95, 0.55, 0.68, 170, 6),

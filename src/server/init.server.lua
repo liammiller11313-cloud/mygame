@@ -171,6 +171,13 @@ local MODULES = {
 	-- Stats listens to signals the combat services own, so it loads after them.
 	"Round/StatsService",
 	"Level/AtmosphereService",
+	--[[ Last of the level services, and after every system it borrows: the sky it
+	     asks for a grade, the Director it asks for a horde, ItemPlacer for a drop,
+	     RoundService for the clock and its voice. It reaches all of them by
+	     registry name at call time, so this ordering is for tidiness rather than
+	     need — but a director that loaded first would spend the first round warning
+	     about services that were about to exist. ]]
+	"Events/RandomEventDirector",
 }
 
 -- Matchmaking is the one module the bootstrap itself changes behaviour around,

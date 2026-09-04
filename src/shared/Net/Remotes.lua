@@ -217,6 +217,14 @@ local EVENTS: { string } = {
 	     step. ]]
 	"SetPause", -- C->S (paused: boolean)
 
+	-- ── Random events ───────────────────────────────────────────────────────
+	--[[ The banner and its siren, once, at the moment an event starts. A remote
+	     rather than an attribute because it is a MOMENT: an attribute would fire
+	     its listener again for anybody who joined mid-event and hand them a siren
+	     for something that started two minutes ago. The event STATE rides
+	     Attributes.Game.Event*, which a joiner reads and a banner does not. ]]
+	"RandomEvent", -- S->C {id: string, name: string, endsAt: number}
+
 	-- ── The vault puzzle ────────────────────────────────────────────────────
 	--[[ The optional side objective. The code the player typed goes up, one
 	     answer comes back to them alone, and the door opening is announced to

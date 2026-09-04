@@ -189,6 +189,8 @@ function SurvivorService:_ensureRecord(player: Player)
 		baseJumpPower = 50,
 		baseJumpHeight = 7.2,
 		appliedSpeed = -1,
+		-- nil rather than false, so the first tick always publishes the gait.
+		appliedSprint = nil,
 
 		lastInteractRequest = 0,
 		flowClock = 0,
@@ -533,6 +535,33 @@ function SurvivorService:_applyHumanoid(record)
 	if math.abs(speed - record.appliedSpeed) > 0.01 then
 		record.appliedSpeed = speed
 		humanoid.WalkSpeed = speed
+	end
+
+	--[[
+		Whether that speed is a RUN, published for the footsteps.
+
+		Derived from the same conditions _computeWalkSpeed uses rather than from
+		the number it returned, because the number has already been through the
+		weapon's walkSpeedScale and a heavy rifle at a sprint lands on the same
+		figure as a light one at a walk. Asking the conditions is the only reading
+		that stays right whatever is in somebody's hands.
+
+		Written only on a CHANGE. Attributes.set is a bare SetAttribute and this
+		runs on the humanoid tick, so an unguarded write would be a replicated
+		property set several times a second per survivor for a value that changes
+		a handful of times a minute. `appliedSprint` is the same trick
+		appliedSpeed above it uses, with the same nil sentinel so the first tick
+		always publishes.
+	]]
+	local sprinting = record.sprinting
+		and not record.sprintLocked
+		and not record.crouching
+		and record.stamina > 0
+		and self:_effective(record) >= S.HurtThreshold
+		and speed > 0
+	if record.appliedSprint ~= sprinting then
+		record.appliedSprint = sprinting
+		Attributes.set(record.player, Attributes.Player.IsSprinting, sprinting)
 	end
 
 	-- The Humanoid is a mirror, never the source of truth. It is kept above zero

@@ -35,6 +35,11 @@
 	producer: waves, bosses, the last thirty seconds, teammates going down, and
 	how the round ended. The client SubtitleController owns queueing and speaker
 	colour; all that is sent is a speaker, a line, and how long it should hold.
+
+	The random events have things to say too — a radio transmission, a supply
+	drop's location — and they ASK, through `announce` below, rather than firing
+	the remote themselves. One producer is worth keeping: it is what lets the
+	queueing, the pacing and the speaker colours stay one problem instead of two.
 ]]
 
 local Players = game:GetService("Players")
@@ -1425,6 +1430,21 @@ end
 
 function RoundService:isBreather(): boolean
 	return phase == PHASE.Breather
+end
+
+--[[ The game's voice, for another service that has a line to deliver. The same
+     `say` the waves and the bosses use — see the header on callouts — so an
+     event's transmission queues behind a wave announcement instead of landing on
+     top of it. ]]
+function RoundService:announce(speaker: any, text: any, duration: any)
+	if typeof(text) ~= "string" or text == "" then
+		return
+	end
+	say(
+		if typeof(speaker) == "string" then speaker else "",
+		text,
+		if typeof(duration) == "number" then duration else nil
+	)
 end
 
 function RoundService:isRunning(): boolean

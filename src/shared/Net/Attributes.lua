@@ -47,6 +47,14 @@ Attributes.Player = table.freeze({
 	FlowDistance = "FL_Flow", -- number, studs along the level spline
 	IsReady = "FL_Ready", -- boolean, lobby readiness
 	IsCrouching = "FL_IsCrouching", -- boolean; the server owns it, the client asks
+	--[[ boolean, whether this survivor is actually running rather than merely
+	     asking to. Published because the FOOTSTEPS need it and the client cannot
+	     work it out: WalkSpeed is the sprint speed multiplied by whatever the
+	     weapon in hand scales it by, so a heavy rifle at a sprint and a light one
+	     at a walk land on the same number. The server already knows the answer —
+	     see _computeWalkSpeed — so it says so rather than making four clients
+	     guess, and a teammate's gait is audible for the same one write. ]]
+	IsSprinting = "FL_IsSprinting", -- boolean
 	--[[ The player's own comfort setting, as a name from SettingsConfig.Difficulty.
 	     Only ever softens what the infected do to THIS player — see the header
 	     of SettingsConfig. Public rather than private because the HUD wants to
@@ -222,6 +230,15 @@ Attributes.Game = table.freeze({
 	     reads it from one place and because the day this game grows a second way
 	     to pause, it should set the same flag. ]]
 	Paused = "FL_Paused", -- boolean
+
+	--[[ The random event that is running, or "" when none is. Three attributes
+	     rather than a remote for the state itself, because a client that joins
+	     mid-event has to be able to see it — a remote only ever tells you what
+	     happened while you were listening. The BANNER is a remote (see
+	     Remotes.RandomEvent), because that is a moment rather than a state. ]]
+	EventId = "FL_EventId", -- string, an EventConfig id or ""
+	EventName = "FL_EventName", -- string, what to call it on screen
+	EventEndsAt = "FL_EventEndsAt", -- number, absolute GetServerTimeNow stamp
 
 	--[[ The pre-round ready gate. `ReadyHold` is true while wave 1 is waiting on
 	     the team; the two counts are published rather than left for each client

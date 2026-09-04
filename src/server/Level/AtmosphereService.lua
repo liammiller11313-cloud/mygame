@@ -224,6 +224,99 @@ local BOSS = table.freeze({
 })
 
 --[[
+	WEATHER — the grades a random event can push the sky into.
+
+	Built exactly like BOSS above and applied the same way, and that is the whole
+	reason a rain event needs no code that touches Lighting: the look here is a
+	pure function of round progress plus whatever moods are active, recomputed
+	every tick. Nothing is overwritten, so nothing has to be restored — an event
+	ending is the blend easing back to zero and the next commit writing the
+	honest value.
+
+	It also means an event cannot corrupt the sky. A module that errors halfway
+	through, a round that ends mid-storm, a server that hitches for a second: all
+	of them leave a number between 0 and 1 that decays on its own.
+
+	Every grade goes through the readability floor below it, so no event can make
+	the map unfightable however hard it is pushed.
+]]
+local WEATHER = table.freeze({
+	--[[ Overcast. Light goes flat and grey rather than dark: rain at noon is a
+	     loss of CONTRAST, and taking brightness instead would just read as
+	     somebody turning the sun down. ]]
+	Rain = table.freeze({
+		Brightness = 0.88,
+		Ambient = 1.06, -- UP: an overcast sky is a giant softbox
+		Exposure = -0.03,
+		FogEnd = 0.78,
+		FogStart = 0.62,
+		Density = 0.06,
+		Haze = 0.9,
+		Glare = -0.08,
+		Saturation = -0.16,
+		Contrast = -0.05,
+		Tint = Color3.fromRGB(198, 208, 214),
+		TintBlend = 0.45,
+	}),
+	--[[ Fog takes the far end of the street and nothing else. Brightness is
+	     barely touched and ambient goes UP, because real fog is bright — it is
+	     the distance that goes, not the light, and darkening it as well is how
+	     a fog event becomes a blackout nobody announced. ]]
+	Fog = table.freeze({
+		Brightness = 1.0,
+		Ambient = 1.12,
+		Exposure = 0.02,
+		FogEnd = 0.52,
+		FogStart = 0.30,
+		Density = 0.16,
+		Haze = 1.8,
+		Glare = 0.10,
+		Saturation = -0.22,
+		Contrast = -0.10,
+		Tint = Color3.fromRGB(214, 218, 222),
+		TintBlend = 0.6,
+	}),
+	--[[ The storm. Rain's grade with the contrast pushed back up and the sky
+	     colder, so the lightning has something dark to interrupt. ]]
+	Storm = table.freeze({
+		Brightness = 0.78,
+		Ambient = 0.94,
+		Exposure = -0.07,
+		FogEnd = 0.70,
+		FogStart = 0.55,
+		Density = 0.09,
+		Haze = 1.1,
+		Glare = -0.10,
+		Saturation = -0.20,
+		Contrast = 0.06,
+		Tint = Color3.fromRGB(178, 194, 214),
+		TintBlend = 0.55,
+	}),
+	--[[ Lights out. The only grade that genuinely takes light away, which is why
+	     it is the one the readability floor matters most for. ]]
+	Blackout = table.freeze({
+		Brightness = 0.72,
+		Ambient = 0.70,
+		Exposure = -0.10,
+		FogEnd = 0.88,
+		FogStart = 0.70,
+		Density = 0.04,
+		Haze = 0.3,
+		Glare = -0.05,
+		Saturation = -0.12,
+		Contrast = 0.08,
+		Tint = Color3.fromRGB(150, 168, 196),
+		TintBlend = 0.5,
+	}),
+})
+
+--[[ How fast a weather grade arrives and leaves. Slower in than the boss mood
+     and slower still out: weather that snaps on reads as a lighting bug, and
+     the moment an event ENDS is the one the player is least looking at. ]]
+local WEATHER_EASE_IN = 6.0
+local WEATHER_EASE_OUT = 9.0
+
+--[[
 	VISIBILITY — the one number to turn if the game is too dark or too bright.
 
 	Everything below is tuned to be moody but FIGHTABLE: you should be able to
@@ -483,6 +576,13 @@ local owned: { [Instance]: boolean } = {}
 -- because an instance we created has no baseline worth keeping.
 local baseline: { [string]: any } = {}
 
+--[[ The weather grade a random event has asked for, and how far into it we
+     are. Two fields for the same reason the boss mood has two: the request is
+     instantaneous and the look is not. ]]
+local weatherWanted: string? = nil
+local weatherActive: string? = nil
+local weatherBlend = 0
+
 local bossExplicit = false
 local bossDetected = false
 local bossBlend = 0
@@ -690,6 +790,9 @@ function AtmosphereService:_restore()
 	gutterActive = false
 	pendingStrikeAt = 0
 	bossBlend = 0
+	weatherWanted = nil
+	weatherActive = nil
+	weatherBlend = 0
 	mode = MODE.Restored
 end
 
@@ -745,6 +848,27 @@ local function resolve()
 		target.ambient = target.ambient:Lerp(Color3.new(), (1 - BOSS.Ambient) * blend)
 		target.outdoor = target.outdoor:Lerp(Color3.new(), (1 - BOSS.Ambient) * blend)
 		target.tint = target.tint:Lerp(BOSS.Tint, BOSS.TintBlend * blend)
+	end
+
+	--[[ Weather, on top of the mood and UNDER the readability floor below. That
+	     ordering is what makes an event safe to ship: whatever a grade asks for,
+	     the visibility bias and the clamps still get the last word, so no
+	     configuration of any event can produce a map nobody can fight in. ]]
+	local grade = if weatherActive then WEATHER[weatherActive] else nil
+	if grade and weatherBlend > 0 then
+		local blend = weatherBlend
+		target.brightness *= lerp(1, grade.Brightness, blend)
+		target.exposure += grade.Exposure * blend
+		target.fogStart *= lerp(1, grade.FogStart, blend)
+		target.fogEnd *= lerp(1, grade.FogEnd, blend)
+		target.density += grade.Density * blend
+		target.haze += grade.Haze * blend
+		target.glare += grade.Glare * blend
+		target.saturation += grade.Saturation * blend
+		target.contrast += grade.Contrast * blend
+		target.ambient = scaleColor(target.ambient, lerp(1, grade.Ambient, blend))
+		target.outdoor = scaleColor(target.outdoor, lerp(1, grade.Ambient, blend))
+		target.tint = target.tint:Lerp(grade.Tint, grade.TintBlend * blend)
 	end
 
 	--[[ The visibility bias, applied after the mood so a boss still darkens the
@@ -969,6 +1093,29 @@ function AtmosphereService:setBossMood(active: boolean)
 	bossExplicit = active == true
 end
 
+--[[
+	Asks for a weather grade, or clears it with nil.
+
+	Named rather than numeric so the caller does not get to invent a look: a
+	random event picks one of the grades this file defines and the sky stays
+	something somebody chose. An unknown name clears, which is the safe failure —
+	a typo in an event module should give you ordinary weather, not an error in
+	the lighting tick.
+
+	The change is a REQUEST. It eases in and out over several seconds and the
+	blend is what the commit actually reads, so nothing here writes to Lighting
+	and nothing has to be restored when it stops.
+]]
+function AtmosphereService:setWeather(grade: string?)
+	weatherWanted = if typeof(grade) == "string" and WEATHER[grade] then grade else nil
+end
+
+--[[ What is on the sky right now, for anything that has to answer "is it
+     raining" without owning the answer. ]]
+function AtmosphereService:getWeather(): string?
+	return weatherActive
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 --  Internals
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1069,6 +1216,32 @@ function AtmosphereService:_step(now: number)
 	self:_ensureInstances()
 
 	bossDetected = detectBoss()
+	--[[
+		The weather blend, eased like the mood.
+
+		A grade cannot be swapped mid-blend. Crossfading rain straight into fog
+		would run one set of offsets out while the other ran in, and the frames in
+		between belong to neither — the same problem interpolating the keyframes
+		independently would cause, one layer up. So a new grade waits for the old
+		one to reach zero, which costs a few seconds nobody is timing and means
+		every intermediate frame is still a look somebody chose.
+	]]
+	local weatherTarget = if weatherActive ~= nil and weatherActive == weatherWanted then 1 else 0
+	if weatherActive == nil and weatherWanted ~= nil then
+		weatherActive = weatherWanted
+		weatherTarget = 1
+	end
+	if weatherBlend ~= weatherTarget then
+		local rate = TICK_INTERVAL / (weatherTarget > weatherBlend and WEATHER_EASE_IN or WEATHER_EASE_OUT)
+		weatherBlend = math.clamp(weatherBlend + math.clamp(weatherTarget - weatherBlend, -rate, rate), 0, 1)
+		resolved = false
+	end
+	if weatherBlend <= 0 and weatherActive ~= weatherWanted then
+		-- Faded out. Free the slot so the next grade can start easing in.
+		weatherActive = nil
+		resolved = false
+	end
+
 	local moodTarget = (bossExplicit or bossDetected) and 1 or 0
 	if bossBlend ~= moodTarget then
 		local rate = TICK_INTERVAL / (moodTarget > bossBlend and BOSS_EASE_IN or BOSS_EASE_OUT)
