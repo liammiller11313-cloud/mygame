@@ -51,6 +51,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
 local MapConfig = require(Shared.Config.MapConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
@@ -726,7 +727,12 @@ function RoundService:_restock(wave)
 			who was reading the menu into the middle of a wave.
 		]]
 		local state = survivors:getState(player)
-		local isGone = state == Enums.SurvivorState.Dead
+		--[[ And not somebody who is out of lives for the round. The check is here
+		     as well as inside _respawn, and both are wanted: the one there refuses
+		     the respawn, and this one stops the body being released and the team
+		     hearing "I'm back" from a player who is not. ]]
+		local eliminated = typeof(survivors.isEliminated) == "function" and survivors:isEliminated(player)
+		local isGone = state == Enums.SurvivorState.Dead and not eliminated
 
 		if isGone and CLASSIC.BreatherRespawnsDead then
 			self:_respawnSurvivor(survivors, player, slot)
@@ -924,10 +930,45 @@ function RoundService:startRound(requestedMode: string?)
 	     round starts". They come back by picking a mode. ]]
 	local survivors = Registry.find("SurvivorService")
 	if survivors then
+		local expected = {}
 		for _, player in Players:GetPlayers() do
 			if player:GetAttribute(Attributes.Player.LeftMatch) ~= true then
 				survivors:spawnSurvivor(player)
+				table.insert(expected, player)
 			end
+		end
+
+		--[[
+			And then check it actually happened.
+
+			spawnSurvivor resets health, temp health, both ledgers and the rescue
+			queue and then calls LoadCharacter, so a round is meant to open with
+			every player upright at full strength whatever the last one left
+			behind. This says so out loud when it does not.
+
+			The STATE and the health, not the character: LoadCharacter has not
+			finished by the time this runs and never will have, so testing for a
+			body would fail every single round. What is being verified is that the
+			service agreed to the spawn — which is the half that can silently not
+			happen, and the half everything else reads.
+		]]
+		local wrong = {}
+		for _, player in expected do
+			local state = survivors:getState(player)
+			local health = player:GetAttribute(Attributes.Player.Health) or 0
+			if state ~= Enums.SurvivorState.Healthy or health < GameConfig.Survivor.MaxHealth then
+				table.insert(wrong, string.format("%s (%s, %d hp)", player.Name, state, health))
+			end
+		end
+		if #wrong > 0 then
+			warn(
+				string.format(
+					"[RoundService] the round started with %d player(s) not upright at full health: %s "
+						.. "— every one of them should have been reset by SurvivorService.spawnSurvivor",
+					#wrong,
+					table.concat(wrong, ", ")
+				)
+			)
 		end
 	end
 

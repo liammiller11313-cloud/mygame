@@ -170,6 +170,12 @@ function SurvivorService:_ensureRecord(player: Player)
 		incapCount = 0,
 		blackAndWhite = false,
 
+		--[[ The round's death ledger. Reset by spawnSurvivor, which is the round
+		     boundary — a defib or a closet rescue deliberately does NOT clear it,
+		     since a life you were given back is exactly the thing being counted. ]]
+		deaths = 0,
+		eliminated = false,
+
 		adrenalineUntil = 0,
 		stamina = S.MaxStamina,
 		sprintLocked = false,
@@ -343,6 +349,16 @@ function SurvivorService:_publish(record)
 	if pub.blackAndWhite ~= record.blackAndWhite then
 		pub.blackAndWhite = record.blackAndWhite
 		player:SetAttribute(PA.IsBlackAndWhite, record.blackAndWhite)
+	end
+
+	if pub.deaths ~= record.deaths then
+		pub.deaths = record.deaths
+		player:SetAttribute(PA.Deaths, record.deaths)
+	end
+
+	if pub.eliminated ~= record.eliminated then
+		pub.eliminated = record.eliminated
+		player:SetAttribute(PA.Eliminated, record.eliminated)
 	end
 
 	local pinned = record.pinnedKind or ""
@@ -677,8 +693,22 @@ end
 
 -- ─── public API ──────────────────────────────────────────────────────────────
 
---[[ Spawns a survivor at full strength. A fresh spawn is a fresh life: the incap
-     ledger resets, because dying already cost everything it was going to. ]]
+--[[
+	Spawns a survivor at full strength. A fresh spawn is a fresh life: the incap
+	ledger resets, because dying already cost everything it was going to.
+
+	── AND IT IS THE ONLY THING THAT CLEARS THE DEATH LEDGER ───────────────────
+	Which is what makes GameConfig's DeathsPerRound mean anything. RoundService
+	calls this for every player who has not walked out, once, when a round starts;
+	every other way back into a body — a defibrillator, a closet, the breather
+	respawn — goes through `_respawn` and leaves the count alone. A life somebody
+	gave you back is precisely the thing being counted.
+
+	StartHealth equals MaxHealth, so this is also the guarantee that a new round
+	begins with the whole team upright and full: health, temp health, the incap
+	ledger, black-and-white, the death ledger and the rescue queue are all put
+	back, whatever state the last round left them in.
+]]
 function SurvivorService:spawnSurvivor(player: Player)
 	local record = self:_ensureRecord(player)
 
@@ -692,6 +722,8 @@ function SurvivorService:spawnSurvivor(player: Player)
 	record.incapHealth = 0
 	record.incapCount = 0
 	record.blackAndWhite = false
+	record.deaths = 0
+	record.eliminated = false
 	record.adrenalineUntil = 0
 	record.stamina = S.MaxStamina
 	record.sprintLocked = false
@@ -737,6 +769,14 @@ function SurvivorService:isIncapacitated(player: Player): boolean
 	local state = self:getState(player)
 	-- Hanging is not a different problem from a teammate's point of view.
 	return state == STATE.Incapacitated or state == STATE.LedgeHanging
+end
+
+--[[ Out of lives for this round. Asked by anything that would otherwise put
+     them back in a body — the breather respawn is the caller that matters, since
+     it works off the Dead state alone and announces the return out loud. ]]
+function SurvivorService:isEliminated(player: Player): boolean
+	local record = records[player]
+	return record ~= nil and record.eliminated == true
 end
 
 function SurvivorService:isAlive(player: Player): boolean
@@ -1320,7 +1360,30 @@ function SurvivorService:kill(player: Player, ctx)
 		CollectionService:AddTag(character, BODY_TAG)
 	end
 
-	if GameConfig.RespawnClosetsEnabled and not table.find(awaitingRescue, player) then
+	--[[
+		THE ROUND'S DEATH LEDGER.
+
+		Counted here rather than anywhere else because this is the one door every
+		death goes through — the damage funnel, the void, a stray script that
+		killed a Humanoid, all of it arrives at kill(). See GameConfig's
+		DeathsPerRound for what the number is for.
+
+		Eliminated means no way back: not queued for a closet, and defibrillate
+		refuses. The body STAYS, deliberately — the team can see where they fell,
+		which is the reason a death leaves one at all — but nothing will bring it
+		up, and _classify stops offering a defib on it so nobody spends one
+		finding that out.
+	]]
+	record.deaths += 1
+	if record.deaths >= S.DeathsPerRound then
+		record.eliminated = true
+	end
+
+	if
+		GameConfig.RespawnClosetsEnabled
+		and not record.eliminated
+		and not table.find(awaitingRescue, player)
+	then
 		table.insert(awaitingRescue, player)
 	end
 
@@ -1405,6 +1468,12 @@ function SurvivorService:defibrillate(player: Player): boolean
 	if not record or record.state ~= STATE.Dead then
 		return false
 	end
+	--[[ Out of lives. The prompt is already withheld by _classify, so reaching
+	     here means a client asked for something it was not offered — and the
+	     answer is the same either way: this one is not coming back this round. ]]
+	if record.eliminated then
+		return false
+	end
 
 	local cframe
 	local body = record.character
@@ -1464,8 +1533,26 @@ end
 
 --[[ Rebuilds a character and puts the survivor back on their feet with permanent
      health. LoadCharacter yields, so this is never called from the heartbeat. ]]
+--[[
+	Puts a survivor back in a body mid-round: a defibrillator, a closet, or the
+	breather's own respawn.
+
+	── AND IT IS THE ONE DOOR THAT REFUSES ─────────────────────────────────────
+	The eliminated check lives here rather than at each of the three callers, and
+	that is the point of putting it here at all: `defibrillate` and
+	`rescueFromCloset` were both easy to remember, and RoundService's breather
+	loop — which respawns anybody reporting Dead, in a different file, on a rule
+	of its own — is exactly the one that would have been missed. It would have
+	handed a player their round back ninety seconds after taking it away.
+
+	Anything added later that wants to revive somebody arrives through this door
+	too, and gets the same answer without knowing the rule exists.
+]]
 function SurvivorService:_respawn(player: Player, cframe: CFrame?, health: number)
 	local record = self:_ensureRecord(player)
+	if record.eliminated then
+		return
+	end
 	record.health = math.min(health, self:_cap(record))
 	record.tempHealth = 0
 	record.incapHealth = 0
@@ -1536,7 +1623,11 @@ function SurvivorService:_classify(record, target: Instance)
 			elseif other.state == STATE.LedgeHanging then
 				return INTERACT.LedgePull, targetPlayer, S.LedgePullTime, "Pull Up"
 			elseif other.state == STATE.Dead then
-				if heldHealthItem == Enums.HealthItem.Defibrillator then
+				--[[ Not for somebody who is out for the round. Offering a defib
+				     that cannot work would cost a teammate the item's whole use
+				     time to find out, in the middle of whatever killed the person
+				     they are kneeling over. ]]
+				if heldHealthItem == Enums.HealthItem.Defibrillator and not other.eliminated then
 					return INTERACT.Defib, targetPlayer, S.DefibUseTime, "Revive"
 				end
 			elseif heldHealthItem == Enums.HealthItem.Medkit and other.health < S.MaxHealth then

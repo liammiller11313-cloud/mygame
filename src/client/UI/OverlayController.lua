@@ -554,12 +554,31 @@ local function refreshState()
 
 	statusPanel.Visible = downed or dead
 	if dead then
-		statusTitle.Text = "YOU ARE DEAD"
+		--[[
+			A death that is the last one says so, in as many words.
+
+			Three deaths ends a survivor's round — see GameConfig's DeathsPerRound
+			— and "WAITING FOR RESCUE" under a body nobody can rescue would be the
+			cruellest possible thing to leave on screen. Nor is the last life
+			something to find out by dying on it: the count is on the card for
+			every death before that too, so a player who is one away knows it while
+			they still have a say in the matter.
+		]]
+		local eliminated = Attributes.get(player, PA.Eliminated, false) == true
+		local left = math.max(GameConfig.Survivor.DeathsPerRound - Attributes.get(player, PA.Deaths, 0), 0)
+		statusTitle.Text = if eliminated then "OUT FOR THE ROUND" else "YOU ARE DEAD"
 		statusTitle.TextColor3 = COLOR.Danger
-		statusLine.Text = if GameConfig.RespawnClosetsEnabled
-			then "WAITING FOR RESCUE"
-			else "WAITING FOR A DEFIBRILLATOR"
-		statusWarning.Text = ""
+		if eliminated then
+			statusLine.Text = "SPECTATING UNTIL THE NEXT ROUND"
+			statusWarning.Text = ""
+		else
+			statusLine.Text = if GameConfig.RespawnClosetsEnabled
+				then "WAITING FOR RESCUE"
+				else "WAITING FOR A DEFIBRILLATOR"
+			statusWarning.Text = if left == 1
+				then "LAST LIFE — THE NEXT DEATH ENDS YOUR ROUND"
+				else string.format("%d LIVES LEFT THIS ROUND", left)
+		end
 	elseif downed then
 		statusTitle.Text = if state.survivorState == STATE.LedgeHanging then "HANGING ON" else "YOU ARE DOWN"
 		statusTitle.TextColor3 = COLOR.HealthIncap

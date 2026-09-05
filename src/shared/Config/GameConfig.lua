@@ -26,7 +26,7 @@ local GameConfig = {}
 	none. If it is stale, the log says so honestly: the code in Studio is at least
 	as new as this date, and no newer than the push that set it.
 ]]
-GameConfig.BuildStamp = "2026-09-05d"
+GameConfig.BuildStamp = "2026-09-05e"
 
 --[[
 	What the game calls itself, on screen.
@@ -239,6 +239,26 @@ GameConfig.Survivor = table.freeze({
 	ReviveTime = 5.0,
 	ReviveHealth = 30, -- temp health you stand up with
 	MaxIncapsBeforeDeath = 2, -- the third down kills you
+
+	--[[
+		How many times a survivor may DIE in one round before they are out of it.
+
+		The incap ledger above is the small version of this and runs on the same
+		idea: a third down kills you, and a third death ends your round. Together
+		they give a player who is having a bad time nine falls before the game
+		stops handing them another one — enough that nobody is eliminated by one
+		mistake, few enough that a player who keeps running into the horde stops
+		costing their team a defibrillator every ninety seconds.
+
+		A round is seventeen minutes. Three is a real budget across that and still
+		short enough to be worth protecting, which is the whole point: it turns
+		"I can always come back" into "we cannot keep doing this".
+
+		Eliminated is NOT the same as leaving. They keep their body, they keep
+		their score, they spectate the team, and the next round starts them at
+		full health with a fresh ledger — see SurvivorService.spawnSurvivor.
+	]]
+	DeathsPerRound = 3,
 	BlackAndWhiteHealth = 50, -- forced health cap while black & white
 
 	LedgeHangTime = 60,

@@ -120,6 +120,11 @@ Attributes.Player = table.freeze({
 	     the trigger stops firing the gun in your hands, because it is firing the
 	     one you are sitting behind instead. ]]
 	ManningTurret = "FL_ManningTurret", -- boolean
+	--[[ How many times this survivor has died THIS ROUND, and whether that has
+	     run out. Both published because the HUD wants to warn on the last life
+	     and the spectate card wants to say why there is no way back. ]]
+	Deaths = "FL_Deaths", -- number, reset at every round start
+	Eliminated = "FL_Eliminated", -- boolean, out until the next round
 })
 
 -- Written on the Player instance, read by the ammo counter.

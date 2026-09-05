@@ -27,6 +27,23 @@ editing it by hand.
 | Backpack | B | — | — |
 | Requisitions | T | — | — |
 
+## Three deaths and your round is over
+
+A survivor gets **three deaths per round**. The first two are recoverable — a
+teammate's defibrillator, a rescue closet, or the breather's own respawn. The
+third ends your round: no defib, no closet, no breather, and the prompt to
+defibrillate you stops being offered so nobody spends one finding that out.
+
+The death card counts down to it, so nobody discovers their last life by
+spending it. Being out is **not** the same as leaving: you keep your body, you
+keep your score, you spectate the team, and the next round starts you at full
+health with a clean ledger.
+
+Together with the incap ledger — a third down kills you — that is nine falls
+before the game stops handing you another one.
+
+`GameConfig.Survivor.DeathsPerRound`.
+
 ## When you die you watch the team
 
 Dying used to unlock the camera and leave it pointed at your own body, so a

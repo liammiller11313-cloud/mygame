@@ -182,7 +182,17 @@ end
 local function redraw()
 	local target = state.target
 	local name = if target then string.upper(target.DisplayName) else ""
-	local text = if name ~= "" then "SPECTATING  " .. name else "NOBODY LEFT TO WATCH"
+	--[[ Which of the two ways there is no way back matters to the player reading
+	     it: waiting for a rescue is something a teammate can still fix, and being
+	     out of lives is not. The card says which without them having to work it
+	     out from the fact that nobody has come. ]]
+	local out = Attributes.get(player, PA.Eliminated, false) == true
+	local text
+	if name ~= "" then
+		text = if out then "OUT — SPECTATING  " .. name else "SPECTATING  " .. name
+	else
+		text = "NOBODY LEFT TO WATCH"
+	end
 	if text ~= state.shownName then
 		state.shownName = text
 		nameLabel.Text = text
