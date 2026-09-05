@@ -354,10 +354,16 @@ WeaponConfig.Definitions = {
 	     means three body shots on a Common where the .45 takes two, so the
 	     fifteen rounds are not free — they are the same total damage spread over
 	     more trigger pulls and more time upright. ]]
+	--[[ The enum id stays DualBerettas and the model is a Glock and a P220, which
+	     looks like an oversight and is not: the id is what a PROFILE stores. It is
+	     in every save's `owned` set and in the loadouts pointing at it, so
+	     renaming it would un-buy this gun for everybody who has one. What the
+	     player reads is displayName; what the asset pipeline looks for is
+	     modelName; the id is a database key and nothing else. ]]
 	[Enums.Weapon.DualBerettas] = {
 		id = Enums.Weapon.DualBerettas,
-		displayName = "Dual Berettas",
-		modelName = "Dual Berettas",
+		displayName = "Dual Pistols",
+		modelName = "Dual Pistol",
 		slot = Enums.Slot.Secondary,
 		class = "Pistol",
 		fireMode = "Semi",

@@ -592,6 +592,13 @@ local function prepare(instance: Instance)
 			-- Every sound this weapon makes is played by WeaponController, in 2D,
 			-- on the frame it happened. Nothing the model brought is wanted.
 			descendant:Destroy()
+		elseif descendant:IsA("Camera") then
+			--[[ A ThumbnailCamera, left behind by whoever rendered the model's
+			     marketplace icon. It is in more supplied models than not, and a
+			     viewmodel is parented to Workspace.CurrentCamera — so this is a
+			     Camera nested inside the live one, and it is inside every
+			     bounding box the fit and the muzzle are measured from. ]]
+			descendant:Destroy()
 		end
 	end
 end

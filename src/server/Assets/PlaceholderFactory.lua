@@ -346,6 +346,13 @@ local STRIPPED_CLASSES = table.freeze({
 	"ProximityPrompt",
 	"ClickDetector",
 	"Sound",
+	--[[ A Camera called ThumbnailCamera is what Studio leaves inside a model
+	     somebody generated a marketplace icon for, and it is in more supplied
+	     models than not. Harmless in a folder and not harmless in a weapon: it
+	     rides the clone into the world, gets welded to the character with
+	     everything else, and turns up in the bounding box every measurement in
+	     this pipeline is taken from — the fit, the muzzle, the grip. ]]
+	"Camera",
 })
 
 --[[
@@ -1983,6 +1990,27 @@ local function ensureGrip(model: Model, handle: BasePart): Attachment
 	attachment.Name = "Grip"
 
 	local forward = ModelFacing.forwardOf(model, handle, model:GetPivot()) or -Vector3.zAxis
+	--[[ Said out loud when the answer was a guess AND it changed anything. A gun
+	     that was already facing forward is not worth a line, and one this
+	     straightened on a longest-axis reading is: it is the case the reading can
+	     be wrong about — a dual-wield pair is longest along whichever way the
+	     artist arranged the two, which is not measurable from outside — and the
+	     fix is one Muzzle attachment. See docs/WEAPON_MODELS.md. ]]
+	if ModelFacing.LastWasGuess and not ModelFacing.isForward(forward) then
+		--[[ model.Name, not the weapon id: adoptWeapon renames the model AFTER
+		     this runs, so what is here is still what the artist called the folder
+		     — which is the name they will be looking for in Studio. ]]
+		warnOnce(
+			"facing:" .. model.Name,
+			string.format(
+				"the %q model is not built barrel-down-Z, so it was straightened from its longest "
+					.. "axis — which is a guess. If it comes out of the hand pointing the wrong way, "
+					.. "add an Attachment called Muzzle at the end of its barrel and the answer "
+					.. "becomes exact. See docs/WEAPON_MODELS.md",
+				model.Name
+			)
+		)
+	end
 	--[[ Into the handle's own space, which is what an Attachment parented to it
 	     is measured in. Up comes from the model's pivot rather than from the
 	     world: the model is sitting in ServerStorage at whatever rotation it was

@@ -25,6 +25,18 @@
 	     than it is wide, and the end furthest from the part you hold it by is the
 	     end the rounds come out of.
 
+	── AND THE SECOND ONE IS A GUESS, WHICH IT SAYS ────────────────────────────
+	The longest axis is the barrel for one gun and is not necessarily the barrel
+	for two. A DUAL-WIELD model is a pair of pistols with a gap between them, and
+	which way that pair is longest depends entirely on how the artist arranged
+	them — along their own barrels, or side by side across them. Measured from the
+	outside there is no way to tell those apart.
+
+	So the fallback sets LastWasGuess, and the callers that act on it say so at
+	boot with the model's name. A player can then look at the gun once and know
+	whether to do anything, and what to do is one instance: a Muzzle attachment at
+	the end of a barrel makes the answer exact and takes this path out of it.
+
 	Neither answer is trusted when it is marginal: a model already close to
 	forward is left exactly as its author made it, because overruling a
 	deliberate cant is worse than the bug this fixes.
@@ -99,10 +111,17 @@ end
 	the biggest thing present. It is only used for the fallback, to decide which
 	END of the longest axis is the muzzle.
 ]]
+--[[ Set by forwardOf on the fallback path, so a caller that straightens a model
+     can say which of the two answers it acted on. A Muzzle reading is exact and
+     needs no comment; a longest-axis one is a guess and is worth naming. ]]
+ModelFacing.LastWasGuess = false
+
 function ModelFacing.forwardOf(model: Model, grip: BasePart?, frame: CFrame): Vector3?
 	local inverse = frame:Inverse()
 	local low, high = ModelFacing.extents(model, frame)
 	local centre = (low + high) * 0.5
+
+	ModelFacing.LastWasGuess = false
 
 	local muzzle = muzzleIn(model)
 	if muzzle then
@@ -115,6 +134,7 @@ function ModelFacing.forwardOf(model: Model, grip: BasePart?, frame: CFrame): Ve
 	if not grip then
 		return nil
 	end
+	ModelFacing.LastWasGuess = true
 
 	local size = high - low
 	local axis, length = Vector3.zAxis, size.Z

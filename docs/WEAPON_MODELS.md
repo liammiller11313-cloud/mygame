@@ -82,7 +82,7 @@ Same folder, same rules.
 | Secondary | M1911A1 | `M1911` · `M1911A1` |
 | Secondary | M9 | `M9` |
 | Secondary | .357 Magnum | `.357 Magnum` · `Magnum357` |
-| Secondary | Dual Berettas | `Dual Berettas` · `DualBerettas` |
+| Secondary | Dual Pistols | `Dual Pistol` · `DualBerettas` |
 | Secondary | Glock 18 | `Glock 18` · `Glock18` |
 | Secondary | Sawn-Off | `Sawn-Off` · `SawnOff` |
 | Secondary | RPG-7 | `RPG-7` · `RPG7` |
@@ -163,3 +163,29 @@ The barrel is found in one of two ways:
 So if a weapon still comes out pointing the wrong way, **put an Attachment called
 `Muzzle` at the end of its barrel.** That settles it, and it improves where the
 flash and the tracers come from at the same time.
+
+**Boot tells you when it guessed.** Any model straightened on the longest-axis
+reading is named in the output, with the same advice:
+
+```
+[PlaceholderFactory] the "Dual Pistol" model is not built barrel-down-Z, so it was
+straightened from its longest axis — which is a guess. If it comes out of the hand
+pointing the wrong way, add an Attachment called Muzzle...
+```
+
+A model already facing forward, or one carrying a `Muzzle`, says nothing.
+
+**Dual-wield models are the shape most worth checking.** The longest axis is the
+barrel for one gun and not necessarily for two: a pair of pistols is longest along
+whichever way you arranged them, and nothing measurable from outside can tell
+"end to end" from "side by side". One `Muzzle` on one of the two barrels is the
+whole fix.
+
+## Things Studio leaves in a model
+
+`ThumbnailCamera` — a `Camera` left behind by whoever rendered the marketplace
+icon — is stripped now, along with scripts, sounds, prompts and click detectors.
+It is in more supplied models than not, and it was riding the clone into the
+world, getting welded to the character with everything else, and sitting inside
+the bounding box that the scale fit, the muzzle and the grip are all measured
+from. You do not need to delete it yourself.
