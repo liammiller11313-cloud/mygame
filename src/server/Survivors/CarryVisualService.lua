@@ -396,8 +396,8 @@ local function buildKitModel(itemId: string): Model?
 		return nil
 	end
 
-	local medkits = Registry.find("MedkitService")
-	local template = medkits and medkits:getCarryTemplate()
+	local mapItems: any = Registry.find("MapItemService")
+	local template = mapItems and typeof(mapItems.getTemplate) == "function" and mapItems:getTemplate(itemId)
 	if not template then
 		return nil
 	end

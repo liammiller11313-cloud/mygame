@@ -488,13 +488,18 @@ Two rules:
   out sideways. Derive it: `C0.Rotation:Inverse() * Vector3.xAxis` is the
   parent's right axis in joint space, and it is the correct hinge on any rig.
 
-### `Level/MedkitService.lua` → `"MedkitService"`
+### `Level/MapItemService.lua` → `"MapItemService"`
 
-Owns the `Medkits` folder in the live map: dresses each model as a pickup, and
-refills a spawn point 30s after the kit it produced is **spent**. Listens to
-`InventoryService.pickedUp` and `.itemConsumed` — not `.changed`, which cannot
-tell a spend from a drop, a swap or a death, and refilling on those would print
-medkits.
+Owns every item folder in the live map — `Medkits`, `Pain Pills` and
+`Adrenaline Shots`, declared in `MapConfig.MapItems`. Dresses each model as a
+pickup where it stands and refills that spot once the item it produced is
+**spent**. Listens to `InventoryService.pickedUp` and `.itemConsumed` — not
+`.changed`, which cannot tell a spend from a drop, a swap or a death, and
+refilling on those would print items.
+
+It is also where the ART for these three comes from: `getTemplate(itemId)` hands
+back the map's own model, and both `PlaceholderFactory` (pads) and
+`CarryVisualService` (backs) use it, so there is no second copy to keep in sync.
 
 ### `Survivors/CarryVisualService.lua` → `"CarryVisualService"`
 

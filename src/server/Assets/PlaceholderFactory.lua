@@ -83,6 +83,7 @@ local AnimationConfig = require(Shared.Config.AnimationConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
+local MapConfig = require(Shared.Config.MapConfig)
 local ModelFacing = require(Shared.Util.ModelFacing)
 local Registry = require(Shared.Util.Registry)
 local RigUtil = require(Shared.Util.RigUtil)
@@ -2480,13 +2481,20 @@ end
 
 	There used to be: a white case with a red cross, four parts. It was the only
 	grey-box in this file competing with a model the game already had, because a
-	medkit is the one pickup the MAP supplies — MedkitService loads eleven of the
-	designer's own per level and the carry visual already used them for the thing
-	on a survivor's back. So a player saw their kit on the floor of the map, their
-	kit on a teammate's back, and this one on an item pad.
+	medkit is a pickup the MAP supplies — MapItemService loads the designer's own
+	per level and the carry visual already used them for the thing on a survivor's
+	back. So a player saw their kit on the floor of the map, their kit on a
+	teammate's back, and this one on an item pad.
 
-	buildPickup now asks MedkitService for that same template. See it for how,
-	and for why the answer is not cached.
+	Pills and adrenaline are supplied the same way now and DO still have a
+	generated version below, and the difference is deliberate. The medkit is
+	strict — no map model, no medkit, because the whole point of that change was
+	to remove ours. The pill builders stay as a fallback because a misnamed
+	folder must not silently delete the Director's entire pills flow: a team that
+	stops finding pills has no way to tell that from bad luck.
+
+	buildPickup asks MapItemService for the map's template first either way. See
+	it for how, and for why the answer is not cached.
 ]]
 
 PICKUP_BUILDERS[Enums.HealthItem.Defibrillator] = function(model)
@@ -2601,6 +2609,16 @@ local function finishPickup(model: Model): Model?
 			part.Massless = true
 			weldTo(handle, part)
 		end
+		--[[ Queryable, and SET rather than left as it arrived. Both the ways the
+		     prompt finds a pickup — the crosshair ray and the arm's-reach sweep —
+		     skip a part with CanQuery off, so a supplied mesh that happens to have
+		     it cleared is an item nobody can pick up with nothing on screen to say
+		     why. The two parts this function added itself keep it off on purpose:
+		     the invisible handle and the floor ring must never eat the ray aimed
+		     at the thing standing on them. ]]
+		if part ~= handle and part ~= ring then
+			part.CanQuery = true
+		end
 	end
 	return model
 end
@@ -2690,29 +2708,31 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 	end
 
 	--[[
-		The medkit is the MAP'S model, and it is resolved BEFORE the cache.
+		Medkits, pills and adrenaline are the MAP'S models, resolved BEFORE the
+		cache.
 
-		Not cached, and that is the whole reason it is up here rather than in the
-		fallback chain below: the template belongs to whichever level is loaded,
-		and a cache is forever. Caching Clinton's kit would put Clinton's kit on
-		an item pad in every map after it.
+		Not cached, and that is the whole reason this is up here rather than in
+		the fallback chain below: the template belongs to whichever level is
+		loaded, and a cache is forever. Caching Clinton's kit would put Clinton's
+		kit on an item pad in every map after it.
 
 		It also has to be ahead of the boot-time prewarm, which calls this for
-		every pickup id before MedkitService exists. Down in the chain, that call
+		every pickup id before MapItemService exists. Down in the chain, that call
 		would have found no template, fallen through to the generic crate, and
 		cached the CRATE as the medkit for the life of the server.
 	]]
 	local key = slot .. "_" .. itemId
+	local family = MapConfig.mapItemFor(itemId)
 
 	--[[ An explicit Assets/Pickups entry still wins, and is checked before the
 	     map. Somebody who put a model there is deliberately saying the floor
-	     version differs from the one lying around the level, and this change was
-	     about removing OUR medkit, not about overruling theirs. ]]
-	if itemId == Enums.HealthItem.Medkit and not suppliedEntry("Pickups", { key, itemId }) then
-		local medkits = Registry.find("MedkitService")
-		local template = medkits
-			and typeof(medkits.getCarryTemplate) == "function"
-			and medkits:getCarryTemplate()
+	     version differs from the one lying around the level, and this was about
+	     removing OUR models, not about overruling theirs. ]]
+	if family and not suppliedEntry("Pickups", { key, itemId }) then
+		local mapItems: any = Registry.find("MapItemService")
+		local template = mapItems
+			and typeof(mapItems.getTemplate) == "function"
+			and mapItems:getTemplate(itemId)
 		if template then
 			local model = template:Clone()
 			sanitise(model)
@@ -2722,25 +2742,36 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 				return finished
 			end
 		end
-		--[[
-			No template means nothing to copy, and nil is the answer either way — a
-			medkit that is not the map's medkit is the thing this change exists to
-			remove, and the caller already copes with an empty pad.
 
-			But it is only worth SAYING when MedkitService exists and has nothing.
-			The boot-time prewarm calls this for every pickup id before that
-			service is registered at all, so warning unconditionally meant a
-			complaint about missing medkits on the startup of every server ever
-			run, including one with a map full of them.
+		--[[
+			Only worth SAYING when the service exists and has nothing. The
+			boot-time prewarm calls this for every pickup id before that service is
+			registered at all, so warning unconditionally meant a complaint about
+			missing medkits on the startup of every server ever run, including one
+			with a map full of them.
 		]]
-		if medkits then
+		if mapItems then
 			warnOnce(
-				"nomedkit",
-				"a Health pickup was asked for but the live map has no medkits to copy. "
-					.. 'Put models named "Medkit 1" upward in a Medkits folder in the map.'
+				"nomapitem:" .. itemId,
+				string.format(
+					"a %s was asked for but the live map has none to copy. Put models named "
+						.. "%q upward in a %q folder in the map.%s",
+					itemId,
+					family.modelName .. " 1",
+					family.folderName,
+					if itemId == Enums.HealthItem.Medkit
+						then ""
+						else " Falling back to the built-in model for now."
+				)
 			)
 		end
-		return nil
+
+		--[[ The medkit and only the medkit stops here. Everything else falls
+		     through to its builder below — see the note above PICKUP_BUILDERS for
+		     why the two differ. ]]
+		if itemId == Enums.HealthItem.Medkit then
+			return nil
+		end
 	end
 
 	local source = pickupTemplates[key]

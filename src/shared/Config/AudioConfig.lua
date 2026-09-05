@@ -516,6 +516,17 @@ AudioConfig.Survivor = {
 	Revived = sound(ID.Gasp, 0.65, 0.96, 1.06, 90, 4),
 	HealSelf = sound(ID.Bandage, 0.55, 0.96, 1.04, 60, 3),
 	PillsUse = sound(ID.PillBottle, 0.5, 0.98, 1.06, 50, 3),
+	--[[ Not the pill bottle. Both items used to share that rattle, and a teammate
+	     who hears one of the two has learned something quite different about what
+	     is about to happen — pills are somebody buying time, a shot is somebody
+	     about to run at something.
+
+	     The gasp rather than a needle, pitched under Revived's, because it is the
+	     survivor's reaction that reads at a distance and this project has no
+	     injector sample. Named honestly as a stand-in in docs/AUDIO_NEEDED.md;
+	     only the id changes when there is a real one. Carries further than the
+	     pills do, on purpose: this is the cue worth hearing across a room. ]]
+	AdrenalineUse = sound(ID.Gasp, 0.72, 0.84, 0.92, 85, 4),
 	Breathing = sound(ID.HeavyBreathing, 0.5, 0.98, 1.02, 45, 2),
 	Footstep = sound(EMPTY, 0.3, 0.9, 1.1, 50, 1),
 } :: { [string]: SoundDefinition }

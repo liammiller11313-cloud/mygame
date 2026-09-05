@@ -1,4 +1,4 @@
-# Maps and Ammo Crates
+# Maps, Items and Ammo Crates
 
 ## Where the maps go
 
@@ -74,25 +74,42 @@ event — so tag those two by hand when you want them.
 
 ---
 
-## Medkits
+## Health items
 
-Inside **each** map, put a folder called `Medkits`:
+Three folders inside **each** map, one per item:
 
 ```
 Zombieville/
     Medkits/
-        Medkit 1
-        Medkit 2
-        ...
-        Medkit 11
+        Medkit 1 ... Medkit 11
+    Pain Pills/
+        Pain Pills 1 ... Pain Pills 9
+    Adrenaline Shots/
+        Adrenaline Shot 1 ... Adrenaline Shot 7
 ```
 
-**You don't tag anything.** Same rule as the crates — the game finds the folder by
-name when the map loads and does the rest. Naming is forgiving: `Medkit 3`,
-`Medkit3` and `medkit 3` all work, and the folder can be `Medkits` or `medkits`.
-Eleven is what you have; nothing enforces a count.
+**You don't tag anything.** Same rule as the crates — the game finds each folder
+by name when the map loads and does the rest. Naming is forgiving: `Medkit 3`,
+`Medkit3` and `medkit 3` all work, and `Pain Pills`, `pain pills` and `PainPill`
+all find the same folder. The counts above are what you have; nothing enforces
+one, and a model with no number on the end just keeps its place in the folder.
 
-### How they behave
+**Your models are the game's models.** These folders are not only *where* the
+items are — they are what the items *look like*, everywhere. When the Director
+drops pills on an item pad partway through a wave, it copies the model standing
+in your map rather than building its own. Change the prop in the map and the
+whole game changes with it; there is no second copy to keep in sync.
+
+> If a folder is missing or misnamed, the server says so by name at boot and
+> lists what folders the map *does* have. Pills and adrenaline fall back to a
+> built-in model so the Director's item flow keeps working; a **medkit does
+> not** — no map kit means no kit, because your model is the only medkit the
+> game has.
+
+The whole contract lives in `MapConfig.MapItems`, one entry per family, if you
+want a fourth.
+
+### How medkits behave
 
 - **Walk up and take it.** Instant, like any other pickup — no hold. It lands in
   your Health slot and shows in the hotbar.
@@ -114,6 +131,26 @@ The prop on the back is scaled down from your own model, and anything larger tha
 — the supplied models are built to be read on the floor, not worn, and a big one
 would otherwise become a wardrobe on somebody's shoulder. `CarryOffset` in
 `MapConfig` moves it if it sits wrong on your rig.
+
+Only the medkit rides on a back. A pill bottle on someone's shoulder would be
+three pixels, and the point of carrying a kit visibly is that the team can read
+it across a room.
+
+### How pills and adrenaline behave
+
+Both go in the **Pills** slot — you can carry one, alongside a medkit — and both
+are taken instantly and used with the same button.
+
+**Pain pills** are a buffer: 50 temporary health that drains slowly. It is time,
+not healing, and it is what a hurt team takes when there is no kit.
+
+**Adrenaline is not a smaller pill bottle.** It is 25 temporary health that
+drains almost three times as fast, and the health is the least of it — see
+`docs/ADRENALINE.md`. Everything else it does is about the next fifteen seconds.
+
+They refill on a slower clock than a medkit (45 and 55 seconds against 30) and
+only once the item is actually **used**. Dropping or swapping one leaves it lying
+in the world, so refilling on those would print bottles.
 
 ---
 

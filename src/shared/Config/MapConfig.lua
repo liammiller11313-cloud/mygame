@@ -10,6 +10,8 @@
 	Adding a map is one entry here plus a model in ServerStorage.Maps. No code.
 ]]
 
+local Enums = require(script.Parent.Parent.Enums)
+
 local MapConfig = {}
 
 --[[ Where the server looks for maps, and where the live one is parented. Both
@@ -191,29 +193,129 @@ MapConfig.AmmoCrates = table.freeze({
 	not thirty seconds after it is TAKEN. Carrying a kit you have not used yet
 	should not also be quietly restocking the map behind you.
 ]]
+--[[
+	── EVERY ITEM THE MAP ITSELF SUPPLIES ──────────────────────────────────────
+
+	Three families now, and the contract is one contract: a folder named after
+	the family, holding models numbered from one. `MapItemService` finds them,
+	turns each into a pickup where it stands, and refills that spot on a clock
+	once the item it produced has actually been spent.
+
+	Naming rather than tagging, for the same reason as the ammo crates: a level
+	designer names things anyway, and a tag is one more thing to forget. The
+	match is loose — `folderMatches` folds case, spaces and a trailing plural —
+	so "Pain Pills", "pain pills" and "PainPill" all find the same folder.
+
+	The models are also where the game's ART for these items comes from.
+	PlaceholderFactory copies whatever is standing in the map rather than
+	building its own, so an item the Director drops on a pad is the same object
+	the player has been walking past all round. There is no second place to
+	update when the model changes.
+
+	── WHY THE REFILL CLOCK STARTS WHERE IT DOES ───────────────────────────────
+	On the SPEND, not on the pickup. Four things empty a slot — using the item,
+	dropping it, swapping it, and dying — and only the first destroys anything.
+	The other three leave the item lying in the world, so refilling on those
+	would print items. Carrying an unspent kit around must not quietly restock
+	the map behind you.
+]]
+export type MapItemFamily = {
+	key: string, -- stamped on every spawned model, so a pickup knows its family
+	folderName: string,
+	--[[ What one model inside is called, for the warning that fires when the
+	     folder is missing. Nothing enforces the count — nine or three or twenty
+	     all work, and a model with no trailing number keeps discovery order. ]]
+	modelName: string,
+	expectedCount: number,
+	slot: string,
+	itemId: string,
+	tag: string,
+	respawnSeconds: number,
+	--[[ A taken spawn point leaves a faint outline, exactly as a spent crate
+	     does. A player who has learned the map should be able to plan around an
+	     item that is not there yet. ]]
+	leaveGhost: boolean,
+	ghostTransparency: number,
+}
+
+MapConfig.MapItems = table.freeze({
+	table.freeze({
+		key = "Medkits",
+		folderName = "Medkits",
+		modelName = "Medkit",
+		expectedCount = 11,
+		slot = Enums.Slot.Health,
+		itemId = Enums.HealthItem.Medkit,
+		tag = "FL_Medkit",
+		respawnSeconds = 30,
+		leaveGhost = true,
+		ghostTransparency = 0.86,
+	}),
+
+	--[[ Nine and seven, against the medkit's eleven, and the split is the point.
+	     Pills are the consolation prize a hurt team finds when there is no kit,
+	     so there should be a few of them; adrenaline is a tool rather than a
+	     heal — you take it to DO something — and finding one should feel like a
+	     decision about the next thirty seconds.
+
+	     Both refill slower than a medkit. A kit is the thing a round is planned
+	     around and the map should not run out of them; a pill bottle that came
+	     back every half minute would make the buffer free. ]]
+	table.freeze({
+		key = "PainPills",
+		folderName = "Pain Pills",
+		modelName = "Pain Pills",
+		expectedCount = 9,
+		slot = Enums.Slot.Pills,
+		itemId = Enums.PillItem.PainPills,
+		tag = "FL_PainPills",
+		respawnSeconds = 45,
+		leaveGhost = true,
+		ghostTransparency = 0.9,
+	}),
+	table.freeze({
+		key = "Adrenaline",
+		folderName = "Adrenaline Shots",
+		modelName = "Adrenaline Shot",
+		expectedCount = 7,
+		slot = Enums.Slot.Pills,
+		itemId = Enums.PillItem.Adrenaline,
+		tag = "FL_Adrenaline",
+		respawnSeconds = 55,
+		leaveGhost = true,
+		ghostTransparency = 0.9,
+	}),
+}) :: { MapItemFamily }
+
+--[[ The family that supplies an item id, or nil for one the map does not place.
+     Both pill families share a Slot, so the id is the only thing that separates
+     them and every lookup has to go through the id rather than the slot. ]]
+function MapConfig.mapItemFor(itemId: string?): MapItemFamily?
+	if typeof(itemId) ~= "string" then
+		return nil
+	end
+	for _, family in MapConfig.MapItems do
+		if family.itemId == itemId then
+			return family
+		end
+	end
+	return nil
+end
+
+--[[
+	How a medkit rides on a survivor's back.
+
+	Only the medkit: it is the one carried item big enough to read as a
+	silhouette across a room, and that visibility is most of why it is carried at
+	all. A pill bottle on someone's shoulder would be three pixels.
+
+	There is deliberately no Range in here either. A medkit is a PICKUP, not a
+	station, so both the prompt and the server's reach come from
+	GameConfig.Interaction.PickupRange — the same number every other pickup in
+	the game uses. A second copy of it would only ever be the one that was
+	forgotten.
+]]
 MapConfig.Medkits = table.freeze({
-	FolderName = "Medkits",
-	Tag = "FL_Medkit",
-
-	--[[ Only used in the "you have not set this up yet" warning, so it names the
-	     right range of models. Nothing enforces a count — eleven or three or
-	     twenty all work. ]]
-	ExpectedCount = 11,
-
-	RespawnSeconds = 30,
-
-	--[[ There is deliberately no Range here. A medkit is a PICKUP, not a
-	     station, so both the prompt and the server's reach come from
-	     GameConfig.Interaction.PickupRange — the same number every other pickup
-	     in the game uses. A second copy of it would only ever be the one that
-	     was forgotten. ]]
-
-	--[[ A taken spawn point leaves a faint ghost, exactly as a spent crate does.
-	     A player who has learned the map should be able to plan around a kit that
-	     is not there yet. ]]
-	LeaveGhost = true,
-	GhostTransparency = 0.86,
-
 	--[[ How the kit sits on a survivor's back. Studs, in torso space: back from
 	     the spine, up towards the shoulders, and turned so the flat face of the
 	     kit lies against them rather than the edge.

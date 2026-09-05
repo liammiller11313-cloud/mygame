@@ -110,15 +110,15 @@ know it is a Tank.
 
 A **substitute never inherits the wave's elite tier**. Wave 15's Apex triples
 health, which on a Tank is the finale and on a Metallic is eighteen thousand
-health and a fight nobody finishes.
+health and a fight nobody finishes. So the last wave is either an Apex Tank or a
+plain Metallic, and those are meant to be about equally hard by completely
+different routes. The ELITE WAVE modifier follows the same rule.
 
 > An Apex is not currently any *bigger* than a plain Tank, only tougher. Its
 > tier asks for ×1.12 scale, and that is applied by writing the Humanoid's scale
 > values — which the asset pipeline deletes from every template on purpose, so
 > spawning cannot scale a rig twice. Health and damage land; size does not.
-> Listed here because it is invisible from the config and surprising. So the last wave is either an Apex Tank or a
-plain Metallic, and those are meant to be about equally hard by completely
-different routes. The ELITE WAVE modifier follows the same rule.
+> Listed here because it is invisible from the config and surprising.
 
 The callout always tells the truth. Whatever the wave *announced*, the shouted
 line names what actually walked in.

@@ -452,6 +452,41 @@ function SurvivorService:_refreshUprightState(record)
 end
 
 --[[
+	The speed this survivor's CONDITION implies, and whether they are limping —
+	before sprint, crouch, the weapon in their hands or adrenaline's multiplier.
+
+	Shared by _computeWalkSpeed and the sprint detector, and that is not
+	tidiness. The detector decides whether somebody is sprinting by comparing
+	their real velocity against this number, so two copies of it are two things
+	that can disagree about what walking looks like. They did disagree once, over
+	adrenaline, and the result was that the item you take to move faster deleted
+	your sprint for its entire duration.
+
+	── ADRENALINE LIFTS THE LIMP ───────────────────────────────────────────────
+	Outright, for its whole fifteen seconds, whatever your health is.
+
+	This used to be the opposite, deliberately: a limping survivor could not
+	break into a run, and adrenaline's temp health was meant to be the way back
+	over the threshold rather than an exception carved out here. That is a
+	coherent rule and it is not Left 4 Dead's, which is what this game is. In
+	L4D2 a survivor on one health who takes a shot RUNS — that single property is
+	most of what the item is for, and it is why you save one for the moment
+	somebody has to cross open ground to a downed teammate.
+
+	It was also inconsistent as written. Twenty-five temp health lifts you over a
+	forty-point threshold from sixteen health but not from ten, so whether the
+	shot let you run depended on a number nobody can see, and it stopped working
+	partway through as the buffer drained at 1.4 a second.
+]]
+function SurvivorService:_baseWalkSpeed(record): (number, boolean)
+	if self:_hasAdrenaline(record) then
+		return S.NormalWalkSpeed, false
+	end
+	local hurt = self:_effective(record) < S.HurtThreshold
+	return (if hurt then S.LimpWalkSpeed else S.NormalWalkSpeed), hurt
+end
+
+--[[
 	The one place that decides how fast a survivor moves.
 
 	Limping below the hurt threshold is the whole point of that threshold: it is
@@ -471,11 +506,8 @@ function SurvivorService:_computeWalkSpeed(record): number
 		return 0
 	end
 
-	local hurt = self:_effective(record) < S.HurtThreshold
-	local speed = hurt and S.LimpWalkSpeed or S.NormalWalkSpeed
+	local speed, hurt = self:_baseWalkSpeed(record)
 
-	-- A limping survivor cannot break into a run; adrenaline's temp health is the
-	-- intended way back over the threshold, not an exception carved out here.
 	--[[
 		Sprint is now ASKED FOR rather than assumed.
 
@@ -1206,15 +1238,19 @@ function SurvivorService:applyPills(player: Player, itemId: string): boolean
 			duration = S.AdrenalineDuration,
 			intensity = 1,
 		})
+		--[[ Its own cue, and it travels further than the pills. A teammate who
+		     hears a shot go in has learned that somebody is about to move — which
+		     is worth knowing, and is not what a pill bottle means. ]]
+		playAt(AudioConfig.Survivor.AdrenalineUse, record.root)
+		return true
 	elseif itemId == Enums.PillItem.PainPills then
 		record.tempDecay = S.PillDecayPerSecond
 		self:heal(player, S.PillHealth, true)
-	else
-		return false
+		playAt(AudioConfig.Survivor.PillsUse, record.root)
+		return true
 	end
 
-	playAt(AudioConfig.Survivor.PillsUse, record.root)
-	return true
+	return false
 end
 
 --[[
@@ -1944,10 +1980,10 @@ function SurvivorService:_stepRecord(record, dt: number, now: number)
 	if root and self:_isUpright(record) and record.stamina > 0 then
 		local velocity = root.AssemblyLinearVelocity
 		local planar = math.sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z)
-		local walking = self:_effective(record) < S.HurtThreshold and S.LimpWalkSpeed or S.NormalWalkSpeed
 		--[[
 			The baseline has to carry every multiplier _computeWalkSpeed applied,
-			or the test is comparing a real speed against an imaginary one.
+			or the test is comparing a real speed against an imaginary one. Through
+			the same helper for exactly that reason — see _baseWalkSpeed.
 
 			Adrenaline was the case that proved it. It multiplies the FINAL speed by
 			1.25, so a stimmed survivor merely walking moved at 22.5 against a
@@ -1957,15 +1993,24 @@ function SurvivorService:_stepRecord(record, dt: number, now: number)
 			thing you take to move faster, deleted your sprint for its whole
 			duration and left you slower than when you drank it.
 		]]
+		local walking = self:_baseWalkSpeed(record)
 		if self:_hasAdrenaline(record) then
 			walking *= S.AdrenalineSpeedBonus
 		end
 		sprinting = planar > walking + SPRINT_DETECT_MARGIN
 	end
 	if sprinting then
-		record.stamina = math.max(record.stamina - S.SprintStaminaDrain * dt, 0)
-		if record.stamina <= 0 then
-			record.sprintLocked = true
+		--[[ Adrenaline does not spend wind. Without this the fifteen seconds are
+		     really eight: a hundred stamina at twelve a second runs out well
+		     before the effect does, and the back half of the item is spent
+		     walking — which is the one thing somebody who took it did not want.
+		     Stamina is this game's own axis rather than L4D2's, so making the
+		     duration mean the duration is the honest translation. ]]
+		if not self:_hasAdrenaline(record) then
+			record.stamina = math.max(record.stamina - S.SprintStaminaDrain * dt, 0)
+			if record.stamina <= 0 then
+				record.sprintLocked = true
+			end
 		end
 	elseif record.stamina < S.MaxStamina then
 		-- Downed and pinned survivors get their wind back too; standing up with

@@ -173,9 +173,9 @@ local MODULES = {
 	"Survivors/LoadoutService",
 	"Survivors/SurvivorService",
 	"Survivors/InventoryService",
-	-- Both listen to InventoryService's signals, so they load after it. MedkitService
+	-- Both listen to InventoryService's signals, so they load after it. MapItemService
 	-- owns the spawn points; CarryVisualService owns what ends up on a back.
-	"Level/MedkitService",
+	"Level/MapItemService",
 	"Survivors/CarryVisualService",
 	"Combat/GoreService",
 	"Combat/DamageService",

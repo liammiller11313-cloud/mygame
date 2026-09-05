@@ -150,10 +150,14 @@ local ITEM_DETAIL: { [string]: string } = {
 	),
 	[HEALTH_ITEM.Defibrillator] = "BRINGS A DEAD SURVIVOR BACK. ONE USE.",
 	[PILL_ITEM.PainPills] = string.format("%d TEMPORARY HEALTH, DRAINING", SURVIVOR.PillHealth),
+	--[[ Leads with RUN, not with the health. The 25 is the least of what this
+	     does and reads as a worse pill bottle next to the 50 above it — what a
+	     player needs told is that it is the item that gets a hurt survivor
+	     moving, which is the reason to be holding one. ]]
 	[PILL_ITEM.Adrenaline] = string.format(
-		"%d TEMPORARY HEALTH · FASTER FOR %.0fS",
-		SURVIVOR.AdrenalineHealth,
-		SURVIVOR.AdrenalineDuration
+		"RUN AND ACT FASTER FOR %.0fS, HURT OR NOT · %d TEMPORARY HEALTH",
+		SURVIVOR.AdrenalineDuration,
+		SURVIVOR.AdrenalineHealth
 	),
 	[THROWABLE.PipeBomb] = "DRAWS THE HORDE TO IT, THEN KILLS THEM",
 	[THROWABLE.Molotov] = "A WALL OF FIRE THAT BURNS WHAT CROSSES IT",

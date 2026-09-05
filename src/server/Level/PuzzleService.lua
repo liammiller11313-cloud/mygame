@@ -267,7 +267,7 @@ end
 	of gunfire and bodies, and an imported model is unanchored about half the
 	time. Unanchored, a clipboard is shot off its desk by the first stray pellet,
 	a flamethrower is kicked under the geometry by a Charger, and the clue a team
-	needs is somewhere nobody will ever look. MedkitService anchors its floor
+	needs is somewhere nobody will ever look. MapItemService anchors its floor
 	pickups for exactly this reason and says so.
 
 	Collision is only dropped for things a player walks up to and takes — a
@@ -797,7 +797,7 @@ function PuzzleService:arm(random: Random?)
 		settle(state.stockpile, false)
 	end
 	if state.weaponDrop then
-		--[[ Collision dropped as well, the way MedkitService does it for the same
+		--[[ Collision dropped as well, the way MapItemService does it for the same
 		     reason: a weapon on the floor of a doorway should not be a thing the
 		     team walks into. ]]
 		settle(state.weaponDrop, true)

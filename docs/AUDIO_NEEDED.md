@@ -74,6 +74,7 @@ Each needs to be identifiable in under half a second through a firefight.
 | **Jockey ride** | Cackling laughter that continues while it's steering someone — that's how teammates locate the victim. |
 | **Rusher idle** | Fast, ragged, panting breath. Something moving quickly toward you. |
 | **Rusher charge** | A bellow as it commits. **This is the dodge cue** — it needs a hard, unmistakable transient at the front. |
+| **Adrenaline shot** | A stand-in today — the survivor's gasp, pitched down. Wanted: the injector itself. A hard click and a hiss, then the gasp on top. It carries further than the pill bottle on purpose, because a teammate hearing it has learned that somebody is about to run at something. |
 | **Witch cry** | Distant, quiet sobbing. Audible from very far away, and genuinely unsettling. This one should make players *slow down*. |
 | **Witch summon** | A rising wail that resolves into a scream — the moment she calls the horde. Everyone in the round should know what just happened. |
 | **Witch startle** | A shriek, then silence. |
@@ -215,6 +216,7 @@ Two things to check on every result before you commit to it:
 | **Witch** scream | `woman scream`, `female shriek`, `horror scream` |
 | **Tank** roar | `monster roar`, `giant roar`, `beast roar deep`, `demon roar` |
 | **Tank** footstep | `heavy footstep`, `giant footstep`, `stomp`, `earth thud` |
+| **Adrenaline** shot | `syringe injection`, `injector click`, `epipen`, `needle stab` |
 | **Metallic** roar | `mech roar`, `robot roar`, `industrial horn`, `metal groan large` |
 | **Metallic** wind | `drill spin up`, `motor whine rising`, `machine spool up` |
 | **Metallic** vent | `steam release`, `pressure hiss`, `air valve burst` |
