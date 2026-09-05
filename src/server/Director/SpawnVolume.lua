@@ -60,11 +60,32 @@ params.MaxParts = 1
 	scaling use, so this box tracks whatever size the rig is actually built at
 	rather than restating it.
 ]]
+--[[ What a definition's body occupies, as a multiplier on the reference above.
+
+     Usually its `scale`, which is exactly that. A definition may instead state a
+     `targetHeight` — a finished size in studs, for a kind whose rig is supplied
+     and whose real proportions are therefore not known here — and then `scale`
+     builds only the grey-box fallback and is the wrong number to reserve space
+     with. Converting the height back through the reference keeps this box
+     tracking the body that will actually stand in it, which is the whole
+     property this file exists for. ]]
+local function bodyScale(definition, referenceHeight: number): number
+	if definition then
+		local target = definition.targetHeight
+		if typeof(target) == "number" and target > 0 and referenceHeight > 0 then
+			return target / referenceHeight
+		end
+		if typeof(definition.scale) == "number" then
+			return definition.scale
+		end
+	end
+	return 1
+end
+
 function SpawnVolume.sizeFor(kind: string?): Vector3
 	local base = SPAWNING.SpawnBodySize
 	local definition = if typeof(kind) == "string" then InfectedConfig.get(kind) else nil
-	local scale = if definition and typeof(definition.scale) == "number" then definition.scale else 1
-	return base * math.max(scale, 0.1)
+	return base * math.max(bodyScale(definition, base.Y), 0.1)
 end
 
 --[[
@@ -110,13 +131,14 @@ function SpawnVolume.largestSize(): Vector3
 		return widest :: Vector3
 	end
 	local biggest = 1
+	local base = SPAWNING.SpawnBodySize
 	for _, definition in InfectedConfig.all() do
-		local scale = definition.scale
-		if typeof(scale) == "number" and scale > biggest then
+		local scale = bodyScale(definition, base.Y)
+		if scale > biggest then
 			biggest = scale
 		end
 	end
-	widest = SPAWNING.SpawnBodySize * biggest
+	widest = base * biggest
 	return widest :: Vector3
 end
 

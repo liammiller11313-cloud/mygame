@@ -201,6 +201,21 @@ local function isSupplyContainer(instance: Instance): boolean
 	return instance:IsA("Model") or instance:IsA("Tool")
 end
 
+--[[ Every name an infected kind's asset folder might be under: the definition's
+     own `modelFolder` first, then the id.
+
+     Built by hand rather than as { definition.modelFolder, kind }, because
+     modelFolder is nil for every kind but one and a nil in slot 1 of a table
+     constructor is a HOLE — a lookup that would have run zero passes, greyboxing
+     the entire roster to add one folder alias. ]]
+local function infectedNames(kind: string, definition): { string }
+	local names = { kind }
+	if definition and definition.modelFolder then
+		table.insert(names, 1, definition.modelFolder)
+	end
+	return names
+end
+
 local function modelsIn(entry: Instance): { Instance }
 	if isSupplyContainer(entry) then
 		return { entry }
@@ -340,6 +355,29 @@ end
 	that brings its own looping moan multiplies straight past that budget by
 	forty-six.
 ]]
+--[[
+	What a boss has to fit through, in studs.
+
+	Not a rule the engine enforces — nothing stops a rig being built bigger — but
+	the size the maps in this project are laid out to pass, so a body past it is
+	a body that will hang up on a doorway and turn its encounter into "stand
+	inside a building". The reference is the Tank at roughly 10.6 tall and 6.1
+	across, which every map already passes; these are that with enough headroom
+	to be a real ceiling rather than a restatement of it.
+
+	The Apex Tank is NOT bigger than a plain one today, whatever its tier says:
+	EliteTiers.Apex asks for x1.12 and RigUtil.scaleRig delivers it by writing
+	the Humanoid's scale NumberValues — which adoptRig has already destroyed by
+	then, on purpose, so that spawning cannot scale a rig a second time on top of
+	the geometry pass. Worth knowing before anyone sets this ceiling from what
+	they think the finale's boss measures.
+
+	Checked once at boot against the prepared template, because the answer is a
+	product of an artist's units and a config multiplier and nothing earlier in
+	the pipeline knows it.
+]]
+local BOSS_CLEARANCE = table.freeze({ height = 15, width = 8 })
+
 local STRIPPED_CLASSES = table.freeze({
 	"LuaSourceContainer",
 	"BodyMover",
@@ -840,6 +878,54 @@ local SHAPES = {
 		headTilt = 12,
 		shoulders = true,
 	},
+
+	--[[
+		Not a body that got bigger — a machine. Everything here is chosen against
+		the Tank standing next to it, because the whole point of a second boss is
+		that a player can tell at fifty studs which one is walking at them.
+
+		TALLER, NOT WIDER. The proportions sum to 5.70 against the Tank's 4.50, so
+		at their respective scales it stands about 17 studs to the Tank's 10.6 —
+		and its shoulders come out barely wider, because a thing that reads as
+		big by being WIDE is a thing that gets stuck in the first doorway. It
+		towers instead.
+
+		UPRIGHT. Hunch 18 against the Tank's 30: a Tank lopes, this does not
+		slouch, and standing straight is most of what makes it read as built
+		rather than turned.
+
+		THE ARMS ARE THE DRILLS. Long lower arms tapering into small hands, which
+		at this scale is a drill barrel and its bit. That silhouette is the one
+		thing a player has to recognise instantly, because it is what the charge
+		is pointed with.
+
+		This is the fallback, not the intent — the supplied rig under
+		Assets/Infected/Metallic Boss is what should actually turn up. It exists
+		because without a shape entry buildRig returns nil, and a kind with no
+		grey box is a kind that silently fails to arrive on the two waves that
+		ask for it.
+	]]
+	[Enums.Infected.Metallic] = {
+		head = V(0.60, 0.45, 0.65),
+		neck = 0.05,
+		upperTorso = V(2.10, 1.55, 1.35),
+		lowerTorso = V(1.55, 0.60, 1.10),
+		upperArm = V(1.05, 1.45, 1.05),
+		lowerArm = V(0.95, 1.70, 0.95),
+		hand = V(0.80, 0.90, 0.80),
+		upperLeg = V(1.05, 1.30, 1.05),
+		lowerLeg = V(0.95, 1.30, 0.95),
+		foot = V(1.10, 0.45, 1.50),
+		root = V(1.55, 1.50, 1.10),
+		legSpread = 0.72,
+		armDrop = 0.06,
+		hunch = 18,
+		armPitch = 8,
+		roll = 0,
+		headTilt = 0,
+		shoulders = true,
+		eyes = true,
+	},
 }
 
 --[[ Verifies once, per rig template, that every part GoreConfig is allowed to
@@ -1276,6 +1362,72 @@ end
 	which is the point: a hand-modelled Tank and a box Tank have to behave the
 	same way under fire or the grey-box stops being a useful stand-in.
 ]]
+--[[
+	How much to multiply a SUPPLIED rig by.
+
+	Ordinarily the definition's `scale`, which is the right answer for anything
+	standard-sized: every Common and every special is a humanoid rig, and 1.25
+	means what it says on one of those.
+
+	It stops meaning anything the moment a definition's size is load-bearing.
+	The Metallic has to read as bigger than a Tank and still fit through the
+	doors a Tank fits through, and neither of those is a fact about the units an
+	artist happened to build in — a rig already modelled giant, multiplied by the
+	number that makes a standard rig giant, is a boss that cannot follow anybody
+	indoors. So a definition may state a `targetHeight` instead, and this
+	measures what turned up and works out the rest.
+
+	Clamped, because the measurement can be wrong: a rig that arrives as a single
+	flat plate measures almost nothing tall and would ask for a multiplier in the
+	hundreds. The clamp turns that into a visibly wrong body rather than a server
+	that stops responding, and the warning says which rig did it.
+]]
+local SCALE_MIN = 0.2
+local SCALE_MAX = 8
+
+local function rigScale(kind: string, model: Model, definition): number
+	local target = definition.targetHeight
+	if not target or target <= 0 then
+		return definition.scale
+	end
+
+	local _, size = model:GetBoundingBox()
+	if size.Y < 0.05 then
+		warnOnce(
+			"flatrig:" .. kind,
+			string.format(
+				'the %s rig "%s" measures %.2f studs tall, which is not a height a '
+					.. "targetHeight can be worked out from; falling back to scale %.2f",
+				kind,
+				model.Name,
+				size.Y,
+				definition.scale
+			)
+		)
+		return definition.scale
+	end
+
+	local wanted = target / size.Y
+	local clamped = math.clamp(wanted, SCALE_MIN, SCALE_MAX)
+	if math.abs(clamped - wanted) > 0.001 then
+		warnOnce(
+			"scaleclamp:" .. kind,
+			string.format(
+				'the %s rig "%s" is %.2f studs tall and would need x%.2f to reach the %d '
+					.. "studs its definition asks for, which is outside the sane range; "
+					.. "clamped to x%.2f. Check the rig is not a stray part or a flat plate.",
+				kind,
+				model.Name,
+				size.Y,
+				wanted,
+				target,
+				clamped
+			)
+		)
+	end
+	return clamped
+end
+
 local function adoptRig(model: Model, kind: string, definition, scale: number): Model?
 	-- Order matters: the ids have to be lifted out before the script holding them
 	-- is destroyed.
@@ -1643,22 +1795,13 @@ local function variantsFor(kind: string): { Model }
 	local folder = folderIn(privateFolder("Infected"), kind)
 	--[[ The definition's own folder name first, then the id. The same order the
 	     weapon pipeline uses for modelName, and for the same reason: the folder
-	     is called whatever the artist called it, and "Metallic Boss" holding a rig
-	     named "Metallic" is an ordinary way to have organised one.
-
-	     Built by hand rather than as { definition.modelFolder, kind }, because
-	     modelFolder is nil for every kind but one and a nil in slot 1 of a table
-	     constructor is a hole — which is a lookup this pipeline would have done
-	     zero passes of, greyboxing the entire roster to add one folder alias. ]]
-	local names = { kind }
-	if definition.modelFolder then
-		table.insert(names, 1, definition.modelFolder)
-	end
-	local supplied = suppliedEntry("Infected", names)
+	     is called whatever the artist called it, and "Metallic Boss" holding a
+	     rig named "Metallic" is an ordinary way to have organised one. ]]
+	local supplied = suppliedEntry("Infected", infectedNames(kind, definition))
 	if supplied then
 		for _, source in modelsIn(supplied) do
 			local copy = cloneAsModel(source)
-			local rig = copy and adoptRig(copy, kind, definition, definition.scale)
+			local rig = copy and adoptRig(copy, kind, definition, rigScale(kind, copy, definition))
 			if rig then
 				rig.Parent = folder
 				table.insert(prepared, rig)
@@ -3658,15 +3801,51 @@ function PlaceholderFactory:ensureAssets()
 	     between a summary and a to-do list. ]]
 	local rigs = {}
 	local empty = {}
-	for kind in InfectedConfig.all() do
-		local count = #variantsFor(kind)
-		table.insert(rigs, string.format("%s x%d", kind, count))
-		if not suppliedEntry("Infected", { kind }) then
+	local oversized = {}
+	for kind, definition in InfectedConfig.all() do
+		local variants = variantsFor(kind)
+		table.insert(rigs, string.format("%s x%d", kind, #variants))
+
+		--[[ Through the same name list the rigs were actually looked up with. It
+		     used to ask for the id alone, which is a different question from the
+		     one prepareInfected asks — so a kind supplying its models under a
+		     folder alias was reported as having none, and the one line somebody
+		     reads after dropping models into a place said the opposite of the
+		     truth about them. ]]
+		if not suppliedEntry("Infected", infectedNames(kind, definition)) then
 			table.insert(empty, kind)
+		end
+
+		--[[ And how big the thing actually came out, for the ones where that is a
+		     question worth asking. A boss is the only kind whose size can stop
+		     the encounter working — too tall and it cannot follow a team indoors,
+		     too wide and the first doorway holds it — and the size is a product
+		     of an artist's units and a multiplier, so nothing before this point
+		     knows the answer. Measured from the prepared template, which is the
+		     body that will actually spawn. ]]
+		if definition.isBoss and variants[1] then
+			local _, size = variants[1]:GetBoundingBox()
+			table.insert(oversized, string.format("%s %.1fx%.1f", kind, size.Y, math.max(size.X, size.Z)))
+			if size.Y > BOSS_CLEARANCE.height or math.max(size.X, size.Z) > BOSS_CLEARANCE.width then
+				warnOnce(
+					"bossfit:" .. kind,
+					string.format(
+						"the %s stands %.1f studs tall and %.1f across, past the %d x %d this "
+							.. "project builds maps to pass. It will get caught on doorways. "
+							.. "Lower its targetHeight, or widen the map.",
+						kind,
+						size.Y,
+						math.max(size.X, size.Z),
+						BOSS_CLEARANCE.height,
+						BOSS_CLEARANCE.width
+					)
+				)
+			end
 		end
 	end
 	table.sort(rigs)
 	table.sort(empty)
+	table.sort(oversized)
 
 	for slot, ids in
 		{
@@ -3687,13 +3866,14 @@ function PlaceholderFactory:ensureAssets()
 	print(
 		string.format(
 			"[PlaceholderFactory] weapons %d supplied / %d grey-boxed · viewmodels %d / %d · "
-				.. "infected %d kinds supplied / %d grey-boxed · rigs: %s",
+				.. "infected %d kinds supplied / %d grey-boxed · bosses (tall x wide): %s · rigs: %s",
 			resolved.Weapons.real,
 			resolved.Weapons.grey,
 			resolved.Viewmodels.real,
 			resolved.Viewmodels.grey,
 			resolved.Infected.real,
 			resolved.Infected.grey,
+			if #oversized > 0 then table.concat(oversized, ", ") else "none",
 			table.concat(rigs, ", ")
 		)
 	)

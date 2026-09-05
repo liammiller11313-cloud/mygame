@@ -1,6 +1,6 @@
 # Backlog
 
-Captured 2026-08-20, reviewed 2026-08-21. Roughly ordered by how broken each one
+Captured 2026-08-20, reviewed 2026-09-05. Roughly ordered by how broken each one
 is rather than how big — a thing that traps the mouse is worse than a thing that
 is merely missing.
 
@@ -31,6 +31,25 @@ testing, so if it reproduces, start at the third:
   draws a differently-named button on iPadOS, ours would be the only one on
   screen — which is the working case — but if the geometry differs, ours may be
   landing off the safe area. That is the thing to photograph first.
+
+### 2. An Apex boss is not actually any bigger
+
+Found on 2026-09-05 while sizing the Metallic, and **left alone on purpose** —
+fixing it changes how the finale looks, which is a design decision rather than a
+repair.
+
+`EliteTiers.Apex` asks for `scale = 1.12`, and `RigUtil.scaleRig` applies scale
+by writing the Humanoid's `BodyHeightScale` and friends. `PlaceholderFactory`'s
+`adoptRig` deletes exactly those NumberValues from every template, deliberately,
+so that spawning cannot scale a rig a second time on top of the geometry pass it
+already did. So the Apex's health and damage land and its size silently does not.
+
+Whoever picks this up has to decide what an Apex should be. If it should be
+visibly bigger, the scaling has to happen the way `scaleRigGeometry` does it —
+on the parts, at spawn, on the clone rather than the template. If a tougher Tank
+of the same size is fine, then `EliteTiers.scale` is a field that lies and should
+go, and the tier's outline colour is doing the "this one is different" job on its
+own. Say which in the tier's comment either way.
 
 ### 3. Difficulty only changes incoming damage
 
@@ -136,6 +155,24 @@ what made raising the ceiling to 48 affordable. `corpseLifetime` is 35 for a
 Common. Not device-scaled, deliberately: corpses are replicated instances every
 client shares, so one player's hardware must not decide how many bodies everyone
 else sees.
+
+### Bosses were a schedule you could memorise — **built**
+
+Two days on the bosses, 2026-09-04 into 2026-09-05. The Metallic exists
+(`Specials/Metallic`), the Tank no longer plays the same every time, and which
+boss a wave sends is a roll rather than a row in a table. `docs/BOSSES.md` is the
+whole of it; `GameModeConfig.rollBosses` is the one function that decides what
+walks in.
+
+The size problem turned out to be the interesting part. `scale` is a multiplier
+on whatever the artist built, which is fine for a roster of standard humanoid
+rigs and meaningless for a boss delivered at whatever size seemed right — the
+number that makes a normal rig into a Tank makes an already-giant rig into
+something that cannot follow a team indoors. Definitions can now state a
+`targetHeight` instead and the pipeline measures and solves for it, so the
+Metallic is fourteen studs regardless of what lands in the folder. The boot line
+prints every boss's finished size and warns by name if one is past the 15 × 8
+the maps are laid out to pass.
 
 ---
 

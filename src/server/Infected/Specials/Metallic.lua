@@ -62,6 +62,7 @@ local PHASE = table.freeze({
 	Charge = "Charge", -- driving forward in a committed straight line
 	Overheat = "Overheat", -- rooted, defenceless, double damage
 	Pound = "Pound", -- rooted, about to slam the ground
+	Direct = "Direct", -- pathing gave up; walking straight at the target
 })
 
 --[[ THE CHARGE. Long enough to cross a street, fast enough that a survivor
@@ -113,6 +114,36 @@ local ENRAGE_TEMPO = 0.65 -- multiplier on how long it waits between decisions
      ramps and thresholds it is supposed to run over. ]]
 local CHARGE_PROBE_HEIGHT = 5
 
+--[[ The charge follows the FLOOR. Its direction is flattened, so without this it
+     drives at a constant height: up a ramp it buries itself, down one it flies,
+     and off a roof it leaves the map entirely. Each frame it looks down from a
+     little above where it is going and puts itself back the same distance above
+     whatever it finds.
+
+     Finding nothing ENDS the charge, and that is the useful half. A boss that
+     hurls itself off a rooftop after somebody is a boss the team beats by
+     standing near an edge — so a missing floor is treated exactly like a wall,
+     and it stops at the lip and vents. ]]
+local GROUND_PROBE_UP = 8
+local GROUND_PROBE_DOWN = 14
+
+--[[
+	Getting stuck is the failure mode that would ruin this encounter, the same
+	way it would a Tank's, and it matters more here: this thing is fourteen studs
+	of machinery with no jump at all, so anything a Common would hop over is a
+	wall to it.
+
+	Two answers, escalating. First it stops trusting the path and walks the
+	straight line — which is what fixes an ordinary navmesh failure. If that
+	makes no progress either, it winds up and CHARGES, and that one physically
+	cannot be blocked by a pathing problem: the charge moves the body with
+	PivotTo, so the navmesh has no say in it and only real geometry stops it.
+]]
+local STUCK_SAMPLE = 1.0
+local STUCK_PROGRESS = 1.5 -- studs of closing per sample that counts as progress
+local STUCK_SAMPLES_TO_GIVE_UP = 3
+local DIRECT_TIME = 3.0
+
 local SCAN_INTERVAL = 0.3
 local FOOTSTEP_INTERVAL = 0.5
 local ROAR_INTERVAL = 13
@@ -140,6 +171,15 @@ type State = {
 	     whole frame, so there is no instant where it equals the deadline. ]]
 	landed: boolean,
 	enraged: boolean,
+	--[[ How far the body's origin sat above the floor when the charge began, so
+	     each frame of it can put itself back at the same height over whatever is
+	     under it now. ]]
+	chargeGroundOffset: number,
+	--[[ Progress toward the target, sampled on a slow clock. Three bad samples
+	     in a row and it stops trusting the path — see the stuck constants. ]]
+	stuckClock: number,
+	stuckSamples: number,
+	lastDistance: number,
 	--[[ What the charge looks ahead with. Rebuilt at the start of every charge
 	     rather than kept current, because the only things it has to ignore — the
 	     survivors it is trying to run over, and the horde around them — are
@@ -172,6 +212,10 @@ local function ensure(model: Model): State
 			poundDamage = POUND_DAMAGE,
 			landed = false,
 			enraged = false,
+			chargeGroundOffset = 0,
+			stuckClock = 0,
+			stuckSamples = 0,
+			lastDistance = math.huge,
 			probe = probe,
 		}
 		states[model] = state
@@ -257,6 +301,36 @@ local function checkEnrage(model: Model, state: State, root: BasePart)
 	announce("IT'S VENTING FASTER — THE WINDOW IS CLOSING")
 end
 
+--[[ The one way back to the brain driving. Every move ends here, and it resets
+     the progress tracking as well as the phase: a body that has just been carried
+     sixty studs by its own charge would otherwise compare its next sample against
+     a distance from before the move and declare itself stuck for standing still
+     in a completely different place. ]]
+local function backToPursue(model: Model, brain: any, state: State)
+	setPhase(state, PHASE.Pursue)
+	state.stuckClock = 0
+	state.stuckSamples = 0
+	state.lastDistance = math.huge
+
+	--[[
+		The wait before the next move starts HERE, when this one finishes, not
+		when it started.
+
+		Timing it from the decision instead was quietly chaining the moves: a wind
+		and a charge and a vent is five and a half seconds, most of a decision
+		interval, so by the time the boss was back on its feet its next decision
+		was already due and it committed again on the spot. Modelled over ten
+		minutes that is a boss spending a third of its life in the overheat, which
+		is the reverse of the intent — the window is meant to be EARNED, and a
+		team that gets one every eight seconds without doing anything is being
+		handed the fight.
+	]]
+	state.nextDecide = os.clock() + decideDelay(state)
+
+	Support.resumeBrain(brain)
+	local _ = model
+end
+
 -- ── the moves ───────────────────────────────────────────────────────────────
 
 local function beginPound(model: Model, brain: any, state: State)
@@ -322,9 +396,26 @@ local function aimProbe(model: Model, state: State)
 	state.probe.FilterDescendantsInstances = exclude
 end
 
+--[[ The height of the floor under a point, or nil for nothing within reach.
+     Uses the charge's own probe, so it ignores survivors and the horde for the
+     same reason the wall check does: a body it is running over is not ground. ]]
+local function floorUnder(position: Vector3, state: State): number?
+	local hit = Workspace:Raycast(
+		position + Vector3.new(0, GROUND_PROBE_UP, 0),
+		Vector3.new(0, -(GROUND_PROBE_UP + GROUND_PROBE_DOWN), 0),
+		state.probe
+	)
+	return if hit then hit.Position.Y else nil
+end
+
 local function beginCharge(model: Model, state: State, root: BasePart)
 	setPhase(state, PHASE.Charge)
 	aimProbe(model, state)
+
+	--[[ Measured before the first step, so the charge holds the stance it set
+	     off in rather than one derived from whatever it lands on. ]]
+	local floor = floorUnder(root.Position, state)
+	state.chargeGroundOffset = if floor then root.Position.Y - floor else 0
 	--[[ Locked HERE, at the end of the windup, from where the body is facing.
 	     The telegraph is the turn during the wind — so what it commits to is
 	     what the players watched it line up on, and stepping out of that lane is
@@ -367,11 +458,31 @@ local function stepCharge(model: Model, state: State, root: BasePart, dt: number
 		return true
 	end
 
-	model:PivotTo(model:GetPivot() + step)
+	--[[ Where the step lands, corrected onto the floor. No floor there is a lip,
+	     a stairwell or the edge of the map, and every one of those is a place
+	     this must stop rather than sail off. ]]
+	local landing = from + step
+	local floor = floorUnder(landing, state)
+	if not floor then
+		return true
+	end
+	local settled = Vector3.new(landing.X, floor + state.chargeGroundOffset, landing.Z)
 
+	model:PivotTo(model:GetPivot() + (settled - from))
+
+	--[[ Killed every frame. PivotTo teleports the assembly, and Roblox's solver
+	     reads a body that moved sixty studs a second as a body travelling sixty
+	     studs a second: without this the momentum is still there when the charge
+	     stops, and a fourteen-stud boss launches itself across the map at the
+	     exact moment it is supposed to be standing still and defenceless. ]]
+	root.AssemblyLinearVelocity = Vector3.zero
+
+	--[[ Moved but hit nobody, which is not the same as blocked: without the
+	     service there is nothing to run over, and the charge still has to run its
+	     course and end in the window it owes the team. ]]
 	local survivors: any = Registry.find("SurvivorService")
 	if not survivors then
-		return
+		return false
 	end
 	for _, player in survivors:getAliveSurvivors() do
 		if state.chargeHit[player] then
@@ -430,6 +541,47 @@ end
 
 -- ── the phases ──────────────────────────────────────────────────────────────
 
+--[[ Stops trusting the path and walks the straight line at the target. The
+     first of the two answers to being stuck; see the stuck constants. ]]
+local function beginDirect(model: Model, brain: any, state: State)
+	setPhase(state, PHASE.Direct)
+	state.stuckClock = 0
+	state.stuckSamples = 0
+	state.lastDistance = math.huge
+	Support.pauseBrain(brain)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = Support.scaledSpeed(model, DEFINITION.runSpeed)
+		humanoid.AutoRotate = true
+	end
+end
+
+--[[ One progress sample. Returns true when this body has failed to close on its
+     target often enough in a row to be treated as stuck.
+
+     Only counts against it while it is OUT of reach: a boss standing next to
+     somebody is not making progress and is not stuck either, it is fighting. ]]
+local function sampleStuck(state: State, distance: number, dt: number): boolean
+	state.stuckClock += dt
+	if state.stuckClock < STUCK_SAMPLE then
+		return false
+	end
+	state.stuckClock = 0
+
+	if distance > POUND_RANGE and distance > state.lastDistance - STUCK_PROGRESS then
+		state.stuckSamples += 1
+	else
+		state.stuckSamples = 0
+	end
+	state.lastDistance = distance
+
+	if state.stuckSamples >= STUCK_SAMPLES_TO_GIVE_UP then
+		state.stuckSamples = 0
+		return true
+	end
+	return false
+end
+
 local function stepPursue(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
 	if now >= state.nextScan then
 		state.nextScan = now + SCAN_INTERVAL
@@ -440,18 +592,83 @@ local function stepPursue(model: Model, brain: any, state: State, root: BasePart
 		if player and now >= state.nextDecide then
 			state.nextDecide = now + decideDelay(state)
 			decide(model, brain, state, distance)
+			--[[ The decision may have changed phase, and a Pursue-only progress
+			     check has nothing to say about a body that is now winding up. ]]
+			if state.phase ~= PHASE.Pursue then
+				return
+			end
 		end
+	end
+
+	local _, targetRoot = Support.rootOf(state.target)
+	if targetRoot and sampleStuck(state, (targetRoot.Position - root.Position).Magnitude, dt) then
+		beginDirect(model, brain, state)
+		return
 	end
 
 	if now >= state.nextRoar then
 		state.nextRoar = now + ROAR_INTERVAL
 		Support.playSound("MetallicRoar", root)
 	end
-	if now >= state.nextFootstep then
+
+	--[[ On the movement state rather than on a timer, so a Metallic that has
+	     stopped is silent. Footsteps are how this thing is located through a
+	     wall; one that clomps while standing still is telling the team it is
+	     walking somewhere, which is worse than telling them nothing. ]]
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.MoveDirection.Magnitude > 0.1 and now >= state.nextFootstep then
 		state.nextFootstep = now + FOOTSTEP_INTERVAL
 		Support.playSound("MetallicStep", root)
 	end
-	local _ = dt
+end
+
+--[[
+	Walking the straight line because pathing would not do it.
+
+	No jump, unlike the Tank's version of this: jumpPower is 0 on purpose — a
+	machine on drills does not hop — so the escape from something it cannot walk
+	over has to be the charge, and that is exactly what a second failed run of
+	progress samples buys.
+]]
+local function stepDirect(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
+	local _, targetRoot = Support.rootOf(state.target)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not targetRoot or not humanoid then
+		backToPursue(model, brain, state)
+		return
+	end
+
+	--[[ brain:moveTo is the sanctioned way for a special to drive a paused body:
+	     it throttles the MoveTo re-issue and drops the path the brain could not
+	     finish, which is the whole reason we are here. ]]
+	if brain and typeof(brain.moveTo) == "function" then
+		brain:moveTo(targetRoot.Position)
+	else
+		local flat =
+			Vector3.new(targetRoot.Position.X - root.Position.X, 0, targetRoot.Position.Z - root.Position.Z)
+		if flat.Magnitude > 0.05 then
+			humanoid:Move(flat.Unit, false)
+		end
+	end
+
+	if humanoid.MoveDirection.Magnitude > 0.1 and now >= state.nextFootstep then
+		state.nextFootstep = now + FOOTSTEP_INTERVAL
+		Support.playSound("MetallicStep", root)
+	end
+
+	local distance = (targetRoot.Position - root.Position).Magnitude
+
+	--[[ Walking straight did not work either, so it stops walking. The charge
+	     moves the body with PivotTo and the navmesh has no say in it, which makes
+	     it the one move a pathing failure cannot block. ]]
+	if sampleStuck(state, distance, dt) then
+		beginWind(model, brain, state)
+		return
+	end
+
+	if distance <= POUND_RANGE or state.phaseTime >= DIRECT_TIME then
+		backToPursue(model, brain, state)
+	end
 end
 
 local function stepWind(model: Model, brain: any, state: State, root: BasePart, dt: number)
@@ -481,8 +698,7 @@ end
 local function stepOverheat(model: Model, brain: any, state: State)
 	if state.phaseTime >= overheatWindow(state) then
 		setVulnerable(model, 1)
-		setPhase(state, PHASE.Pursue)
-		Support.resumeBrain(brain)
+		backToPursue(model, brain, state)
 	end
 end
 
@@ -495,8 +711,7 @@ local function stepPound(model: Model, brain: any, state: State, root: BasePart)
 		landPound(model, state, root)
 	end
 	if state.phaseTime >= POUND_WIND + POUND_RECOVER then
-		setPhase(state, PHASE.Pursue)
-		Support.resumeBrain(brain)
+		backToPursue(model, brain, state)
 	end
 end
 
@@ -549,6 +764,8 @@ function Metallic.onUpdate(model: Model, brain: any, dt: number)
 		stepOverheat(model, brain, state)
 	elseif state.phase == PHASE.Pound then
 		stepPound(model, brain, state, root)
+	elseif state.phase == PHASE.Direct then
+		stepDirect(model, brain, state, root, dt, now)
 	else
 		stepPursue(model, brain, state, root, dt, now)
 	end

@@ -59,7 +59,24 @@ export type InfectedDefinition = {
 	-- Presentation
 	bodyColor: Color3,
 	accentColor: Color3,
+	--[[ A blind multiplier on whatever the rig already is. Correct for the
+	     grey boxes, which this project lays out itself and therefore knows the
+	     size of — and a guess for anything an artist supplied, because the same
+	     2.35 that makes a standard rig into a Tank makes an already-huge model
+	     into something that does not fit down a street. See targetHeight. ]]
 	scale: number,
+	--[[ How tall this thing should END UP, in studs, whatever it arrived as.
+
+	     Set it and the supplied-rig pipeline measures the model and works out the
+	     multiplier itself, ignoring `scale`. That is the right question to be
+	     asking for anything whose size is load-bearing: a boss has to read as
+	     bigger than the last boss and still fit through the doors the last one
+	     fits through, and neither of those is a fact about the artist's units.
+
+	     Nil means "trust scale", which is every kind but the Metallic — the
+	     Commons and the specials are all standard-sized rigs where a multiplier
+	     means what it says. ]]
+	targetHeight: number?,
 	outlineColor: Color3, -- silhouette colour when highlighted through walls
 
 	-- Gore tuning; see GoreConfig for how these combine with weapon gibPower
@@ -560,7 +577,31 @@ InfectedConfig.Definitions = {
 
 		bodyColor = Color3.fromRGB(104, 108, 116),
 		accentColor = Color3.fromRGB(58, 62, 68),
-		scale = 3.0,
+		--[[ 2.45 against the Tank's 2.35, which sounds like nothing and is not:
+		     the grey-box proportions are taller to begin with, so the two land at
+		     14 studs and 10.6. See targetHeight below — this number only ever
+		     builds the fallback rig, and the two are kept in agreement so a
+		     grey-boxed Metallic is the same size as the real one. ]]
+		scale = 2.45,
+		--[[
+			Fourteen studs, and the ceiling is what set it rather than the floor.
+
+			A Tank stands about 10.6 and every map is laid out to pass one — and
+			an Apex is the same height, whatever its tier says, because the x1.12
+			it asks for is applied through Humanoid scale values the asset
+			pipeline has already stripped. Fourteen is a third taller than that:
+			unmistakable from across a street, which is the whole job, and still
+			inside the clearance the maps give. The first draft was seventeen,
+			which would have read beautifully right up until the point it could
+			not follow anybody indoors and the fight became "stand in a
+			building".
+
+			It is a HEIGHT rather than a multiplier because the rig is supplied.
+			An artist asked for a giant mecho zombie and will build one at
+			whatever size seemed right; multiplying that by anything is a guess
+			about their units, and this is not a number worth guessing.
+		]]
+		targetHeight = 14,
 		outlineColor = Color3.fromRGB(255, 154, 42),
 
 		gibThreshold = 4000,

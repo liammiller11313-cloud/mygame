@@ -110,7 +110,13 @@ know it is a Tank.
 
 A **substitute never inherits the wave's elite tier**. Wave 15's Apex triples
 health, which on a Tank is the finale and on a Metallic is eighteen thousand
-health and a fight nobody finishes. So the last wave is either an Apex Tank or a
+health and a fight nobody finishes.
+
+> An Apex is not currently any *bigger* than a plain Tank, only tougher. Its
+> tier asks for ×1.12 scale, and that is applied by writing the Humanoid's scale
+> values — which the asset pipeline deletes from every template on purpose, so
+> spawning cannot scale a rig twice. Health and damage land; size does not.
+> Listed here because it is invisible from the config and surprising. So the last wave is either an Apex Tank or a
 plain Metallic, and those are meant to be about equally hard by completely
 different routes. The ELITE WAVE modifier follows the same rule.
 
@@ -148,8 +154,46 @@ the kind id — the Metallic ships as **`Assets/Infected/Metallic Boss/`** holdi
 rig called `Metallic`, and that works as-is. Several rigs in one folder are
 treated as variants and picked between.
 
-Anything missing is grey-boxed from the definition's colours and scale, and the
-server prints which kinds are still empty at boot.
+Anything missing is grey-boxed, including the Metallic, so a wave that asks for
+one always gets something. The server prints which kinds are still empty at boot.
+
+### Size
+
+Most kinds are sized by `scale`, a plain multiplier — right for anything standard,
+since every Common and special is a normal humanoid rig.
+
+**The Metallic is sized by `targetHeight` instead: 14 studs, whatever it arrives
+as.** The pipeline measures the rig and works out the multiplier itself. Build it
+at any size you like — the game will make it 14 studs tall and keep its
+proportions. That is deliberate: a boss has to read as bigger than the last boss
+*and* still fit through the doors the last one fits through, and neither of those
+is a fact about the units it was modelled in.
+
+For reference: a Tank comes out about 10.6 studs. Fourteen is a third taller —
+unmistakable across a street — and inside the 15 × 8 the maps are laid out to
+pass. The boot line prints every boss's finished size (`bosses (tall x wide)`),
+and warns by name if one is past that clearance.
+
+The rig is stripped on import: its own `Script`, `Animate` and `Sound` objects
+are removed so nothing fights the game's audio or animation. Animation **ids**
+are lifted out first, so a rig that carries its own clips keeps them.
+
+## Movement
+
+Two things a fourteen-stud body needs that a normal one does not.
+
+**It cannot get stuck.** Two escalating answers, both on a three-second progress
+check. First it stops trusting pathfinding and walks the straight line. If that
+also makes no progress, it winds up and charges — and the charge moves the body
+directly rather than through the navmesh, so a pathing failure physically cannot
+block it. It has no jump at all (a machine on drills does not hop), which is why
+the second answer has to exist.
+
+**The charge follows the floor.** It is a horizontal move, so without correction
+it would bury itself going up a ramp and fly going down one. Each frame it puts
+itself back on whatever is underneath. Finding *no* floor ends the charge — so it
+stops at the lip of a roof rather than launching off it, and a team cannot beat
+it by standing near an edge.
 
 ## Audio
 
