@@ -40,7 +40,6 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
-local Enums = require(Shared.Enums)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local Registry = require(Shared.Util.Registry)
 local RigUtil = require(Shared.Util.RigUtil)
@@ -75,10 +74,19 @@ local PICK_INTERVAL = 0.25
      up before the player looks back at it. ]]
 local FILL_CHASE = 9
 
---[[ Below this fraction the bar goes hot. Not a phase and not a mechanic — the
-     Tank does not change — it is the readout admitting the fight is nearly
-     over, which is the moment a team decides to commit rather than break off. ]]
+--[[ Below this fraction the bar goes hot, and below this fraction a boss
+     enrages — see Specials/Tank's ENRAGE_FRACTION, which is deliberately the
+     same number. It used to be only the readout admitting the fight was nearly
+     over; now it is the warning that the last quarter is the hardest one, and
+     the two agreeing is what makes it a warning rather than a surprise. ]]
 local NEARLY_DEAD = 0.25
+
+--[[ The exposed window. The Metallic opens one on itself after a charge (see
+     Specials/Metallic) and it is the only way the fight is winnable in the time
+     a wave allows — so it cannot be a thing a player has to notice from the
+     model. The bar pulses and says so. ]]
+local EXPOSED_PULSE = 7 -- radians a second
+local EXPOSED_COLOR = COLOR.AccentBright
 
 local BossBarController = {}
 
@@ -101,20 +109,33 @@ local state = {
 	shown = 0, -- what the bar is actually drawing, easing toward `fraction`
 	pickAt = 0,
 	inset = 0,
+	vulnerable = 1,
 }
 
 -- ── helpers ─────────────────────────────────────────────────────────────────
 
---[[ What this Tank is called. An Apex is called an Apex: a team that reads
-     "TANK" on the finale brings the plan that worked on wave 5. ]]
+--[[ What this boss is called. An Apex is called an Apex: a team that reads
+     "TANK" on the finale brings the plan that worked on wave 5, and for the
+     same reason a Metallic must never read "TANK" either. ]]
 local function titleFor(model: Model): string
-	local definition = InfectedConfig.get(Attributes.get(model, IA.Kind, "") :: string)
-	local name = if definition then definition.displayName else "Tank"
+	local kind = Attributes.get(model, IA.Kind, "") :: string
+	local definition = InfectedConfig.get(kind)
+	local name = if definition then definition.displayName else kind
 	local elite = InfectedConfig.elite(Attributes.get(model, IA.Elite, "") :: string)
 	if elite then
 		name = elite.titlePrefix .. " " .. name
 	end
 	return string.upper(name)
+end
+
+--[[ Its damage multiplier right now, defaulting to 1 for every boss that never
+     writes the attribute — which is all of them but the Metallic. ]]
+local function vulnerabilityOf(model: Model): number
+	local value = tonumber(Attributes.get(model, IA.Vulnerable, 1))
+	if not value or value ~= value then
+		return 1
+	end
+	return value
 end
 
 local function accentFor(model: Model): Color3
@@ -203,6 +224,25 @@ local function refreshHealth()
 	countLabel.Text = string.format("%d / %d", math.ceil(current), maximum)
 end
 
+--[[ Redraws the name line. The window is stated in words as well as colour: a
+     pulse alone is a thing you learn by dying to it, and the whole point of the
+     window is that a first-time team can be told about it in the moment. ]]
+local function refreshVulnerable()
+	local model = state.model
+	if not model then
+		state.vulnerable = 1
+		return
+	end
+	state.vulnerable = vulnerabilityOf(model)
+	if state.vulnerable > 1 then
+		nameLabel.Text = titleFor(model) .. "  —  EXPOSED"
+		nameLabel.TextColor3 = EXPOSED_COLOR
+	else
+		nameLabel.Text = titleFor(model)
+		nameLabel.TextColor3 = accentFor(model)
+	end
+end
+
 local function follow(model: Model?)
 	if state.model == model then
 		return
@@ -216,10 +256,9 @@ local function follow(model: Model?)
 		return
 	end
 
-	nameLabel.Text = titleFor(model)
 	local accent = accentFor(model)
-	nameLabel.TextColor3 = accent
 	barFill.BackgroundColor3 = accent
+	refreshVulnerable()
 
 	--[[ Snapped rather than eased on a change of target. Easing from the last
 	     Tank's remaining health would show the new one at whatever the old one
@@ -229,6 +268,7 @@ local function follow(model: Model?)
 
 	targetTrove:connect(model:GetAttributeChangedSignal(IA.Health), refreshHealth)
 	targetTrove:connect(model:GetAttributeChangedSignal(IA.MaxHealth), refreshHealth)
+	targetTrove:connect(model:GetAttributeChangedSignal(IA.Vulnerable), refreshVulnerable)
 
 	gui.Enabled = true
 	-- The height only. TopStack owns the gap between slots now.
@@ -241,7 +281,10 @@ local function considerModel(child: Instance)
 	if not child:IsA("Model") then
 		return
 	end
-	if Attributes.get(child, IA.Kind, "") ~= Enums.Infected.Tank then
+	--[[ Not every isBoss kind. The Witch is one and deliberately has no bar: a
+	     health bar turns a creature into a fight with a number attached, and she
+	     is meant to be a thing you tiptoe past. See InfectedConfig.PeakBosses. ]]
+	if not InfectedConfig.PeakBosses[Attributes.get(child, IA.Kind, "") :: string] then
 		return
 	end
 	bosses[child] = true
@@ -293,9 +336,17 @@ local function step(dt: number)
 		state.shown = state.fraction
 	end
 	barFill.Size = UDim2.new(math.max(state.shown, 0), 0, 1, 0)
-	barFill.BackgroundColor3 = if state.shown <= NEARLY_DEAD
-		then COLOR.AccentBright
-		else accentFor(state.model)
+
+	--[[ The window outranks the nearly-dead tint. Both are "commit now", but only
+	     one of them is a door that shuts again. ]]
+	if state.vulnerable > 1 then
+		local pulse = 0.5 + 0.5 * math.sin(now * EXPOSED_PULSE)
+		barFill.BackgroundColor3 = accentFor(state.model):Lerp(EXPOSED_COLOR, pulse)
+	elseif state.shown <= NEARLY_DEAD then
+		barFill.BackgroundColor3 = COLOR.AccentBright
+	else
+		barFill.BackgroundColor3 = accentFor(state.model)
+	end
 end
 
 local function build()

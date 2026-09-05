@@ -486,6 +486,24 @@ AudioConfig.Infected = {
 
 	TankRoar = sound(ID.MonsterRoar, 1.0, 0.98, 1.02, 700, 9),
 	TankFootstep = sound(ID.HeavyFootsteps, 0.7, 0.95, 1.05, 280, 5),
+
+	--[[ The Metallic. Every one of these is an existing sample re-pitched rather
+	     than a dedicated upload, and they are named honestly for that reason —
+	     when real drill and servo audio exists, only the ids below change.
+
+	     The pitches are not decoration. This thing is bigger than a Tank, so it
+	     sits a full step under the Tank's cues and rolls off further; a player
+	     who knows the Tank has to be able to hear at once that this is not one.
+	     The two cues that gate the fight — Wind before a charge, Vent when the
+	     back plates open — carry the highest priority in the table, because a
+	     dropped Wind is an unavoidable charge and a dropped Vent is a window
+	     nobody knew was open. ]]
+	MetallicRoar = sound(ID.MonsterRoar, 1.0, 0.66, 0.72, 900, 10),
+	MetallicStep = sound(ID.HeavyFootsteps, 0.85, 0.68, 0.76, 400, 6),
+	MetallicWind = sound(ID.ImpactMetal, 0.95, 0.5, 0.56, 560, 10),
+	MetallicCharge = sound(ID.MonsterBellow, 1.0, 0.68, 0.74, 640, 9),
+	MetallicSlam = sound(ID.ImpactConcrete, 1.0, 0.54, 0.62, 580, 9),
+	MetallicVent = sound(ID.FlamethrowerBurst, 0.95, 0.6, 0.68, 500, 10),
 } :: { [string]: SoundDefinition }
 
 AudioConfig.Survivor = {

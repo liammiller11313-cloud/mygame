@@ -45,6 +45,13 @@ export type InfectedDefinition = {
 	hearingRange: number,
 	loseInterestTime: number, -- seconds with no target before returning to idle
 
+	--[[ The folder under Assets/Infected this kind's models live in, when it is
+	     not simply the id. The same escape hatch weapons have as `modelName`, and
+	     for the same reason: an artist's folder is called what they called it,
+	     and "Metallic Boss" holding a rig called "Metallic" is a perfectly
+	     ordinary way to have organised it. Nil means the id is the folder. ]]
+	modelFolder: string?,
+
 	-- What the Director pays to spawn one, and how many may live at once
 	spawnCost: number,
 	maxAlive: number,
@@ -460,12 +467,17 @@ InfectedConfig.Definitions = {
 		loseInterestTime = 25,
 
 		spawnCost = 100,
-		--[[ Two. The finale releases ONE Tank now — an Apex one, see EliteTiers —
-		     but the ceiling stays at two because the Director's own flow schedule
-		     can still put an ordinary Tank on the map, and a ceiling of one would
-		     make the finale's boss silently fail to arrive if it did. That is the
-		     exact failure this number was raised to fix the first time. ]]
-		maxAlive = 2,
+		--[[ Three, which is exactly what GameModeConfig's pack roll can ask for on
+		     a full team and not one more. A ceiling under that makes a boss the
+		     wave announced silently fail to arrive, which is the exact failure
+		     this number was raised to fix the first time.
+
+		     Nothing else competes for the three. The Director's own flow schedule
+		     refuses to walk a Tank in while ANY Tank is alive, so a wave's pack
+		     never has to share the ceiling with it. And it is a ceiling, not a
+		     target: the roll decides how many actually come, and under three
+		     survivors it never fires at all. ]]
+		maxAlive = 3,
 
 		bodyColor = Color3.fromRGB(126, 98, 82),
 		accentColor = Color3.fromRGB(88, 62, 52),
@@ -474,6 +486,85 @@ InfectedConfig.Definitions = {
 
 		gibThreshold = 2000,
 		dismemberable = false, -- a Tank falls in one piece; it earned that
+		corpseLifetime = 60,
+	},
+
+	--[[
+		METALLIC — the thing above a Tank.
+
+		A Tank is a body that got bigger. This is not a body: it is machinery on
+		two drills, and every number here is chosen so it plays differently rather
+		than harder. Bigger health and bigger damage on the same fight would just
+		be a longer Tank, which is the one thing a second boss must not be.
+
+		── WHAT MAKES IT A DIFFERENT FIGHT ─────────────────────────────────────
+		SLOWER THAN A TANK, and that is deliberate. A Tank cannot be outrun by
+		anybody who stops to shoot, which forces the team to move as one and fire
+		in turns. This one CAN be walked away from — and then it closes the
+		distance in one committed line (see Specials/Metallic: the drill charge),
+		so the answer is not distance, it is not being in the lane. A team that
+		learns to sidestep beats it; a team that backs up in a straight corridor
+		does not.
+
+		FIRE IS NOT THE ANSWER. burnDamagePerSecond is 25 against the Tank's 150,
+		and that is the single most important number on this table. Fire is the
+		Tank's counter and every team learns it; meeting the next boss with the
+		same molotov and watching it walk through the flames is what tells them
+		this is a different problem. What it is weak to instead is the window
+		after its own charge — see the overheat in Specials/Metallic — which is
+		earned rather than bought.
+
+		HEALTH IS ONLY HALF AGAIN A TANK'S, not double. The fight is longer than a
+		Tank's because of the phases, not because of the bar; 8000 would be four
+		minutes of shooting the same silhouette.
+	]]
+	[Enums.Infected.Metallic] = {
+		id = Enums.Infected.Metallic,
+		displayName = "Metallic",
+		--[[ Their folder, which holds a rig called "Metallic". See modelFolder in
+		     the type above. ]]
+		modelFolder = "Metallic Boss",
+		health = 6000,
+		isBoss = true,
+		isSpecial = true,
+
+		--[[ Walks slower than a survivor and runs slower than a Tank. The charge
+		     is what closes distance, so the base speed is allowed to be honest
+		     about how heavy it is. ]]
+		walkSpeed = 13,
+		runSpeed = 19,
+		sprintChance = 1.0,
+		--[[ Half a Tank's turn rate. It cannot follow somebody circling it, which
+		     is exactly the counterplay the fight is built around. ]]
+		turnSpeed = 75,
+		jumpPower = 0,
+
+		headshotAlwaysKills = false,
+		damageResistance = 1.0,
+		stumbleResistance = 1.0,
+		burnDamagePerSecond = 25,
+
+		--[[ Drills, not fists: less per hit than a Tank's swing and far more
+		     often, so standing in front of it is a mistake that compounds rather
+		     than one that throws you clear. ]]
+		attack = { damage = 16, range = 12, cooldown = 0.75, windup = 0.3 },
+
+		sightRange = 500,
+		hearingRange = 600,
+		loseInterestTime = 25,
+
+		spawnCost = 160,
+		--[[ One. There is no arrangement of a map or a team where two of these at
+		     once is a fight rather than a formality. ]]
+		maxAlive = 1,
+
+		bodyColor = Color3.fromRGB(104, 108, 116),
+		accentColor = Color3.fromRGB(58, 62, 68),
+		scale = 3.0,
+		outlineColor = Color3.fromRGB(255, 154, 42),
+
+		gibThreshold = 4000,
+		dismemberable = false,
 		corpseLifetime = 60,
 	},
 } :: { [string]: InfectedDefinition }
@@ -573,6 +664,26 @@ InfectedConfig.CommonTiers = table.freeze({
 	fit through — the rigs are scaled by RigUtil and a boss wedged in a doorway
 	is a boss the team beats by standing still.
 ]]
+--[[
+	The bosses a team has to STAND AND FIGHT, as opposed to the one it can walk
+	around.
+
+	All three of Witch, Tank and Metallic set `isBoss`, and for most purposes
+	that is the right question. This is the other one, and enough places need it
+	that it belongs here rather than being spelled out again in each: the Tank
+	and the Metallic are fights, and the Witch is a hazard you are supposed to
+	tiptoe past.
+
+	It decides who gets a health bar — put one over the Witch and a team starts
+	shooting her to watch it move, which is the opposite of the whole idea — and
+	it decides whether an arrival pushes the Director to its peak pacing state,
+	because a hazard the team chooses to avoid has not raised the pressure.
+]]
+InfectedConfig.PeakBosses = table.freeze({
+	[Enums.Infected.Tank] = true,
+	[Enums.Infected.Metallic] = true,
+})
+
 export type EliteTier = {
 	id: string,
 	--[[ A PREFIX, not a name. It used to be "Apex Tank" because the finale was

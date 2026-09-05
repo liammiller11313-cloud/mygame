@@ -1641,7 +1641,20 @@ local function variantsFor(kind: string): { Model }
 	end
 
 	local folder = folderIn(privateFolder("Infected"), kind)
-	local supplied = suppliedEntry("Infected", { kind })
+	--[[ The definition's own folder name first, then the id. The same order the
+	     weapon pipeline uses for modelName, and for the same reason: the folder
+	     is called whatever the artist called it, and "Metallic Boss" holding a rig
+	     named "Metallic" is an ordinary way to have organised one.
+
+	     Built by hand rather than as { definition.modelFolder, kind }, because
+	     modelFolder is nil for every kind but one and a nil in slot 1 of a table
+	     constructor is a hole — which is a lookup this pipeline would have done
+	     zero passes of, greyboxing the entire roster to add one folder alias. ]]
+	local names = { kind }
+	if definition.modelFolder then
+		table.insert(names, 1, definition.modelFolder)
+	end
+	local supplied = suppliedEntry("Infected", names)
 	if supplied then
 		for _, source in modelsIn(supplied) do
 			local copy = cloneAsModel(source)

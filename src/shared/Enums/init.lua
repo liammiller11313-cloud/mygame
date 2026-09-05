@@ -158,6 +158,9 @@ Enums.Infected = table.freeze({
 
 	Witch = "Witch",
 	Tank = "Tank",
+	--[[ Bigger than a Tank and built rather than turned: a mechanical thing on
+	     drills. See InfectedConfig for the fight it is meant to be. ]]
+	Metallic = "Metallic",
 })
 
 -- Survivor lifecycle. Drives the HUD, the Director, and revive logic.

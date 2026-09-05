@@ -80,6 +80,22 @@ Each needs to be identifiable in under half a second through a firefight.
 | **Tank roar** | The set-piece announcement. Huge, guttural, longer than you think it needs to be. |
 | **Tank footstep** | Heavy, low, ground-shaking. Loops while it runs. Should be audible through walls. |
 
+### Metallic — all six are placeholders today
+Every `Metallic*` cue in `AudioConfig.Infected` is an existing sample re-pitched.
+They work, they are distinguishable, and none of them is right. Two of the six
+are load-bearing and should be replaced first: **wind** and **vent** are the only
+warning a player gets before a charge and the only signal that the damage window
+is open, and the whole fight is unreadable without them.
+
+| Cue | What it should be |
+|---|---|
+| **Metallic roar** | Not a throat. Something enormous and mechanical announcing itself — a horn, a klaxon, metal under load. It must not be mistakable for a Tank at any distance. |
+| **Metallic wind** | **The charge tell.** Drills spinning up: a rising whine with a hard start. A player who hears this has about a second to leave the lane. |
+| **Metallic vent** | **The window.** Pressure escaping — a long steam hiss with a metallic edge. This is "shoot it now" and it needs to cut through a firefight. |
+| **Metallic charge** | The commit. Engine and drills at full speed, sustained, getting louder as it closes. |
+| **Metallic slam** | Both drills into the ground. Concrete, not flesh. Should feel like it moved the floor. |
+| **Metallic step** | Slower and heavier than the Tank's, with servo and metal in it. This is how you hear one coming through a wall. |
+
 ### Common infected
 `Idle`, `Alert`, `Attack`, `Death` — **get many variants of each.** These play
 forty times a minute. Idle should be a low background murmur of groaning; Alert is
@@ -199,6 +215,12 @@ Two things to check on every result before you commit to it:
 | **Witch** scream | `woman scream`, `female shriek`, `horror scream` |
 | **Tank** roar | `monster roar`, `giant roar`, `beast roar deep`, `demon roar` |
 | **Tank** footstep | `heavy footstep`, `giant footstep`, `stomp`, `earth thud` |
+| **Metallic** roar | `mech roar`, `robot roar`, `industrial horn`, `metal groan large` |
+| **Metallic** wind | `drill spin up`, `motor whine rising`, `machine spool up` |
+| **Metallic** vent | `steam release`, `pressure hiss`, `air valve burst` |
+| **Metallic** charge | `heavy machinery loop`, `engine roar`, `drill running` |
+| **Metallic** slam | `heavy metal impact concrete`, `pile driver`, `industrial slam` |
+| **Metallic** step | `mech footstep`, `robot step heavy`, `servo stomp` |
 
 ## Survivor and UI
 

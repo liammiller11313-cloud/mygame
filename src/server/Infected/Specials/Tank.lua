@@ -27,6 +27,25 @@
 	Getting stuck is the failure mode that would ruin the encounter, so there is
 	an explicit answer: if the Tank makes no progress toward its target for a few
 	seconds, it stops pathing and smashes straight at it.
+
+	── WHY NO TWO OF THEM ARE THE SAME ─────────────────────────────────────────
+	Everything above describes one Tank. A team that has fought six of them has
+	fought the same one six times, and once a set piece is memorised it stops
+	being a set piece. Three things vary per body, and none of them change how
+	hard it is — only what it does first and when.
+
+	  * THE OPENING. Rolled on spawn, and it owns roughly the first ten seconds.
+	    It either walks in roaring, opens at range with a rock before anyone has
+	    seen it, or arrives quietly at walking pace and does not announce itself
+	    until it is already close. See OPENINGS.
+	  * THE TEMPO. A per-body multiplier on every cooldown. Its real job is the
+	    pack: two Tanks released three seconds apart on the same tempo swing in
+	    unison, which reads as one enormous attack rather than two, and a team
+	    that dodges one dodges both.
+	  * THE ENRAGE. Below a quarter health it gets faster and acts oftener. This
+	    is deliberately the same quarter at which the boss bar goes hot, so the
+	    readout a team is already watching is the warning rather than a second
+	    thing to learn.
 ]]
 
 local Debris = game:GetService("Debris")
@@ -100,6 +119,42 @@ local FOOTSTEP_INTERVAL = 0.42
 local ROAR_INTERVAL = 11
 local SCAN_INTERVAL = 0.3
 
+--[[ How this body opens. Rolled once on spawn and spent within about ten
+     seconds; after that every Tank behaves the same, which is the point — the
+     variation is in the arrival, not in the fight. ]]
+local OPENING = table.freeze({
+	-- Straight in, roaring, no rock until the first interval is up. The
+	-- classic, and the one wave 5 wants a team to meet first.
+	Charge = "Charge",
+	-- Opens with the rock. A team hears the roar and then takes a hit from
+	-- somewhere they have not looked yet.
+	Artillery = "Artillery",
+	-- Walks in at survivor pace and says nothing. The scariest of the three by
+	-- some distance, because the audio cue a team relies on to locate a Tank is
+	-- simply not there until it is already inside the room.
+	Stalk = "Stalk",
+})
+local OPENINGS = table.freeze({ OPENING.Charge, OPENING.Artillery, OPENING.Stalk })
+
+local STALK_TIME = 6.5 -- how long the quiet lasts before it announces itself
+local STALK_SPEED = 0.62 -- fraction of run speed while stalking
+
+--[[ Per-body cooldown multiplier. Deliberately not centred on 1: a Tank that is
+     slightly slower than the book is still a Tank, and the pack only needs the
+     two bodies to disagree with each other. ]]
+local TEMPO_MIN = 0.85
+local TEMPO_MAX = 1.18
+
+--[[ The enrage. The fraction is shared with BossBarController's NEARLY_DEAD on
+     purpose — the bar going hot IS this, rather than a second tell nobody was
+     taught. Modest numbers: the last quarter of a Tank should be the hardest
+     quarter, not a different creature. ]]
+local ENRAGE_FRACTION = 0.25
+local ENRAGE_SPEED = 1.10
+local ENRAGE_TEMPO = 0.62 -- multiplier on every cooldown, so it acts oftener
+
+local random = Random.new()
+
 local SWING_CAMERA_IMPULSE = table.freeze({
 	position = Vector3.new(0, -0.6, 1.1),
 	rotation = Vector3.new(-16, 5, 0),
@@ -124,6 +179,13 @@ type State = {
 	     elite multiplier has to be resolved once here or it never applies to the
 	     two things a Tank actually kills anybody with. ]]
 	damage: number,
+	--[[ This body's opening, and the clock it runs out on. See OPENINGS. The
+	     deadline is absolute rather than counted down so nothing has to remember
+	     to tick it. ]]
+	opening: string,
+	openingUntil: number,
+	tempo: number,
+	enraged: boolean,
 	stuckClock: number,
 	stuckSamples: number,
 	lastDistance: number,
@@ -153,6 +215,10 @@ local function ensure(model: Model): State
 			nextFootstep = 0,
 			swung = false,
 			damage = ATTACK.damage,
+			opening = OPENING.Charge,
+			openingUntil = 0,
+			tempo = 1,
+			enraged = false,
 			target = nil,
 			rock = nil,
 			rockFrom = Vector3.zero,
@@ -166,6 +232,74 @@ local function ensure(model: Model): State
 		states[model] = state
 	end
 	return state
+end
+
+--[[
+	How fast this body should be moving.
+
+	Every place that writes WalkSpeed goes through here, and that is the whole
+	reason it exists: the three that used to write DEFINITION.runSpeed straight
+	were quietly undoing the elite tier's multiplier every time the Tank finished
+	a swing. That was a no-op only because the Apex tier's speed happens to be
+	1.0 — it would not have stayed one, and the enrage below would have been
+	eaten by it within a second of landing.
+
+	`allowStalk` is false for the anti-stuck path: a Tank that has given up on
+	pathing is already the worst state this encounter has, and it does not get to
+	be slow on top of it.
+]]
+local function cruiseSpeed(model: Model, state: State, allowStalk: boolean): number
+	local speed = Support.scaledSpeed(model, DEFINITION.runSpeed)
+	if state.enraged then
+		speed *= ENRAGE_SPEED
+	end
+	if allowStalk and state.opening == OPENING.Stalk and os.clock() < state.openingUntil then
+		speed *= STALK_SPEED
+	end
+	return speed
+end
+
+--[[ The multiplier on every cooldown this body waits out: its own tempo, halved
+     again once it is enraged. ]]
+local function cadence(state: State): number
+	local factor = state.tempo
+	if state.enraged then
+		factor *= ENRAGE_TEMPO
+	end
+	return factor
+end
+
+--[[ Crosses into the enrage once, at a quarter health, and never back. Faster,
+     acting oftener, and it says so — the roar is the audible half of the tell
+     the boss bar is already showing. ]]
+local function checkEnrage(model: Model, state: State, root: BasePart)
+	if state.enraged then
+		return
+	end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.MaxHealth <= 0 then
+		return
+	end
+	if humanoid.Health / humanoid.MaxHealth > ENRAGE_FRACTION then
+		return
+	end
+
+	state.enraged = true
+	state.nextRoar = 0
+	--[[ The stalk is over whatever its clock says. A Tank cannot be quietly
+	     sneaking up on a team that has already taken three quarters of it off. ]]
+	state.openingUntil = 0
+	--[[ Pulled in rather than reset, so enraging does not GRANT a rock to a Tank
+	     that has just thrown one. ]]
+	state.nextRock = math.min(state.nextRock, os.clock() + ROCK_INTERVAL_MIN * cadence(state))
+
+	--[[ Only in Pursue. Swing and Tear hold WalkSpeed at zero on purpose and
+	     writing over that mid-attack slides the Tank out of its own animation;
+	     backToPursue reads the new speed the moment the attack ends. ]]
+	if state.phase == PHASE.Pursue and humanoid.WalkSpeed > 0 then
+		humanoid.WalkSpeed = cruiseSpeed(model, state, true)
+	end
+	Support.playSound("TankRoar", root)
 end
 
 local function nearestSurvivor(root: BasePart): (Player?, BasePart?)
@@ -192,22 +326,6 @@ local function nearestSurvivor(root: BasePart): (Player?, BasePart?)
 	end
 
 	return best, bestRoot
-end
-
---[[ Throws a survivor. Ownership has to move to the server for the velocity to
-     survive the victim's own simulation, and back again straight after. ]]
-local function launch(root: BasePart, velocity: Vector3)
-	pcall(function()
-		root:SetNetworkOwner(nil)
-	end)
-	root.AssemblyLinearVelocity = velocity
-	task.delay(LAUNCH_OWNERSHIP_TIME, function()
-		if root.Parent then
-			pcall(function()
-				root:SetNetworkOwnershipAuto()
-			end)
-		end
-	end)
 end
 
 -- ─── the rock ────────────────────────────────────────────────────────────────
@@ -340,15 +458,25 @@ local function backToPursue(model: Model, brain: any, state: State)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = DEFINITION.runSpeed
+		humanoid.WalkSpeed = cruiseSpeed(model, state, true)
 	end
 	Support.resumeBrain(brain)
 end
 
 local function stepPursue(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
-	if now >= state.nextRoar then
+	--[[ Silent for as long as the stalk lasts, and the FIRST thing it does when
+	     that runs out is roar — the opening's whole payoff is the moment a team
+	     finds out how close it already is. ]]
+	if now >= state.nextRoar and now >= state.openingUntil then
 		state.nextRoar = now + ROAR_INTERVAL
 		Support.playSound("TankRoar", root)
+		--[[ Spent. Without this the stalk keeps slowing it down for as long as
+		     its clock runs, which would be a Tank that roars and then ambles. ]]
+		state.openingUntil = 0
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.WalkSpeed > 0 then
+			humanoid.WalkSpeed = cruiseSpeed(model, state, true)
+		end
 	end
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
@@ -390,7 +518,7 @@ local function stepPursue(model: Model, brain: any, state: State, root: BasePart
 			state.stuckSamples = 0
 			Support.pauseBrain(brain)
 			if humanoid then
-				humanoid.WalkSpeed = DEFINITION.runSpeed
+				humanoid.WalkSpeed = cruiseSpeed(model, state, false)
 				humanoid.AutoRotate = true
 			end
 			state.phase = PHASE.Direct
@@ -443,7 +571,14 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 
 	if not state.swung then
 		state.swung = true
-		state.nextSwing = os.clock() + ATTACK.cooldown
+		state.nextSwing = os.clock() + ATTACK.cooldown * cadence(state)
+
+		--[[ A stalk is spent the moment it connects, whatever its clock says, and
+		     the roar it was holding lands on the way out of the swing. Getting hit
+		     by something you never heard and THEN hearing it is the whole payoff;
+		     staying quiet and 38% slower after that is just a Tank you outrun. ]]
+		state.openingUntil = 0
+		state.nextRoar = 0
 
 		local survivors: any = Registry.find("SurvivorService")
 		if survivors then
@@ -467,7 +602,11 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 				Support.damage(model, character, victimRoot, origin, state.damage)
 				local away = Vector3.new(delta.X, 0, delta.Z)
 				local heading = if away.Magnitude > 0.05 then away.Unit else facing
-				launch(victimRoot, heading * LAUNCH_SPEED + Vector3.new(0, LAUNCH_LIFT, 0))
+				Support.launch(
+					victimRoot,
+					heading * LAUNCH_SPEED + Vector3.new(0, LAUNCH_LIFT, 0),
+					LAUNCH_OWNERSHIP_TIME
+				)
 				Remotes.Event.CameraImpulse:FireClient(player, SWING_CAMERA_IMPULSE)
 			end
 		end
@@ -484,7 +623,7 @@ local function stepTear(model: Model, brain: any, state: State, root: BasePart, 
 
 	if not rock or not targetRoot then
 		destroyRock(state)
-		state.nextRock = os.clock() + ROCK_INTERVAL_MIN
+		state.nextRock = os.clock() + ROCK_INTERVAL_MIN * cadence(state)
 		backToPursue(model, brain, state)
 		return
 	end
@@ -501,7 +640,7 @@ local function stepTear(model: Model, brain: any, state: State, root: BasePart, 
 	end
 
 	throwRock(model, root, state, targetRoot)
-	state.nextRock = os.clock() + math.random() * (ROCK_INTERVAL_MAX - ROCK_INTERVAL_MIN) + ROCK_INTERVAL_MIN
+	state.nextRock = os.clock() + random:NextNumber(ROCK_INTERVAL_MIN, ROCK_INTERVAL_MAX) * cadence(state)
 	backToPursue(model, brain, state)
 end
 
@@ -558,14 +697,34 @@ function Tank.onSpawn(model: Model, brain: any)
 	state.probe.FilterDescendantsInstances = { model }
 	state.damage = Support.scaledDamage(model, ATTACK.damage)
 
+	local now = os.clock()
+
+	--[[ The dice, and they are thrown exactly here: a body's opening and tempo
+	     are decided when it stands up and never re-rolled, so a Tank does not
+	     change its mind about what kind of Tank it is halfway through a fight. ]]
+	state.opening = OPENINGS[random:NextInteger(1, #OPENINGS)]
+	state.tempo = random:NextNumber(TEMPO_MIN, TEMPO_MAX)
+	state.enraged = false
+	state.openingUntil = if state.opening == OPENING.Stalk then now + STALK_TIME else 0
+
+	if state.opening == OPENING.Artillery then
+		-- Ready to throw as soon as it has a target in range and in sight.
+		state.nextRock = 0
+	elseif state.opening == OPENING.Charge then
+		-- No rock at all through the arrival: this one is pure ground pressure.
+		state.nextRock = now + ROCK_INTERVAL_MAX * cadence(state)
+	else
+		state.nextRock = now + ROCK_INTERVAL_MIN * cadence(state)
+	end
+
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		--[[ Through Support rather than straight off the definition. This line
-		     runs AFTER InfectedService applied the elite's speed to the Humanoid
-		     and would otherwise put it back — which for the Apex is a no-op today
-		     (its multiplier is 1.0, on purpose: outrunning a Tank is the counter)
-		     but would silently eat any future tier's. ]]
-		humanoid.WalkSpeed = Support.scaledSpeed(model, DEFINITION.runSpeed)
+		--[[ Through cruiseSpeed rather than straight off the definition. This
+		     line runs AFTER InfectedService applied the elite's speed to the
+		     Humanoid and would otherwise put it back — which for the Apex is a
+		     no-op today (its multiplier is 1.0, on purpose: outrunning a Tank is
+		     the counter) but would silently eat any future tier's. ]]
+		humanoid.WalkSpeed = cruiseSpeed(model, state, true)
 	end
 
 	-- The music system reads exactly this. Set before anything else so a Tank is
@@ -574,8 +733,14 @@ function Tank.onSpawn(model: Model, brain: any)
 
 	local root = RigUtil.getRoot(model)
 	if root then
-		Support.playSound("TankRoar", root)
-		state.nextRoar = os.clock() + ROAR_INTERVAL
+		--[[ A stalking Tank arrives without a sound and the roar is held until
+		     its clock runs out; everything else announces itself on the spot. ]]
+		if state.opening == OPENING.Stalk then
+			state.nextRoar = state.openingUntil
+		else
+			Support.playSound("TankRoar", root)
+			state.nextRoar = now + ROAR_INTERVAL
+		end
 	end
 	Support.setBrainTarget(brain, nil)
 end
@@ -589,6 +754,9 @@ function Tank.onUpdate(model: Model, brain: any, dt: number)
 
 	local now = os.clock()
 	state.phaseTime += dt
+
+	-- Checked in every phase: crossing the line mid-swing must still count.
+	checkEnrage(model, state, root)
 
 	-- The rock flies on the Tank's clock, in every phase, so a throw is not
 	-- cancelled by the Tank moving on to something else.
@@ -615,14 +783,17 @@ function Tank.onDeath(model: Model, brain: any, _ctx: any)
 		states[model] = nil
 	end
 
-	-- Only the LAST Tank clears the flag. maxAlive is 1 today, but a finale that
-	-- sends two must not drop the music when the first one falls.
+	--[[ Only the last BOSS clears the flag, and a Metallic counts as one: the
+	     flag means "a boss is here", not "a Tank is here", so neither a pack-mate
+	     nor the bigger thing standing next to it may have the music stop on it. ]]
 	local others = 0
 	local infected: any = Registry.find("InfectedService")
 	if infected and typeof(infected.getAlive) == "function" then
-		for _, other in infected:getAlive(Enums.Infected.Tank) do
-			if other ~= model and RigUtil.isAlive(other) then
-				others += 1
+		for _, kind in { Enums.Infected.Tank, Enums.Infected.Metallic } do
+			for _, other in infected:getAlive(kind) do
+				if other ~= model and RigUtil.isAlive(other) then
+					others += 1
+				end
 			end
 		end
 	end

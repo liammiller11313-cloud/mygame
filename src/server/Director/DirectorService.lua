@@ -1758,9 +1758,10 @@ function DirectorService:releaseBoss(kind: string, elite: string?): Model?
 	end
 
 	broadcast(EVENT.Boss, { kind = kind, position = position })
-	-- A Tank IS the peak by definition; a Witch is a hazard the team can choose
-	-- to walk around, so she does not move the pacing state.
-	if kind == Enums.Infected.Tank then
+	-- A boss the team has to stand and fight IS the peak by definition; a Witch
+	-- is a hazard it can choose to walk around, so she does not move the pacing
+	-- state. See InfectedConfig.PeakBosses.
+	if InfectedConfig.PeakBosses[kind] then
 		self:_setState(STATE.SustainPeak)
 	end
 	return model
@@ -2021,9 +2022,8 @@ function DirectorService:_drainQueue(now: number)
 		elseif request.source == SOURCE_BOSS then
 			self:_rerollBossFlow(request.kind)
 			broadcast(EVENT.Boss, { kind = request.kind, position = position })
-			-- A Tank is the peak by definition; a Witch is a hazard the team can
-			-- walk around, so she does not move the pacing state.
-			if request.kind == Enums.Infected.Tank then
+			-- As above: a fight moves the pacing state, a hazard does not.
+			if InfectedConfig.PeakBosses[request.kind] then
 				self:_setState(STATE.SustainPeak)
 			end
 		end

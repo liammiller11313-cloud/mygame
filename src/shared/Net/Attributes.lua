@@ -148,6 +148,12 @@ Attributes.Loadout = table.freeze({
 -- the right hit sound, and decide whether a body deserves the gore budget.
 Attributes.Infected = table.freeze({
 	Kind = "FL_Kind", -- string, Enums.Infected
+	--[[ A damage multiplier on this body, 1 when it is not set. Written by a
+	     special that has opened a window on itself — see Specials/Metallic's
+	     overheat — and read by InfectedService:damage. Published rather than kept
+	     private so the HUD can say the window is open, which is the whole point
+	     of having one. ]]
+	Vulnerable = "FL_Vulnerable", -- number, 1 = normal
 	Health = "FL_Health", -- number
 	MaxHealth = "FL_MaxHealth", -- number
 	IsBoss = "FL_IsBoss", -- boolean, Tank / Witch

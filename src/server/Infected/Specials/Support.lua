@@ -363,6 +363,32 @@ function Support.hasClearArc(
 	return clear
 end
 
+--[[
+	Throws a survivor, and gives them back.
+
+	Ownership has to move to the server for the velocity to survive the victim's
+	own simulation, and back again straight after — a character left
+	server-simulated feels laggy to the person playing it, so the handback is not
+	optional and is why this is a function rather than two lines at each call
+	site. Kept short for the same reason.
+
+	Two bosses do this and used to do it twice, differing only in which of them
+	remembered to check that the part still existed before handing it back.
+]]
+function Support.launch(root: BasePart, velocity: Vector3, holdFor: number?)
+	pcall(function()
+		root:SetNetworkOwner(nil)
+	end)
+	root.AssemblyLinearVelocity = velocity
+	task.delay(holdFor or 0.8, function()
+		if root.Parent then
+			pcall(function()
+				root:SetNetworkOwnershipAuto()
+			end)
+		end
+	end)
+end
+
 --[[ One positional cue, through AudioService so it obeys AudioConfig's voice
      limits. Specials own their own vocalisations because those are the game's
      early-warning system, and a cue that gets dropped by a budget is a warning

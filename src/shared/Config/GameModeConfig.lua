@@ -42,6 +42,16 @@ export type WaveDefinition = {
 	--[[ An InfectedConfig.EliteTiers id applied to every boss this wave releases,
 	     or nil for ordinary ones. The finale's Tank is the only user. ]]
 	bossTier: string?,
+	--[[ What this wave MAY send instead of what `bosses` names, and how often it
+	     does. Empty or nil means the wave always sends exactly what it declares.
+	     See GameModeConfig.rollBosses — the roll happens once, at the top of the
+	     wave, and the callout is spoken from its result. ]]
+	bossPool: { string }?,
+	bossPoolChance: number?,
+	--[[ Whether a Tank this wave releases may bring company. Off unless a wave
+	     says otherwise, because the wave that teaches the Tank must send exactly
+	     one — see the pack notes below GameModeConfig.Waves. ]]
+	bossPack: boolean?,
 	itemDropChance: number, -- odds the breather after this wave restocks the map
 	announcement: string,
 }
@@ -190,6 +200,12 @@ GameModeConfig.Waves = {
 		maxSpecialsAlive = 3,
 		specialInterval = 26,
 		bosses = { Enums.Infected.Witch },
+		--[[ The first wave that lies about itself. Announcing "SOMETHING IS
+		     CALLING THEM" and then sending a Tank is the point: this is where a
+		     team learns the callout is the truth and the schedule is not. ]]
+		bossPool = { Enums.Infected.Tank },
+		bossPoolChance = 0.30,
+		bossPack = true,
 		itemDropChance = 0.60,
 		announcement = "SOMETHING IS CALLING THEM",
 	},
@@ -229,6 +245,12 @@ GameModeConfig.Waves = {
 		maxSpecialsAlive = 3,
 		specialInterval = 24,
 		bosses = { Enums.Infected.Tank },
+		--[[ Three ways this wave can go, which is the most any wave gets. By
+		     eleven the team has fought a Tank and a Witch and has a plan for
+		     both; this is where the Metallic first turns up to spoil it. ]]
+		bossPool = { Enums.Infected.Metallic, Enums.Infected.Witch },
+		bossPoolChance = 0.40,
+		bossPack = true,
 		itemDropChance = 0.70,
 		announcement = "ANOTHER ONE",
 	},
@@ -290,10 +312,130 @@ GameModeConfig.Waves = {
 		     through InfectedConfig.EliteTiers rather than as an ordinary one: same
 		     creature, same tells, several times the health and the reach. ]]
 		bossTier = "Apex",
+		--[[ A coin flip for the last fight of the round. The substitute comes in
+		     WITHOUT the Apex tier — see BossRelease — so the finale is either an
+		     Apex Tank or a plain Metallic, and the two are meant to be about as
+		     hard as each other by completely different routes. ]]
+		bossPool = { Enums.Infected.Metallic },
+		bossPoolChance = 0.50,
 		itemDropChance = 0.00,
 		announcement = "SURVIVE",
 	},
 } :: { WaveDefinition }
+
+--[[
+	── WHAT ACTUALLY WALKS IN ──────────────────────────────────────────────────
+
+	The table above is the round's SHAPE: a boss lands on 5, 8, 11 and 15, and
+	that rhythm is deliberate and fixed. What it does not decide any more is
+	WHICH boss, or how many of it.
+
+	Two rolls sit between the schedule and the spawn.
+
+	SUBSTITUTION. From wave 8 on, a wave can send something other than what it
+	declares. A team that has played four rounds knows a Tank is coming on 11;
+	it should not also know it is a Tank. Wave 5 is exempt on purpose — the
+	first boss of a player's first round teaches the Tank, and a fight you have
+	to learn cannot be the fight you might not get.
+
+	THE PACK. A Tank can arrive with company, and only a Tank: two Witches is
+	two ambushes that do not interact, and two Metallics is two charge lanes
+	through the same corridor, which is not a fight so much as a coin flip. Two
+	Tanks is the one doubling that stays a fight, because the counter to a Tank
+	is the team moving as a unit and a second one is what tests that.
+
+	The pack is scaled by how many people are actually holding guns, not by the
+	wave. Below three survivors it never fires at all: a second Tank on a duo is
+	not harder, it is over. And it only fires on a wave that opted in with
+	`bossPack`, which wave 5 does not: the first Tank of a player's first round
+	is the one that teaches the fight, and you cannot learn it from two.
+]]
+
+--[[ humans -> { chance of a second Tank, chance of a third GIVEN a second }.
+     Indices are clamped into range by rollBosses, so a five-player future or a
+     zero-player edge case reads the nearest row rather than nil. ]]
+GameModeConfig.TankPack = table.freeze({
+	table.freeze({ 0.00, 0.00 }),
+	table.freeze({ 0.00, 0.00 }),
+	table.freeze({ 0.25, 0.00 }),
+	table.freeze({ 0.35, 0.20 }),
+})
+
+export type BossRelease = {
+	kind: string,
+	--[[ An EliteTiers id or nil. Carried per release rather than per wave
+	     because a SUBSTITUTE never inherits the wave's tier: the finale's Apex
+	     multiplies health by three, which on a Tank is the finale and on a
+	     Metallic is eighteen thousand health and a fight nobody finishes. The
+	     bigger boss is already the escalation; it does not need the modifier
+	     that exists to make the smaller one into one. ]]
+	tier: string?,
+}
+
+--[[
+	Turns a wave definition into the bosses this particular run of it releases.
+
+	`promotion` is an EliteTiers id the caller wants applied to anything the wave
+	has not already promoted — the ELITE WAVE modifier, in practice, and nil the
+	rest of the time. It is taken as a parameter rather than applied to the result
+	afterwards because the ORDER matters: a promoted boss does not get a pack, and
+	a caller that promoted the list after this returned would hand a full team
+	three Apex Tanks on one wave.
+
+	Pure apart from `rng`, which the caller supplies so a test can pin it. Never
+	returns nil — a wave with no bosses returns an empty list — and never returns
+	a kind the wave did not name or list in its pool.
+]]
+function GameModeConfig.rollBosses(
+	wave: WaveDefinition,
+	humans: number,
+	rng: Random,
+	promotion: string?
+): { BossRelease }
+	local releases: { BossRelease } = {}
+	if not wave or typeof(wave.bosses) ~= "table" then
+		return releases
+	end
+
+	local pool = wave.bossPool
+	local poolChance = wave.bossPoolChance or 0
+
+	for _, declared in wave.bosses do
+		local kind = declared
+		local tier = wave.bossTier
+
+		if pool and #pool > 0 and poolChance > 0 and rng:NextNumber() < poolChance then
+			kind = pool[rng:NextInteger(1, #pool)]
+			if kind ~= declared then
+				tier = nil
+			end
+		end
+
+		--[[ The caller's promotion fills in for a wave that asked for no tier of
+		     its own. Never the Metallic: it is already three times a Tank's
+		     health before any multiplier, and tripling that again is a fight no
+		     team finishes inside a wave. ]]
+		if tier == nil and promotion and kind ~= Enums.Infected.Metallic then
+			tier = promotion
+		end
+
+		table.insert(releases, { kind = kind, tier = tier })
+
+		--[[ The pack, and only for a plain Tank. An Apex is already this wave's
+		     escalation and two of them is the same wave twice as long. ]]
+		if wave.bossPack and kind == Enums.Infected.Tank and tier == nil then
+			local row = GameModeConfig.TankPack[math.clamp(math.floor(humans), 1, #GameModeConfig.TankPack)]
+			if row and rng:NextNumber() < row[1] then
+				table.insert(releases, { kind = kind, tier = nil })
+				if rng:NextNumber() < row[2] then
+					table.insert(releases, { kind = kind, tier = nil })
+				end
+			end
+		end
+	end
+
+	return releases
+end
 
 GameModeConfig.Classic = table.freeze({
 	PrepDuration = 15, -- the calm before wave 1: pick up a gun, find your team

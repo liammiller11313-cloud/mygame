@@ -691,6 +691,27 @@ function InfectedService:damage(model: Model, amount: number, ctx: any): any
 		return Types.blockedResult(math.max(humanoid.Health, 0))
 	end
 
+	--[[
+		A window this body has opened on itself.
+
+		The definition's damageResistance is a constant and is applied upstream in
+		DamageService; this is the temporary half, and it exists so a boss can have
+		a RHYTHM rather than a health bar. Metallic's charge leaves it overheating
+		and defenceless for a couple of seconds, and the fight is about earning
+		that window and then filling it.
+
+		Clamped rather than trusted. It is an attribute, so anything at all can
+		write it, and a NaN or a negative here would either heal the body or make
+		the next bullet kill it.
+	]]
+	local vulnerable = tonumber(model:GetAttribute(Attributes.Infected.Vulnerable))
+	if vulnerable and vulnerable == vulnerable then
+		amount *= math.clamp(vulnerable, 0, 10)
+		if amount <= 0 then
+			return Types.blockedResult(math.max(humanoid.Health, 0))
+		end
+	end
+
 	local before = math.max(humanoid.Health, 0)
 	local remaining = math.max(before - amount, 0)
 	local killed = remaining <= 0

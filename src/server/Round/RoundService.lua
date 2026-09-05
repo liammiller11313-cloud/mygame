@@ -98,6 +98,11 @@ local FINAL_WARNING = 30
      to shoulder through one doorway, which is a wall, not a set piece. ]]
 local BOSS_STAGGER = 3
 
+--[[ The one source of chance in the wave schedule. Its own generator rather than
+     math.random so nothing else in the round can perturb the sequence of bosses
+     a server hands out, and so a future "seeded round" only has to reseed here. ]]
+local bossRng = Random.new()
+
 -- Subtitle dwell times. SubtitleController clamps these; they are the intent.
 local SAY_ANNOUNCE = 3.2
 local SAY_CALLOUT = 2.2
@@ -350,43 +355,65 @@ local function releaseBoss(kind: string, elite: string?)
 	director:releaseBoss(kind, elite)
 end
 
---[[ "TANK!" for one, "TANK! 2 of them." for a wave that opens with a pair. The
-     wave's own announcement already sets the tone; this is the specific. ]]
-local function bossCallout(bosses: { string }, elite: string?): string?
+--[[ "TANK!" for one, "TANK! 2 of them." for a wave whose pack roll came up. The
+     wave's own announcement already sets the tone; this is the specific.
+
+     Grouped by kind AND tier rather than by kind alone, because a wave can now
+     release two different things and only one of them may be elite. ]]
+local function bossCallout(releases: { GameModeConfig.BossRelease }): string?
 	local order: { string } = {}
 	local counts: { [string]: number } = {}
-	for _, kind in bosses do
-		if not counts[kind] then
-			counts[kind] = 0
-			table.insert(order, kind)
+	local labels: { [string]: string } = {}
+
+	for _, release in releases do
+		local kind = release.kind
+		local definition = InfectedConfig.get(kind)
+		local plain = if definition then definition.displayName else kind
+
+		--[[ An elite boss is called out by the TIER's name, not the kind's: the
+		     wave that releases an Apex Tank shouts "APEX TANK!", because a team
+		     that hears the same word it heard on wave 5 will bring the same
+		     plan. ]]
+		local eliteTier = InfectedConfig.elite(release.tier)
+		local label = if eliteTier then eliteTier.titlePrefix .. " " .. plain else plain
+		local key = label
+
+		if not counts[key] then
+			counts[key] = 0
+			labels[key] = string.upper(label)
+			table.insert(order, key)
 		end
-		counts[kind] += 1
+		counts[key] += 1
 	end
 
-	--[[ An elite boss is called out by the TIER's name, not the kind's: the wave
-	     that releases an Apex Tank shouts "APEX TANK!", because a team that hears
-	     the same word it heard on wave 5 will bring the same plan. ]]
-	local eliteTier = InfectedConfig.elite(elite)
-
 	local parts: { string } = {}
-	for _, kind in order do
-		local definition = InfectedConfig.get(kind)
-		local name = string.upper(if definition then definition.displayName else kind)
-		if eliteTier then
-			name = string.upper(
-				eliteTier.titlePrefix .. " " .. (if definition then definition.displayName else kind)
-			)
-		end
-		if counts[kind] > 1 then
-			table.insert(parts, string.format("%s! %d of them.", name, counts[kind]))
+	for _, key in order do
+		if counts[key] > 1 then
+			table.insert(parts, string.format("%s! %d of them.", labels[key], counts[key]))
 		else
-			table.insert(parts, string.format("%s!", name))
+			table.insert(parts, string.format("%s!", labels[key]))
 		end
 	end
 	if #parts == 0 then
 		return nil
 	end
 	return table.concat(parts, " ")
+end
+
+--[[ How many people are on their feet right now. This is what the Tank pack roll
+     scales against, rather than the size of the lobby: four in the match with two
+     of them on the floor is a team of two for as long as that lasts, and a second
+     Tank landing on it is not a harder wave, it is the end of the round. ]]
+local function uprightCount(): number
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors then
+		return 0
+	end
+	if typeof(survivors.getRescueCounts) == "function" then
+		local _, upright = survivors:getRescueCounts()
+		return upright
+	end
+	return #survivors:getAliveSurvivors()
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -608,28 +635,30 @@ function RoundService:_enterWave(entry)
 	     the finale must not walk in three seconds after a team wipe ended the
 	     round. ]]
 	if #wave.bosses > 0 then
-		local callout = bossCallout(wave.bosses, wave.bossTier)
+		--[[ Rolled once, here, and everything downstream reads the RESULT: the
+		     callout, the stagger and the spawns all have to agree, and a wave
+		     that announced a Witch and sent a Tank would be a bug rather than a
+		     surprise. See GameModeConfig.rollBosses for what can vary. ]]
+		--[[ ELITE WAVE's promotion goes IN rather than being applied to what comes
+		     out. rollBosses has to know about it before it rolls the pack: a
+		     promoted boss does not get one, and promoting the list afterwards
+		     would hand a full team three Apex Tanks on a single wave. ]]
+		local promotion = if ModifierConfig.eliteBosses(Workspace) then "Apex" else nil
+		local releases = GameModeConfig.rollBosses(wave, uprightCount(), bossRng, promotion)
+
+		local callout = bossCallout(releases)
 		if callout then
 			say("", callout, SAY_ANNOUNCE)
 		end
+
 		local mine = generation
-		--[[ The wave's own elite tier, applied to every boss it releases. Only
-		     the finale sets one; everywhere else it is nil and the Director
-		     places an ordinary body. ]]
-		--[[ The wave's own tier, or ELITE WAVE's, whichever exists. The modifier
-		     does not override a wave that already asks for one — wave 15 is
-		     already an Apex and there is nothing above it. ]]
-		local elite = wave.bossTier
-		if not elite and ModifierConfig.eliteBosses(Workspace) then
-			elite = "Apex"
-		end
-		for order, kind in wave.bosses do
+		for order, release in releases do
 			if order == 1 then
-				releaseBoss(kind, elite)
+				releaseBoss(release.kind, release.tier)
 			else
 				task.delay((order - 1) * BOSS_STAGGER, function()
 					if mine == generation and roundState == Enums.RoundState.InProgress then
-						releaseBoss(kind, elite)
+						releaseBoss(release.kind, release.tier)
 					end
 				end)
 			end
