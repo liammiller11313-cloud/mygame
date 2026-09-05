@@ -124,6 +124,11 @@ local EVENTS: { string } = {
 	"RequestProfile", -- C->S ()
 	"SetLoadout", -- C->S {index: number, slots: {[slot]: weaponId}}
 	"SetActiveLoadout", -- C->S (index: number)
+	--[[ Renaming one. Owner-only text: the server sanitises the length and strips
+	     control and BIDI characters, and it is never drawn to anybody but the
+	     player who wrote it — see LoadoutConfig.sanitiseName, which says what
+	     would have to happen first for that to change. ]]
+	"SetLoadoutName", -- C->S {index: number, name: string}
 	--[[ What a round paid, itemised, for the end-of-round screen. Sent once at
 	     the end rather than accumulated on the client, because the client cannot
 	     see the bonus arithmetic and should not be inventing it. ]]
@@ -228,6 +233,11 @@ local EVENTS: { string } = {
 	     server: that is what the Roblox menu is for, and the mode entries on the
 	     main menu are how a player moves servers here. ]]
 	"LeaveMatch", -- C->S ()
+	--[[ The server sending everybody home. Fired once, after the result screen
+	     has had its time, when a run ended in a way there is no continuing from —
+	     a team wipe. The client half is the same one the pause menu's RETURN TO
+	     MAIN MENU uses, so there is one way back to the menu rather than two. ]]
+	"ReturnToMenu", -- S->C {reason: string}
 
 	-- ── Pausing, and only when there is nobody to pause on ──────────────────
 	--[[ Asks the server to stop the round. It is granted only when the sender is

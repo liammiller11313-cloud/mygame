@@ -96,10 +96,77 @@ LoadoutConfig.Default = table.freeze({
 
 export type Loadout = { [string]: string }
 
---[[ A readable name for a loadout the player has not named. They cannot rename
-     them yet; when they can, this is the placeholder the field starts at. ]]
+--[[ A readable name for a loadout the player has not named. Also what an empty
+     or unusable name falls back to — see sanitiseName. ]]
 function LoadoutConfig.defaultName(index: number): string
 	return string.format("LOADOUT %d", index)
+end
+
+--[[ Long enough for "CQC / TANK BUSTER" and short enough that the row it sits in
+     never has to reflow. Enforced on the SERVER, because the client's TextBox
+     limit is a courtesy and the wire is not. ]]
+LoadoutConfig.MaxNameLength = 18
+
+--[[
+	A loadout name the game will store and draw.
+
+	── WHAT THIS IS AND IS NOT ─────────────────────────────────────────────────
+	It is a length cap, a control-character strip and a whitespace trim. It is
+	NOT a content filter, and the difference decides where the name may ever be
+	shown: these names are drawn to their OWNER and to nobody else, which is the
+	only reason an unfiltered string is safe to render at all.
+
+	If a name is ever put in front of another player — a lobby row, a scoreboard,
+	a spectate card — it has to go through TextService:FilterStringAsync first,
+	and this function is not that and cannot be made into it from here, because
+	filtering is asynchronous and this is called from the middle of a write.
+
+	Two classes of character go rather than being escaped. ASCII controls, because
+	a newline in a single-line label draws as a name that is silently blank. And
+	the Unicode BIDI overrides, because those are not control characters — Lua's
+	%c does not match them, and U+202E in a name reorders the row it sits in
+	around itself. They are stripped by their UTF-8 bytes, which is the only way
+	to reach them from a byte pattern.
+]]
+--[[ U+202A..U+202E and U+2066..U+2069: the embedding, override and isolate
+     marks. All of them encode as E2 80 xx / E2 81 xx, so one class each. ]]
+local BIDI_PATTERNS = table.freeze({ "\226\128[\170-\174]", "\226\129[\166-\169]" })
+function LoadoutConfig.sanitiseName(name: any, index: number): string
+	if typeof(name) ~= "string" then
+		return LoadoutConfig.defaultName(index)
+	end
+	--[[ %c is every control character including tab and newline; the second
+	     pattern collapses the runs of spaces they leave behind, so "A\n\nB"
+	     becomes "A B" rather than "A  B". ]]
+	local cleaned = name
+	for _, pattern in BIDI_PATTERNS do
+		cleaned = string.gsub(cleaned, pattern, "")
+	end
+	cleaned = string.gsub(cleaned, "%c", " ")
+	cleaned = string.gsub(cleaned, "%s+", " ")
+	cleaned = string.match(cleaned, "^%s*(.-)%s*$") or ""
+	if cleaned == "" then
+		return LoadoutConfig.defaultName(index)
+	end
+	--[[ Bytes rather than characters, deliberately: it is what the datastore
+	     budget is measured in, and cutting a multi-byte glyph in half is a
+	     cosmetic problem where an unbounded string is a storage one. ]]
+	if #cleaned > LoadoutConfig.MaxNameLength then
+		cleaned = string.sub(cleaned, 1, LoadoutConfig.MaxNameLength)
+	end
+	return cleaned
+end
+
+--[[ All three names, whatever was stored. Mirrors sanitiseAll below: a profile
+     saved before names existed has none, and every one of them comes back as its
+     own default rather than as a hole. ]]
+function LoadoutConfig.sanitiseNames(stored: any): { string }
+	local out = table.create(LoadoutConfig.MaxLoadouts)
+	for index = 1, LoadoutConfig.MaxLoadouts do
+		local raw = if typeof(stored) == "table" then stored[index] else nil
+		out[index] = LoadoutConfig.sanitiseName(raw, index)
+	end
+	return out
 end
 
 --[[ Whether `weaponId` can legally sit in `slot`. The weapon's own definition

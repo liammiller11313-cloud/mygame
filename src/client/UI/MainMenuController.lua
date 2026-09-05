@@ -2356,6 +2356,21 @@ function MainMenuController:start()
 	trove:connect(Remotes.Event.LobbyStateChanged.OnClientEvent, onLobbyState)
 	trove:connect(Remotes.Event.RoundEnded.OnClientEvent, showResults)
 
+	--[[
+		The server sending everybody home after a wipe.
+
+		Through dismissResults rather than open(), so it is the SAME exit the
+		player would have taken themselves: the results poster comes down, the
+		confetti is cleared, the back sound plays, and the LeaveMatch that path
+		already sends is a harmless second copy of the flag the server has
+		written. One way back to the menu rather than two that have to agree.
+	]]
+	trove:connect(Remotes.Event.ReturnToMenu.OnClientEvent, function()
+		if not MainMenuController:isOpen() then
+			dismissResults()
+		end
+	end)
+
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.CurrentMap), refreshMapLine)
 	trove:connect(Remotes.Event.MapLoading.OnClientEvent, refreshMapLine)
 	refreshMapLine()

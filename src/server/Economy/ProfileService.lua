@@ -134,6 +134,7 @@ export type Profile = {
 	dollars: number,
 	owned: { [string]: boolean },
 	loadouts: { LoadoutConfig.Loadout },
+	loadoutNames: { string },
 	active: number,
 	--[[ Permanent abilities: what is unlocked, and what is equipped. A SEPARATE
 	     set from `owned` on purpose — that one is validated against
@@ -202,6 +203,7 @@ local function blankProfile(): Profile
 		dollars = EconomyConfig.StartingDollars,
 		owned = EconomyConfig.defaultOwned(),
 		loadouts = LoadoutConfig.sanitiseAll(nil, nil),
+		loadoutNames = LoadoutConfig.sanitiseNames(nil),
 		active = 1,
 		abilities = AbilityConfig.defaultOwned(),
 		abilitySlots = AbilityConfig.sanitiseSlots(nil, nil),
@@ -300,6 +302,10 @@ local function migrate(stored: any): Profile
 	profile.abilitySlots = AbilityConfig.sanitiseSlots(stored.abilitySlots, profile.abilities)
 
 	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, profile.owned, profile.abilities)
+	--[[ Names are sanitised the same way and separately from the slots, because
+	     a profile saved before naming existed has loadouts and no names — see
+	     sanitiseNames, which answers a default for every one it does not find. ]]
+	profile.loadoutNames = LoadoutConfig.sanitiseNames(stored.loadoutNames)
 	profile.active = LoadoutConfig.clampIndex(stored.active)
 
 	--[[
@@ -385,6 +391,7 @@ local function serialise(profile: Profile, lock: any): any
 		dollars = math.clamp(math.floor(profile.dollars), 0, EconomyConfig.MaxDollars),
 		owned = profile.owned,
 		loadouts = profile.loadouts,
+		loadoutNames = profile.loadoutNames,
 		active = profile.active,
 		abilities = profile.abilities,
 		abilitySlots = profile.abilitySlots,
@@ -497,6 +504,7 @@ function ProfileService:sync(player: Player)
 		dollars = profile.dollars,
 		owned = profile.owned,
 		loadouts = profile.loadouts,
+		loadoutNames = profile.loadoutNames,
 		active = profile.active,
 		--[[ Carried on the existing sync rather than through a remote of their
 		     own. Every screen that reads this payload already needs all of it,
@@ -1109,6 +1117,32 @@ function ProfileService:setLoadout(player: Player, index: number, loadout: any):
 	     the alternative is a branch that is wrong the first time somebody makes
 	     the active index change in the same breath. ]]
 	syncAbilityMirror(profile)
+	markChanged(player, profile, true)
+	return true
+end
+
+--[[
+	Renames one loadout.
+
+	Sanitised on arrival rather than trusted: the client's TextBox has a length
+	limit and a filter of its own, and both are a courtesy to the player rather
+	than a property of the wire. See LoadoutConfig.sanitiseName, which is also
+	where the rule that these names are OWNER-ONLY is written down.
+
+	Returns false for a no-op so the caller does not mark a profile dirty and
+	spend a datastore write on somebody clicking into a field and back out.
+]]
+function ProfileService:setLoadoutName(player: Player, index: number, name: any): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+	local slot = LoadoutConfig.clampIndex(index)
+	local cleaned = LoadoutConfig.sanitiseName(name, slot)
+	if profile.loadoutNames[slot] == cleaned then
+		return false
+	end
+	profile.loadoutNames[slot] = cleaned
 	markChanged(player, profile, true)
 	return true
 end

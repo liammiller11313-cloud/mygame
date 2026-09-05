@@ -82,6 +82,7 @@ local state = {
 	dollars = 0,
 	owned = {} :: { [string]: boolean },
 	loadouts = LoadoutConfig.sanitiseAll(nil, nil),
+	loadoutNames = LoadoutConfig.sanitiseNames(nil),
 	active = 1,
 	--[[ The ability half of the same profile. It rides the same sync for the
 	     same reason the loadouts do: one payload, one arrival order, and no
@@ -162,6 +163,33 @@ end
 
 function ProfileController:getLoadout(index: number): LoadoutConfig.Loadout
 	return state.loadouts[LoadoutConfig.clampIndex(index)] or LoadoutConfig.sanitise(nil, nil)
+end
+
+--[[ What this loadout is called. Never empty: sanitiseNames answers a default
+     for every index it does not find, so a screen can draw this without a
+     fallback of its own and a profile saved before naming existed reads as
+     LOADOUT 1, 2, 3 rather than as three blank rows. ]]
+function ProfileController:getLoadoutName(index: number): string
+	local slot = LoadoutConfig.clampIndex(index)
+	return state.loadoutNames[slot] or LoadoutConfig.defaultName(slot)
+end
+
+--[[ Renames one. Drawn immediately, like setActive and for the same reason: the
+     player typed it, they are looking at the field, and a name that snapped back
+     to the old one for a round trip would read as the edit being rejected. The
+     server sanitises and the next sync is what settles it. ]]
+function ProfileController:setLoadoutName(index: number, name: string)
+	if not state.ready then
+		return
+	end
+	local slot = LoadoutConfig.clampIndex(index)
+	local cleaned = LoadoutConfig.sanitiseName(name, slot)
+	if state.loadoutNames[slot] == cleaned then
+		return
+	end
+	state.loadoutNames[slot] = cleaned
+	Remotes.Event.SetLoadoutName:FireServer({ index = slot, name = cleaned })
+	ProfileController.changed:fire()
 end
 
 --[[ Whether a purchase for this id is in flight. One at a time: the shop has one
@@ -257,6 +285,7 @@ local function onSynced(payload: any)
 	     that index it, and a payload that arrived malformed for any reason
 	     should produce a drawable loadout rather than a nil index. ]]
 	state.loadouts = LoadoutConfig.sanitiseAll(payload.loadouts, nil)
+	state.loadoutNames = LoadoutConfig.sanitiseNames(payload.loadoutNames)
 	state.abilities = if typeof(payload.abilities) == "table" then payload.abilities else {}
 	-- Same reasoning as the loadouts above: the shape has to be right to index.
 	state.abilitySlots = AbilityConfig.sanitiseSlots(payload.abilitySlots, nil)

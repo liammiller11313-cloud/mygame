@@ -158,8 +158,33 @@ local function serverNow(): number
 	return Workspace:GetServerTimeNow()
 end
 
+--[[
+	Whether this player is actually IN the match this lobby is counting toward.
+
+	LeftMatch is the flag RETURN TO MAIN MENU writes and requestMode clears — see
+	RoundService's LeaveMatch handler, which calls it "a decision, so coming back
+	is one too". It is the only honest answer to "is this person playing", and
+	the lobby was not asking it.
+
+	Everything below counted every player in the SERVER. Somebody sitting in the
+	main menu therefore made the countdown run without them: they filled a slot
+	against MinPlayersToStart, so three players and one in the menu started
+	Versus with three, and their stale `desired` vote helped choose the mode of a
+	match they were not in. A wipe made it worse than that, since a wipe now puts
+	the WHOLE server in the menu at once.
+]]
+local function inMatch(player: Player): boolean
+	return player:GetAttribute(Attributes.Player.LeftMatch) ~= true
+end
+
 local function playerCount(): number
-	return #Players:GetPlayers()
+	local count = 0
+	for _, player in Players:GetPlayers() do
+		if inMatch(player) then
+			count += 1
+		end
+	end
+	return count
 end
 
 --[[ Each mode carries its own headcount rules — Versus needs four people to be a
@@ -475,7 +500,7 @@ end
 ]]
 local function anyoneHasChosen(): boolean
 	for _, player in Players:GetPlayers() do
-		if desired[player] then
+		if inMatch(player) and desired[player] then
 			return true
 		end
 	end
@@ -483,7 +508,12 @@ local function anyoneHasChosen(): boolean
 end
 
 local function tallyPreferredMode(): string?
-	local players = Players:GetPlayers()
+	local players = {}
+	for _, player in Players:GetPlayers() do
+		if inMatch(player) then
+			table.insert(players, player)
+		end
+	end
 	local count = #players
 	if count == 0 then
 		return nil

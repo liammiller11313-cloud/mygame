@@ -188,6 +188,20 @@ function LoadoutService:start()
 		end
 	end)
 
+	--[[ Renaming. Through the same throttle as the other two edits: a TextBox
+	     that fires on every keystroke would otherwise be a datastore write per
+	     character. It does NOT reapply — a name is not something a survivor is
+	     holding. ]]
+	serviceTrove:connect(Remotes.Event.SetLoadoutName.OnServerEvent, function(player, payload)
+		if typeof(payload) ~= "table" or throttled(player) then
+			return
+		end
+		local store = Registry.find("ProfileService")
+		if store and typeof(store.setLoadoutName) == "function" then
+			store:setLoadoutName(player, payload.index, payload.name)
+		end
+	end)
+
 	serviceTrove:connect(Remotes.Event.SetActiveLoadout.OnServerEvent, function(player, index)
 		if throttled(player) then
 			return

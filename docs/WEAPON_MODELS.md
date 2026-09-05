@@ -133,7 +133,7 @@ None of this is required. A bare model with no attachments and no PrimaryPart
 works; the four bullets above are what you get for free and what to add if you
 want it exact.
 
-## If a gun comes out sideways
+## If a gun comes out sideways — in either hand
 
 The first-person pose assumes a weapon's barrel runs down its own **-Z**. A gun
 modelled along X — a perfectly ordinary way to build one — used to be drawn lying
@@ -141,11 +141,17 @@ across the bottom of the screen pointing at the edge of it, and looked enormous
 doing it, because you were seeing its whole length side-on instead of
 foreshortened down the barrel.
 
-That is now corrected automatically: a model whose barrel is more than 35° off
-forward has its pivot straightened, which moves nothing and fixes the pose, the
-scale fit, the muzzle, the sight and the arms in one go. A model that is already
-close to forward is left exactly as you made it — a deliberate cant is yours to
-keep.
+The **world** model had the same problem from the other side: the grip that gets
+invented for a weapon with no `Grip` attachment was a position and nothing else,
+so the angle a survivor held it at was whatever rotation the `Handle` part
+happened to have. A gun modelled along X came out of the fist at ninety degrees.
+
+Both are now corrected automatically, by the same measurement: a model whose
+barrel is more than 35° off forward is straightened. In first person that is the
+pivot — which moves nothing and fixes the pose, the scale fit, the muzzle, the
+sight and the arms in one go. In third person it is the grip's orientation. A
+model that is already close to forward is left exactly as you made it, byte for
+byte — a deliberate cant is yours to keep.
 
 The barrel is found in one of two ways:
 

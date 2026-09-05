@@ -83,6 +83,7 @@ local AnimationConfig = require(Shared.Config.AnimationConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
+local ModelFacing = require(Shared.Util.ModelFacing)
 local Registry = require(Shared.Util.Registry)
 local RigUtil = require(Shared.Util.RigUtil)
 local UITheme = require(Shared.Config.UITheme)
@@ -1955,11 +1956,51 @@ local function ensureGrip(model: Model, handle: BasePart): Attachment
 		end
 	end
 
+	--[[
+		Invented, and ORIENTED, which it was not.
+
+		This used to be a position and nothing else: half the handle's height down
+		and a third of its LENGTH back, where "length" meant the handle's Z. With
+		an identity rotation the weapon's angle in the fist is then entirely the
+		Handle part's own rotation — and CarryVisualService's own note says why
+		that matters: "every world model is authored barrel-down-Z, so a gripped
+		weapon points where its owner is looking without any correction at all".
+
+		A gun modelled along X is an ordinary way to build one and breaks both
+		halves of that at once: it came out of the survivor's fist at ninety
+		degrees, and the grip point was measured down an axis that was not the
+		barrel. ModelFacing answers which way it actually points; the offsets below
+		are the same two the hand-written version used, taken along that answer
+		rather than along Z.
+
+		For a model already authored barrel-down-Z this produces the identical
+		CFrame it always did — lookAt with forward = -Z is an identity rotation,
+		and the reach and drop collapse to half the handle's Z and Y. A correct
+		model is not touched, which is the property that makes this safe to ship
+		across a roster somebody else built.
+	]]
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "Grip"
-	--[[ Half the handle's height down and a third of its length back. Local to
-	     the handle, so it survives the model being scaled or re-posed. ]]
-	attachment.CFrame = CFrame.new(0, -handle.Size.Y * 0.5, handle.Size.Z * 0.3)
+
+	local forward = ModelFacing.forwardOf(model, handle, model:GetPivot()) or -Vector3.zAxis
+	--[[ Into the handle's own space, which is what an Attachment parented to it
+	     is measured in. Up comes from the model's pivot rather than from the
+	     world: the model is sitting in ServerStorage at whatever rotation it was
+	     saved at, so world up means nothing here. ]]
+	local pivot = model:GetPivot()
+	local f = handle.CFrame:VectorToObjectSpace(pivot:VectorToWorldSpace(forward))
+	local u = handle.CFrame:VectorToObjectSpace(pivot.UpVector)
+	if math.abs(u:Dot(f)) > 0.95 then
+		--[[ The barrel points along the model's own up. There is no roll left to
+		     preserve, so any perpendicular will do and the handle's is nearest. ]]
+		u = handle.CFrame:VectorToObjectSpace(pivot.RightVector)
+	end
+
+	local half = handle.Size * 0.5
+	local reach = math.abs(f.X) * half.X + math.abs(f.Y) * half.Y + math.abs(f.Z) * half.Z
+	local drop = math.abs(u.X) * half.X + math.abs(u.Y) * half.Y + math.abs(u.Z) * half.Z
+	local position = -f * (reach * 0.6) - u * drop
+	attachment.CFrame = CFrame.lookAt(position, position + f, u)
 	attachment.Parent = handle
 	return attachment
 end

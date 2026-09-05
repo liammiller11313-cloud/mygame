@@ -58,6 +58,7 @@ local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local AmmoConfig = require(Shared.Config.AmmoConfig)
 local GameConfig = require(Shared.Config.GameConfig)
+local ModelFacing = require(Shared.Util.ModelFacing)
 local Registry = require(Shared.Util.Registry)
 local Device = require(Shared.Util.Device)
 local Spring = require(Shared.Util.Spring)
@@ -326,7 +327,9 @@ local FIT_TOLERANCE = 1.45
      the weapon off screen the moment the player aims. ]]
 local SIGHT_MAX_OFFSET = 2.5
 
-local MUZZLE_NAMES = { "Muzzle", "MuzzlePoint", "MuzzleAttachment", "FirePoint", "Tip" }
+--[[ Shared with the world model, so both hands agree about what an artist
+     called the end of the barrel. ]]
+local MUZZLE_NAMES = ModelFacing.MuzzleNames
 local SIGHT_NAMES = { "Sight", "AimPoint", "AimPart", "Iron" }
 
 -- Sway. The weapon lags the camera, which is the single cheapest cue that the
@@ -848,125 +851,16 @@ local function attachmentHost(built: Model): BasePart?
 	return largestPart(built)
 end
 
---[[ How far off forward a model has to be before this file overrules the
-     artist. Thirty-five degrees is well past any deliberate cant and well short
-     of the ninety a gun modelled along the wrong axis lands at, so a weapon that
-     is merely angled is left exactly as it was made. ]]
-local FORWARD_TOLERANCE = math.cos(math.rad(35))
-
---[[ How much longer the longest axis has to be than the forward one before it is
-     believed to be the barrel. A gun that is 1.05 times as wide as it is long is
-     not telling us anything. ]]
-local AXIS_MARGIN = 1.3
-
---[[
-	The model's own extents, in the frame it will be POSED in.
-
-	Not GetBoundingBox, which answers in world axes and therefore says nothing
-	about which way the model itself is built. This walks the eight corners of
-	every part through the pivot's inverse, which is the only measurement that
-	survives the model being saved at some arbitrary rotation in ServerStorage.
-
-	Two hundred-odd CFrame multiplies for a detailed gun, once per weapon swap.
-]]
-local function localExtents(built: Model, pivot: CFrame): (Vector3, Vector3)
-	local inverse = pivot:Inverse()
-	local low = Vector3.new(math.huge, math.huge, math.huge)
-	local high = -low
-	for _, part in built:GetDescendants() do
-		if part:IsA("BasePart") then
-			local frame = inverse * part.CFrame
-			local half = part.Size * 0.5
-			for _, sx in { -1, 1 } do
-				for _, sy in { -1, 1 } do
-					for _, sz in { -1, 1 } do
-						local corner = frame * Vector3.new(half.X * sx, half.Y * sy, half.Z * sz)
-						low = low:Min(corner)
-						high = high:Max(corner)
-					end
-				end
-			end
-		end
-	end
-	return low, high
-end
-
---[[
-	Which way the model's barrel points, in pivot space, or nil when it cannot
-	tell.
-
-	Two answers, in order of how much they can be trusted:
-
-	  1. A MUZZLE ATTACHMENT. Exact, and it is already the documented convention
-	     for this game — the same names ensureMuzzle looks for. An artist whose
-	     gun comes out sideways fixes it by putting an Attachment called "Muzzle"
-	     at the end of the barrel, which they may well want to do anyway so the
-	     flash and the tracers leave from the right place.
-
-	  2. THE LONGEST AXIS, POINTED AWAY FROM THE GRIP. A gun is longer than it is
-	     wide, and the end furthest from the thing you hold it by is the end the
-	     rounds come out of. Only believed when the longest axis is clearly longer
-	     than the forward one — see AXIS_MARGIN — because on a stubby weapon the
-	     comparison is noise.
-]]
-local function forwardOf(built: Model, host: BasePart, pivot: CFrame, centre: Vector3): Vector3?
-	local muzzle = findAttachment(built, MUZZLE_NAMES)
-	if muzzle then
-		local delta = (pivot:Inverse() * muzzle.WorldPosition) - centre
-		if delta.Magnitude > 0.05 then
-			return delta.Unit
-		end
-	end
-
-	local low, high = localExtents(built, pivot)
-	local size = high - low
-	local axis, length = Vector3.zAxis, size.Z
-	if size.X > length then
-		axis, length = Vector3.xAxis, size.X
-	end
-	if size.Y > length then
-		axis, length = Vector3.yAxis, size.Y
-	end
-	if axis == Vector3.zAxis or length < size.Z * AXIS_MARGIN then
-		return nil
-	end
-
-	--[[ Away from the grip. `host` is the PrimaryPart, the Handle, or the biggest
-	     part — see attachmentHost — and every one of those sits at the held end of
-	     a gun rather than at the muzzle. ]]
-	local grip = ((pivot:Inverse() * host.CFrame).Position - centre):Dot(axis)
-	return if grip > 0 then -axis else axis
-end
-
---[[
-	Pins the pivot, and straightens the model if it is plainly not facing forward.
-
-	── WHY THIS DOES MORE THAN PIN ─────────────────────────────────────────────
-	The pose puts the weapon at an offset and lets the camera do the rest, which
-	assumes the model's barrel runs down its own -Z. Nothing ever checked. A gun
-	modelled along X — which is a perfectly ordinary way to build one — was drawn
-	lying across the bottom of the screen pointing at the edge of it, and looked
-	enormous doing it, because you were seeing its whole length side-on instead of
-	foreshortened down the barrel.
-
-	So a model that is clearly not pointing forward gets its PIVOT rotated, which
-	moves nothing and costs nothing: everything downstream — the pose, the fit,
-	the muzzle, the sight, the arms — is measured against the pivot, so correcting
-	it once here corrects all of them.
-
-	── AND A MODEL THAT IS FINE IS NOT TOUCHED ─────────────────────────────────
-	Within FORWARD_TOLERANCE of forward, this behaves exactly as it did: the
-	artist's PrimaryPart is left as the pivot if they set one, and the bounding
-	box centre is used if they did not. Overruling a deliberate cant would be
-	worse than the bug.
-]]
+--[[ Which way a supplied model is built, and whether that is close enough to
+     forward to leave alone. Shared with the WORLD model's grip — see
+     Shared/Util/ModelFacing, whose header carries the reasoning for both. ]]
 local function pinPivot(built: Model, host: BasePart)
 	local pivot = built:GetPivot()
-	local low, high = localExtents(built, pivot)
+	local low, high = ModelFacing.extents(built, pivot)
 	local centre = (low + high) * 0.5
 
-	local forward = forwardOf(built, host, pivot, centre)
-	if not forward or forward.Z <= -FORWARD_TOLERANCE then
+	local forward = ModelFacing.forwardOf(built, host, pivot)
+	if ModelFacing.isForward(forward) then
 		-- Already pointing the right way, or unreadable. Old behaviour exactly.
 		if built.PrimaryPart then
 			return

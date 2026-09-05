@@ -1052,6 +1052,37 @@ function RoundService:endRound(outcome: string)
 		if mine ~= generation then
 			return
 		end
+
+		--[[
+			A WIPE ENDS THE RUN, NOT JUST THE ROUND.
+
+			The team died. There is no next map for them to vote on and no reason
+			to hold everybody in a lobby waiting to be spawned into another one —
+			so once the scoreboard has had its eight seconds, the server sends
+			them back to the main menu, which is the same place RETURN TO MAIN MENU
+			puts them and by the same mechanism.
+
+			LeftMatch is the flag that makes it stick. It outlives the round, so
+			the post-round _startIfReady below finds nobody in the match and does
+			not start one; picking a mode again is what clears it, which is
+			MatchmakingService's job and the reason coming back is a decision.
+
+			A VICTORY is deliberately not this. Holding out earns the next map, and
+			the vote is the thing that offers it.
+		]]
+		if outcome == Enums.RoundState.TeamWipe then
+			local survivors = Registry.find("SurvivorService")
+			for _, player in Players:GetPlayers() do
+				player:SetAttribute(Attributes.Player.LeftMatch, true)
+				player:SetAttribute(Attributes.Player.Ready, false)
+				if survivors and typeof(survivors.leaveRound) == "function" then
+					survivors:leaveRound(player)
+				end
+			end
+			Remotes.Event.ReturnToMenu:FireAllClients({ reason = outcome })
+			return
+		end
+
 		local vote = Registry.find("MapVoteService")
 		if vote then
 			pendingMap = vote:beginVote()

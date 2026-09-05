@@ -273,6 +273,21 @@ local function profile(): any
 	return Registry.find("ProfileController")
 end
 
+--[[ What loadout `index` is called: the player's own name for it, or LOADOUT n
+     until they give it one. Every place this screen prints a loadout's name goes
+     through here, so a rename lands on the card, on the picker row and on the
+     picker's footer at once. ]]
+local function nameFor(index: number): string
+	local store = profile()
+	if store and typeof(store.getLoadoutName) == "function" then
+		local ok, name = pcall(store.getLoadoutName, store, index)
+		if ok and typeof(name) == "string" and name ~= "" then
+			return name
+		end
+	end
+	return LoadoutConfig.defaultName(index)
+end
+
 --[[ Which of the three is currently armed. Its own function because four places
      ask, and every one of them has to cope with a profile that has not loaded —
      defaulting to 1 rather than nil-indexing a card. ]]
@@ -395,6 +410,15 @@ local function refreshCards()
 			else COLOR.Border
 		card.stroke.Thickness = if isEditing then LAYOUT.BorderThickness + 1 else LAYOUT.BorderThickness
 		card.title.TextColor3 = if isEditing then COLOR.AccentBright else COLOR.TextPrimary
+		--[[ Not while the player is inside the box. A refresh lands on every
+		     profile sync, and rewriting the field under a cursor would delete
+		     half a name somebody is in the middle of typing. ]]
+		if not card.title:IsFocused() then
+			local wanted = nameFor(index)
+			if card.title.Text ~= wanted then
+				card.title.Text = wanted
+			end
+		end
 	end
 
 	local isActive = state.editing == active
@@ -758,6 +782,11 @@ local function refreshPickerButtons()
 			then LAYOUT.BorderThickness + 1
 			else LAYOUT.BorderThickness
 		entry.title.TextColor3 = if selected then COLOR.AccentBright else COLOR.TextSecondary
+		--[[ And its name, kept current here rather than only at build. The picker
+		     is built once and shown at the start of every round, so a loadout
+		     renamed between two of them would otherwise still be showing the name
+		     it had the first time this screen was made. ]]
+		entry.title.Text = nameFor(index)
 		--[[ The selected card fills. A stroke alone is a one-pixel difference
 		     read at a glance in a safe room with a horde arriving — which is to
 		     say, not read. ]]
@@ -779,7 +808,7 @@ local function refreshPickerButtons()
 	     discovered, because the whole point of a default is that it is fine —
 	     and a countdown with an unnamed consequence reads as a threat. ]]
 	if pickerFoot then
-		local name = LoadoutConfig.defaultName(active)
+		local name = nameFor(active)
 		pickerFoot.Text = if state.pickerLocked
 			then string.upper(name) .. " LOCKED IN"
 			else "KEEPING " .. string.upper(name) .. " IF YOU DO NOT CHOOSE"
@@ -896,11 +925,58 @@ local function buildCard(index: number, parent: Frame)
 	     are a left-aligned title and a right-aligned ACTIVE inside one row, and a
 	     title sized to the full width draws through the badge on any row narrow
 	     enough for the two to meet. ]]
-	local title = Widgets.label(button, "Title", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	--[[
+		A TEXTBOX, so the player can call this one what it is.
+
+		"LOADOUT 2" tells you nothing about the three guns underneath it, and a
+		player with a close-quarters set, a boss set and whatever they are saving
+		for has to read all three cards every time to tell them apart. Naming them
+		is the difference between choosing and checking.
+
+		In place rather than behind a rename button: the field is already a title
+		in the right position at the right size, so a click into it is the whole
+		interaction and there is nothing new on the card to explain.
+
+		ClearTextOnFocus is off — renaming is almost always editing what is
+		already there — and the length cap is the server's own, so what the box
+		refuses is exactly what the server would have trimmed. The box is a
+		courtesy; LoadoutConfig.sanitiseName is the rule.
+	]]
+	local title = Instance.new("TextBox")
+	title.Name = "Title"
+	title.BackgroundTransparency = 1
+	title.BorderSizePixel = 0
+	title.Font = FONT.Heading
+	title.TextSize = TEXT.Body
+	title.TextColor3 = COLOR.TextPrimary
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.ClearTextOnFocus = false
+	title.MultiLine = false
+	title.TextTruncate = Enum.TextTruncate.AtEnd
+	title.TextEditable = true
 	title.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 4)
 	title.Size = UDim2.new(1, -(LAYOUT.PanelPadding * 2 + BADGE_WIDTH + CARD_GAP), 0, TEXT.Large)
-	title.TextTruncate = Enum.TextTruncate.AtEnd
-	title.Text = LoadoutConfig.defaultName(index)
+	title.Text = nameFor(index)
+	title.Parent = button
+
+	--[[ Committed on the way OUT of the box rather than per keystroke: the
+	     rename remote is throttled with the other loadout edits, and a field that
+	     sent on every character would spend that throttle on the first three and
+	     drop the rest of the word.
+
+	     `enterPressed` is not tested. Clicking away is a commit as much as
+	     pressing Enter is, and treating one as a cancel is how a player loses a
+	     name they had finished typing. ]]
+	trove:connect(title.FocusLost, function()
+		local store = profile()
+		if store and typeof(store.setLoadoutName) == "function" then
+			store:setLoadoutName(index, title.Text)
+		end
+		--[[ Redrawn from the store rather than left as typed, so whatever the
+		     sanitiser did to it — a trim, a cut, an empty name becoming LOADOUT 2
+		     — is visible immediately instead of on the next sync. ]]
+		title.Text = nameFor(index)
+	end)
 
 	local badge = Widgets.label(button, "Badge", FONT.Body, TEXT.Tiny, COLOR.Accent)
 	badge.AnchorPoint = Vector2.new(1, 0)
@@ -1196,7 +1272,7 @@ local function buildPicker()
 		     longer than what is left. ]]
 		label.Size = UDim2.new(1, -(LAYOUT.PanelPadding * 2 + BADGE_WIDTH + CARD_GAP), 0, TEXT.Body)
 		label.TextTruncate = Enum.TextTruncate.AtEnd
-		label.Text = LoadoutConfig.defaultName(index)
+		label.Text = nameFor(index)
 
 		--[[ The ACTIVE badge, on whichever card the player spawns with. It is the
 		     one fact a glance has to return, so it is a word rather than a
@@ -1337,14 +1413,24 @@ local function refreshPickerSize()
 		local room = width - LAYOUT.PanelPadding * 2
 		local hintWidth = textWidth(wanted, FONT.Body, TEXT.Tiny)
 
-		--[[ The foot's longest phrasing, not its current one: the text changes
-		     between "KEEPING X IF YOU DO NOT CHOOSE" and "X LOCKED IN" while the
-		     picker is open, and a layout measured from the short one would start
-		     overlapping the moment it grew back. ]]
+		--[[
+			The foot's longest phrasing, not its current one: the text changes
+			between "KEEPING X IF YOU DO NOT CHOOSE" and "X LOCKED IN" while the
+			picker is open, and a layout measured from the short one would start
+			overlapping the moment it grew back.
+
+			And X is now whatever the player CALLED it, which is why the name in
+			the measurement is the widest one they could have typed rather than
+			the widest default. "LOADOUT 3" is nine characters and a name can be
+			eighteen; measured against the default, the first player to name a
+			loadout properly would have pushed this line back under the hint.
+
+			M is the widest glyph in the face, so this over-reserves for any real
+			name — which is the safe direction: the hint is the half this layout
+			is willing to drop when there is no room, and it says so below.
+		]]
 		local footWidth = textWidth(
-			"KEEPING "
-				.. string.upper(LoadoutConfig.defaultName(LoadoutConfig.MaxLoadouts))
-				.. " IF YOU DO NOT CHOOSE",
+			"KEEPING " .. string.rep("M", LoadoutConfig.MaxNameLength) .. " IF YOU DO NOT CHOOSE",
 			FONT.Body,
 			TEXT.Tiny
 		)
