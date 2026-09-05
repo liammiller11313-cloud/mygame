@@ -674,8 +674,7 @@ function InventoryService:dropWeapon(player: Player, slot: string): Model?
 		return nil
 	end
 
-	model:SetAttribute(PICKUP.Slot, slot)
-	model:SetAttribute(PICKUP.ItemId, entry.itemId)
+	Attributes.markPickup(model, slot, entry.itemId)
 	model:SetAttribute(PICKUP.Ammo, entry.ammo)
 	model:SetAttribute(PICKUP.Reserve, entry.reserve)
 

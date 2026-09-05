@@ -16,6 +16,8 @@
 	will be overwritten and should be treated as a bug.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
+
 local Attributes = {}
 
 -- Written on the Player instance. Survives character respawns, so the HUD can
@@ -364,6 +366,39 @@ Attributes.Crate = table.freeze({
 	Reads an attribute with a fallback. Attributes are nil until first written,
 	and every consumer wanting `(x or 0)` inline gets noisy fast.
 ]]
+--[[
+	Every pickup in the world carries this tag as well as its attributes.
+
+	The attributes are the CONTRACT — what slot, which item, how much ammo — and
+	the tag is how anything finds them at all. Those are different jobs and it
+	took a bug to see it: the client's outline pass looked for the Slot attribute
+	across Workspace:GetChildren(), which finds a pickup the Director dropped on
+	a pad and does not find one standing in the map, because a map's items are
+	three levels down inside the map model. So the items a level designer placed
+	by hand were the only ones with no outline on them — and they are the ones
+	that most need it, since a pill bottle on a dark floor is four studs of
+	geometry with no glow of its own.
+
+	Walking the whole of Workspace on a timer instead would be thousands of
+	instances several times a second to find a dozen things. A tag is a lookup,
+	and it comes with the two signals that make the periodic scan unnecessary.
+]]
+Attributes.PickupTag = "FL_Pickup"
+
+--[[
+	Stands an instance up as a pickup: the slot, the item, and the tag that lets
+	anything find it.
+
+	One function rather than four call sites setting two attributes each, because
+	the tag was added after three of those four existed and adding it by hand in
+	each place is how the fourth gets forgotten.
+]]
+function Attributes.markPickup(instance: Instance, slot: string, itemId: string)
+	instance:SetAttribute(Attributes.Pickup.Slot, slot)
+	instance:SetAttribute(Attributes.Pickup.ItemId, itemId)
+	CollectionService:AddTag(instance, Attributes.PickupTag)
+end
+
 function Attributes.get<T>(instance: Instance, name: string, default: T): T
 	local value = instance:GetAttribute(name)
 	if value == nil then

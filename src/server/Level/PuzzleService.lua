@@ -493,8 +493,7 @@ local function armLoot()
 
 	local weapon = loot.weapon
 	if weapon and state.weaponDrop and state.weaponDrop.Parent then
-		state.weaponDrop:SetAttribute(Attributes.Pickup.Slot, weapon.slot)
-		state.weaponDrop:SetAttribute(Attributes.Pickup.ItemId, weapon.itemId)
+		Attributes.markPickup(state.weaponDrop, weapon.slot, weapon.itemId)
 		--[[ A full tank and no reserve. The weapon's own config says reserveMax
 		     is zero — an ammo crate will not refill it, and this is the only one
 		     that will ever exist. ]]

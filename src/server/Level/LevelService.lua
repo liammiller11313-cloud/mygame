@@ -463,21 +463,6 @@ function LevelService:getItemSections(): { Instance }
 end
 
 --[[
-	Stocks the part of the map the team is fighting in, through ItemPlacer.
-
-	Called by RoundService when a breather's itemDropChance roll comes up, and
-	once during prep so there is something on the shelves to start with. The
-	timing matters: ItemPlacer weights its roll by how the team is doing RIGHT
-	NOW, so a map stocked at load would hand a healthy team the medkit a hurt team
-	needed twelve minutes later.
-
-	Re-stocking the same section is safe and is the point — ItemPlacer skips pads
-	that are still holding something, so a breather tops up exactly what the team
-	picked up during the wave.
-
-	Returns the number of sections offered to ItemPlacer.
-]]
---[[
 	Re-arms every panic trigger for a new round.
 
 	Each one fires once and then latches, which is correct inside a round. Nothing
@@ -506,6 +491,21 @@ function LevelService:resetTriggers(): number
 	return rearmed
 end
 
+--[[
+	Stocks the part of the map the team is fighting in, through ItemPlacer.
+
+	Called by RoundService when a breather's itemDropChance roll comes up, and
+	once during prep so there is something on the shelves to start with. The
+	timing matters: ItemPlacer weights its roll by how the team is doing RIGHT
+	NOW, so a map stocked at load would hand a healthy team the medkit a hurt team
+	needed twelve minutes later.
+
+	Re-stocking the same section is safe and is the point — ItemPlacer skips pads
+	that are still holding something, so a breather tops up exactly what the team
+	picked up during the wave.
+
+	Returns the number of sections offered to ItemPlacer.
+]]
 function LevelService:restockItems(): number
 	if sectionsDirty then
 		rebuildSections()

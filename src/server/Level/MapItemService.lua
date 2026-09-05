@@ -49,8 +49,6 @@ local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 
-local PICKUP = Attributes.Pickup
-
 --[[ Stamped on every model this service stands up, so a pickup coming back
      through InventoryService can be traced to the exact spot it left. Two
      attributes rather than one because both pill families share a Slot: the
@@ -117,8 +115,7 @@ end
      SurvivorService routes anything carrying Pickup.Slot down the instant-pickup
      path, and InventoryService reads the item id off the same model. ]]
 local function dressAsPickup(model: Model, family: MapConfig.MapItemFamily, index: number)
-	model:SetAttribute(PICKUP.Slot, family.slot)
-	model:SetAttribute(PICKUP.ItemId, family.itemId)
+	Attributes.markPickup(model, family.slot, family.itemId)
 	model:SetAttribute(FAMILY_ATTRIBUTE, family.key)
 	model:SetAttribute(SPOT_ATTRIBUTE, index)
 	CollectionService:AddTag(model, family.tag)

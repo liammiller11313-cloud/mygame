@@ -22,10 +22,17 @@
 	did not put a pad is an item nobody finds.
 
 	In wave mode there are no sections to walk into, so the BREATHER is when the
-	map restocks — see restockForBreather. That timing is if anything better than
-	the campaign one: the roll reads the team's health immediately after the wave
-	that just hurt them, so what appears on the pads answers the fight they
-	actually had rather than the one they are about to have.
+	map restocks. That timing is if anything better than the campaign one: the
+	roll reads the team's health immediately after the wave that just hurt them,
+	so what appears on the pads answers the fight they actually had rather than
+	the one they are about to have.
+
+	The entry point for that is LevelService:restockItems, which finds the section
+	the team is standing in and hands it here. This module used to carry a second
+	one of its own — restockForBreather, scanning the whole Workspace for free
+	pads — that nothing ever called: a complete, documented, plausible-looking
+	path to the same place, which is the worst kind of dead code to leave lying
+	about, because the header pointed readers straight at it.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -330,8 +337,7 @@ function ItemPlacer:spawnPickup(slot: string, itemId: string, position: Vector3)
 		return nil
 	end
 
-	model:SetAttribute(Attributes.Pickup.Slot, slot)
-	model:SetAttribute(Attributes.Pickup.ItemId, itemId)
+	Attributes.markPickup(model, slot, itemId)
 
 	-- A placed weapon arrives full. Half a magazine on the floor is a rule that
 	-- reads as a bug to everyone who has not seen the code.
@@ -447,31 +453,6 @@ function ItemPlacer:populateSection(sectionFolder: Instance)
 		return
 	end
 	self:_stock(pads)
-end
-
---[[
-	Restocks the map between two waves. RoundService's entry point.
-
-	A wave-mode map has no sections to commit to — the team holds one arena for
-	seventeen minutes — so every free FL_ItemSpawn pad in the Workspace is a
-	candidate and the breather is the only moment new items appear. Pads still
-	holding an untaken item are skipped, so a team that hoarded gets less than a
-	team that spent everything, which is the correct answer to both.
-
-	WHETHER to call this is RoundService's decision: `itemDropChance` lives on
-	the wave definition and belongs to whoever owns the schedule. What appears
-	once it does is this module's, and it is still weighted by how badly the team
-	is hurting.
-
-	Returns how many pickups landed, so a caller can tell "the map is already
-	full" apart from "nothing spawned".
-]]
-function ItemPlacer:restockForBreather(): number
-	local pads = self:_availablePads(Workspace)
-	if #pads == 0 then
-		return 0
-	end
-	return self:_stock(pads)
 end
 
 Registry.register("ItemPlacer", ItemPlacer)

@@ -1868,11 +1868,36 @@ function InfectedService:_watchPlayer(player: Player)
 	end
 end
 
---[[ Global counts for the music system and the debug overlay. Written on spawn
-     and death only — never on a heartbeat. ]]
+--[[
+	Global counts for the music system and the debug overlay. Written on spawn
+	and death only — never on a heartbeat.
+
+	TankActive is misnamed and means "a boss the team has to stand and fight is
+	on the map": the Tank and the Metallic, per InfectedConfig.PeakBosses, and
+	not the Witch, who is a hazard you walk around rather than a fight worth
+	changing the music for.
+
+	THIS IS THE ONLY WRITER. The two specials used to set it themselves on spawn
+	and clear it on death, each with its own "unless another one is still
+	standing" scan — and this line then quietly overwrote both of them from the
+	Tank count alone on the very next spawn or death. A Metallic fought without a
+	Tank present therefore lost its music to whichever Common happened to die
+	next. Counting it in one place, off the counts that are already authoritative
+	for everything else, removes the second writer rather than teaching it about
+	a third kind.
+
+	The ordering works out on both sides: _unlist decrements before the special's
+	onDeath runs, and the increment happens before onSpawn, so this is correct
+	the instant it is called rather than one event behind.
+]]
 function InfectedService:_publishCounts()
 	Workspace:SetAttribute(Attributes.Game.InfectedAlive, #self._alive)
-	Workspace:SetAttribute(Attributes.Game.TankActive, (self._countByKind[Enums.Infected.Tank] or 0) > 0)
+
+	local bosses = 0
+	for kind in InfectedConfig.PeakBosses do
+		bosses += self._countByKind[kind] or 0
+	end
+	Workspace:SetAttribute(Attributes.Game.TankActive, bosses > 0)
 end
 
 Registry.register("InfectedService", InfectedService)

@@ -94,6 +94,14 @@ by name when the map loads and does the rest. Naming is forgiving: `Medkit 3`,
 all find the same folder. The counts above are what you have; nothing enforces
 one, and a model with no number on the end just keeps its place in the folder.
 
+**They glow through walls when you are near one.** Every pickup carries the
+`FL_Pickup` tag and the client outlines the nearest few in item colour — which
+matters most for the small ones, since a pill bottle on a dark floor has no light
+of its own. (Until 2026-09-05 this only worked for items the Director dropped:
+the scan looked at the top of `Workspace` and a map's items are three levels down
+inside the map model, so the ones placed by hand were the only ones in the game
+with no outline on them.)
+
 **Your models are the game's models.** These folders are not only *where* the
 items are — they are what the items *look like*, everywhere. When the Director
 drops pills on an item pad partway through a wave, it copies the model standing

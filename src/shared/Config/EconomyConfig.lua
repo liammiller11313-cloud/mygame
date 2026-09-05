@@ -127,6 +127,18 @@ EconomyConfig.KillReward = table.freeze({
 	[Enums.Infected.Spitter] = 5,
 	[Enums.Infected.Witch] = 8,
 	[Enums.Infected.Tank] = 8,
+	--[[ The same 8 as a Tank, and not more, because 8 IS the ceiling — see
+	     MaxKillReward. That the hardest thing in the game pays what the second
+	     hardest does is a real flattening at the top, and it is the right trade:
+	     the round bonuses below are where the money actually is, and widening the
+	     band here to rank two bosses against each other would move the whole
+	     economy to pay for a distinction nobody counts.
+
+	     It matters that it is HERE at all. Without a row a kind falls to
+	     DefaultKillReward, so the six-thousand-health boss would have paid the
+	     Common rate of 2 — a quarter of what the Tank it replaces pays, for a
+	     fight several times longer. ]]
+	[Enums.Infected.Metallic] = 8,
 })
 
 --[[ Anything that dies without a row above. A kind added to InfectedConfig and

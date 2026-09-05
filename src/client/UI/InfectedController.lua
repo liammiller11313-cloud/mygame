@@ -55,6 +55,11 @@ local BLURB = {
 	[Enums.Infected.Boomer] = "BURST ON DEATH · BLIND THEM AND CALL THE HORDE",
 	[Enums.Infected.Spitter] = "ACID ON THE GROUND · MAKE A CORNER COST SOMETHING",
 	[Enums.Infected.Tank] = "FOUR THOUSAND HEALTH · THROW THE WORLD AT THEM",
+	--[[ Not playable, and here anyway: the kill feed reads this table, so a kind
+	     missing from it is a kill with no line against it. Says what it does to
+	     YOU rather than what it is, like the rest — the drills are the thing to
+	     recognise and the lane is the thing to leave. ]]
+	[Enums.Infected.Metallic] = "SIX THOUSAND HEALTH · DRILLS A LANE STRAIGHT THROUGH YOU",
 }
 
 --[[ The blurbs above cover every special, playable or not. Only the rows in

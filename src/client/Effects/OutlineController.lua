@@ -35,12 +35,13 @@
 	    teammates in trouble first and the furthest pickup last
 	  * the scan runs at SCAN_HZ, not every frame; only the incap pulse is
 	    per-frame, and only for the one or two highlights that are pulsing
-	  * the pickup list is rebuilt at ITEM_RESCAN_INTERVAL rather than watched
-	    with ChildAdded, because during a horde Workspace gains a child several
-	    times a second and none of them are ever a medkit
+	  * the pickup list is kept by CollectionService's tag signals rather than
+	    rescanned, so a horde adding several children a second to Workspace costs
+	    nothing at all — none of them are ever a pickup
 	  * every reusable table is module-level; a tick allocates nothing
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -59,7 +60,6 @@ local UITheme = require(Shared.Config.UITheme)
 local OUTLINE = UITheme.Outline
 local PA = Attributes.Player
 local IA = Attributes.Infected
-local PICKUP = Attributes.Pickup
 local STATE = Enums.SurvivorState
 
 --[[
@@ -90,11 +90,24 @@ end
 local SCAN_HZ = 10
 local SCAN_INTERVAL = 1 / SCAN_HZ
 
---[[ Pickups are found by attribute (Attributes.Pickup.Slot), which is the whole
-     pickup contract — ItemPlacer and InventoryService both parent them straight
-     to Workspace with no tag to watch. Rebuilding the candidate list once a
-     second is cheap and cannot miss one for longer than that. ]]
-local ITEM_RESCAN_INTERVAL = 1.0
+--[[
+	Pickups are found by TAG, and the list is kept by the tag's own signals
+	rather than rebuilt on a clock.
+
+	It used to walk Workspace:GetChildren() once a second looking for the
+	Attributes.Pickup.Slot attribute. That is where ItemPlacer and
+	InventoryService put theirs, so it worked — and it silently missed every item
+	standing in the MAP, because a map's items live three levels down inside the
+	map model rather than at the top of Workspace. The pickups a level designer
+	placed by hand were the only ones in the game with no outline on them, which
+	is exactly backwards: a pill bottle on a dark floor has no glow of its own and
+	needs the outline far more than a pad item sitting on a lit marker ring does.
+
+	Walking the whole of Workspace instead would be thousands of instances a
+	second to find a dozen things. GetTagged is a lookup, and its two signals mean
+	the periodic rescan does not have to exist at all — a pickup joins the list
+	the instant it is stood up rather than up to a second later.
+]]
 
 --[[ Sort keys. Lower goes first, and the cap is spent from the top: a downed
      teammate outranks a healthy one, and any teammate outranks a medkit. ]]
@@ -163,7 +176,6 @@ local pickupCount = 0
 local seen: { [Instance]: boolean } = {}
 
 local scanAccumulator = SCAN_INTERVAL
-local itemAccumulator = ITEM_RESCAN_INTERVAL
 
 local losParams = RaycastParams.new()
 local losFilter: { Instance } = {}
@@ -316,16 +328,31 @@ end
      children only, because that is where both ItemPlacer and a dropped weapon
      put them, and walking the whole descendant tree once a second during a
      horde would not be free. ]]
+--[[ Rebuilds the list from the tag. Called once when the controller starts and
+     never again on a clock — the signals below keep it current. ]]
 local function rescanPickups()
 	pickupCount = 0
-	for _, child in Workspace:GetChildren() do
-		if child:GetAttribute(PICKUP.Slot) ~= nil then
-			pickupCount += 1
-			pickups[pickupCount] = child
-		end
+	for _, tagged in CollectionService:GetTagged(Attributes.PickupTag) do
+		pickupCount += 1
+		pickups[pickupCount] = tagged
 	end
 	for index = #pickups, pickupCount + 1, -1 do
 		pickups[index] = nil
+	end
+end
+
+--[[ One removal. A linear search rather than a map, because the list is a dozen
+     entries and collectPickups walks it by index every frame — the array is the
+     shape that matters and a second structure to keep in step with it would cost
+     more than the search. ]]
+local function forgetPickup(instance: Instance)
+	for index = 1, pickupCount do
+		if pickups[index] == instance then
+			pickups[index] = pickups[pickupCount]
+			pickups[pickupCount] = nil
+			pickupCount -= 1
+			return
+		end
 	end
 end
 
@@ -578,11 +605,11 @@ function OutlineController:isEnabled(): boolean
 	return enabled
 end
 
---[[ Forces the next frame to rescan. Anything that changes the roster or drops
-     an item can call this instead of waiting out the tick. ]]
+--[[ Forces the next frame to rescan the roster. Anything that changes who is on
+     the team can call this instead of waiting out the tick. Pickups are not part
+     of it: they are kept by tag signals and are already current. ]]
 function OutlineController:refresh()
 	scanAccumulator = SCAN_INTERVAL
-	itemAccumulator = ITEM_RESCAN_INTERVAL
 end
 
 function OutlineController:getCount(): number
@@ -594,12 +621,6 @@ end
 local function update(deltaTime: number)
 	if not enabled then
 		return
-	end
-
-	itemAccumulator += deltaTime
-	if itemAccumulator >= ITEM_RESCAN_INTERVAL then
-		itemAccumulator = 0
-		rescanPickups()
 	end
 
 	scanAccumulator += deltaTime
@@ -654,6 +675,16 @@ local function watchInfected(infectedFolder: Instance)
 end
 
 function OutlineController:start()
+	--[[ The pickup list, and then the two signals that keep it that way. Built
+	     once here rather than on a clock — see the note on Attributes.PickupTag
+	     for the bug that came of scanning for them instead. ]]
+	rescanPickups()
+	trove:connect(CollectionService:GetInstanceAddedSignal(Attributes.PickupTag), function(instance: Instance)
+		pickupCount += 1
+		pickups[pickupCount] = instance
+	end)
+	trove:connect(CollectionService:GetInstanceRemovedSignal(Attributes.PickupTag), forgetPickup)
+
 	--[[ The Infected folder is made by InfectedService on the first spawn, which
 	     on a fresh server is after the client has booted. One connection, dropped
 	     the moment it fires. ]]
@@ -689,7 +720,12 @@ function OutlineController:destroy()
 	table.clear(candidates)
 	table.clear(threats)
 	table.clear(pulsing)
+	--[[ The count with the list. It used to be left behind, which was harmless
+	     only because the next tick's rescan reset it a fraction of a second
+	     later — and the rescan is gone now that the list is kept by tag
+	     signals, so a stale count would outlive the teardown that emptied it. ]]
 	table.clear(pickups)
+	pickupCount = 0
 	table.clear(seen)
 end
 

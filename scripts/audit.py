@@ -1388,6 +1388,48 @@ if _input.exists():
                 )
 
 
+# ── 33. A sound cue that does not exist ─────────────────────────────────────
+#
+# Every cue is played by NAME through AudioService, and a name with no row in
+# AudioConfig is not an error anywhere: the service warns once at startup and
+# then stays silent for the life of the server. That is the right behaviour for
+# a half-filled bank and the wrong one for a typo, and the two are
+# indistinguishable from the output window.
+#
+# It matters most for exactly the cues you cannot afford to lose. A special's
+# vocalisations are the game's early-warning system — the wind-up before a
+# charge, the vent that says the damage window is open — and a boss shipped with
+# six new cue names and no rows would be a boss with no tells, silently, on
+# every machine.
+_audio_src = (ROOT / "src/shared/Config/AudioConfig.lua").read_text(encoding="utf-8")
+_audio_groups = {}
+for _m in re.finditer(r"^AudioConfig\.(\w+)\s*=\s*\{(.*?)^\}", _audio_src, re.S | re.M):
+    _g, _body = _m.group(1), _m.group(2)
+    _keys = set(re.findall(r"^\t(\w+)\s*=\s*(?:sound|varied)\(", _body, re.M))
+    _keys |= set(re.findall(r"^\t(\w+)\s*=\s*\{", _body, re.M))
+    _audio_groups[_g] = _keys
+
+# Over `code` rather than `sources`: sources blanks string literals, and the cue
+# name IS a string literal. Comments are still stripped, so a name mentioned in
+# prose is not mistaken for a call.
+for _path, _text in code.items():
+    if _path.name == "AudioConfig.lua":
+        continue
+    _refs = [(m.group(1), m.group(2), m.start()) for m in
+             re.finditer(r'(?::play|:playAt|playSound)\(\s*"(\w+)"\s*,\s*"(\w+)"', _text)]
+    # Specials/Support.playSound takes the key alone and always means Infected.
+    _refs += [("Infected", m.group(1), m.start()) for m in
+              re.finditer(r'Support\.playSound\(\s*"(\w+)"', _text)]
+    for _group, _key, _at in _refs:
+        if _group not in _audio_groups or _key in _audio_groups[_group]:
+            continue
+        problems.append(
+            f"{rel(_path)}:{_text[:_at].count(chr(10)) + 1}  plays AudioConfig.{_group}.{_key}, "
+            f"which does not exist. AudioService warns once at startup and is then silent "
+            f"forever, so this is a cue that never plays and never complains again"
+        )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

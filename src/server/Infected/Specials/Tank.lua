@@ -19,10 +19,10 @@
 	Fire is the intended counter — burnDamagePerSecond is 150, six times a
 	Common's — and that lives in InfectedService's ignite path, not here.
 
-	Attributes.Game.TankActive is set on spawn and cleared on death so the music
-	system has a single boolean to react to. It is cleared only when no other Tank
-	is still alive, because two Tanks in a finale must not have the first death
-	stop the music.
+	The music reacts to Attributes.Game.TankActive, which InfectedService owns and
+	writes off its own live counts. This file used to set and clear it too, with a
+	scan for "is another one still standing" — and that was a second writer racing
+	one that already knew the answer.
 
 	Getting stuck is the failure mode that would ruin the encounter, so there is
 	an explicit answer: if the Tank makes no progress toward its target for a few
@@ -53,7 +53,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
@@ -727,10 +726,6 @@ function Tank.onSpawn(model: Model, brain: any)
 		humanoid.WalkSpeed = cruiseSpeed(model, state, true)
 	end
 
-	-- The music system reads exactly this. Set before anything else so a Tank is
-	-- never on screen with the wrong track playing.
-	Workspace:SetAttribute(Attributes.Game.TankActive, true)
-
 	local root = RigUtil.getRoot(model)
 	if root then
 		--[[ A stalking Tank arrives without a sound and the roar is held until
@@ -781,24 +776,6 @@ function Tank.onDeath(model: Model, brain: any, _ctx: any)
 		destroyRock(state)
 		Support.resumeBrain(brain)
 		states[model] = nil
-	end
-
-	--[[ Only the last BOSS clears the flag, and a Metallic counts as one: the
-	     flag means "a boss is here", not "a Tank is here", so neither a pack-mate
-	     nor the bigger thing standing next to it may have the music stop on it. ]]
-	local others = 0
-	local infected: any = Registry.find("InfectedService")
-	if infected and typeof(infected.getAlive) == "function" then
-		for _, kind in { Enums.Infected.Tank, Enums.Infected.Metallic } do
-			for _, other in infected:getAlive(kind) do
-				if other ~= model and RigUtil.isAlive(other) then
-					others += 1
-				end
-			end
-		end
-	end
-	if others == 0 then
-		Workspace:SetAttribute(Attributes.Game.TankActive, false)
 	end
 
 	local root = RigUtil.getRoot(model)

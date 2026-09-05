@@ -727,11 +727,6 @@ function Metallic.onSpawn(model: Model, brain: any)
 		humanoid.WalkSpeed = Support.scaledSpeed(model, DEFINITION.runSpeed)
 	end
 
-	--[[ The same flag a Tank raises. The music system asks one boolean "is there
-	     a boss on the map", and giving this one its own would mean every reader
-	     of that flag needing to learn about a second. ]]
-	Workspace:SetAttribute(Attributes.Game.TankActive, true)
-
 	local root = RigUtil.getRoot(model)
 	if root then
 		Support.playSound("MetallicRoar", root)
@@ -781,24 +776,6 @@ function Metallic.onDeath(model: Model, brain: any, _ctx: any)
 	     harmless today and is exactly the kind of thing a future reader of it
 	     would be caught by. ]]
 	setVulnerable(model, 1)
-
-	--[[ Only the last boss on the map clears the music flag, and a Tank counts:
-	     the flag means "a boss is here", so a Metallic dying while a Tank is
-	     still standing must not stop the track. ]]
-	local others = 0
-	local infected: any = Registry.find("InfectedService")
-	if infected and typeof(infected.getAlive) == "function" then
-		for _, kind in { Enums.Infected.Metallic, Enums.Infected.Tank } do
-			for _, other in infected:getAlive(kind) do
-				if other ~= model and RigUtil.isAlive(other) then
-					others += 1
-				end
-			end
-		end
-	end
-	if others == 0 then
-		Workspace:SetAttribute(Attributes.Game.TankActive, false)
-	end
 
 	local root = RigUtil.getRoot(model)
 	if root then
