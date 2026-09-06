@@ -650,7 +650,23 @@ end
 	the throttle window. If the build ever throws, the client still gets a
 	well-formed lobby payload rather than an error that surfaces as a broken HUD.
 ]]
-Remotes.Function.RequestInitialState.OnServerInvoke = function(_player: Player)
+Remotes.Function.RequestInitialState.OnServerInvoke = function(player: Player)
+	--[[ This is also the "my client has booted" signal, and the only one there
+	     is: the client invokes it once, at the end of its own two-phase boot.
+	     SurvivorService holds a joining character still until it arrives — see
+	     the clientReady note there for the console fall-through this fixes.
+
+	     Before the cache check, deliberately. The cached-state early return is
+	     about not rebuilding a payload; it must not swallow the fact that a
+	     different player has just finished loading. ]]
+	local survivors = Registry.find("SurvivorService")
+	if survivors and typeof(survivors.markClientReady) == "function" then
+		local ok, err = protect(survivors.markClientReady, survivors, player)
+		if not ok then
+			report("markClientReady", tostring(player), err)
+		end
+	end
+
 	local now = os.clock()
 	if cachedState and now - cachedAt < STATE_CACHE_TIME then
 		return cachedState

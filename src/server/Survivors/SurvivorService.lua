@@ -108,6 +108,36 @@ SurvivorService.revived = Signal.new() -- (player, rescuer) — rescuer is nil f
 local records: { [Player]: any } = {}
 local bodies: { [Model]: Player } = {} -- corpse model -> the player it belongs to
 local awaitingRescue: { Player } = {} -- dead players queued for a closet, oldest first
+
+--[[
+	── WHY A JOINING CHARACTER IS HELD STILL ───────────────────────────────────
+
+	Players whose client has finished booting and told us so, by invoking
+	RequestInitialState. Until that happens their world may not exist yet.
+
+	The bug this exists for, reported from a PS5: a player joining an active
+	match went THROUGH the floor and stuck in it. StreamingEnabled is false, so
+	it is not a streaming hole — it is network ownership. The server creates the
+	character and Roblox hands its root to that player's client immediately, but
+	a console on a slow link can be given the character before it has received
+	the map. The client then simulates a body with no floor under it, which
+	falls, and the server takes that position because the client is the owner.
+	By the time the map arrives the character is already inside it.
+
+	The fix is not to fight the fall but to prevent it: hold the root still until
+	the client says it is ready. That is a flag rather than a timer because the
+	wait is a real event with a real signal, and the timeout below exists only so
+	a client that never speaks is not frozen out of the game.
+
+	FIRST CHARACTER ONLY. A round start and a mid-round respawn both come through
+	_onCharacterAdded too, and by then the client has long since booted — holding
+	those would be a freeze on every single respawn.
+]]
+local clientReady: { [Player]: boolean } = {}
+--[[ How long a joining character waits before it is released anyway. Generous:
+     the cost of being early is the bug above, and the cost of being late is a
+     second of standing still on a screen that is still showing a loading map. ]]
+local READY_TIMEOUT = 12
 --[[ Ping callouts. One key, one line of dialogue, and a cooldown so it cannot be
      held down to flood every client's subtitle queue. ]]
 local PING_COOLDOWN = 1.6
@@ -253,6 +283,7 @@ function SurvivorService:_destroyRecord(player: Player)
 	self:_cancelHelp(record)
 	record.trove:destroy()
 	records[player] = nil
+	clientReady[player] = nil
 
 	local index = table.find(awaitingRescue, player)
 	if index then
@@ -715,10 +746,98 @@ end
 
 -- ─── character setup ─────────────────────────────────────────────────────────
 
+--[[
+	Holds a JOINING player's body still until their client has booted.
+
+	Anchoring rather than taking network ownership, because the two fail
+	differently. A server-owned character still simulates — it just simulates
+	somewhere the player cannot see yet, and their own input does not move it,
+	which reads as the controls being broken. An anchored one does nothing at
+	all, which is honest: there is nothing to do until the map arrives.
+
+	Released by markClientReady, or by the timeout, whichever comes first. Both
+	paths go through the same release so a client that reports ready one frame
+	after the timeout cannot unanchor a body twice or strand an anchored one.
+]]
+function SurvivorService:_holdUntilReady(player: Player, record)
+	if clientReady[player] then
+		return
+	end
+	local root = record.root
+	if not root then
+		return
+	end
+
+	root.Anchored = true
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+
+	local released = false
+	local function release()
+		if released then
+			return
+		end
+		released = true
+		--[[ Only ever OUR anchor. Between the hold and the release the player can
+		     have been caught on a ledge, which anchors the root for its own
+		     reasons and owns the unanchoring — releasing that here would drop
+		     somebody mid-hang. ]]
+		if record.state == STATE.LedgeHanging then
+			return
+		end
+		if root.Parent and root.Anchored then
+			root.Anchored = false
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+
+	record.releaseHold = release
+	--[[ The timeout is the floor under this, not the mechanism. A client that
+	     never invokes RequestInitialState — one that failed to boot, or an
+	     exploiter who simply does not — must still end up playable rather than
+	     welded to the spawn pad for the rest of the round. ]]
+	record.charTrove:add(task.delay(READY_TIMEOUT, function()
+		if not clientReady[player] then
+			warn(
+				string.format(
+					"[SurvivorService] %s was held at spawn for %ds without their client reporting "
+						.. "ready; releasing anyway",
+					player.Name,
+					READY_TIMEOUT
+				)
+			)
+		end
+		release()
+	end))
+end
+
+--[[
+	Called when a client finishes booting. Releases the spawn hold above, and is
+	remembered so the player's LATER characters — a respawn, the next round — are
+	never held at all.
+]]
+function SurvivorService:markClientReady(player: Player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+	clientReady[player] = true
+	local record = records[player]
+	if record and typeof(record.releaseHold) == "function" then
+		record.releaseHold()
+		record.releaseHold = nil
+	end
+end
+
 function SurvivorService:_onCharacterAdded(player: Player, character: Model)
 	local record = self:_ensureRecord(player)
 	self:_setBreathing(record, false)
 	record.charTrove:clean()
+	--[[ Dropped with the character it belonged to. The closure captures that
+	     body's root, and a release called against a destroyed one is a no-op
+	     rather than a bug — but a stale one left here reads as if this character
+	     is still held, which is the kind of thing that survives a refactor. ]]
+	record.releaseHold = nil
 	record.character = character
 
 	local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
@@ -770,6 +889,9 @@ function SurvivorService:_onCharacterAdded(player: Player, character: Model)
 			root.AssemblyAngularVelocity = Vector3.zero
 		end
 	end
+
+	-- See clientReady at the top of the file: this is the console fall-through.
+	self:_holdUntilReady(player, record)
 
 	humanoid.MaxHealth = S.MaxHealth
 	humanoid.BreakJointsOnDeath = false -- GoreService owns what a body does
