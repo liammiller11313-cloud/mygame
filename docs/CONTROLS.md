@@ -16,7 +16,7 @@ editing it by hand.
 | Crouch | Ctrl / C | B | CROUCH button |
 | Use / revive / pick up | E | X | USE button |
 | Use the held item | H | — | — |
-| Throw | G | — | — |
+| Throw | G, or **fire** | **Fire** (RT) | **FIRE button** |
 | Swap weapon | — | D-pad ◄ | — |
 | Primary | 1 | — | — |
 | Secondary | 2 | — | — |
@@ -26,6 +26,29 @@ editing it by hand.
 | Ping | Q | R3 | — |
 | Backpack | B | — | — |
 | Requisitions | T | — | — |
+
+## The trigger spends what is in your hand
+
+With a **gun** out, the fire button shoots. With anything else out, it uses that
+thing — because a player holding a medkit and clicking has told you exactly what
+they want, and the alternative is a click that does nothing at all.
+
+| Selected | Fire button does |
+|---|---|
+| Primary / Secondary / Melee | shoot or swing |
+| Health item | start healing yourself |
+| Pills / Adrenaline | take them |
+| Throwable | **throw it, where you are looking** |
+
+The throwable was the last one to join, and it is the one that mattered most:
+until it did, a pipe bomb on the trigger produced no throw, no sound and no
+message — silence a player cannot tell apart from a broken item. `G` and `H`
+both threw it and nothing on screen said so. On a controller or a phone there
+was no throw binding at all, so the fire button is now the *only* way those
+players can throw without knowing an undocumented gesture.
+
+It aims down the **camera**, not the character. A bomb goes where the crosshair
+is — up onto a balcony, down a stairwell — rather than flat out in front of you.
 
 ## Three deaths and your round is over
 

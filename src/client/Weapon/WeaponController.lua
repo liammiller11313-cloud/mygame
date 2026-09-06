@@ -725,7 +725,7 @@ end
 	lives. Flash, tracer, kick, shake, sound, counter — then the packet.
 ]]
 --[[
-	The trigger, with a consumable in your hands.
+	The trigger, with something in your hands that is not a gun.
 
 	Selecting a medkit and pulling the trigger did nothing at all: a health slot
 	carries no weapon definition, so this function returned on its first line. The
@@ -736,46 +736,75 @@ end
 	modelled on. Pills too — the same rule, and a heal key that worked for one and
 	not the other would be a worse thing to have to remember.
 
+	── AND THE THROWABLE, WHICH THIS USED TO REFUSE ────────────────────────────
+	It was Health and Pills only, on a stated fear that turned out to be about a
+	fallback that does not exist: "the UseItem action falls back to Health when
+	the selected slot is not something it can spend", so a click meant as a throw
+	would burn a medkit. A throwable IS something UseItem can spend — it is in
+	InputController's CONSUMABLE_SLOTS — so that guard was never false with a
+	bomb in hand and no kit was ever at risk.
+
+	What the exclusion cost instead was the whole verb. A player holding a pipe
+	bomb and clicking got NOTHING: no throw, no sound, no notice, silence
+	indistinguishable from a broken item. G threw it and H threw it, and the HUD
+	names neither — the throwable tile draws "3", the key that SELECTS it,
+	because the glyph comes from bindings that carry a slot and Throw carries
+	none. On a gamepad or a phone there was no throw binding at all.
+
+	── AND WHY THE THROWABLE RAISES Throw AND NOT UseItem ──────────────────────
+	Both end at ProjectileService:throw and they do not aim alike. Throw sends a
+	CAMERA ray. UseItem sends no direction at all, and the server then falls back
+	to its own view of the character — a level LookVector. Route the trigger
+	through UseItem and every bomb leaves your hand flat: up onto a balcony and
+	down a stairwell both become a lob at the floor in front of you, at the one
+	moment the player was aiming hardest.
+
 	── AND IT IS GATED ON THE SLOT, NOT ON WHAT YOU CARRY ──────────────────────
-	The obvious version tests "is a gun in hand, and do I own a medkit" — and a
-	THROWABLE is also not a gun. Pull the trigger with a pipe bomb out and that
-	version spends your medkit, because the UseItem action falls back to Health
-	when the selected slot is not something it can spend. Burning a kit for a
-	click the player meant as a throw is far worse than the bug being fixed.
+	It asks which slot is actually out rather than what is in the pack. The slot
+	attribute lags a SwitchSlot by one round trip, which means pressing 4 and
+	clicking inside a tenth of a second does nothing and wants a second click.
+	That is the right way round for the trade.
 
-	So it asks which slot is actually out, and answers only for the two that this
-	is about. The slot attribute lags a SwitchSlot by one round trip, which means
-	pressing 4 and clicking inside a tenth of a second does nothing and wants a
-	second click. That is the right way round for the trade.
-
-	It delegates the WHICH to InputController, whose UseItem action already
-	resolves it, rather than firing the remote from here.
+	It delegates the WHICH to InputController, whose actions already resolve it,
+	rather than firing a remote from here. Named rather than referenced because
+	this table is built before any controller is reachable; the name is looked up
+	on input.Action at the moment of use.
 ]]
-local USE_ON_TRIGGER: { [string]: boolean } = {
-	[Enums.Slot.Health] = true,
-	[Enums.Slot.Pills] = true,
+local TRIGGER_ACTION: { [string]: string } = {
+	[Enums.Slot.Health] = "UseItem",
+	[Enums.Slot.Pills] = "UseItem",
+	[Enums.Slot.Throwable] = "Throw",
 }
 
 local function useHeldConsumable(): boolean
-	if not USE_ON_TRIGGER[Attributes.get(player, LA.ActiveSlot, "")] then
+	local wanted = TRIGGER_ACTION[Attributes.get(player, LA.ActiveSlot, "")]
+	if not wanted then
 		return false
 	end
 	local input = Registry.find("InputController")
 	if not input or typeof(input.raise) ~= "function" then
 		return false
 	end
-	input:raise(input.Action.UseItem, true)
-	input:raise(input.Action.UseItem, false)
+	local action = input.Action and input.Action[wanted]
+	if not action then
+		return false
+	end
+	input:raise(action, true)
+	input:raise(action, false)
 	return true
 end
 
 local function fireOnce()
 	local definition = state.definition
 	if not definition then
-		--[[ No gun in hand. If a consumable is, the trigger spends it; the
-		     medkit's own use timer then owns the rest, so holding the button
-		     down is harmless — the server refuses a second use while one is
-		     already running. ]]
+		--[[ No gun in hand. If something spendable is, the trigger spends it.
+
+		     Holding the button down is harmless for all three. The auto-fire
+		     loop below is gated on `definition`, which is nil for every one of
+		     these slots, so a held trigger is exactly one press. Beyond that the
+		     medkit's own use timer owns the rest and the server refuses a second
+		     use while one is running, and a thrown bomb has already emptied its
+		     slot before a second click could arrive. ]]
 		useHeldConsumable()
 		return
 	end
