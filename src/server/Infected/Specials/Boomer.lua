@@ -147,9 +147,11 @@ local function bile(survivors: any, player: Player, seconds: number)
 		survivors:applyBile(player, seconds)
 		return
 	end
-	--[[ The attribute is the contract either way. SurvivorService is the one that
-	     ticks it down, but writing it here means a build without applyBile still
-	     shows the player what happened rather than nothing at all. ]]
+	--[[ Last resort, and it is a WORSE outcome rather than an equal one: the
+	     attribute is the state, but the green screen is sent by applyBile, so a
+	     build without that method flags the survivor as coated and shows them
+	     nothing. Left in because a flagged survivor still behaves correctly for
+	     everything that reads the flag; it is not a second way of doing this. ]]
 	Attributes.set(player, Attributes.Player.BiledUntil, Workspace:GetServerTimeNow() + seconds)
 end
 

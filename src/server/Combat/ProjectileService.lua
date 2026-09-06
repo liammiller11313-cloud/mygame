@@ -1,14 +1,14 @@
 --!nonstrict
 --[[
-	ProjectileService — the four things you throw.
+	ProjectileService — the three things you throw.
 
-	Pipe bombs, molotovs, bile jars and hazardous waste are placed in the map or
-	by ItemPlacer, picked up by InventoryService and drawn in the HUD, and until
+	Pipe bombs, molotovs and hazardous waste are placed in the map or by
+	ItemPlacer, picked up by InventoryService and drawn in the HUD, and until
 	this module existed none of them could ever be used: InputController sent
 	Remotes.Event.ThrowItem and nobody was listening. This is the listener.
 
 	── WHAT EACH ONE IS FOR ────────────────────────────────────────────────────
-	They are not four flavours of grenade. Each answers a different problem, and
+	They are not three flavours of grenade. Each answers a different problem, and
 	a team that reads which one they are holding correctly survives a wave they
 	otherwise would not.
 
@@ -22,14 +22,12 @@
 	             InfectedConfig gives a Tank burnDamagePerSecond 150 against 4000
 	             health precisely so that a Tank walking through fire is a Tank
 	             the team can beat.
-	  BILE JAR   is the Boomer effect without the Boomer: it makes something else
-	             more interesting than you are. Thrown at the floor it is a
-	             gathering point; thrown at a teammate it is a very funny mistake.
-	  HAZARDOUS  is the jar's opposite number, and shares its machinery rather
-	  WASTE      than its job: fifty seconds, wider, coats nobody. The jar is a
-	             panic button aimed at a BODY; this is a plan aimed at a FLOOR,
-	             put down before a wave to decide where it goes. See the ZONES
-	             table, which is where the two are actually kept apart.
+	  HAZARDOUS  moves a horde the way a pipe bomb does, but slowly and for a
+	  WASTE      long time: fifty seconds of split drum that the wave walks to
+	             and stands in. That length is the item. A pipe bomb is thrown at
+	             a horde already on you; this is put down BEFORE one, on the
+	             corridor you have decided not to defend, and it is still running
+	             when the wave it was meant for arrives. See the ZONES table.
 
 	── AUTHORITY ───────────────────────────────────────────────────────────────
 	The client sends an origin, a direction and a power, and every one of those
@@ -50,7 +48,7 @@
 
 	── PERFORMANCE AND CLEANUP ─────────────────────────────────────────────────
 	One Heartbeat connection drives every live projectile, every fire pool and
-	every bile zone. Contact is a swept raycast between steps rather than a
+	every lure zone. Contact is a swept raycast between steps rather than a
 	.Touched connection per object, the area effects re-test bodies four times a
 	second rather than every frame off ONE shared list of the living, and every
 	instance any of this creates belongs to a Trove that is destroyed on a hard
@@ -195,118 +193,89 @@ local FIRE_LIGHT_RANGE = 30
 local FIRE_LIGHT_BRIGHTNESS = 2.6
 local FIRE_FADE_TIME = 2.5 -- the pool dies down rather than blinking out
 
--- ── the lure zones: the bile jar, and the hazardous waste ───────────────────
+-- ── the lure zone: the hazardous waste ──────────────────────────────────────
 
 --[[
-	TWO ITEMS, ONE MACHINE, AND THE DIFFERENCE BETWEEN THEM IS THE DESIGN.
+	ONE ITEM, AND A MACHINE BUILT FOR MORE THAN ONE.
 
-	Both put a puddle on the floor that the horde walks to. They are not the
-	same item, and if they were, one of them should not exist:
+	This used to be two — the bile jar and the waste — and the jar is gone. It
+	was replaced rather than joined: both put a puddle on the floor that the
+	horde walks to, and two items that do that are one item and a copy of it.
 
-	  BILE JAR      a panic button. Short, small, and it COATS whoever is
-	                standing in it — a coated survivor becomes ten times the
-	                most interesting thing in the room, so the horde does not
-	                come to the spot, it comes to the person. You throw it at
-	                the thing chasing you, or at a teammate you have decided to
-	                sacrifice, and it resolves in twenty seconds.
+	What survived is the interesting half:
 
-	  HAZARDOUS     a plan. Long, wide, weaker, and it coats NOBODY. It pulls
-	  WASTE         the wave to a PLACE and holds it there for the best part of
-	                a minute, which is a thing you do BEFORE the wave arrives:
-	                bait a corridor you are not defending, buy a route to the
-	                safe room, or feed a crowd into a molotov you already threw.
+	  HAZARDOUS     a plan. Long, wide, and it coats NOBODY. It pulls the wave to
+	  WASTE         a PLACE and holds it there for the best part of a minute,
+	                which is a thing you do BEFORE the wave arrives: bait a
+	                corridor you are not defending, buy a route to the safe room,
+	                or feed a crowd into a molotov you already threw.
 
-	The bile jar answers "get them off me". The waste answers "not through
-	here". The first is aimed at a body and the second at a floor, and that is
-	why the second does not coat: a leak that turned the nearest survivor into
-	the target would be a worse bile jar with a longer fuse.
+	The jar's other half — coating a survivor so the horde comes for the PERSON
+	rather than the spot — went with it, and was never really this file's to
+	begin with. That is the Boomer's whole identity, the Boomer still does it,
+	and doing it from a floor item as well made the Boomer less frightening.
+	See SurvivorService:applyBile.
 
-	Everything below is one table per kind so the two can never quietly drift
-	into each other, and so a third one is a table rather than a branch.
+	Still one table per kind rather than a set of constants, because the machine
+	below is general and the shape of a second zone is a table rather than a
+	branch. The fields are the whole vocabulary: anything a future zone wants to
+	differ in is a row here.
 ]]
 local ZONES = table.freeze({
-	[THROWABLE.BileJar] = table.freeze({
-		fuse = 8,
-		duration = 20,
-		splashRadius = 16, -- who gets coated
-		height = 12,
-		poolSize = 12,
-		cells = 7,
-		mistRate = 14,
-		color = COLOR.Bile,
-		--[[ How hard a coated survivor outranks everyone else in target
-		     selection. InfectedConfig's noise weights put a gunshot at 0.45;
-		     the brain divides a candidate's score by (1 + weight), so this
-		     makes a biled teammate roughly ten times more attractive than the
-		     person standing next to them. That is the joke and the mechanic at
-		     once. ]]
-		coats = true,
-		noiseWeight = 9.0,
-		--[[ Stated rather than left nil. Every field the code reads appears on
-		     every spec, so the table can be read as a comparison of the two
-		     items and a misspelled field is a nil that shows up as a missing
-		     row here rather than as an effect that quietly does not happen. ]]
-		leaks = false,
-	}),
-
 	[THROWABLE.HazardousWaste] = table.freeze({
-		--[[ A longer fuse than the jar's, because this is a drum rather than a
-		     bottle and it should feel thrown rather than lobbed — and because
-		     an item used to prepare ground wants to be placeable at range. ]]
+		--[[ A long fuse, because this is a drum rather than a bottle and it
+		     should feel thrown rather than lobbed — and because an item used to
+		     prepare ground wants to be placeable at range. ]]
 		fuse = 10,
-		--[[ Fifty seconds against the jar's twenty. This is the number that
-		     makes it a different item: long enough to still be running when the
-		     wave it was put down for arrives, which is the entire use. It is
-		     paid for twice — a sixty-second respawn in MapConfig, and the same
-		     four-zone ceiling every other pool shares. ]]
+		--[[ Fifty seconds. This is the number that makes it the item it is:
+		     long enough to still be running when the wave it was put down for
+		     arrives, which is the entire use. It is paid for twice — a
+		     sixty-second respawn in MapConfig, and the same four-zone ceiling
+		     every other pool shares. ]]
 		duration = 50,
-		--[[ Wider than the jar, because it is aimed at a doorway rather than at
-		     a person, and a zone you place in advance has to cover the ground
-		     you are choosing not to defend. ]]
+		-- Wide, because it is aimed at a doorway rather than at a person, and a
+		-- zone you place in advance has to cover the ground you are giving up.
 		splashRadius = 22,
 		height = 14,
 		poolSize = 18,
 		cells = 11,
-		--[[ The SAME rate as the jar, not twice it, and the difference between
-		     the two zones is carried by the leak below instead.
-
-		     These are server-side emitters on a replicated part: every client
+		--[[ These are server-side emitters on a replicated part: every client
 		     renders them at whatever rate is set here, so a phone cannot scale
 		     them the way GoreConfig.budgetFor scales a blood burst. They have to
 		     be affordable on the weakest device in the server.
 
-		     At 26 with a leak on top, four waste zones put about 450 large soft
-		     particles on screen against the four-bile worst case of 126 — three
-		     and a half times the most expensive thing this system could
-		     previously do, on a zone that also lasts two and a half times as
-		     long, so four at once is far likelier. 14 plus a thin leak is 183:
-		     more than the jar, because it is a bigger and longer-lived thing,
-		     and not a different order of cost. ]]
+		     At 26 with a leak on top, four zones put about 450 large soft
+		     particles on screen — three and a half times anything else this
+		     system does, on a zone that lasts fifty seconds, so four at once is
+		     likely rather than exotic. 14 plus a thin leak is 183. ]]
 		mistRate = 14,
 		color = COLOR.Hazard,
-		--[[ The leak, on top of the mist every zone gets. A drum that has split
-		     is still emptying, so this drifts UP and keeps going for the whole
-		     fifty seconds rather than settling like a splash — it is the only
-		     part of either zone that reads at distance through a doorway, and
-		     from across a street it is the entire tell. ]]
+		--[[ The leak, on top of the mist. A drum that has split is still
+		     emptying, so this drifts UP and keeps going for the whole fifty
+		     seconds rather than settling like a splash — it is the part that
+		     reads at distance through a doorway, and from across a street it is
+		     the entire tell.
+
+		     Stated rather than left nil, like every field here: a misspelled one
+		     is then a missing row rather than an effect that quietly does not
+		     happen. ]]
 		leaks = true,
-		--[[ It coats nobody, and that is the point. See the header. ]]
-		coats = false,
-		noiseWeight = 0,
 	}),
 })
 
 -- What an unrecognised throwable waits before landing. Only reachable through
 -- the fallback in _detonate; see the note there.
-local BILE_DEFAULT_FUSE = 8
+local UNKNOWN_FUSE = 8
 
 local ZONE_LURE_RADIUS = PIPE_LURE_RADIUS -- who comes running; the same earshot
 local ZONE_LURE_REFRESH = 0.5
 local ZONE_FADE_TIME = 2.0
 
--- Same ceiling and same reasoning as the fire pools: the oldest zone is retired
--- rather than a thrown item refused. Shared across BOTH kinds on purpose — the
--- budget is a frame cost, and a frame does not care which one made the puddle.
+--[[ Same ceiling and same reasoning as the fire pools: the oldest zone is
+     retired rather than a thrown item refused. It is a ceiling on ZONES rather
+     than on a kind, so a second lure item shares this budget rather than
+     doubling it — the cost is frame time, and a frame does not care which item
+     made the puddle. Four of these is 183 particles; see mistRate. ]]
 local MAX_ZONES = 4
 
 -- ── shared visuals ──────────────────────────────────────────────────────────
@@ -465,7 +434,7 @@ function ProjectileService:_container(): Instance
 end
 
 function ProjectileService:start()
-	-- THE loop. Every projectile, every fire pool and every bile zone, forever.
+	-- THE loop. Every projectile, every fire pool and every lure zone, forever.
 	self._trove:connect(RunService.Heartbeat, function(deltaTime: number)
 		self:_step(deltaTime)
 	end)
@@ -541,7 +510,7 @@ function ProjectileService:throw(
 		return false
 	end
 	-- A caller that named an item has to have named the one being held. Nothing
-	-- in the game can throw a molotov out of a bile jar's slot.
+	-- in the game can throw a molotov out of a pipe bomb's slot.
 	if itemId ~= nil and itemId ~= held then
 		return false
 	end
@@ -666,10 +635,10 @@ function ProjectileService:_spawnProjectile(
 		body.Material = Enum.Material.Glass
 	else
 		--[[ In flight it wears the colour of the puddle it will become, so a
-		     player who sees one arc past a doorway already knows which of the
-		     two it was. See the ZONES header. ]]
+		     player who sees one arc past a doorway already knows what is about
+		     to be on the floor. See the ZONES header. ]]
 		local inFlight = ZONES[kind]
-		body.Color = if inFlight then inFlight.color else COLOR.Bile
+		body.Color = if inFlight then inFlight.color else COLOR.Hazard
 		body.Material = Enum.Material.Neon
 	end
 
@@ -747,8 +716,8 @@ function ProjectileService:_spawnProjectile(
 	local params = RaycastUtil.excluding(ignore)
 
 	--[[ Named rather than defaulted. Every one of these dispatches used to end
-	     in an `else` that meant "bile jar", so a throwable added to the enum and
-	     to nothing else silently became a bile jar with a different model — it
+	     in an `else` that meant the lure zone, so a throwable added to the enum
+	     and to nothing else silently became one with a different model — it
 	     would look wired up, place in the map, throw, and land as the wrong
 	     item. scripts/items.py fails the build on a throwable this file never
 	     names, and that check exists because this is where it would have been
@@ -758,7 +727,7 @@ function ProjectileService:_spawnProjectile(
 		then PIPE_FUSE
 		elseif kind == THROWABLE.Molotov then MOLOTOV_FUSE
 		elseif spec then spec.fuse
-		else BILE_DEFAULT_FUSE
+		else UNKNOWN_FUSE
 
 	table.insert(self._live, {
 		kind = kind,
@@ -874,12 +843,11 @@ function ProjectileService:_detonate(record: any, index: number, position: Vecto
 	elseif kind == THROWABLE.Molotov then
 		self:_spawnFirePool(owner, position, record.body)
 	else
-		--[[ A kind with no ZONES row lands as a bile jar, which is the oldest
-		     behaviour and the safe one — an unknown throwable should still DO
-		     something rather than vanish out of the player's hand. It cannot
-		     happen quietly, though: items.py refuses to build a throwable this
-		     file does not name. ]]
-		self:_spawnLureZone(owner, position, record.body, ZONES[kind] or ZONES[THROWABLE.BileJar])
+		--[[ A kind with no ZONES row lands as a lure zone, which is the safe
+		     answer — an unknown throwable should still DO something rather than
+		     vanish out of the player's hand. It cannot happen quietly, though:
+		     items.py refuses to build a throwable this file does not name. ]]
+		self:_spawnLureZone(owner, position, record.body, ZONES[kind] or ZONES[THROWABLE.HazardousWaste])
 	end
 
 	self:_retireProjectile(index)
@@ -1206,12 +1174,12 @@ function ProjectileService:_retireFire(index: number)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
---  Bile jar: the gathering point
+--  Lure zones: the gathering point
 -- ════════════════════════════════════════════════════════════════════════════
 
---[[ One puddle, built to whichever ZONES spec was handed in. Every number that
-     differs between a bile splash and a waste leak arrives through `spec`, so
-     the two can only ever differ where the table says they do. ]]
+--[[ One puddle, built to whichever ZONES spec was handed in. Every number a
+     zone could differ in arrives through `spec` rather than being written here,
+     which is what keeps this general enough for a second one. ]]
 function ProjectileService:_spawnLureZone(owner: Player?, position: Vector3, body: BasePart?, spec: any)
 	if #self._zones >= MAX_ZONES then
 		self:_retireLureZone(1)
@@ -1222,7 +1190,7 @@ function ProjectileService:_spawnLureZone(owner: Player?, position: Vector3, bod
 
 	local trove = Trove.new()
 	local anchor = Instance.new("Part")
-	anchor.Name = "FL_BileZone"
+	anchor.Name = "FL_LureZone"
 	anchor.Shape = Enum.PartType.Cylinder
 	anchor.Size = Vector3.new(0.3, spec.poolSize, spec.poolSize)
 	-- Cylinders point down their X axis, so a puddle is one laid on its side.
@@ -1312,12 +1280,13 @@ function ProjectileService:_spawnLureZone(owner: Player?, position: Vector3, bod
 		endsAt = os.clock() + spec.duration,
 		lureAt = 0,
 		spec = spec,
-		coated = {} :: { [Player]: number },
 	})
 end
 
-function ProjectileService:_stepLureZone(record: any, index: number, now: number, bodies: any)
-	local spec = record.spec
+--[[ No `bodies` parameter, unlike _stepFire. A lure zone is aimed at a floor
+     and touches nobody, so it has no reason to be handed the list of the
+     living — see the note at the end of the function. ]]
+function ProjectileService:_stepLureZone(record: any, index: number, now: number)
 	if now >= record.endsAt then
 		self:_retireLureZone(index)
 		return
@@ -1329,8 +1298,8 @@ function ProjectileService:_stepLureZone(record: any, index: number, now: number
 	if infected and now >= record.lureAt then
 		record.lureAt = now + ZONE_LURE_REFRESH
 		--[[ Re-issued for the same reason a pipe bomb's is: commons that spawn
-		     into the wave after the jar broke have to come running too. The hold
-		     shrinks with the splash, so the crowd releases as it dries. ]]
+		     into the wave after the drum split have to come running too. The
+		     hold shrinks with the puddle, so the crowd releases as it dries. ]]
 		infected:lure(record.origin, ZONE_LURE_RADIUS, remaining)
 	end
 
@@ -1340,50 +1309,15 @@ function ProjectileService:_stepLureZone(record: any, index: number, now: number
 		record.anchor.Transparency = 1 - 0.65 * fade
 	end
 
-	--[[ A leak coats nobody, so it does not walk the survivor list at all. This
-	     is the one behavioural fork between the two kinds and it is a single
-	     `if`, which is the whole reason they share a machine. ]]
-	if not spec.coats then
-		return
-	end
+	--[[ And that is the whole step. A lure zone never walks the survivor list:
+	     it is aimed at a floor, so the only thing it does to a person is be
+	     somewhere they would rather not stand.
 
-	for _, entry in bodies.survivors do
-		if not withinColumn(record.origin, entry.position, spec.splashRadius, spec.height) then
-			continue
-		end
-
-		--[[ Coated once per zone. Re-firing the screen effect every quarter
-		     second would reset the fade forever and the player would never see
-		     out of it again. ]]
-		if record.coated[entry.player] then
-			continue
-		end
-		record.coated[entry.player] = now
-
-		Remotes.Event.ScreenEffect:FireClient(entry.player, {
-			effect = "Bile",
-			duration = GoreConfig.ScreenBlood.BoomerBileFadeTime,
-			intensity = 1,
-		})
-
-		--[[ And the actual mechanic: a coated survivor becomes the loudest thing
-		     in the room. reportNoise is the hook InfectedConfig documents for
-		     exactly this — every listener applies its own hearing range, so who
-		     comes running is the config's decision and not this file's. ]]
-		if infected then
-			--[[ The COATING's clock, not the puddle's. `remaining` is how long
-			     the splash has left to live, and it was being handed to the
-			     survivor as the duration of the noise flag on their body — so
-			     somebody coated by a jar about to dry attracted the horde for a
-			     second, and somebody coated by a fresh one for twenty. The
-			     screen effect two lines above has always used a fixed fade, and
-			     a survivor is coated at most once per zone, so nothing came
-			     along later to reconcile them. Both halves of the item now end
-			     together: you stop being blind and you stop being the target on
-			     the same clock. ]]
-			infected:reportNoise(entry.character, spec.noiseWeight, GoreConfig.ScreenBlood.BoomerBileFadeTime)
-		end
-	end
+	     The bile jar used to fork here — it coated whoever was inside it and
+	     made them the horde's target — and that fork left with it. Coating a
+	     survivor is the Boomer's identity and belongs to the Boomer alone; see
+	     SurvivorService:applyBile, which is now the one place in the game that
+	     does it. ]]
 end
 
 function ProjectileService:_retireLureZone(index: number)
@@ -1459,7 +1393,7 @@ function ProjectileService:_stepZones(now: number, elapsed: number)
 		self:_stepFire(self._fires[index], index, now, elapsed, bodies)
 	end
 	for index = #self._zones, 1, -1 do
-		self:_stepLureZone(self._zones[index], index, now, bodies)
+		self:_stepLureZone(self._zones[index], index, now)
 	end
 end
 
@@ -1484,11 +1418,11 @@ end
 
 --[[ For the debug overlay and for a round teardown that wants to know whether
      anything is still burning. ]]
-function ProjectileService:getActiveCounts(): { projectiles: number, fires: number, bile: number }
+function ProjectileService:getActiveCounts(): { projectiles: number, fires: number, zones: number }
 	return {
 		projectiles = #self._live,
 		fires = #self._fires,
-		bile = #self._zones,
+		zones = #self._zones,
 	}
 end
 

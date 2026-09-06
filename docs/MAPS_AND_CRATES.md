@@ -152,24 +152,24 @@ worth walking into.
 | **Hazardous waste** | draws the horde to a place and *holds* it there |
 
 The waste is the one you throw **before** the wave rather than at it. Its leak
-runs for fifty seconds — more than twice a bile jar's splash — so it is still
-pulling when the thing you put it down for arrives: bait a corridor you are not
-defending, buy a route to the safe room, or feed a crowd into a molotov you
-already threw. It coats nobody, deliberately. A leak that turned the nearest
-survivor into the target would just be a worse bile jar with a longer fuse.
+runs for fifty seconds, so it is still pulling when the thing you put it down
+for arrives: bait a corridor you are not defending, buy a route to the safe
+room, or feed a crowd into a molotov you already threw. It coats nobody,
+deliberately — a leak that turned the nearest survivor into the target would be
+doing the Boomer's job, and worse than the Boomer does it.
 
 Sixty seconds to respawn rather than forty, because a fifty-second zone on a
 forty-second clock is one player keeping a permanent leak running somewhere on
 the map.
 
-The **bile jar** is the short-range answer to the same question and is unchanged
-— no map folder, still placed by the Director from the built-in model. Give it a
-`Bile Jars` folder and one entry in `MapConfig.MapItems` and it joins the
-others; nothing else has to change.
+> **The bile jar is gone.** The waste replaced it rather than joining it: both
+> put a puddle on the floor that the horde walks to, and two items that do that
+> are one item and a copy of it. Its other half — coating a survivor so the
+> horde comes for the *person* — belongs to the Boomer, which still does it.
 
-> `Assets/Throwables` still works as a fallback for anything the map does not
-> place, and the game no longer creates empty folders in there for the two that
-> it does.
+> `Assets/Throwables` still works as a fallback for a throwable no map places.
+> Every throwable has a map folder today, so nothing uses it and the game
+> creates no empty folders in there.
 
 ### How medkits behave
 

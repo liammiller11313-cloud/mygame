@@ -537,8 +537,9 @@ function InventoryService:useItem(player: Player, slot: string): boolean
 		--[[ Named rather than assumed. The medkit used to be whatever was left
 		     after the defibrillator, so a third health item added to the enum
 		     would have quietly become a medkit that heals its user — the same
-		     shape of bug the throwables had, where every unnamed kind landed as
-		     a bile jar. scripts/items.py fails the build on a health item this
+		     shape of bug the throwables had, where every unnamed kind fell
+		     through to one particular item and looked wired up while being the
+		     wrong one. scripts/items.py fails the build on a health item this
 		     function never names. ]]
 		if entry.itemId ~= Enums.HealthItem.Medkit then
 			return false

@@ -1171,8 +1171,8 @@ function GoreController:screenBlood(count: number?)
 end
 
 --[[ Blood at a world position, for anything that wants some and has no gore
-     event to ride on — a thrown bile jar, a melee finisher, a scripted set
-     piece. `scale` multiplies GoreConfig.Blood's particle counts. ]]
+     event to ride on — a melee finisher, a scripted set piece. `scale`
+     multiplies GoreConfig.Blood's particle counts. ]]
 function GoreController:spawnBlood(position: Vector3, normal: Vector3?, scale: number?)
 	if not enabled or typeof(position) ~= "Vector3" or tooFar(position) then
 		return

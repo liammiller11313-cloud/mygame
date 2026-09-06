@@ -13,7 +13,7 @@
 	        Infected/<Kind>/         one or more rig variants
 	        Weapons/<modelName>      third-person / world model
 	        Viewmodels/<modelName>   first-person model
-	        Throwables/<Id>          molotov, pipe bomb, bile jar
+	        Throwables/<Id>          only for a throwable no map places; see below
 	        Pickups/<Slot>_<ItemId>  optional; grey-boxed when absent
 
 	A Model or a TOOL is accepted anywhere in that tree. Roblox hands you a weapon
@@ -2624,17 +2624,10 @@ PICKUP_BUILDERS[Enums.Throwable.Molotov] = function(model)
 	)
 end
 
-PICKUP_BUILDERS[Enums.Throwable.BileJar] = function(model)
-	pickupPart(model, "Jar", V(0.8, 1.1, 0.8), V(0, 0.55, 0), UITheme.Color.Bile, Enum.Material.Neon)
-	pickupPart(model, "Lid", V(0.86, 0.2, 0.86), V(0, 1.2, 0), UITheme.Color.Border)
-end
-
---[[ A squat drum rather than a bottle, and deliberately not a bigger jar. The
-     two lure throwables have to be told apart in a dark room at a glance, and
-     the grey-box only has silhouette and colour to do it with: the jar is tall
-     and narrow in olive, this is wide and low in chemical green with a band
-     around it. Maps that supply their own "Hazardous Waste 1" never build this
-     — see the map families in MapConfig. ]]
+--[[ A squat drum, wide and low in chemical green with a band around it —
+     nothing else a survivor can pick up has that silhouette, which is the only
+     thing a grey-box has to work with in a dark room. Maps that supply their own
+     "Hazardous Waste 1" never build this — see the map families in MapConfig. ]]
 PICKUP_BUILDERS[Enums.Throwable.HazardousWaste] = function(model)
 	pickupPart(model, "Drum", V(1.2, 1.3, 1.2), V(0, 0.65, 0), UITheme.Color.Hazard, Enum.Material.Neon)
 	pickupPart(model, "Band", V(1.28, 0.22, 1.28), V(0, 0.85, 0), UITheme.Color.Border)
@@ -2724,7 +2717,7 @@ local mapSourcedThrowables: { [string]: boolean } = {}
 	the level it was copied from stopped existing, and nothing about it says which
 	map it came from.
 
-	Only the map-sourced ones. Rebuilding a bile jar that came out of an assets
+	Only the map-sourced ones. Rebuilding a throwable that came out of the assets
 	folder would be work for an answer that cannot have changed.
 ]]
 local function clearMapTemplates()
@@ -2753,10 +2746,11 @@ end
 	it in exactly one of the three places it appears.
 
 	── AND THE MAP COMES FIRST ─────────────────────────────────────────────────
-	Molotovs and pipe bombs are placed by hand in the level now, in the folders
-	MapConfig.MapItems names, and that is where their model comes from. The assets
-	folder is still read for anything the map does not supply — the bile jar —
-	so nothing that worked before stops working.
+	Every throwable is placed by hand in the level now, in the folders
+	MapConfig.MapItems names, and that is where its model comes from. The assets
+	folder is still read for anything the map does not supply, which today is
+	nothing — it is the escape hatch for the next throwable that has no family
+	rather than a path anything currently takes.
 
 	The map's answer is NOT cached across a map swap. Everything else in this file
 	is prepared once and kept for the life of the server, which is correct for a
@@ -2790,9 +2784,8 @@ function PlaceholderFactory:buildThrowableModel(kind: string): Model?
 			end
 		end
 
-		--[[ Then the assets folder, for a throwable no map places. Unchanged
-		     behaviour for the bile jar, and the escape hatch for anybody who
-		     would rather supply one model than place thirteen. ]]
+		--[[ Then the assets folder, for a throwable no map places — and for
+		     anybody who would rather supply one model than place thirteen. ]]
 		if not built then
 			local supplied = suppliedEntry("Throwables", { kind })
 			local candidates = if supplied then modelsIn(supplied) else {}
@@ -2811,9 +2804,11 @@ function PlaceholderFactory:buildThrowableModel(kind: string): Model?
 				yet, and caching that would leave the kind permanently modelless
 				for the life of the server, on every map after it.
 
-				So the bile jar's miss is still cached — nothing about an assets
-				folder moves — and a map kind's is not, and pays one folder walk
-				per throw for as long as its map really has none.
+				So an assets-folder kind's miss is still cached — nothing about
+				that folder moves — and a map kind's is not, and pays one folder
+				walk per throw for as long as its map really has none. Every
+				throwable is a map kind today, so nothing is cached; the branch
+				is what makes adding one that is not safe.
 			]]
 			if not MapConfig.mapItemFor(kind) then
 				throwableTemplates[kind] = false :: any
@@ -4314,8 +4309,10 @@ function PlaceholderFactory:ensureAssetFolders()
 		life. Worse than useless: an empty folder next to a full one reads as the
 		place things go.
 
-		The bile jar has no family and still wants somewhere, so the folder is
-		made only for what is left, and only made at all if anything is left.
+		Every throwable has a family today, so this makes nothing — which is the
+		correct outcome and not a broken loop. It is here for the next throwable
+		that has no family: it gets a home the boot it is added, without anybody
+		remembering to make one.
 	]]
 	local madeThrowables = {}
 	for _, kind in Enums.Throwable do

@@ -1295,7 +1295,31 @@ function SurvivorService:applyBile(player: Player, seconds: number): boolean
 
 	local now = workspace:GetServerTimeNow()
 	local current = tonumber(Attributes.get(player, PA.BiledUntil, 0)) or 0
-	Attributes.set(player, PA.BiledUntil, math.max(current, now + seconds))
+	local until_ = math.max(current, now + seconds)
+	Attributes.set(player, PA.BiledUntil, until_)
+
+	--[[
+		AND THE SCREEN, which is the whole of what bile does.
+
+		This attribute is the state — it is what `isBiled` answers off and what
+		the Director reads as a team in trouble — but no client watches it. The
+		green wash is drawn by OverlayController off the ScreenEffect remote, and
+		nothing here was sending it, so a Boomer bursting on somebody set a flag
+		that only the server ever looked at. The player saw nothing. The one
+		sender in the game was a thrown item, which is how the effect looked
+		fine in testing and the Boomer's entire threat did not exist.
+
+		The duration is the coating's REMAINING time rather than a fixed fade, so
+		the two halves end together: `until_` is already the extended stamp, so a
+		second Boomer bursting on the same survivor pushes the screen out to the
+		same instant it pushes the flag, instead of leaving them lit for a
+		fixed twelve seconds that agrees with neither.
+	]]
+	Remotes.Event.ScreenEffect:FireClient(player, {
+		effect = "Bile",
+		duration = until_ - now,
+		intensity = 1,
+	})
 	return true
 end
 

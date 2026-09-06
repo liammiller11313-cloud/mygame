@@ -61,15 +61,15 @@ UITheme.Color = table.freeze({
 
 	--[[ Hazardous waste, and the second deliberate break in the three-colour
 	     rule after SurvivorColors — for the same reason, which is that it is a
-	     FUNCTION rather than decoration. Two lure zones can be on one floor at
-	     once and they do different things: a bile splash turns the horde onto
-	     whoever it touched, a waste leak pulls them to the spot and holds them
-	     there. A player deciding whether to run through one has to know which it
-	     is at a glance, and Bile's olive is a shade of the same green.
+	     FUNCTION rather than decoration: a player has to be able to read a lure
+	     zone on the floor of a dark room, from a doorway, and decide whether to
+	     run through it.
 
-	     So this is a vivid chemical green rather than a shade of that: brighter
-	     than anything else in the palette, which is the point — the one thing in
-	     a dark map that looks like it is lit from inside. ]]
+	     Kept distinct from Bile above, which is the Boomer's olive and lands on
+	     the LENS rather than on the floor. The two never mean the same thing —
+	     one is the room, one is you — so a vivid chemical green here, brighter
+	     than anything else in the palette: the one thing in a dark map that
+	     looks like it is lit from inside. ]]
 	Hazard = Color3.fromRGB(104, 222, 88),
 })
 

@@ -1770,10 +1770,14 @@ end
 
 --[[
 	Runs a bounded crescendo of waves at a position, on top of whatever the
-	Director is already doing. An alarmed door, a lift, a car alarm — and every
-	bile jar that lands on somebody, which is why this MERGES rather than stacks:
-	one jar can cover all four survivors, and four overlapping panic events would
-	be four times the horde the design asks for.
+	Director is already doing. An alarmed door, a lift, a car alarm, a startled
+	Witch, a failed keypad, a surge event — see the callers of this method.
+
+	It MERGES rather than stacks, because several of those can land at once and
+	genuinely do: a team that trips an alarmed door while a Witch is already up
+	would otherwise get two full crescendos on top of each other, which is twice
+	the horde the design asks for and reads as the game breaking rather than as
+	the team having made two mistakes.
 
 	Wave mode does not schedule these; they are player- and map-triggered, and a
 	panic event a player caused during a breather is a panic event they earned.

@@ -103,15 +103,28 @@ Enums.Slot = table.freeze({
 	     the loadout screen. The cost is that a survivor is never truly out of
 	     options, which for a co-op game is the right side to err on. ]]
 	Melee = "Melee", -- machete, axe, bat, pipe, knife
-	Throwable = "Throwable", -- pipe bomb, molotov, bile
+	Throwable = "Throwable", -- pipe bomb, molotov, hazardous waste
 	Health = "Health", -- medkit, defibrillator
 	Pills = "Pills", -- pain pills, adrenaline
 })
 
+--[[
+	The throwables. Every one of these is placed by hand in the map, in the
+	folder MapConfig.MapItems names for it.
+
+	The BILE JAR used to be here and was replaced by the hazardous waste rather
+	than joined by it: both put a puddle on the floor that the horde walks to,
+	and two items doing that is one item and a copy of it. The waste is the one
+	that survived because it is the more interesting of the two — it is placed
+	before a wave rather than thrown at one.
+
+	The jar's other half, coating a survivor so the horde comes for the PERSON,
+	was never really the item's: it is the Boomer's, and the Boomer still does
+	it. See SurvivorService:applyBile.
+]]
 Enums.Throwable = table.freeze({
 	PipeBomb = "PipeBomb",
 	Molotov = "Molotov",
-	BileJar = "BileJar",
 	HazardousWaste = "HazardousWaste",
 })
 

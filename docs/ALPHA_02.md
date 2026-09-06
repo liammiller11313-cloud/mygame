@@ -91,11 +91,15 @@ The list below is what changed. An alpha that tests everything tests nothing.
 
 ### Two new items
 
-**Hazardous waste** — a throwable, seven per map. It is a lure zone like the
-bile jar and deliberately not the same item: fifty seconds instead of twenty,
-wider, and it **coats nobody**. The jar is a panic button aimed at a *body*;
-this is a plan aimed at a *floor*, put down before a wave to decide where it
-goes. Watch whether players work that out without being told.
+**Hazardous waste** — a throwable, seven per map, and it **replaces the bile
+jar**, which is gone. Both put a puddle on the floor that the horde walks to,
+and two items doing that are one item and a copy of it.
+
+The waste is the one worth keeping: fifty seconds, wide, and it coats nobody. A
+pipe bomb is thrown at a horde that is already on you; this is put down *before*
+one, on the corridor you have decided not to defend, and it is still running
+when the wave arrives. Watch whether players work that out without being told,
+or whether they throw it at things like a grenade.
 
 **Flare gun** — a secondary, $3,500 in the shop. Twelve damage on impact, which
 will not kill a Common; what it does is set them alight. One shell, four-second
@@ -116,6 +120,14 @@ look substantially different during a horde; watch the frame rate on a phone.
 ### Boomers pop
 
 They could not before. One flag was answering two questions.
+
+### Boomer bile actually covers your screen
+
+It did not. `applyBile` set the flag the server reads and never told the client,
+so the only thing in the game that ever drew the green wash was a thrown bile
+jar — which is why it looked fine in testing and the Boomer's entire threat did
+not exist. **Test this deliberately**: let one burst on you and check that you
+are blinded for about eleven seconds, and about seven from a vomit.
 
 ---
 
@@ -193,8 +205,8 @@ Ranked by how likely it is to be wrong, not by how bad it would be.
 
 1. **Does the fire button throwing feel right**, or does it eat clicks people
    meant as shots?
-2. **Is the hazardous waste legible** as a different item from the bile jar,
-   from the floor, in a dark room?
+2. **Is the hazardous waste legible** as area denial rather than a grenade —
+   from the floor, in a dark room, before anybody explains it?
 3. **Frame rate during a horde on a phone**, now that bodies persist.
 4. **The flare gun's damage.** Twelve is deliberately almost nothing.
 5. **Anything on a controller or a phone that a desktop player would not find.**

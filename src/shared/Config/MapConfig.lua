@@ -301,9 +301,10 @@ MapConfig.MapItems = table.freeze({
 		bomb doing nothing, and a map that makes you feel rich in them is a map
 		where you throw one at the horde instead of backing down a corridor.
 
-		The bile jar has no family here and is left exactly as it was — the
-		built-in model, placed by the Director. Give it a folder and an entry and
-		it joins these two; nothing else has to change.
+		Every throwable in the game has a family here. A new one joins them with
+		a folder and an entry and nothing else has to change — and until it has
+		both, ItemPlacer will still place it off the built-in model, so it works
+		before its models exist rather than after.
 	]]
 	table.freeze({
 		key = "Molotovs",
@@ -336,9 +337,9 @@ MapConfig.MapItems = table.freeze({
 	     point of it, and an item you place ahead of time gets used more often
 	     than one you throw in a panic.
 
-	     Sixty seconds rather than forty. A waste drum's zone lasts more than
-	     twice as long as a bile splash, so a forty-second respawn would let one
-	     player keep a permanent leak running somewhere on the map. The refill
+	     Sixty seconds rather than forty. The zone itself runs for fifty, so a
+	     forty-second respawn would let one player keep a permanent leak going
+	     somewhere on the map with nothing but patience. The refill
 	     clock and the zone's own duration are the two halves of how often this
 	     item can be on the floor at all. ]]
 	table.freeze({

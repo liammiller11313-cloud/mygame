@@ -74,8 +74,12 @@ local STATE = Enums.SurvivorState
 local SCREEN_BLOOD = GoreConfig.ScreenBlood
 local MAX_HEALTH = GameConfig.Survivor.MaxHealth
 
--- Effect names carried by Remotes.Event.ScreenEffect. SurvivorService sends
--- "Adrenaline"; Boomer.lua sends "Bile". Anything else is ignored in silence.
+--[[ Effect names carried by Remotes.Event.ScreenEffect. SurvivorService sends
+     two of them: "Adrenaline" from a shot, and "Bile" from applyBile — which is
+     what a Boomer's burst and its vomit both go through. "Blood" has no sender
+     and is kept as the name for a one-off splatter: the droplets a hit throws up
+     are spawned locally off the damage event instead, which is a frame earlier
+     than a remote could be. Anything else is ignored in silence. ]]
 local EFFECT = table.freeze({
 	Bile = "Bile",
 	Adrenaline = "Adrenaline",

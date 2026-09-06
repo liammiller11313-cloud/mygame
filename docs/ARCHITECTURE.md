@@ -544,7 +544,8 @@ ProjectileService:throw(player: Player, itemId: string?, origin: Vector3?, direc
 ```
 Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes via
 `DamageService:applyExplosion`), molotov (a fire pool that ignites infected through
-`InfectedService:ignite`), bile jar (the Boomer effect without the Boomer).
+`InfectedService:ignite`), hazardous waste (a lure zone that holds a wave in one
+place for fifty seconds).
 
 **Everything but the id is optional, and that is what decides where a bomb goes.**
 `ThrowItem` supplies a camera ray, so a throw aimed up onto a balcony arrives
