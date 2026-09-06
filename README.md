@@ -24,6 +24,10 @@ server in half and lets the other side play the special infected.
 | **Atmosphere** | The round opens at dusk and is pitch dark by wave 7, driven off the round clock rather than a free-running timer — so the light level always reads as how far through the round you are. The title is meant literally. |
 | **UI** | A Left 4 Dead HUD in black, white and orange — survivor bars bottom-left, ammo bottom-right, teammate silhouettes through walls, a wave clock up top, and almost nothing else. |
 
+> **Running a playtest?** Start at [`docs/ALPHA_02.md`](docs/ALPHA_02.md) — what
+> to check before inviting anybody, what changed, and what is already known to
+> be missing so nobody spends a session reporting it.
+
 ---
 
 ## Getting it running

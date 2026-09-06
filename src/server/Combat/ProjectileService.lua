@@ -267,11 +267,22 @@ local ZONES = table.freeze({
 		height = 14,
 		poolSize = 18,
 		cells = 11,
-		--[[ Leaking, not splashed. Twice the jar's rate for the whole of a much
-		     longer life, because the particle column IS the tell — from across
-		     a street a player has to be able to see that the far corridor is
-		     the loud one without walking to it. ]]
-		mistRate = 26,
+		--[[ The SAME rate as the jar, not twice it, and the difference between
+		     the two zones is carried by the leak below instead.
+
+		     These are server-side emitters on a replicated part: every client
+		     renders them at whatever rate is set here, so a phone cannot scale
+		     them the way GoreConfig.budgetFor scales a blood burst. They have to
+		     be affordable on the weakest device in the server.
+
+		     At 26 with a leak on top, four waste zones put about 450 large soft
+		     particles on screen against the four-bile worst case of 126 — three
+		     and a half times the most expensive thing this system could
+		     previously do, on a zone that also lasts two and a half times as
+		     long, so four at once is far likelier. 14 plus a thin leak is 183:
+		     more than the jar, because it is a bigger and longer-lived thing,
+		     and not a different order of cost. ]]
+		mistRate = 14,
 		color = COLOR.Hazard,
 		--[[ The leak, on top of the mist every zone gets. A drum that has split
 		     is still emptying, so this drifts UP and keeps going for the whole
@@ -1273,8 +1284,11 @@ function ProjectileService:_spawnLureZone(owner: Player?, position: Vector3, bod
 			NumberSequenceKeypoint.new(0, 0.25),
 			NumberSequenceKeypoint.new(1, 1),
 		})
-		leak.Lifetime = NumberRange.new(2.5, 4.5)
-		leak.Rate = spec.mistRate * 0.6
+		leak.Lifetime = NumberRange.new(2.0, 3.8)
+		--[[ Thin on purpose. A split drum venting is a stream, not a smoke
+		     machine, and the thing that makes it read at distance is that it
+		     RISES and is lit rather than that there is a lot of it. ]]
+		leak.Rate = spec.mistRate * 0.35
 		leak.Speed = NumberRange.new(3, 7)
 		leak.SpreadAngle = Vector2.new(18, 18)
 		-- Straight up out of the drum, and unaffected by the mist's drift.
