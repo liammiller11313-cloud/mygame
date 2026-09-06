@@ -58,6 +58,19 @@ UITheme.Color = table.freeze({
 
 	Blood = Color3.fromRGB(104, 16, 16),
 	Bile = Color3.fromRGB(142, 156, 58),
+
+	--[[ Hazardous waste, and the second deliberate break in the three-colour
+	     rule after SurvivorColors — for the same reason, which is that it is a
+	     FUNCTION rather than decoration. Two lure zones can be on one floor at
+	     once and they do different things: a bile splash turns the horde onto
+	     whoever it touched, a waste leak pulls them to the spot and holds them
+	     there. A player deciding whether to run through one has to know which it
+	     is at a glance, and Bile's olive is a shade of the same green.
+
+	     So this is a vivid chemical green rather than a shade of that: brighter
+	     than anything else in the palette, which is the point — the one thing in
+	     a dark map that looks like it is lit from inside. ]]
+	Hazard = Color3.fromRGB(104, 222, 88),
 })
 
 --[[

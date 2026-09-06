@@ -107,6 +107,7 @@ Enums.Throwable = table.freeze({
 	PipeBomb = "PipeBomb",
 	Molotov = "Molotov",
 	BileJar = "BileJar",
+	HazardousWaste = "HazardousWaste",
 })
 
 Enums.HealthItem = table.freeze({

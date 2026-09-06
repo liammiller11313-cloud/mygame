@@ -162,6 +162,11 @@ local ITEM_DETAIL: { [string]: string } = {
 	[THROWABLE.PipeBomb] = "DRAWS THE HORDE TO IT, THEN KILLS THEM",
 	[THROWABLE.Molotov] = "A WALL OF FIRE THAT BURNS WHAT CROSSES IT",
 	[THROWABLE.BileJar] = "TURNS THE HORDE ON WHATEVER IT LANDS ON",
+	--[[ Deliberately says WHERE rather than what, because that is the whole
+	     difference from the jar above it and a player reading both lines back to
+	     back should be able to see it. The jar names a target; this names a
+	     place, and the long duration is the reason to carry one. ]]
+	[THROWABLE.HazardousWaste] = "A LEAK THAT HOLDS THE HORDE WHERE YOU PUT IT",
 }
 
 local BackpackController = {}

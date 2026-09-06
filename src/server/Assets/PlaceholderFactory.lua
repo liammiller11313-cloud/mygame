@@ -2585,6 +2585,18 @@ PICKUP_BUILDERS[Enums.Throwable.BileJar] = function(model)
 	pickupPart(model, "Lid", V(0.86, 0.2, 0.86), V(0, 1.2, 0), UITheme.Color.Border)
 end
 
+--[[ A squat drum rather than a bottle, and deliberately not a bigger jar. The
+     two lure throwables have to be told apart in a dark room at a glance, and
+     the grey-box only has silhouette and colour to do it with: the jar is tall
+     and narrow in olive, this is wide and low in chemical green with a band
+     around it. Maps that supply their own "Hazardous Waste 1" never build this
+     — see the map families in MapConfig. ]]
+PICKUP_BUILDERS[Enums.Throwable.HazardousWaste] = function(model)
+	pickupPart(model, "Drum", V(1.2, 1.3, 1.2), V(0, 0.65, 0), UITheme.Color.Hazard, Enum.Material.Neon)
+	pickupPart(model, "Band", V(1.28, 0.22, 1.28), V(0, 0.85, 0), UITheme.Color.Border)
+	pickupPart(model, "Cap", V(0.5, 0.22, 0.5), V(0, 1.36, 0), UITheme.Color.Border)
+end
+
 --[[
 	Finishes any pickup — grey-box, dropped gun or a model the user supplied.
 
@@ -3937,6 +3949,17 @@ end
 	models into a place needs one line telling them how many of them the game is
 	actually using, and no way to get it other than this.
 ]]
+--[[ Every throwable id, as a list. Order is whatever the enum iterates in and
+     nothing here depends on it: the two callers want the SET. ]]
+local function throwableIds(): { string }
+	local ids: { string } = {}
+	for _, id in Enums.Throwable do
+		table.insert(ids, id)
+	end
+	table.sort(ids)
+	return ids
+end
+
 function PlaceholderFactory:ensureAssets()
 	for weaponId in WeaponConfig.all() do
 		self:buildWeaponModel(weaponId)
@@ -4063,11 +4086,12 @@ function PlaceholderFactory:ensureAssets()
 		{
 			[Enums.Slot.Health] = { Enums.HealthItem.Medkit, Enums.HealthItem.Defibrillator },
 			[Enums.Slot.Pills] = { Enums.PillItem.PainPills, Enums.PillItem.Adrenaline },
-			[Enums.Slot.Throwable] = {
-				Enums.Throwable.PipeBomb,
-				Enums.Throwable.Molotov,
-				Enums.Throwable.BileJar,
-			},
+			--[[ Read off the enum rather than listed, because the intent here is
+			     "all of them" and a hand-written copy of a list is a list that
+			     goes stale the first time somebody adds an item. This one had
+			     three entries and the enum had four for exactly as long as it
+			     took to notice. ]]
+			[Enums.Slot.Throwable] = throwableIds(),
 		}
 	do
 		for _, itemId in ids do

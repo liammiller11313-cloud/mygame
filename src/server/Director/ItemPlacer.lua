@@ -284,7 +284,17 @@ function ItemPlacer:_rollItem(slot: string): string?
 	elseif slot == Enums.Slot.Pills then
 		return pick({ Enums.PillItem.PainPills, Enums.PillItem.Adrenaline })
 	elseif slot == Enums.Slot.Throwable then
-		return pick({ Enums.Throwable.PipeBomb, Enums.Throwable.Molotov, Enums.Throwable.BileJar })
+		--[[ Every throwable there is, off the enum rather than a copy of it. A
+		     pad is meant to be able to offer any of them, and a hand-written
+		     list is one an added item silently falls out of — the same list
+		     existed in three files and two of them were already a version
+		     behind. ]]
+		local kinds: { string } = {}
+		for _, id in Enums.Throwable do
+			table.insert(kinds, id)
+		end
+		table.sort(kinds)
+		return pick(kinds)
 	end
 
 	-- Class first, then a gun inside it. See the Weapon classes section above.

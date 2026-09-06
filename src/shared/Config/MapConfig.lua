@@ -329,6 +329,30 @@ MapConfig.MapItems = table.freeze({
 		leaveGhost = true,
 		ghostTransparency = 0.9,
 	}),
+
+	--[[ Seven, matching the pipe bombs rather than the molotovs' six, because
+	     this is the throwable a team is most likely to spend without a target
+	     in front of them — a leak put down before a wave arrives is the whole
+	     point of it, and an item you place ahead of time gets used more often
+	     than one you throw in a panic.
+
+	     Sixty seconds rather than forty. A waste drum's zone lasts more than
+	     twice as long as a bile splash, so a forty-second respawn would let one
+	     player keep a permanent leak running somewhere on the map. The refill
+	     clock and the zone's own duration are the two halves of how often this
+	     item can be on the floor at all. ]]
+	table.freeze({
+		key = "HazardousWastes",
+		folderName = "Hazardous Wastes",
+		modelName = "Hazardous Waste",
+		expectedCount = 7,
+		slot = Enums.Slot.Throwable,
+		itemId = Enums.Throwable.HazardousWaste,
+		tag = "FL_HazardousWastePickup",
+		respawnSeconds = 60,
+		leaveGhost = true,
+		ghostTransparency = 0.9,
+	}),
 }) :: { MapItemFamily }
 
 --[[ The family that supplies an item id, or nil for one the map does not place.

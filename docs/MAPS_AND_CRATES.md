@@ -90,6 +90,8 @@ Zombieville/
         Molotov 1 ... Molotov 6
     Pipe Bombs/
         Pipe Bomb 1 ... Pipe Bomb 7
+    Hazardous Wastes/
+        Hazardous Waste 1 ... Hazardous Waste 7
 ```
 
 **You don't tag anything.** Same rule as the crates — the game finds each folder
@@ -136,13 +138,34 @@ worth walking into.
   molotov where you are standing, as your own model, for somebody else to find.
 - **Throw it** on your normal throw input. The object turning over in the air is
   the same model.
-- **The spawn point refills 40 seconds after it is thrown** — not after it is
-  picked up. Faster than a medkit and there are more of them, because throwables
-  are meant to be *spent*: one somebody is saving for later is one doing nothing.
+- **The spawn point refills after it is thrown** — not after it is picked up.
+  Forty seconds for molotovs and pipe bombs, sixty for hazardous waste. Faster
+  than a medkit and there are more of them, because throwables are meant to be
+  *spent*: one somebody is saving for later is one doing nothing.
 
-The **bile jar** is unchanged — no map folder, still placed by the Director from
-the built-in model. Give it a `Bile Jars` folder and one entry in
-`MapConfig.MapItems` and it joins the other two; nothing else has to change.
+### The three of them do different jobs
+
+| | |
+|---|---|
+| **Pipe bomb** | draws the horde to it, then kills what came |
+| **Molotov** | denies a place with fire |
+| **Hazardous waste** | draws the horde to a place and *holds* it there |
+
+The waste is the one you throw **before** the wave rather than at it. Its leak
+runs for fifty seconds — more than twice a bile jar's splash — so it is still
+pulling when the thing you put it down for arrives: bait a corridor you are not
+defending, buy a route to the safe room, or feed a crowd into a molotov you
+already threw. It coats nobody, deliberately. A leak that turned the nearest
+survivor into the target would just be a worse bile jar with a longer fuse.
+
+Sixty seconds to respawn rather than forty, because a fifty-second zone on a
+forty-second clock is one player keeping a permanent leak running somewhere on
+the map.
+
+The **bile jar** is the short-range answer to the same question and is unchanged
+— no map folder, still placed by the Director from the built-in model. Give it a
+`Bile Jars` folder and one entry in `MapConfig.MapItems` and it joins the
+others; nothing else has to change.
 
 > `Assets/Throwables` still works as a fallback for anything the map does not
 > place, and the game no longer creates empty folders in there for the two that

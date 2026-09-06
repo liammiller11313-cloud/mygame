@@ -92,6 +92,17 @@ if command -v python3 >/dev/null 2>&1 && [ -f scripts/audit.py ]; then
   python3 scripts/audit.py || exit 1
 fi
 
+# A carried item is a chain of eight links across six files — map folder, spawn
+# point, pickup, slot, hand, use, effect, refill — and every one of them has
+# broken at least once, always silently. items.py walks the chain itself rather
+# than checking style: an item that cannot be picked up looks exactly like a map
+# with no items in it, and a throwable with no effect looks like a throw that
+# never happened.
+if command -v python3 >/dev/null 2>&1 && [ -f scripts/items.py ]; then
+  echo
+  python3 scripts/items.py || exit 1
+fi
+
 # The economy is a set of numbers that only mean something together: change a
 # payout without changing prices and the whole progression moves. economy.py
 # models a round from the real config and fails when the pacing has drifted out
