@@ -136,6 +136,9 @@ copy is what the game uses:
   model does not carry one. Add your own named `Muzzle` and tracers and the flash
   come out of exactly where you put it — **and it is also what tells the game
   which way your gun points**, so it is the fix for the problem below.
+- **A `Grip` attachment is invented** if the model has neither one nor a part
+  named `Handle`. This is **where the hand holds the gun**, and it is the one
+  worth adding: see below.
 - **A `Sight` or `AimPoint` attachment**, if present, is what gets put on the
   screen's centre line when you aim — so a scope's glass lines up with the
   crosshair instead of merely near it.
@@ -143,8 +146,43 @@ copy is what the game uses:
   then the biggest part in the model.
 
 None of this is required. A bare model with no attachments and no PrimaryPart
-works; the four bullets above are what you get for free and what to add if you
+works; the five bullets above are what you get for free and what to add if you
 want it exact.
+
+### Where the hand goes, and why yours might be wrong
+
+If the model carries a part named `Handle`, that part's own box says where the
+hand is and the answer is the author's. If it does not, one is invented at the
+centre of the model and the hold point is worked out from the model's
+proportions and its **class** in `WeaponConfig`:
+
+| Class | Hand sits |
+|---|---|
+| Shotgun, Rifle, SMG, LMG, Marksman, Launcher | about **64% back** from the muzzle, below the bore |
+| Pistol, Melee | about **78% back**, because the model is mostly grip |
+
+That is a decent guess for a rifle-shaped thing and a poor one for anything
+unusual — **a dual-wield pair worst of all**, because where the two halves sit
+relative to each other is not measurable from outside.
+
+The boot log names every supplied model that had to be guessed at:
+
+```
+[PlaceholderFactory] 3 supplied weapon model(s) carry no Handle part and no Grip
+attachment, so where the hand holds them was guessed from their proportions ...
+```
+
+**The fix is one attachment.** Put an `Attachment` called `Grip` on your model
+where the hand should close around it, and none of the above runs — the gun is
+held exactly where you said. Add `Muzzle` at the barrel too and the facing, the
+tracers and the flash all become exact as well.
+
+> This used to be broken rather than approximate. The offsets were measured
+> against the *invented* handle — a 0.4-stud cube — instead of against the
+> model, so they came out around a tenth of a stud and every supplied gun
+> without a `Handle` part was held by its **geometric middle**: receiver in the
+> palm, stock through the forearm. On a long weapon that reads exactly as "it
+> does not fit in the hand".
 
 ## If a gun comes out sideways — in either hand
 

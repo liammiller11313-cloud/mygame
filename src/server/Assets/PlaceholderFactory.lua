@@ -2118,25 +2118,35 @@ end
 	extents is the one choice that behaves predictably for anything: the
 	viewmodel poses about it, ItemPlacer rests a dropped gun on it, and it never
 	buries the model in the floor the way a grip-shaped pivot would.
+
+	── AND IT RETURNS WHETHER IT HAD TO INVENT ONE ─────────────────────────────
+	Because the two cases are not interchangeable and ensureGrip was treating
+	them as if they were. A real Handle is a grip-shaped part whose own box says
+	where the hand goes; this one is a 0.4-stud cube that says nothing about the
+	model at all. Measuring a grip offset off THAT box gives a tenth of a stud in
+	each direction, which is the same as no offset — see ensureGrip.
 ]]
-local function ensureHandle(model: Model): BasePart?
+local INVENTED_HANDLE_SIZE = 0.4
+
+local function ensureHandle(model: Model): (BasePart?, boolean)
 	local existing = model:FindFirstChild("Handle", true)
 	if existing and existing:IsA("BasePart") then
-		return existing
+		return existing, false
 	end
 
 	local reference = model.PrimaryPart or largestPart(model)
 	if not reference then
-		return nil
+		return nil, false
 	end
 
 	local min, max = extentsIn(model, reference.CFrame)
+	local size = INVENTED_HANDLE_SIZE
 	local handle =
-		prop("Handle", V(0.4, 0.4, 0.4), reference.CFrame * CFrame.new((min + max) * 0.5), GUN.dark)
+		prop("Handle", V(size, size, size), reference.CFrame * CFrame.new((min + max) * 0.5), GUN.dark)
 	handle.Transparency = 1
 	handle.CanQuery = false
 	handle.Parent = model
-	return handle
+	return handle, true
 end
 
 -- Parts whose name says "this end of the gun is the loud end".
@@ -2176,7 +2186,24 @@ local BARREL_NAMES = table.freeze({
 	     better guess than the handle's centre — which on a model whose "Handle"
 	     is the whole receiver puts the grip in the middle of the weapon.
 ]]
-local function ensureGrip(model: Model, handle: BasePart): Attachment
+--[[ Weapons whose hold point this file had to invent, so ensureAssets can name
+     them. Filled by adoptWeapon; read once at boot. ]]
+local guessedGrips: { [string]: boolean } = {}
+
+--[[ Classes whose box extends well past the hand — a stock, a receiver, a
+     barrel. A pistol and a melee weapon are the other shape: the hand is near
+     the back of the model because the model is mostly grip. ]]
+local LONG_GUN_CLASS = table.freeze({
+	SMG = true,
+	Rifle = true,
+	Shotgun = true,
+	LMG = true,
+	Marksman = true,
+	Launcher = true,
+	Special = true,
+})
+
+local function ensureGrip(model: Model, handle: BasePart, invented: boolean, longGun: boolean): Attachment
 	local existing = findAttachmentNamed(model, "Grip")
 	if existing then
 		return existing
@@ -2254,10 +2281,58 @@ local function ensureGrip(model: Model, handle: BasePart): Attachment
 		u = handle.CFrame:VectorToObjectSpace(pivot.RightVector)
 	end
 
-	local half = handle.Size * 0.5
+	--[[
+		WHICH BOX TO MEASURE, AND THE BUG THAT WAS.
+
+		The offsets below are "some of the way back along the barrel, and down".
+		Back and down FROM WHAT is the whole question, and this measured the
+		HANDLE's box for both cases.
+
+		That is right for a model that shipped its own Handle: it is a
+		grip-shaped part, and its box is a real statement about where the hand
+		goes. It is meaningless for the one ensureHandle invents, which is a
+		0.4-stud cube at the centre of the extents — `half` is 0.2 on every axis,
+		so reach and drop came out around a tenth of a stud and the grip landed
+		effectively AT the model's centre.
+
+		Every supplied gun without a Handle part was therefore held by its
+		geometric middle: the receiver in the palm, the stock through the
+		forearm, the barrel out past where a hand could hold it. On a long
+		weapon that reads exactly as "it does not fit in the hand".
+
+		So when the handle was invented, measure the MODEL. Nothing about a
+		model that brought its own Handle changes — which is also every grey-box
+		this file builds, since those name their own.
+	]]
+	local half
+	if invented then
+		local min, max = extentsIn(model, handle.CFrame)
+		half = (max - min) * 0.5
+	else
+		half = handle.Size * 0.5
+	end
 	local reach = math.abs(f.X) * half.X + math.abs(f.Y) * half.Y + math.abs(f.Z) * half.Z
 	local drop = math.abs(u.X) * half.X + math.abs(u.Y) * half.Y + math.abs(u.Z) * half.Z
-	local position = -f * (reach * 0.6) - u * drop
+
+	--[[
+		How far back, and how far down, as fractions of the model's own box.
+
+		A pistol is nearly all grip: the hand sits well behind the middle and the
+		butt is the back of the model. A long gun is not — the stock carries the
+		box a long way past the hand, so the same fraction would hold a rifle by
+		its buttplate. The class is the only thing that separates them and it is
+		already on the definition, so it is passed in rather than guessed at from
+		proportions, which a bullpup would defeat anyway.
+
+		These are fractions of a HALF-extent, so 0.55 of a pistol's half-length
+		is roughly a quarter of the whole gun behind centre. They are calibrated
+		by reasoning about where a hand goes on a firearm rather than by looking
+		at any particular model — which is exactly why a model that cares should
+		ship a Grip attachment and skip all of this. See docs/WEAPON_MODELS.md.
+	]]
+	local backFraction = if longGun then 0.28 else 0.55
+	local downFraction = if longGun then 0.62 else 0.42
+	local position = -f * (reach * backFraction) - u * (drop * downFraction)
 	attachment.CFrame = CFrame.lookAt(position, position + f, u)
 	attachment.Parent = handle
 	return attachment
@@ -2308,7 +2383,7 @@ end
 local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): Model?
 	sanitise(model)
 
-	local handle = ensureHandle(model)
+	local handle, invented = ensureHandle(model)
 	if not handle then
 		warnOnce("noparts:" .. weaponId, string.format("the %s weapon model has no parts", weaponId))
 		model:Destroy()
@@ -2339,7 +2414,21 @@ local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): 
 	--[[ On the viewmodel too. It costs one attachment and it means the two models
 	     agree about where the weapon is held, which is what a future third-person
 	     camera would need to line them up. ]]
-	ensureGrip(model, handle)
+	local definition = WeaponConfig.get(weaponId)
+	local class = definition and definition.class or ""
+	local hadGrip = findAttachmentNamed(model, "Grip") ~= nil
+	ensureGrip(model, handle, invented, LONG_GUN_CLASS[class] == true)
+
+	--[[ Named, once per weapon, when BOTH halves of where-to-hold-it were
+	     guessed. A model that shipped either a Handle part or a Grip attachment
+	     is being held where its author said; one that shipped neither is being
+	     held where this file's proportions put it, which is a decent guess and
+	     never a right answer. The list is the actionable half: it says which
+	     models to add one attachment to. ]]
+	if invented and not hadGrip and not viewmodel then
+		guessedGrips[weaponId] = true
+	end
+
 	model.Name = weaponId
 	return model
 end
@@ -4183,6 +4272,38 @@ function PlaceholderFactory:ensureAssets()
 					.. "a Model or a Tool, either works. See docs/WEAPON_MODELS.md: %s",
 				#missingModels,
 				table.concat(missingModels, " · ")
+			)
+		)
+	end
+
+	--[[
+		And the models that ARE supplied but said nothing about where to hold
+		them.
+
+		A different problem from the list above and easy to confuse with it:
+		these models loaded fine. They have no Handle part and no Grip
+		attachment, so the hold point is this file's proportions rather than the
+		author's intent — which is a decent guess for a rifle-shaped thing and a
+		poor one for anything unusual, a dual-wield pair worst of all, since
+		where the two halves sit is not measurable from outside.
+
+		Worth one line because it is silent otherwise: a gun held slightly wrong
+		looks like an animation problem, and the fix is one attachment.
+	]]
+	local guessed = {}
+	for weaponId in guessedGrips do
+		table.insert(guessed, weaponId)
+	end
+	if #guessed > 0 then
+		table.sort(guessed)
+		print(
+			string.format(
+				"[PlaceholderFactory] %d supplied weapon model(s) carry no Handle part and no Grip "
+					.. "attachment, so where the hand holds them was guessed from their proportions. "
+					.. "Add an Attachment called Grip where the hand goes — and Muzzle at the barrel "
+					.. "— to make it exact. See docs/WEAPON_MODELS.md: %s",
+				#guessed,
+				table.concat(guessed, " · ")
 			)
 		)
 	end
