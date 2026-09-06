@@ -67,6 +67,9 @@ local CONTROLLERS = {
 	-- The horde's walk cycle. Client-side because a continuous gait replicated
 	-- from the server would be a quarter of a million property writes a second.
 	"Effects/InfectedPoseController",
+	--[[ Before the HUD, and that is only tidiness — it draws on its own ScreenGui
+	     under everything by DisplayOrder, not by boot order. ]]
+	"UI/Dread",
 	"UI/HudController",
 	"UI/WaveController",
 	-- After WaveController, whose block height it asks for to sit underneath it.

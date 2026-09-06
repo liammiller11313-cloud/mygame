@@ -159,7 +159,14 @@ UITheme.Grime = table.freeze({
 	background that has failed. Raise it and check the title, not the picture.
 ]]
 UITheme.Backdrop = table.freeze({
-	Image = "rbxassetid://88999880172157",
+	--[[ The photograph behind the main menu. Swapped 2026-09-05; the grade below
+	     was authored against the previous one and is deliberately left alone,
+	     because every number in it is a READABILITY constraint rather than a
+	     flattering one — the scrim exists to keep white headline type legible and
+	     the vignette is measured against the menu's own two columns. Both hold
+	     for any picture. If the new one wants a warmer or cooler cast, Tint is
+	     the number to move and it is the only one that is purely taste. ]]
+	Image = "rbxassetid://111807251881801",
 
 	--[[ Multiplied into the image, so it both grades and darkens. Warm, because
 	     the bulb is the only warm thing left in this game's palette and the round
@@ -518,6 +525,88 @@ UITheme.DamageIndicator = table.freeze({
 	MinDistance = 2,
 })
 
+--[[
+	── THE DREAD LAYER ─────────────────────────────────────────────────────────
+
+	Two things, drawn under everything else, on every screen the game has: the
+	menu, the round, the results card. They are the difference between a dark
+	interface and a frightening one.
+
+	AN EDGE THAT IS ALWAYS THERE. UITheme.Vignette below is a READOUT — it reddens
+	as you get hurt and it is honestly blank when you are fine, which is correct
+	for a thing whose job is to tell you something. The consequence is that a
+	healthy survivor plays inside a perfectly clean rectangle. This is the other
+	kind of vignette: black, quiet, permanent, and it never says anything. It is
+	there so the screen has edges that close in rather than a border.
+
+	It also BREATHES, on a period slow enough that nobody consciously sees it
+	move. That is the whole trick — a still frame reads as a picture and a frame
+	that is never quite still reads as a place.
+
+	AND AN IMAGE THAT WILL NOT SIT STILL. Two full-screen gradients at angles that
+	do not agree, whose stops are re-randomised several times a second. Where they
+	cross they interfere, and the frame develops a slow uneven cast that keeps
+	moving — light through dirty glass rather than a clean pane.
+
+	It is NOT film grain and is deliberately not called that. Real grain is
+	per-pixel and needs a texture; a UIGradient interpolates smoothly between at
+	most twenty stops, so what this can produce is soft banding at a scale of
+	tens of pixels, not speckle. Set HazeImage to a seamless noise tile and the
+	layer uses that instead — which IS grain — and the gradients are what you get
+	for free until somebody uploads one.
+
+	It re-seeds at HazeFps rather than per frame, and that is a look decision
+	before it is a cost one: something that changes every frame at 120Hz reads as
+	electronic noise, and something that changes fourteen times a second reads as
+	a projector.
+]]
+UITheme.Dread = table.freeze({
+	--[[ How far in from each edge the darkness reaches, and how black it is at
+	     the very corner. Deliberately shallower and far weaker than the menu
+	     backdrop's — that one is protecting headline type over a photograph,
+	     this one is under a HUD somebody has to read while being chased. ]]
+	EdgeExtent = 0.26,
+	EdgeStrength = 0.40,
+
+	--[[ The breath. Eighteen seconds is long enough that it never reads as a
+	     pulse; the depth is a fifth of the edge, which is under the threshold
+	     where anybody could point at it and say what changed. ]]
+	BreathPeriod = 18.0,
+	BreathDepth = 0.2,
+
+	--[[ Transparency, so the BIGGER number is the fainter haze — and it wants to
+	     be very faint indeed. Two layers at 0.955 each is already at the edge of
+	     what anybody notices, which is exactly where it belongs: the moment a
+	     player can SEE this it has stopped being atmosphere and started being a
+	     filter over their game. ]]
+	HazeTransparency = 0.955,
+	HazeFps = 14,
+	--[[ Angles that share no common factor, so the two layers never line up into
+	     one visible band pattern. Parallel or perpendicular is the failure mode. ]]
+	HazeAngleA = 73,
+	HazeAngleB = 149,
+	HazeStops = 18, -- NumberSequence allows 20; the two ends are spent on 0 and 1
+
+	--[[
+		A seamless noise tile, if there is one. Empty by default and empty is a
+		perfectly good answer — the gradients above are the assetless version.
+
+		Set it and the layers become REAL grain: the tile is repeated at
+		HazeTileSize and its offset is jerked to a new random place on the same
+		clock, which is per-pixel speckle rather than soft banding. That is the
+		better effect and it costs one upload; it is not the default because a
+		missing or unloaded image is a broken square over somebody's HUD, and an
+		atmosphere layer must never be able to do that.
+	]]
+	HazeImage = "",
+	HazeTileSize = 128,
+
+	--[[ A phone is a smaller screen held closer, and a full-strength vignette on
+	     one eats the corners of a HUD that is already tight. It also has the
+	     least frame budget to spend on something nobody is looking at. ]]
+	MobileScale = 0.55,
+})
+
 UITheme.Vignette = table.freeze({
 	HurtStart = 0.45, -- health fraction at which the edges start to redden
 	MaxIntensity = 0.62,
@@ -540,6 +629,12 @@ UITheme.Motion = table.freeze({
 })
 
 UITheme.DisplayOrder = table.freeze({
+	--[[ The dread EDGES, under everything including the health vignette. They are
+	     the world closing in rather than part of the interface, so they darken the
+	     3D view and nothing the player has to read. The main menu does not need
+	     them and does not get them — it draws its own, stronger, over its own
+	     photograph. See UITheme.Backdrop.VignetteExtent. ]]
+	Dread = 4,
 	Vignette = 5,
 	Hud = 10,
 	Crosshair = 15,
@@ -586,6 +681,20 @@ UITheme.DisplayOrder = table.freeze({
 	     draws and the only thing on screen while it runs: a splash with any layer
 	     over it is a splash with somebody's HUD bleeding through the studio
 	     logo. ]]
+	--[[ The dread HAZE, and it is the one thing in this game that draws over the
+	     interface on purpose.
+
+	     It is a LENS rather than a layer of UI: the grime is on the glass the
+	     whole game is seen through, so a menu that is exempt from it reads as a
+	     different, cleaner screen — which is exactly the seam this was added to
+	     close. At 4.5% black it costs nothing legible even over body text.
+
+	     Above Fade so a transition to black keeps its texture instead of becoming
+	     a clean rectangle at the one moment there is nothing else to look at, and
+	     below Splash so the boot logo is the one image in the game that is not
+	     seen through dirt.
+	]]
+	DreadHaze = 92,
 	Splash = 100,
 })
 
