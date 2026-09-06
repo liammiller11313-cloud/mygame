@@ -955,6 +955,21 @@ function SurvivorService:leaveRound(player: Player): boolean
 	     survivor who is no longer there to finish it. ]]
 	self:_cancelInteraction(record)
 	self:_cancelHelp(record)
+
+	--[[ And out of the dead queue, which this was the one exit that forgot.
+
+	     spawnSurvivor and _respawn both do it, and _destroyRecord does it for a
+	     player who leaves the SERVER — leaving the MATCH was the single door
+	     that dropped a survivor to Spectating while their name sat at the head
+	     of awaitingRescue. _classify keeps lighting the Rescue prompt while that
+	     queue is non-empty, so a teammate holds a closet for the full rescue
+	     time, spends it, and rescueFromCloset respawns somebody who is sitting
+	     in the main menu. The team paid for a body that walks away again. ]]
+	local queued = table.find(awaitingRescue, player)
+	if queued then
+		table.remove(awaitingRescue, queued)
+	end
+
 	self:_setState(record, STATE.Spectating)
 
 	--[[ The body goes rather than being left standing. A character with no
@@ -1696,6 +1711,14 @@ end
 function SurvivorService:_respawn(player: Player, cframe: CFrame?, health: number)
 	local record = self:_ensureRecord(player)
 	if record.eliminated then
+		return
+	end
+	--[[ Belt to leaveRound's braces. This function's header calls itself the one
+	     door where the rules that must not be forgotten live, and "somebody who
+	     asked to leave does not get put back in a body" is one of them. The
+	     queue removal above is what stops a rescue being aimed at them; this is
+	     what stops any OTHER caller landing one anyway. ]]
+	if player:GetAttribute(Attributes.Player.LeftMatch) == true then
 		return
 	end
 	record.health = math.min(health, self:_cap(record))

@@ -4,7 +4,12 @@
 
 	Two screens in one file because they are two views of one thing:
 
-	  THE PANEL   opened from the main menu. Three loadouts down the left, the
+	  THE PANEL   opened from the main menu, and ALSO from the round-start
+	              picker's EDIT button — which is why it claims the cursor and
+	              suppresses the round on open. Mid-round there is no menu
+	              holding either, and a full-screen editor over a locked
+	              first-person camera is one nobody can click. Three loadouts
+	              down the left, the
 	              selected one's three slots on the right — primary, sidearm and
 	              melee — and a weapon picker that takes over the right-hand side
 	              when you change one.
@@ -49,6 +54,7 @@ local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
+local FreeCursor = require(script.Parent.FreeCursor)
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local UiSound = require(script.Parent.UiSound)
@@ -245,6 +251,8 @@ local pickerHint: TextLabel
 
 local state = {
 	open = false,
+	-- Whether this panel has the round turned off. See setSuppressed.
+	suppressed = false,
 	--[[ Which of the three the panel is showing. Not the same as the ACTIVE one:
 	     you edit one loadout while spawning with another, which is most of the
 	     point of having three. ]]
@@ -1564,12 +1572,59 @@ function LoadoutController:isOpen(): boolean
 	return state.open
 end
 
+--[[
+	Owned here, written by FreeCursor. See PauseController's copy of this: these
+	screens nest, so a shared slot would have the inner one hand back the outer
+	one's camera.
+]]
+local restore = {
+	cameraMode = nil :: any,
+	cameraZoom = nil :: any,
+	cameraMinZoom = nil :: any,
+	mouseIcon = nil :: any,
+}
+
+--[[ Suppress the round while this is up, unless the main menu already has.
+     Without it W/A/S/D still walks the survivor around the safe room and the
+     number keys still swap weapons behind a full-screen panel.
+
+     The same four controllers PauseController turns off, and for the same
+     reason: input alone leaves a crosshair and interaction prompts drawn over
+     a menu, which reads as a screen you can shoot through. ]]
+local function setSuppressed(value: boolean)
+	if state.suppressed == value then
+		return
+	end
+	state.suppressed = value
+	callController("InputController", "setEnabled", not value)
+	callController("CrosshairController", "setVisible", not value)
+	callController("PromptController", "setEnabled", not value)
+	callController("TouchController", "setVisible", not value)
+end
+
+--[[
+	The mouse, and why this panel needs to ask for it now when it never used to.
+
+	This file's header said "opened from the main menu", and while that was the
+	only way in it was true and this was unnecessary: the menu already holds the
+	cursor and the input lock. The round-start picker's EDIT button is a second
+	entrance, and it opens the same panel mid-round with no menu anywhere —
+	where CameraController has the survivor in LockFirstPerson and Roblox welds
+	the pointer to the middle of the screen.
+
+	A full-screen editor nobody can click a single control in is what that
+	produced: CLOSE, the loadout cards, the slot rows, SET ACTIVE and the rename
+	box all unreachable, with Escape the only way out. That is the exact case
+	FreeCursor was written for.
+]]
 function LoadoutController:open()
 	if state.open then
 		return
 	end
 	state.open = true
 	gui.Enabled = true
+	setSuppressed(not menuIsOpen())
+	FreeCursor.take(restore)
 	refreshPanelSize()
 	applyTouchSizing()
 
@@ -1589,6 +1644,8 @@ function LoadoutController:close()
 	gui.Enabled = false
 	preview:setTurning(false)
 	GamepadFocus.release(state.firstCard)
+	FreeCursor.giveBack(restore)
+	setSuppressed(false)
 	if menuIsOpen() then
 		callController("MainMenuController", "reassertSuppression")
 	end

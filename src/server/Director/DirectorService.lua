@@ -1998,11 +1998,39 @@ function DirectorService:_drainQueue(now: number)
 			-- whole spawn budget re-running a search that just failed.
 			self._starved += 1
 			self._starvedReason = failure or "unknown"
-			-- A boss is the exception: its flow threshold is only consumed on a
-			-- successful placement, so _updateBosses will offer it again after
-			-- the retry gap rather than losing the set piece entirely.
+			--[[
+				A BOSS GOES BACK IN THE QUEUE. Everything else is dropped, and
+				that is right: the population deficit is recomputed every
+				interval and will simply ask again.
+
+				A boss is asked for ONCE. The old comment here said _updateBosses
+				would re-offer it after the retry gap, which is true in campaign
+				and false in every wave round ever played — _updateBosses returns
+				on its first line while _waveMode is set, and _waveMode latches on
+				the first setWaveBudget, which RoundService sends during prep. So
+				_bossRetryAt was written and never read again, releaseBoss is
+				documented as a thing callers MUST NOT retry, and the wave's Tank
+				was gone for good. The team heard the callout and nothing walked
+				in; on wave 15 the finale ran with no boss at all.
+
+				It fails precisely when the team is standing in the open with
+				clear sight lines — the one case releaseBoss cannot relax — which
+				is a situation that resolves itself the moment somebody moves. So
+				it is re-queued at the tail, behind whatever else is waiting, and
+				the ordinary placement backoff paces the next attempt. _dropQueued
+				already leaves SOURCE_BOSS alone across phase changes, so it
+				survives to the moment the sight lines change.
+			]]
 			if request.source == SOURCE_BOSS then
 				self._bossRetryAt = now + BOSS_RETRY_INTERVAL
+				self:_enqueue(
+					SOURCE_BOSS,
+					request.kind,
+					request.anchor,
+					request.radius,
+					request.flank,
+					request.elite
+				)
 			end
 			self._placementBackoffUntil = now + PLACEMENT_BACKOFF
 			break

@@ -642,11 +642,22 @@ end
 	belongs to another server — which means ours went stale and somebody else
 	took it, and whatever they have is newer than whatever we have.
 ]]
-local function saveProfile(player: Player, profile: Profile, release: boolean): boolean
+local function saveProfile(player: Player, profile: Profile, release: boolean, heartbeat: boolean?): boolean
 	if profile.degraded or not storeAvailable then
 		return false
 	end
-	if not profile.dirty and not release then
+	--[[ A clean profile is normally not worth a write, and there is one case
+	     where it is: the write IS the lock refresh.
+
+	     The autosave loop has always scheduled a clean profile at LOCK_TTL * 0.5
+	     for exactly that, and this guard swallowed it — so the branch was dead,
+	     lock.at was never re-stamped, and the heartbeat this file's header
+	     promises did not exist. A player who browsed the shop for five minutes
+	     without buying anything had a stale lock, and the next server they
+	     joined took it as abandoned instead of waiting the couple of seconds for
+	     this one to release it cleanly. That is a profile rolled back to
+	     whatever the thief loaded. ]]
+	if not profile.dirty and not release and not heartbeat then
 		return true
 	end
 
@@ -1274,9 +1285,14 @@ function ProfileService:start()
 				     released, while an earlier save in this same batch yielded. ]]
 				local profile = profiles[player]
 				if profile and not profile.degraded then
-					local interval = if profile.dirty then AUTOSAVE_INTERVAL else LOCK_TTL * 0.5
+					local dirty = profile.dirty
+					local interval = if dirty then AUTOSAVE_INTERVAL else LOCK_TTL * 0.5
 					dueAt[player] = os.clock() + interval
-					saveProfile(player, profile, false)
+					--[[ The clean branch asks for the write explicitly. Half the
+					     lock's life is the cadence this schedule was built
+					     around, and it only means anything now that saveProfile
+					     stops discarding it. ]]
+					saveProfile(player, profile, false, not dirty)
 				end
 			end
 		end

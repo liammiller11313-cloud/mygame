@@ -476,7 +476,33 @@ function ProgressionService:start()
 		onClaim(player)
 	end)
 
-	serviceTrove:connect(Remotes.Event.SetWornReward.OnServerEvent, onSetWorn)
+	--[[
+		Throttled like its two neighbours, and it needs it more than either.
+
+		This was the one raw connection in the file, and every accepted packet
+		costs a DataStore UpdateAsync: onSetWorn ends in setWorn -> markChanged ->
+		flush, and setWorn reports a change every time the value actually moves.
+		The career screen's reward rows toggle between an id and "", so nothing
+		dedupes a player mashing one — and a crafted client need not even mash.
+
+		The budget that runs out is not theirs. UpdateAsync is a per-server
+		resource, so one player at packet rate exhausts it for EVERYBODY on that
+		server: purchases, level-ups and pass claims all stop being written for
+		the rest of the session, silently, while two replicated attributes churn
+		to every client.
+
+		0.35s, the same as a pass claim, because both are a button a person
+		presses and neither is something a person presses three times a second.
+	]]
+	local lastWornAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
+	serviceTrove:connect(Remotes.Event.SetWornReward.OnServerEvent, function(player: Player, ...)
+		local now = os.clock()
+		if lastWornAt[player] and now - lastWornAt[player] < CLAIM_COOLDOWN then
+			return
+		end
+		lastWornAt[player] = now
+		onSetWorn(player, ...)
+	end)
 
 	serviceTrove:connect(Players.PlayerAdded, function(player: Player)
 		local active = Registry.find("RoundService")

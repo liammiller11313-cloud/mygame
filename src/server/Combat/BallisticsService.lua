@@ -311,9 +311,30 @@ local function isPierceable(result: RaycastResult): boolean
 		return true
 	end
 	if Players:GetPlayerFromCharacter(model) then
-		-- A round stops in a teammate. Letting a rifle thread the whole team is
-		-- how friendly fire goes from a tense mistake to a wipe.
-		return false
+		--[[
+			A round stops in a teammate ONLY IF IT COULD HAVE HURT THEM.
+
+			With friendly fire on, letting a rifle thread the whole team is how a
+			tense mistake becomes a wipe, and that is what this rule was for.
+			With it off — which is the shipped setting — DamageService returns a
+			blocked result for that teammate, so the round did nothing to anybody
+			and stopping it bought nothing. What it cost was the doorway: every
+			rifle round and every shotgun pellet terminating in a friend's back,
+			no damage to them, none to the horde behind them, no hitmarker, no
+			blood and no impact effect. Just a tracer stopping short and the
+			shooter being told off for it every four seconds.
+
+			MeleeService reasons from the same premise and reaches the same
+			answer out loud — "a machete that a teammate can body-block is a
+			machete nobody swings in the doorway it exists for" — and adds every
+			survivor to its ignore list. Guns and melee now agree about the same
+			rule under the same flag instead of contradicting each other.
+
+			No penetration is spent either way, exactly as a corpse costs none: a
+			body that cannot be hurt should not be able to weaken the shot that
+			passes through it.
+		]]
+		return not GameConfig.Survivor.FriendlyFireEnabled
 	end
 	return true
 end

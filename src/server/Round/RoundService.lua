@@ -1656,17 +1656,36 @@ function RoundService:start()
 		     denominator drops with them, but only if it is recounted. ]]
 		player:SetAttribute(Attributes.Player.Ready, false)
 
-		--[[ And the body only when there IS a round to take one out of. Everything
-		     above is bookkeeping that is correct in any state; this is the half
-		     that needs one running. ]]
-		if not self:isRunning() then
-			return
-		end
+		--[[
+			And out of the survivor roster, in EVERY state.
 
+			This used to return early unless a round was running, on the reasoning
+			that taking a body out needs a round to take it out of. The body, yes.
+			The RECORD, no — records outlive rounds, and that is the whole bug.
+
+			Victory, TeamWipe and Lobby all report isRunning() false, and the
+			results screen is exactly where this remote gets fired: the client
+			sends LeaveMatch on every dismissal of the poster. So a player who
+			clicked through their victory screen kept a record in Healthy for the
+			rest of the server's life, with no body and no intention of playing.
+			canTeamRecover then answers true forever on their behalf, _checkWipe
+			can never fire, and the NEXT round cannot end when its real survivors
+			go down — it runs its full seventeen minutes with somebody bleeding
+			out on the floor and nobody left to reach them.
+
+			leaveRound already returns false for a player who is Spectating, so
+			calling it in the lobby is a no-op rather than a special case. The
+			lines below it still need a live round, and still say so.
+		]]
 		local survivors = Registry.find("SurvivorService")
 		if survivors and typeof(survivors.leaveRound) == "function" then
 			survivors:leaveRound(player)
 		end
+
+		if not self:isRunning() then
+			return
+		end
+
 		if holdUntil > 0 then
 			publishReady(true)
 		end
