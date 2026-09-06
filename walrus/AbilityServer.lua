@@ -24,7 +24,20 @@ useAbility.Parent = ReplicatedStorage
 --  HELPERS - the shared bits the abilities below use
 -- ============================================================
 
--- Finds every living player within `range` studs and roughly in front of you.
+-- Is there a clear line between these two? Without this you can swipe
+-- people through walls, which feels broken the first time it happens.
+local function canSee(fromRoot, toRoot)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { fromRoot.Parent, toRoot.Parent }
+	params.IgnoreWater = true
+
+	local hit = workspace:Raycast(fromRoot.Position, toRoot.Position - fromRoot.Position, params)
+	return hit == nil -- nothing in the way
+end
+
+-- Finds every living player you can actually reach: close enough, roughly in
+-- front of you, and not behind cover.
 -- minDot 0.4 is about a 130-degree cone. Closer to 1 = narrower, 0 = a full
 -- half-circle, -1 = all the way around you.
 local function findTargets(attacker, root, range, minDot)
@@ -43,13 +56,31 @@ local function findTargets(attacker, root, range, minDot)
 				local distance = offset.Magnitude
 
 				if distance > 0 and distance <= range and facing:Dot(offset.Unit) >= minDot then
-					table.insert(found, { Humanoid = otherHumanoid, Root = otherRoot })
+					if canSee(root, otherRoot) then
+						table.insert(found, { Player = other, Humanoid = otherHumanoid, Root = otherRoot })
+					end
 				end
 			end
 		end
 	end
 
 	return found
+end
+
+-- Every ability should deal damage through here, so kills always get counted.
+local function dealDamage(attacker, target, amount)
+	-- TakeDamage respects ForceFields, so it won't hit players still
+	-- protected at their spawn.
+	target.Humanoid:TakeDamage(amount)
+
+	-- That blow finished them off - put it on the attacker's scoreboard.
+	if target.Humanoid.Health <= 0 then
+		local leaderstats = attacker:FindFirstChild("leaderstats")
+		local kills = leaderstats and leaderstats:FindFirstChild("Kills")
+		if kills then
+			kills.Value += 1
+		end
+	end
 end
 
 -- A quick glowing puff so a swing you can feel is also a swing you can see.
@@ -76,6 +107,9 @@ end
 --  The key on the left ("Basic") must match exactly what the
 --  leaderboard says. Add a new ability by copying a whole block
 --  and making an EquipPad whose ABILITY_NAME is the new key.
+--
+--  Return false from Activate to mean "couldn't run" - the player
+--  then keeps their cooldown instead of paying for nothing.
 -- ============================================================
 
 local ABILITIES = {
@@ -90,9 +124,7 @@ local ABILITIES = {
 			flash(root.CFrame * CFrame.new(0, 0, -RANGE * 0.4), RANGE * 0.8, Color3.fromRGB(235, 245, 255), 0.15)
 
 			for _, target in ipairs(findTargets(player, root, RANGE, 0.4)) do
-				-- TakeDamage respects ForceFields, so it won't hit players
-				-- still protected at their spawn.
-				target.Humanoid:TakeDamage(DAMAGE)
+				dealDamage(player, target, DAMAGE)
 
 				-- A shove away from you, so a hit reads as a hit.
 				local push = (target.Root.Position - root.Position).Unit * 35
@@ -132,8 +164,7 @@ local ABILITIES = {
 				return false
 			end
 
-			-- Refuse rather than kill them. Returning false tells the
-			-- plumbing below not to spend the cooldown either.
+			-- Refuse rather than kill them, and hand the cooldown back.
 			if humanoid.Health <= HEALTH_COST then
 				return false
 			end
@@ -187,11 +218,15 @@ local ABILITIES = {
 --  THE PLUMBING - you shouldn't need to touch below here
 -- ============================================================
 
--- When each player last used an ability, so we can enforce cooldowns.
-local lastUsed = {}
+-- The server time each player's next go becomes available.
+local readyAt = {}
+
+-- Ability names we've already complained about, so a typo warns once
+-- instead of once per key press.
+local warnedNames = {}
 
 Players.PlayerRemoving:Connect(function(player)
-	lastUsed[player] = nil -- don't hang onto players who left
+	readyAt[player] = nil -- don't hang onto players who left
 end)
 
 useAbility.OnServerEvent:Connect(function(player)
@@ -207,24 +242,41 @@ useAbility.OnServerEvent:Connect(function(player)
 	-- Read what they have equipped straight off the leaderboard.
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local equipped = leaderstats and leaderstats:FindFirstChild("Equipped")
-	local ability = equipped and ABILITIES[equipped.Value]
+	if not equipped then
+		return
+	end
 
-	-- Nothing equipped yet, or a name with no ability behind it.
+	local ability = ABILITIES[equipped.Value]
 	if not ability then
+		-- "None" is the normal starting state, not a mistake. Any other name
+		-- with no ability behind it is almost always a typo on an EquipPad,
+		-- so say so in the Output window rather than failing silently.
+		if equipped.Value ~= "None" and not warnedNames[equipped.Value] then
+			warnedNames[equipped.Value] = true
+			warn(
+				("Ability %q is equipped but is not in the ABILITIES table - check the spelling on that EquipPad."):format(
+					equipped.Value
+				)
+			)
+		end
 		return
 	end
 
-	-- Still cooling down? Ignore the press.
-	local now = os.clock()
-	if now - (lastUsed[player] or 0) < ability.Cooldown then
-		return
+	-- GetServerTimeNow is the same clock on the server and on every client,
+	-- so the HUD can count the same cooldown down without asking us.
+	local now = workspace:GetServerTimeNow()
+	if now < (readyAt[player] or 0) then
+		return -- still cooling down
 	end
-	-- Charge them the cooldown first, then hand it back if the ability
-	-- returns false to say it couldn't run - too little health, say.
-	local previous = lastUsed[player]
-	lastUsed[player] = now
+
+	-- Start the cooldown first, then hand it back if the ability turns out
+	-- not to have run - too little health to go invisible, say.
+	local previous = readyAt[player]
+	readyAt[player] = now + ability.Cooldown
+	player:SetAttribute("AbilityReadyAt", readyAt[player])
 
 	if ability.Activate(player, root, humanoid) == false then
-		lastUsed[player] = previous
+		readyAt[player] = previous
+		player:SetAttribute("AbilityReadyAt", previous or 0)
 	end
 end)
