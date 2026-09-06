@@ -166,12 +166,34 @@ local DISMEMBER_WEIGHT = 0.5
 	Precedence is still right, and now for its own reason rather than as a way
 	around the arithmetic: a machete should take the limb it struck whatever the
 	score would have said, because "the machete takes heads off cleanly" is a
-	statement about the weapon and not about how hard it happened to hit. 0.5
-	claims the machete and the two marksman rifles — the three weapons
-	WeaponConfig describes that way — and leaves every automatic (0.38 and below)
-	and the shotgun (0.00) scoring exactly as they did.
+	statement about the weapon and not about how hard it happened to hit.
+
+	0.5 claims FIVE weapons, not the three an earlier draft of this counted: the
+	machete (0.80), the knife (0.75), the M1A EBR, the M24 and the scoped Mk18
+	(0.50 each). The knife is the second-hardest cutter in the game and belongs
+	on any list of what this number governs. Every automatic (0.38 and below) and
+	the shotgun (0.00) score exactly as they did.
+
+	── AND IT IS COMPARED WITH A TOLERANCE ─────────────────────────────────────
+	Because cutPreference is the DIFFERENCE of two decimal config values, and
+	decimals are not exact in binary. The M1A EBR is dismemberPower 0.95 against
+	gibPower 0.45, which every reader will call 0.5 and which IEEE 754 calls
+	0.49999999999999994 — so the highest dismemberPower in the entire roster
+	failed a `>= 0.5` test by six parts in a hundred quadrillion, silently, while
+	the M24 at 0.85 - 0.35 passed it exactly. One weapon fell out of a
+	hand-authored set of five for a reason no amount of reading WeaponConfig
+	could reveal.
+
+	The tolerance is the fix rather than nudging a weapon's numbers, because the
+	weapon numbers are design and this is arithmetic. It is far smaller than any
+	gap between real values here — the next weapon down is 0.45 — so it can only
+	ever rescue a value that was meant to be on the line.
 ]]
 local CUT_PRECEDENCE = 0.5
+
+-- See CUT_PRECEDENCE. Big enough to absorb decimal subtraction, orders of
+-- magnitude smaller than any distance between two real cutPreference values.
+local CUT_EPSILON = 1e-9
 
 -- Corpses expire on human timescales, so sweeping at 5Hz instead of 60 is the
 -- same behaviour for a twelfth of the cost.
@@ -506,14 +528,33 @@ function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: nu
 		return (if SCORING.FireNeverGibs then LEVEL.Incinerate else LEVEL.Gib), nil
 	end
 
-	-- A body that cannot come apart cannot come apart, and this beats every
-	-- other rule including ExplosiveAlwaysGibs. "A Tank falls in one piece; it
-	-- earned that" is a statement about the Tank, not about grenades.
-	if definition and not definition.dismemberable then
+	--[[
+		TWO QUESTIONS, AND THEY ARE NOT THE SAME QUESTION.
+
+		May this body lose a limb, and may it burst? A Tank answers no to both —
+		"a Tank falls in one piece; it earned that" — and for a long time one
+		flag carried both answers, because the Tank was the case it was written
+		against and the Tank does not care that they were conflated.
+
+		The Boomer does. It answers NO to the first and emphatically YES to the
+		second: taking an arm off a balloon is the wrong read every time, and
+		popping it is the entire creature. Under the single flag the early return
+		fired first, so the one infected whose identity is bursting was the only
+		special in the game that could not, its gibThreshold of 40 was
+		unreachable, and three comments across two files described behaviour
+		nothing produced.
+
+		Both refusals still beat every other rule, ExplosiveAlwaysGibs included:
+		a grenade under a Tank is a statement about the grenade, and the Tank is
+		not listening.
+	]]
+	local mayCut = definition == nil or definition.dismemberable == true
+	local mayBurst = definition == nil or definition.gibbable ~= false
+	if not mayCut and not mayBurst then
 		return LEVEL.None, nil
 	end
 
-	if ctx.damageType == Enums.DamageType.Explosive and SCORING.ExplosiveAlwaysGibs then
+	if ctx.damageType == Enums.DamageType.Explosive and SCORING.ExplosiveAlwaysGibs and mayBurst then
 		return LEVEL.Gib, nil
 	end
 
@@ -523,7 +564,11 @@ function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: nu
 	-- rather than after them. It can only ever fire on a region that has
 	-- something to sever, so a chest hit still bursts, and the shotgun never
 	-- reaches it at all.
-	if cutPreference >= CUT_PRECEDENCE and dismemberScore >= SCORING.DismemberScore then
+	if
+		mayCut
+		and cutPreference >= CUT_PRECEDENCE - CUT_EPSILON
+		and dismemberScore >= SCORING.DismemberScore
+	then
 		local part = self:_pickSeverablePart(model, ctx)
 		if part then
 			return LEVEL.Dismember, part
@@ -534,11 +579,11 @@ function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: nu
 	-- "overkill damage past which the body comes apart". Reading it as an extra
 	-- AND would make the Boomer's threshold of 1 mean nothing, and the Boomer
 	-- always coming apart is the joke that field was written for.
-	if score >= SCORING.GibScore or (definition and overkill >= definition.gibThreshold) then
+	if mayBurst and (score >= SCORING.GibScore or (definition and overkill >= definition.gibThreshold)) then
 		return LEVEL.Gib, nil
 	end
 
-	if dismemberScore >= SCORING.DismemberScore then
+	if mayCut and dismemberScore >= SCORING.DismemberScore then
 		local part = self:_pickSeverablePart(model, ctx)
 		if part then
 			return LEVEL.Dismember, part

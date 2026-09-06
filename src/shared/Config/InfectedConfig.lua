@@ -81,6 +81,16 @@ export type InfectedDefinition = {
 
 	-- Gore tuning; see GoreConfig for how these combine with weapon gibPower
 	gibThreshold: number, -- overkill damage past which the body comes apart
+	--[[ Whether the body may BURST at all. Nil means yes, which is every kind
+	     but the two that are meant to fall in one piece.
+
+	     Separate from `dismemberable` because they are separate questions and
+	     one flag answering both got the Boomer exactly backwards. A Boomer must
+	     never lose an arm and must always pop; a Tank must do neither. Written
+	     as one boolean, "cannot come apart" swallowed the pop as well, and the
+	     one infected whose whole identity is bursting was the only special in
+	     the game that could not. ]]
+	gibbable: boolean?,
 	dismemberable: boolean,
 	corpseLifetime: number,
 }
@@ -127,14 +137,20 @@ InfectedConfig.Definitions = {
 			200, and it was 45 — which against 50 health did not mean "past which
 			the body comes apart" but "any headshot at all".
 
-			The arithmetic nobody did: a head hit is multiplied by four, so the
-			WEAKEST gun in the game puts 96 into a 50-health Common and overkills
-			by 46. Every rifle in the roster cleared 45 on a headshot, gibThreshold
-			is a SUFFICIENT condition rather than an extra gate, and gib() deletes
-			the body outright. So the ordinary kill in this game — a headshot on a
-			Common — never left anything behind, and the 35-second protected
-			corpse a headshot is supposed to EARN had never once been created.
-			Two features pointed at the same moment, and this one silently won.
+			The arithmetic nobody did: a head hit is multiplied by four, so any gun
+			doing 24 or more puts 96+ into a 50-health Common and overkills by 46.
+			That is 24 of the 35 weapons in the roster, including the UMP-45 the
+			game hands every player at spawn — everything from an assault rifle
+			upward, both big pistols, and all five melee weapons. Only the SMGs,
+			the small pistols and the shotguns (whose pellets are counted one at a
+			time) fell short.
+
+			gibThreshold is a SUFFICIENT condition rather than an extra gate, and
+			gib() deletes the body outright. So the ordinary kill in this game — a
+			headshot on a Common, with the gun it starts you with — never left
+			anything behind, and the 35-second protected corpse a headshot is
+			supposed to EARN had never once been created. Two features pointed at
+			the same moment and this one silently won.
 
 			200 sits in the gap between what the heaviest scoped rifle delivers to
 			a head (158) and what a magnum does (222). So the gate now fires for
@@ -382,9 +398,18 @@ InfectedConfig.Definitions = {
 
 		--[[ Comes apart at the slightest provocation, and dismemberable is false
 		     on purpose: a Boomer is one balloon, and taking an arm off it instead
-		     of bursting it is the wrong read every time. ]]
+		     of bursting it is the wrong read every time.
+
+		     It could not actually pop until `gibbable` existed. GoreService read
+		     the single flag as "this body cannot come apart" and returned before
+		     either gate, so the threshold of 40 below had never once been
+		     reached and the one special the design calls a balloon was the only
+		     special in the game that always flopped over intact. Three separate
+		     comments — this one, and two in GoreService — asserted the opposite
+		     of what the code did. ]]
 		gibThreshold = 40,
 		dismemberable = false,
+		gibbable = true,
 		corpseLifetime = 20,
 	},
 
@@ -528,6 +553,7 @@ InfectedConfig.Definitions = {
 
 		gibThreshold = 2000,
 		dismemberable = false, -- a Tank falls in one piece; it earned that
+		gibbable = false, -- and that means neither limbs nor chunks. See the Boomer.
 		corpseLifetime = 60,
 	},
 
@@ -639,6 +665,7 @@ InfectedConfig.Definitions = {
 
 		gibThreshold = 4000,
 		dismemberable = false,
+		gibbable = false, -- a machine does not burst either. See the Boomer.
 		corpseLifetime = 60,
 	},
 } :: { [string]: InfectedDefinition }

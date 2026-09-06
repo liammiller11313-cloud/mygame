@@ -67,16 +67,14 @@ GoreConfig.Scoring = table.freeze({
 		own health.
 
 		Without this the ratio is unbounded, and on the smallest body in the game
-		it was not a variable at all — it was a large constant. A Common has 50
-		health, a head hit is multiplied by four, and the weakest gun in the game
-		still delivers 96 to a head. So EVERY killing headshot on a Common
-		overkilled by between 46 and 330: a ratio of 0.9 to 6.6, in a formula
-		whose other three terms add up to at most 1.5. The overkill term stopped
-		discriminating between an SMG and a sniper rifle and simply drowned them
-		both, and the result was that ordinary rifle fire burst commons — which
-		is the "I shoot them and they disappear" report, and which also meant the
-		35-second protected corpse a headshot is supposed to earn had never once
-		been created.
+		it barely varied. A Common has 50 health and a head hit is multiplied by
+		four, so a headshot from anything heavier than an SMG overkills it by 46
+		to 330 — a ratio of 0.9 to 6.6, in a formula whose other three terms add
+		up to at most 1.5. The overkill term stopped discriminating between a
+		carbine and a sniper rifle and drowned them both, and the result was that
+		ordinary rifle fire burst commons: the "I shoot them and they disappear"
+		report, and the reason the 35-second protected corpse a headshot is
+		supposed to earn had never once been created.
 
 		Half. Surplus damage equal to half the body's health again is the most
 		this term should ever be worth; past that, "very dead" and "extremely
@@ -86,11 +84,15 @@ GoreConfig.Scoring = table.freeze({
 		quarter — so the WEAPON is finally the biggest single input to whether a
 		body comes apart, which is what a gib system is for.
 
-		It cannot make anything un-gibbable: gibThreshold is a separate and
-		sufficient gate, and every archetype still bursts. Modelled across the
-		whole roster, this and the Common's raised threshold together cut the
-		Common's gib cases by 17% and moved every special by at most one case,
-		because no special is small enough for the cap to bind.
+		It cannot make anything un-gibbable that was not already: gibThreshold is
+		a separate and sufficient gate, and the only kinds that never burst are
+		the two that say so — see `gibbable` on the Tank and the Metallic.
+
+		Modelled across the whole roster (36 weapons x 4 regions x 2 ranges x 2
+		remaining-health extremes), this and the Common's raised threshold
+		together cut the Common's gib cases from 199 to 105 — a little under
+		half — and moved every special by at most one case, because no special is
+		small enough for the cap to bind.
 	]]
 	OverkillRatioCap = 0.5,
 	WeaponGibWeight = 0.75,

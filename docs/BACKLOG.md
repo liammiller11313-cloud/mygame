@@ -163,11 +163,13 @@ was — the bodies were never being created. An ordinary headshot on a Common
 *gibbed*, and `gib()` deletes the model.
 
 Two gates fired, both because a Common has 50 health and a head hit is
-multiplied by four, so the weakest gun in the roster overkills it by 46. Its
-`gibThreshold` of 45 read as "past which the body comes apart" and meant "any
-headshot"; and `overkillRatio` was uncapped, so on the smallest body in the game
-it was not a variable but a constant of 0.9 to 6.6, drowning the weapon, region
-and range terms that total at most 1.5. Now 200 and capped at 0.5.
+multiplied by four. Any gun doing 24 damage or more overkills it by 46 on a
+headshot — 24 of the 35 weapons, including the UMP-45 every player spawns with —
+and its `gibThreshold` of 45 read as "past which the body comes apart" while
+meaning "any headshot". Meanwhile `overkillRatio` was uncapped, so on the
+smallest body in the game it sat between 0.9 and 6.6, drowning the weapon,
+region and range terms that total at most 1.5. Now 200 and capped at 0.5, which
+cuts the Common's gib cases from 199 to 105 across the whole roster.
 
 The lesson both times is the same and is why this entry is long: **a symptom
 about bodies disappearing is not evidence about corpse lifetimes.** Twice the
