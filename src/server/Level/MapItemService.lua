@@ -314,6 +314,23 @@ local function buildFamily(root: Instance, family: MapConfig.MapItemFamily): num
 	return found
 end
 
+--[[
+	Whether a scan has actually happened against a live map.
+
+	Not the same question as "does this service exist", and the difference is a
+	whole class of false warning. Every module in the game is required — and so
+	registers — before ANY module's init() runs, but this service does not scan
+	until its start(), a whole phase later. So there is a window in which
+	`Registry.find("MapItemService")` answers yes and every getTemplate answers
+	nil, and anything that reads the second as "this map places none" is wrong
+	about a map that is full of them. PlaceholderFactory's boot prewarm sits
+	squarely in that window; see the guard in buildPickup.
+
+	Stays false when rebuild bails for want of a map root, because that is "could
+	not look" and not "looked and found nothing".
+]]
+local scanned = false
+
 --[[ Rediscovers every map item in whatever map is live. Called on boot and on
      every map swap; the previous map's spots are gone with the map, so this
      starts from nothing each time rather than trying to reconcile. ]]
@@ -339,6 +356,10 @@ function MapItemService:rebuild(): number
 			table.insert(report, string.format("%s x%d", family.key, found))
 		end
 	end
+	--[[ Set here rather than at the end: everything below is sorting and
+	     reporting, and a caller asking "have you looked" during that is owed a
+	     yes. It is never unset — a later map with no items is a real answer. ]]
+	scanned = true
 
 	--[[ By family first and then by index, so the whole list stays in a stable
 	     order a log line can be read against. Nothing depends on the order for
@@ -360,6 +381,12 @@ function MapItemService:rebuild(): number
 		)
 	end
 	return #spots
+end
+
+--[[ Whether this service has scanned a live map yet, so a caller can tell a
+     genuine "this map places none" from a "nobody has looked". See `scanned`. ]]
+function MapItemService:hasScanned(): boolean
+	return scanned
 end
 
 --[[

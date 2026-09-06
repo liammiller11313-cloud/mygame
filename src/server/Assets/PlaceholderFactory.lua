@@ -2853,13 +2853,22 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 		end
 
 		--[[
-			Only worth SAYING when the service exists and has nothing. The
-			boot-time prewarm calls this for every pickup id before that service is
-			registered at all, so warning unconditionally meant a complaint about
-			missing medkits on the startup of every server ever run, including one
-			with a map full of them.
+			Only worth SAYING when somebody has actually LOOKED and found nothing.
+
+			This used to ask whether the service exists, on the stated reasoning
+			that the boot prewarm runs "before that service is registered at all".
+			That premise is false, and the warning it guarded fired on every
+			server ever booted, including one with a map full of items — which is
+			how five of them turned up in a log from a stocked place.
+
+			Every module is required, and so registers, before ANY module's init()
+			runs. The prewarm is in PlaceholderFactory's init(). So MapItemService
+			is registered by then and answers this test yes — but it does not scan
+			the map until its start(), a phase later, so every getTemplate it can
+			give is nil. The service existing and the service having looked are
+			different facts and only the second one licenses a complaint.
 		]]
-		if mapItems then
+		if mapItems and typeof(mapItems.hasScanned) == "function" and mapItems:hasScanned() then
 			warnOnce(
 				"nomapitem:" .. itemId,
 				string.format(
@@ -2869,7 +2878,7 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 					family.modelName .. " 1",
 					family.folderName,
 					if itemId == Enums.HealthItem.Medkit
-						then ""
+						then " No medkit will be placed anywhere in this map."
 						else " Falling back to the built-in model for now."
 				)
 			)
@@ -3942,9 +3951,11 @@ function PlaceholderFactory:ensureAssets()
 	local rigs = {}
 	local empty = {}
 	local oversized = {}
-	--[[ Every boss's measured extents, keyed by kind. Filled in the walk below
-	     and judged after it, because the yardstick is one of the entries. ]]
-	local bossSize: { [string]: Vector3 } = {}
+	--[[ Every boss's measured extents, keyed by kind, and WHERE the body came
+	     from. Filled in the walk below and judged after it, because the yardstick
+	     is one of the entries — and because a supplied rig and a grey-boxed one
+	     cannot be compared. See the judgement below. ]]
+	local bossSize: { [string]: { size: Vector3, supplied: boolean } } = {}
 	for kind, definition in InfectedConfig.all() do
 		local variants = variantsFor(kind)
 		table.insert(rigs, string.format("%s x%d", kind, #variants))
@@ -3955,7 +3966,8 @@ function PlaceholderFactory:ensureAssets()
 		     folder alias was reported as having none, and the one line somebody
 		     reads after dropping models into a place said the opposite of the
 		     truth about them. ]]
-		if not suppliedEntry("Infected", infectedNames(kind, definition)) then
+		local supplied = suppliedEntry("Infected", infectedNames(kind, definition)) ~= nil
+		if not supplied then
 			table.insert(empty, kind)
 		end
 
@@ -3971,7 +3983,7 @@ function PlaceholderFactory:ensureAssets()
 		     seen yet. See below. ]]
 		if definition.isBoss and variants[1] then
 			local _, size = variants[1]:GetBoundingBox()
-			bossSize[kind] = size
+			bossSize[kind] = { size = size, supplied = supplied }
 		end
 	end
 
@@ -3981,23 +3993,51 @@ function PlaceholderFactory:ensureAssets()
 		Nothing happens without one. A place with no Tank rig has no yardstick,
 		and inventing an absolute is exactly the mistake this replaced — see
 		BOSS_HEIGHT_RATIO.
+
+		── AND ONLY LIKE AGAINST LIKE ──────────────────────────────────────────
+		A supplied rig and a grey-boxed one are not on the same ruler, and
+		comparing them says more about which folders somebody has filled in than
+		about either creature. The Metallic is the worked example: its scale is
+		solved backwards from a targetHeight of 17, so the grey box builds a
+		17-stud Metallic — while the grey-box Tank is 10.6, because nothing in
+		SHAPES can know that a real Tank arrives at 13.6. Run those two against
+		each other and the check reports x1.61 and warns, on a place where both
+		bodies are exactly what this file itself built.
+
+		So the ratio is only printed, and only asserted on, when both bodies came
+		from the same place. Mixed pairs still get their studs — the measurement
+		is real either way — with the ratio withheld rather than invented.
 	]]
 	local reference = bossSize[Enums.Infected.Tank]
-	for kind, size in bossSize do
+	for kind, entry in bossSize do
+		local size = entry.size
 		local across = math.max(size.X, size.Z)
-		if reference then
+		local comparable = reference ~= nil and reference.supplied == entry.supplied
+		if comparable then
 			--[[ Reported with its ratio, because the ratio is the number somebody
 			     tuning a targetHeight actually wants and the studs alone gave them
 			     nothing to compare against. ]]
 			table.insert(
 				oversized,
-				string.format("%s %.1fx%.1f (x%.2f)", kind, size.Y, across, size.Y / reference.Y)
+				string.format("%s %.1fx%.1f (x%.2f)", kind, size.Y, across, size.Y / reference.size.Y)
 			)
 		else
-			table.insert(oversized, string.format("%s %.1fx%.1f", kind, size.Y, across))
+			--[[ The tag earns its space: "Metallic 17.0x11.1" beside a Tank with a
+			     ratio, and no ratio of its own, otherwise reads as a bug in the
+			     line rather than as the one fact that explains it. ]]
+			table.insert(
+				oversized,
+				string.format(
+					"%s %.1fx%.1f (%s)",
+					kind,
+					size.Y,
+					across,
+					if entry.supplied then "supplied, no supplied Tank to compare" else "grey box"
+				)
+			)
 		end
 
-		if reference and size.Y > reference.Y * BOSS_HEIGHT_RATIO then
+		if comparable and size.Y > reference.size.Y * BOSS_HEIGHT_RATIO then
 			warnOnce(
 				"bossfit:" .. kind,
 				string.format(
@@ -4007,9 +4047,9 @@ function PlaceholderFactory:ensureAssets()
 						.. "targetHeight, or scale the rig down before importing it.",
 					kind,
 					size.Y,
-					size.Y / reference.Y,
-					reference.Y,
-					reference.Y * BOSS_HEIGHT_RATIO
+					size.Y / reference.size.Y,
+					reference.size.Y,
+					reference.size.Y * BOSS_HEIGHT_RATIO
 				)
 			)
 		end
