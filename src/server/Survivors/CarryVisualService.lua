@@ -113,9 +113,22 @@ local HAND_OFFSET = CFrame.new(0, 0, -0.25) * CFrame.Angles(0, math.rad(-4), 0)
      far end of the part, so "most of the way down it" is right for both. ]]
 local HAND_DROP = 0.5
 
---[[ The slots whose contents are shown in the hands, and how. Anything not in
-     here is carried invisibly, which is the correct answer for pills — a bottle
-     in a fist is not a read anybody needs at twenty studs. ]]
+--[[
+	The slots whose contents are shown in the hands, and how.
+
+	This table is the ONLY thing that decides whether a slot is visible, and it
+	has now been the cause of the same bug twice. Melee was missed when it got a
+	slot of its own. The throwables were missed too, and worse: buildKitModel
+	below carries a whole branch for putting a molotov in somebody's fist, with a
+	comment explaining why it matters — and nothing could ever reach it, because
+	an unlisted slot resolves to "" and reads as empty hands.
+
+	Both are listed now, along with the pills. "a bottle in a fist is not a read
+	anybody needs at twenty studs" is what this used to say about those, and it
+	was wrong in the way that only shows up in play: somebody standing still
+	holding pills is about to be a second slower to react than you expect, and
+	that is exactly the kind of thing the whole file exists to make visible.
+]]
 local HAND_SLOTS: { [string]: string } = {
 	[Enums.Slot.Primary] = "Weapon",
 	[Enums.Slot.Secondary] = "Weapon",
@@ -128,8 +141,18 @@ local HAND_SLOTS: { [string]: string } = {
 	[Enums.Slot.Melee] = "Weapon",
 	--[[ A selected kit comes OFF the back and INTO the hands. That swap is the
 	     single clearest tell in Left 4 Dead that somebody is about to heal, and
-	     it costs nothing here: it is the same model, mounted somewhere else. ]]
+	     it costs nothing here: it is the same model, mounted somewhere else.
+
+	     Its own kind rather than sharing "Held" below, and that is load-bearing:
+	     wantedKeys decides whether the BACK is occupied by asking whether the
+	     hands are showing a "Medkit". Give the pills that kind and selecting them
+	     takes the kit off your back. ]]
 	[Enums.Slot.Health] = "Medkit",
+	--[[ Everything else you hold rather than wield. Same mount, same weld, same
+	     sizing ceiling; they differ from a weapon only in having no torch and no
+	     muzzle to hang one off. ]]
+	[Enums.Slot.Pills] = "Held",
+	[Enums.Slot.Throwable] = "Held",
 }
 
 --[[ What is on each survivor right now, per mount. The `key` is what is being
@@ -346,11 +369,24 @@ local function tame(model: Model)
 	end
 end
 
---[[
-	The medkit prop, from whichever spot in the map still has its template.
+--[[ Refuses to put something enormous in a hand, and does nothing otherwise. A
+     supplied prop is already the size its author meant it to be — this is only
+     the ceiling, so a model built at map scale by mistake does not become a
+     wardrobe on somebody's arm. ]]
+local function fitToHand(model: Model)
+	local longest = longestSide(model)
+	if longest > KIT.CarryMaxSize then
+		scaleModel(model, KIT.CarryMaxSize / math.max(longest, 0.01))
+	end
+end
 
-	Nil is a normal answer and not an error: a map with no kits placed, or a
-	Health slot holding anything that is not a kit, has no model to show — and no
+--[[
+	The prop for anything a survivor carries that is not a weapon: the map's
+	medkit and pills, and the user's own throwable models.
+
+	Nil is a normal answer and not an error. A map with no pills placed, a Health
+	slot holding a defibrillator — which has no prop this file can reach — or a
+	throwable nobody has supplied a model for, all have nothing to show, and no
 	prop beats a wrong one.
 ]]
 local function buildKitModel(itemId: string): Model?
@@ -381,18 +417,14 @@ local function buildKitModel(itemId: string): Model?
 			return nil
 		end
 		tame(thrown)
-		--[[ Only the ceiling, not the medkit's scale-down beside it. A supplied
-		     bottle is already the size its author meant it to be; a kit prop is
-		     map furniture that has to be shrunk to fit a hand. This just refuses
-		     to put something enormous in one. ]]
-		local longest = longestSide(thrown)
-		if longest > KIT.CarryMaxSize then
-			scaleModel(thrown, KIT.CarryMaxSize / math.max(longest, 0.01))
-		end
+		fitToHand(thrown)
 		return thrown
 	end
 
-	if itemId ~= Enums.HealthItem.Medkit then
+	--[[ Every item the MAP supplies, which is the medkit and both pills — see
+	     MapConfig.MapItems. Asked of the config rather than named here, so a
+	     fourth family is visible in a hand the day it is declared. ]]
+	if not MapConfig.mapItemFor(itemId) then
 		return nil
 	end
 
@@ -405,12 +437,22 @@ local function buildKitModel(itemId: string): Model?
 	local model = template:Clone()
 	tame(model)
 
-	local size = longestSide(model)
-	local factor = KIT.CarryScale
-	if size * factor > KIT.CarryMaxSize then
-		factor = KIT.CarryMaxSize / math.max(size, 0.01)
+	--[[ The MEDKIT is the exception, and it is the only one. It is the one prop
+	     here that spends most of its life on a BACK, built to be read across a
+	     room from the floor, so it is shrunk by CarryScale before the ceiling is
+	     even considered. A pill bottle or a molotov is already the size its
+	     author meant a hand to hold, and shrinking it by another third makes it
+	     something you cannot see at all. ]]
+	if itemId == Enums.HealthItem.Medkit then
+		local size = longestSide(model)
+		local factor = KIT.CarryScale
+		if size * factor > KIT.CarryMaxSize then
+			factor = KIT.CarryMaxSize / math.max(size, 0.01)
+		end
+		scaleModel(model, factor)
+	else
+		fitToHand(model)
 	end
-	scaleModel(model, factor)
 	return model
 end
 
