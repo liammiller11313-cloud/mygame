@@ -538,15 +538,24 @@ Interpolates `Lighting.ClockTime`, `Ambient`, `OutdoorAmbient`, `Brightness`,
 Tune it dark and cold. Keep `FogEnd` short enough to hide draw distance and long
 enough that a Tank is visible before it reaches you.
 
-### `Combat/ProjectileService.lua` → `"ProjectileService"`
-`InventoryService` already calls `Registry.find("ProjectileService")`; it does not
-exist yet, so throwables are dead. Build it.
+### `Combat/ProjectileService.lua` → `"ProjectileService"` — **built**
 ```lua
-ProjectileService:throw(player: Player, itemId: string, origin: Vector3, direction: Vector3, power: number)
+ProjectileService:throw(player: Player, itemId: string?, origin: Vector3?, direction: Vector3?, power: number?)
 ```
 Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes via
 `DamageService:applyExplosion`), molotov (a fire pool that ignites infected through
 `InfectedService:ignite`), bile jar (the Boomer effect without the Boomer).
+
+**Everything but the id is optional, and that is what decides where a bomb goes.**
+`ThrowItem` supplies a camera ray, so a throw aimed up onto a balcony arrives
+there. `InventoryService`'s UseItem path supplies neither, and the server then
+falls back to its own view of the character — a level `LookVector`. Both are
+legitimate entry points; only one of them aims. Anything new that throws should
+send a ray unless it genuinely means "straight ahead".
+
+The thing that flies is a procedural part built unconditionally; the map's model
+is **dressing**, applied when there is one. A missing model is not a failure and
+is not warned about — it means a grey cylinder, not a throw that does not happen.
 
 ## New client modules
 

@@ -145,7 +145,7 @@ The lobby waits for a mode to be claimed before it starts counting, and
 (`UITheme.DisplayOrder.LobbyClock`) precisely so a player spending their dollars
 can see how long they have.
 
-### Bodies should last 35 seconds — **built**
+### Bodies should last 35 seconds — **built, then reported again, then fixed properly**
 
 The lifetime was never the thing to change: `GameConfig.Corpses.MaxRagdolls` is
 a COUNT and at 26 it recycled every body within seconds of a horde landing.
@@ -155,6 +155,23 @@ what made raising the ceiling to 48 affordable. `corpseLifetime` is 35 for a
 Common. Not device-scaled, deliberately: corpses are replicated instances every
 client shares, so one player's hardware must not decide how many bodies everyone
 else sees.
+
+**And it was reported again on 2026-09-06, with a completely different cause.**
+Worth recording because the second investigation nearly went the same way as the
+first: three of four angles came back with "the corpse ring is fine", and it
+was — the bodies were never being created. An ordinary headshot on a Common
+*gibbed*, and `gib()` deletes the model.
+
+Two gates fired, both because a Common has 50 health and a head hit is
+multiplied by four, so the weakest gun in the roster overkills it by 46. Its
+`gibThreshold` of 45 read as "past which the body comes apart" and meant "any
+headshot"; and `overkillRatio` was uncapped, so on the smallest body in the game
+it was not a variable but a constant of 0.9 to 6.6, drowning the weapon, region
+and range terms that total at most 1.5. Now 200 and capped at 0.5.
+
+The lesson both times is the same and is why this entry is long: **a symptom
+about bodies disappearing is not evidence about corpse lifetimes.** Twice the
+number in the config named after the symptom was innocent.
 
 ### Ledge hanging was built and unreachable — **fixed**
 
