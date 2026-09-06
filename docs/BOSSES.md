@@ -162,17 +162,27 @@ one always gets something. The server prints which kinds are still empty at boot
 Most kinds are sized by `scale`, a plain multiplier — right for anything standard,
 since every Common and special is a normal humanoid rig.
 
-**The Metallic is sized by `targetHeight` instead: 14 studs, whatever it arrives
+**The Metallic is sized by `targetHeight` instead: 17 studs, whatever it arrives
 as.** The pipeline measures the rig and works out the multiplier itself. Build it
-at any size you like — the game will make it 14 studs tall and keep its
+at any size you like — the game will make it 17 studs tall and keep its
 proportions. That is deliberate: a boss has to read as bigger than the last boss
 *and* still fit through the doors the last one fits through, and neither of those
 is a fact about the units it was modelled in.
 
-For reference: a Tank comes out about 10.6 studs. Fourteen is a third taller —
-unmistakable across a street — and inside the 15 × 8 the maps are laid out to
-pass. The boot line prints every boss's finished size (`bosses (tall x wide)`),
-and warns by name if one is past that clearance.
+Seventeen is measured against **a Tank**, which boots at about 13.6 studs — so
+the Metallic is a quarter taller, unmistakable across a street, and every map is
+already laid out to pass a Tank with room.
+
+> This number was 14 for a while, against a Tank of 10.6. That 10.6 was the
+> *grey-box* Tank — the fallback rig built out of parts when nothing is supplied,
+> which the shipped game has never used. A real Tank is an artist's rig and
+> measures 13.6, so the Metallic was arriving at x1.03 of one: the same size,
+> which is the one thing this creature must not be.
+
+The boot line prints every boss's finished size (`bosses (tall x wide)`) and
+warns by name if one stands more than **1.35 x a Tank**. A ratio rather than a
+number of studs, for exactly the reason above: nothing in the pipeline can know
+an artist's units in advance, and the Tank can never fail its own check.
 
 The rig is stripped on import: its own `Script`, `Animate` and `Sound` objects
 are removed so nothing fights the game's audio or animation. Animation **ids**
@@ -180,7 +190,7 @@ are lifted out first, so a rig that carries its own clips keeps them.
 
 ## Movement
 
-Two things a fourteen-stud body needs that a normal one does not.
+Two things a seventeen-stud body needs that a normal one does not.
 
 **It cannot get stuck.** Two escalating answers, both on a three-second progress
 check. First it stops trusting pathfinding and walks the straight line. If that

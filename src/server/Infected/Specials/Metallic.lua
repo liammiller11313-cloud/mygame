@@ -129,7 +129,7 @@ local GROUND_PROBE_DOWN = 14
 
 --[[
 	Getting stuck is the failure mode that would ruin this encounter, the same
-	way it would a Tank's, and it matters more here: this thing is fourteen studs
+	way it would a Tank's, and it matters more here: this thing is seventeen studs
 	of machinery with no jump at all, so anything a Common would hop over is a
 	wall to it.
 
@@ -473,7 +473,7 @@ local function stepCharge(model: Model, state: State, root: BasePart, dt: number
 	--[[ Killed every frame. PivotTo teleports the assembly, and Roblox's solver
 	     reads a body that moved sixty studs a second as a body travelling sixty
 	     studs a second: without this the momentum is still there when the charge
-	     stops, and a fourteen-stud boss launches itself across the map at the
+	     stops, and a seventeen-stud boss launches itself across the map at the
 	     exact moment it is supposed to be standing still and defenceless. ]]
 	root.AssemblyLinearVelocity = Vector3.zero
 

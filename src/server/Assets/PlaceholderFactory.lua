@@ -357,27 +357,53 @@ end
 	forty-six.
 ]]
 --[[
-	What a boss has to fit through, in studs.
+	How much bigger than a TANK a boss is allowed to be.
 
-	Not a rule the engine enforces — nothing stops a rig being built bigger — but
-	the size the maps in this project are laid out to pass, so a body past it is
-	a body that will hang up on a doorway and turn its encounter into "stand
-	inside a building". The reference is the Tank at roughly 10.6 tall and 6.1
-	across, which every map already passes; these are that with enough headroom
-	to be a real ceiling rather than a restatement of it.
+	── WHY THIS IS A RATIO AND NOT A NUMBER OF STUDS ───────────────────────────
+	It was a number of studs — 15 tall by 8 across — and the first real boot it
+	ever ran on fired it at the Tank, which is the creature it had been
+	calibrated against. That is a check failing on its own reference case, and a
+	warning that cries wolf about the thing it was built to measure is worse than
+	no warning at all.
+
+	The number was wrong because it was arithmetic on the GREY-BOX proportions in
+	the SHAPES table below: a Tank laid out from those measures about 10.6 studs.
+	Every rig in a real place is the artist's instead, and that Tank measures
+	13.6. Nothing in this file can know an artist's units in advance, so any
+	absolute here is a guess dressed as a constraint.
+
+	A ratio cannot make that mistake. The Tank is the biggest thing this project
+	ships and the biggest thing its maps are known to carry, so it is the honest
+	yardstick — and it can never fail itself, because its own ratio is 1.
+
+	── AND WHY THERE IS NO WIDTH RULE ANY MORE ─────────────────────────────────
+	The width came from GetBoundingBox on the prepared template, and a template
+	is in whatever pose the artist saved. The Tank's box is 14.2 across against
+	13.6 tall: a ratio of 1.04, and a human's arm span is famously about equal to
+	their height. That 14.2 is fingertip to fingertip on a T-POSE, and arms are
+	not what catches on a doorway — they swing, and the animation puts them at
+	the body's sides the moment it walks.
+
+	A bounding box cannot recover shoulder width from an arbitrary saved pose.
+	So the width is REPORTED, because it is worth seeing, and nothing is asserted
+	from it.
+
+	── WHAT IT STILL CATCHES ───────────────────────────────────────────────────
+	The failure that actually happens: a model dropped in at the wrong scale.
+	1.35 puts the ceiling at about eighteen studs against today's Tank, which
+	passes the Metallic at seventeen and trips anything somebody forgot to size.
 
 	The Apex Tank is NOT bigger than a plain one today, whatever its tier says:
 	EliteTiers.Apex asks for x1.12 and RigUtil.scaleRig delivers it by writing
 	the Humanoid's scale NumberValues — which adoptRig has already destroyed by
 	then, on purpose, so that spawning cannot scale a rig a second time on top of
-	the geometry pass. Worth knowing before anyone sets this ceiling from what
-	they think the finale's boss measures.
+	the geometry pass. So the yardstick is the same Tank either way.
 
 	Checked once at boot against the prepared template, because the answer is a
 	product of an artist's units and a config multiplier and nothing earlier in
 	the pipeline knows it.
 ]]
-local BOSS_CLEARANCE = table.freeze({ height = 15, width = 8 })
+local BOSS_HEIGHT_RATIO = 1.35
 
 local STRIPPED_CLASSES = table.freeze({
 	"LuaSourceContainer",
@@ -887,6 +913,9 @@ local SHAPES = {
 
 		TALLER, NOT WIDER. The proportions sum to 5.70 against the Tank's 4.50, so
 		at their respective scales it stands about 17 studs to the Tank's 10.6 —
+		both GREY-BOX figures, which is the only comparison this table can make
+		and is not the one the game ships (a supplied Tank measures 13.6; see
+		BOSS_HEIGHT_RATIO for the mistake that came of confusing the two) —
 		and its shoulders come out barely wider, because a thing that reads as
 		big by being WIDE is a thing that gets stuck in the first doorway. It
 		towers instead.
@@ -3913,6 +3942,9 @@ function PlaceholderFactory:ensureAssets()
 	local rigs = {}
 	local empty = {}
 	local oversized = {}
+	--[[ Every boss's measured extents, keyed by kind. Filled in the walk below
+	     and judged after it, because the yardstick is one of the entries. ]]
+	local bossSize: { [string]: Vector3 } = {}
 	for kind, definition in InfectedConfig.all() do
 		local variants = variantsFor(kind)
 		table.insert(rigs, string.format("%s x%d", kind, #variants))
@@ -3929,31 +3961,60 @@ function PlaceholderFactory:ensureAssets()
 
 		--[[ And how big the thing actually came out, for the ones where that is a
 		     question worth asking. A boss is the only kind whose size can stop
-		     the encounter working — too tall and it cannot follow a team indoors,
-		     too wide and the first doorway holds it — and the size is a product
-		     of an artist's units and a multiplier, so nothing before this point
-		     knows the answer. Measured from the prepared template, which is the
-		     body that will actually spawn. ]]
+		     the encounter working — too tall and it cannot follow a team indoors
+		     — and the size is a product of an artist's units and a multiplier, so
+		     nothing before this point knows the answer. Measured from the prepared
+		     template, which is the body that will actually spawn.
+
+		     Collected rather than judged here: the yardstick is the Tank's own
+		     height and this loop walks a dictionary, so the Tank may not have been
+		     seen yet. See below. ]]
 		if definition.isBoss and variants[1] then
 			local _, size = variants[1]:GetBoundingBox()
-			table.insert(oversized, string.format("%s %.1fx%.1f", kind, size.Y, math.max(size.X, size.Z)))
-			if size.Y > BOSS_CLEARANCE.height or math.max(size.X, size.Z) > BOSS_CLEARANCE.width then
-				warnOnce(
-					"bossfit:" .. kind,
-					string.format(
-						"the %s stands %.1f studs tall and %.1f across, past the %d x %d this "
-							.. "project builds maps to pass. It will get caught on doorways. "
-							.. "Lower its targetHeight, or widen the map.",
-						kind,
-						size.Y,
-						math.max(size.X, size.Z),
-						BOSS_CLEARANCE.height,
-						BOSS_CLEARANCE.width
-					)
-				)
-			end
+			bossSize[kind] = size
 		end
 	end
+
+	--[[
+		Now that every boss has been measured, judge them against the Tank.
+
+		Nothing happens without one. A place with no Tank rig has no yardstick,
+		and inventing an absolute is exactly the mistake this replaced — see
+		BOSS_HEIGHT_RATIO.
+	]]
+	local reference = bossSize[Enums.Infected.Tank]
+	for kind, size in bossSize do
+		local across = math.max(size.X, size.Z)
+		if reference then
+			--[[ Reported with its ratio, because the ratio is the number somebody
+			     tuning a targetHeight actually wants and the studs alone gave them
+			     nothing to compare against. ]]
+			table.insert(
+				oversized,
+				string.format("%s %.1fx%.1f (x%.2f)", kind, size.Y, across, size.Y / reference.Y)
+			)
+		else
+			table.insert(oversized, string.format("%s %.1fx%.1f", kind, size.Y, across))
+		end
+
+		if reference and size.Y > reference.Y * BOSS_HEIGHT_RATIO then
+			warnOnce(
+				"bossfit:" .. kind,
+				string.format(
+					"the %s stands %.1f studs tall, %.2f times the Tank's %.1f. The Tank is the "
+						.. "biggest thing this project's maps are known to carry, so past about "
+						.. "%.1f it will hang up on doorways the Tank clears. Lower its "
+						.. "targetHeight, or scale the rig down before importing it.",
+					kind,
+					size.Y,
+					size.Y / reference.Y,
+					reference.Y,
+					reference.Y * BOSS_HEIGHT_RATIO
+				)
+			)
+		end
+	end
+
 	table.sort(rigs)
 	table.sort(empty)
 	table.sort(oversized)

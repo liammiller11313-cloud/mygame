@@ -577,31 +577,39 @@ InfectedConfig.Definitions = {
 
 		bodyColor = Color3.fromRGB(104, 108, 116),
 		accentColor = Color3.fromRGB(58, 62, 68),
-		--[[ 2.45 against the Tank's 2.35, which sounds like nothing and is not:
-		     the grey-box proportions are taller to begin with, so the two land at
-		     14 studs and 10.6. See targetHeight below — this number only ever
-		     builds the fallback rig, and the two are kept in agreement so a
-		     grey-boxed Metallic is the same size as the real one. ]]
-		scale = 2.45,
+		--[[ Solved backwards from targetHeight, not chosen: the grey-box
+		     proportions add up to 5.70 studs unscaled, and 5.70 x 2.98 is 17.0.
+		     This number only ever builds the fallback rig, and the two are kept
+		     in agreement so a grey-boxed Metallic is the same size as the real
+		     one. Change targetHeight and this has to be re-solved. ]]
+		scale = 2.98,
 		--[[
-			Fourteen studs, and the ceiling is what set it rather than the floor.
+			Seventeen studs, and the number it is measured against is a Tank.
 
-			A Tank stands about 10.6 and every map is laid out to pass one — and
-			an Apex is the same height, whatever its tier says, because the x1.12
+			This was 14 for a while, on the reasoning that a Tank stands about
+			10.6 so 14 is a third taller. That 10.6 was wrong, and wrong in a way
+			worth writing down: it was the height of the GREY-BOX Tank, the
+			fallback rig this file builds out of parts when nothing is supplied.
+			The shipped game has never used it. A real Tank is an artist's rig
+			and boots at 13.6 studs — so the Metallic at 14 was x1.03 of a Tank,
+			which is to say the same size, and the one thing this creature has to
+			do at a glance is not be a Tank.
+
+			Seventeen is x1.25 of a measured Tank: unmistakable down a street,
+			and every map is already laid out to pass a Tank with room. It is
+			also under the boot-time ceiling in PlaceholderFactory, which is
+			1.35x whatever the Tank actually measures.
+
+			An Apex is a Tank's height whatever its tier says, because the x1.12
 			it asks for is applied through Humanoid scale values the asset
-			pipeline has already stripped. Fourteen is a third taller than that:
-			unmistakable from across a street, which is the whole job, and still
-			inside the clearance the maps give. The first draft was seventeen,
-			which would have read beautifully right up until the point it could
-			not follow anybody indoors and the fight became "stand in a
-			building".
+			pipeline has already stripped — so it does not move this number.
 
 			It is a HEIGHT rather than a multiplier because the rig is supplied.
 			An artist asked for a giant mecho zombie and will build one at
 			whatever size seemed right; multiplying that by anything is a guess
 			about their units, and this is not a number worth guessing.
 		]]
-		targetHeight = 14,
+		targetHeight = 17,
 		outlineColor = Color3.fromRGB(255, 154, 42),
 
 		gibThreshold = 4000,

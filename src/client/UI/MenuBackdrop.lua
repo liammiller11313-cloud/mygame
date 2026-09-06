@@ -44,6 +44,12 @@
 	having crashed, and the interesting thing about a dying filament is that it
 	does not quite let go.
 
+	── AND IT SAYS SO WHEN THE PICTURE DOES NOT ARRIVE ─────────────────────────
+	If the asset fails to fetch, this degrades to a black menu that looks
+	deliberate, which is the worst possible way for it to fail. So the id is
+	preloaded once on the client and a failure is warned about by name. See
+	verifyImage.
+
 	── AND IT ONLY RUNS WHILE IT IS ON SCREEN ──────────────────────────────────
 	setActive is driven from the menu's own visibility. A RenderStepped
 	connection behind a hidden frame is a frame of work per frame for something
@@ -51,6 +57,7 @@
 	of a round.
 ]]
 
+local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -156,6 +163,78 @@ local function vignette(parent: Instance, name: string, rotation: number, size: 
 	gradient.Parent = frame
 end
 
+--[[
+	Does the photograph actually exist, for this player, right now?
+
+	Nothing outside a running client can answer that. The id in UITheme.Backdrop
+	is a number somebody typed into a config, and every way it can be wrong looks
+	the same from in here: the ImageLabel draws nothing, `root` shows through as
+	near-black, and the menu quietly becomes the black one this game had before
+	the photograph. That fallback is perfectly fine to LOOK at — which is exactly
+	the problem, because nobody ever finds out.
+
+	So the id is fetched once, on the client, and its status reported. It is a
+	DIAGNOSTIC and deliberately changes nothing on screen: the degraded menu is
+	already the right degraded menu, and white headline type over black is more
+	readable than over a photograph, not less. What was missing was knowing.
+
+	Three ways this actually goes wrong, in the order they happen:
+
+	  * A DECAL id where an image id was wanted. The id on a Creator Store page,
+	    and the id of a decal sitting in your inventory, belongs to the decal —
+	    a wrapper. `rbxassetid://` on an ImageLabel wants the image inside it.
+	    This is the common one and it is invisible from the config, because both
+	    are real ids and only one of them draws.
+	  * An asset that is private, still in moderation, or owned by an account
+	    that is not this place's owner. That fails per CLIENT, so it can load in
+	    Studio for the person who uploaded it and fail for everybody else — the
+	    single worst failure to have no warning for.
+	  * A typo. An id that is wrong but real draws somebody else's picture and
+	    nothing can catch that; one that is wrong and unused fails here.
+]]
+local function verifyImage()
+	local id = BACKDROP.Image
+	if typeof(id) ~= "string" or id == "" then
+		warn("[MenuBackdrop] UITheme.Backdrop.Image is empty. The menu will draw on flat black.")
+		return
+	end
+
+	--[[ Spawned: PreloadAsync yields until the id resolves or gives up, and an
+	     id the client cannot see takes seconds to give up. attach() runs while
+	     the menu is being built and must not wait on a network round trip. ]]
+	task.spawn(function()
+		--[[ The callback form, because the plain call cannot tell an id that
+		     FAILED from one that merely took a while — and "took a while" is the
+		     normal case on a cold join. Wrapped because PreloadAsync throws
+		     outright on a malformed content string, and a bad id in a config is
+		     not worth taking a thread down for. ]]
+		local ok, err = pcall(function()
+			ContentProvider:PreloadAsync({ id }, function(_content: string, fetchStatus: any)
+				if fetchStatus == Enum.AssetFetchStatus.Success then
+					return
+				end
+				warn(
+					string.format(
+						"[MenuBackdrop] the menu photograph %s could not be fetched (%s), so the "
+							.. "menu is drawing on flat black. The usual cause is a DECAL id: the id "
+							.. "shown on a Creator Store page wraps the image rather than being it. "
+							.. "Open the decal in Studio and read the id off its Texture/Image "
+							.. "property. Otherwise the asset is private, in moderation, or owned by "
+							.. "an account that does not own this place.",
+						id,
+						tostring(fetchStatus)
+					)
+				)
+			end)
+		end)
+		if not ok then
+			warn(
+				string.format("[MenuBackdrop] could not check the menu photograph %s: %s", id, tostring(err))
+			)
+		end
+	end)
+end
+
 --[[ Builds under `parent`. Called once, from the menu's own build(), BEFORE the
      menu's content layer exists — with ZIndexBehavior.Sibling, equal-ZIndex
      siblings draw in creation order, so being built first is the whole of what
@@ -204,6 +283,8 @@ function MenuBackdrop:attach(parent: Instance)
 	vignette(root, "VigBottom", 270, UDim2.fromScale(1, extent), UDim2.fromScale(0.5, 1 - extent * 0.5))
 	vignette(root, "VigLeft", 0, UDim2.fromScale(extent, 1), UDim2.fromScale(extent * 0.5, 0.5))
 	vignette(root, "VigRight", 180, UDim2.fromScale(extent, 1), UDim2.fromScale(1 - extent * 0.5, 0.5))
+
+	verifyImage()
 end
 
 -- ── the flicker ─────────────────────────────────────────────────────────────

@@ -123,6 +123,11 @@ Two `scripts/audit.py` checks exist because of bugs in this area:
 
 - **A cue that does not exist.** Every sound played by name must have a row in
   `AudioConfig`. A missing one warns once at startup and is then silent forever.
+- **A menu photograph that never arrives.** Not an audit check — it cannot be
+  one, because whether an asset resolves is a fact about the client running it,
+  not about the source. `MenuBackdrop.verifyImage` preloads the id once and warns
+  by name if it fails, because the failure mode is a black menu that looks
+  deliberate. The usual cause is a **decal** id where an image id was wanted.
 - **A property the class does not have.** Setting one throws, and inside a
   controller's `init()` the boot runner swallows it and reports one failed
   service among forty — the symptom is a layer of the interface that silently

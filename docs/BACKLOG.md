@@ -192,9 +192,11 @@ rigs and meaningless for a boss delivered at whatever size seemed right — the
 number that makes a normal rig into a Tank makes an already-giant rig into
 something that cannot follow a team indoors. Definitions can now state a
 `targetHeight` instead and the pipeline measures and solves for it, so the
-Metallic is fourteen studs regardless of what lands in the folder. The boot line
-prints every boss's finished size and warns by name if one is past the 15 × 8
-the maps are laid out to pass.
+Metallic is seventeen studs regardless of what lands in the folder. The boot line
+prints every boss's finished size and warns by name if one stands more than 1.35
+times a Tank — a ratio rather than a clearance in studs, because the first
+absolute written there was arithmetic on the grey-box rigs and fired on the Tank
+itself the first time it ran on a real place.
 
 ---
 
