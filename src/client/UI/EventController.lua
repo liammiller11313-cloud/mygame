@@ -151,6 +151,11 @@ local function hide()
 	end)
 end
 
+--[[ Whether this client has already captioned an event it arrived in the middle
+     of. One caption per client per session start, so the mid-event notice cannot
+     re-fire every time the attribute is touched. ]]
+local joinedDuring = false
+
 local function show(name: string)
 	if not banner then
 		return
@@ -300,9 +305,24 @@ end
 
 -- ── reacting to the server ──────────────────────────────────────────────────
 
---[[ Reads the published state rather than the banner's remote, so a player who
-     joins into an event already running gets its rain — the banner is a moment
-     they missed and the weather is a fact they are standing in. ]]
+--[[
+	Reads the published state rather than the banner's remote, so a player who
+	joins into an event already running gets its rain — the banner is a moment
+	they missed and the weather is a fact they are standing in.
+
+	AND NOW ALSO ITS NAME. Three attributes are published for exactly this
+	reason, and the docblock over them in Attributes.lua says so: "a client that
+	joins mid-event has to be able to see it". Only the first was ever read. So a
+	player who joined during a storm got the rain, was told nothing about why,
+	and the two attributes carrying the answer were write-only — a promise made
+	in the contract and kept nowhere.
+
+	The banner is still a MOMENT for the people who were here: the remote plays
+	the siren and fades it after four seconds. A joiner gets the same banner with
+	no siren, because nothing just happened to them; it is a caption on a thing
+	already in progress, and it holds until the event's own end stamp rather than
+	on the four-second timer.
+]]
 local function refreshWorld()
 	local id = Workspace:GetAttribute(GA.EventId)
 	local strength = if typeof(id) == "string" then RAIN[id] else nil
@@ -312,6 +332,41 @@ local function refreshWorld()
 		end
 	elseif rainPart then
 		stopRain()
+	end
+
+	local live = typeof(id) == "string" and id ~= ""
+	if not live then
+		--[[ The event ended while we were in it. The banner may still be up on
+		     its own timer, and that is fine — it is describing something that
+		     just stopped, which is worth the last second of reading. ]]
+		return
+	end
+
+	--[[ Only for somebody who did NOT get the remote. joinedDuring is set once,
+	     the first time this sees a live event it has no banner for, so a player
+	     who was here all along is never captioned about an event they watched
+	     arrive. ]]
+	if joinedDuring or banner == nil or banner.Visible then
+		return
+	end
+	joinedDuring = true
+
+	local name = Workspace:GetAttribute(GA.EventName)
+	if typeof(name) ~= "string" or name == "" then
+		return
+	end
+	show(name)
+
+	--[[ Held to the event's real end rather than the banner's four seconds,
+	     because this is a caption on a state rather than an announcement of a
+	     change. An absent or past stamp falls back to the ordinary timer, which
+	     show() has already set. ]]
+	local endsAt = tonumber(Workspace:GetAttribute(GA.EventEndsAt))
+	if endsAt then
+		local remaining = endsAt - Workspace:GetServerTimeNow()
+		if remaining > 0 then
+			hideAt = os.clock() + remaining
+		end
 	end
 end
 

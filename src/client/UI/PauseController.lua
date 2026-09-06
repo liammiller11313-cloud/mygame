@@ -2,7 +2,8 @@
 --[[
 	PauseController — the button in the corner, and what is behind it.
 
-	Three entries: RESUME, SETTINGS, RETURN TO MAIN MENU. It is the one place a
+	Six entries: RESUME, BACKPACK, REQUISITIONS, CAREER, SETTINGS and LEAVE
+	MATCH. It is the one place a
 	player can reliably get out of whatever they are in, on every platform, and
 	that is the whole reason it exists — a keyboard has Escape (which belongs to
 	Roblox), a pad has a menu button (which also belongs to Roblox), and a phone
@@ -417,9 +418,30 @@ local function build()
 	panel.Position = UDim2.fromScale(0.5, 0.5)
 	panel.Size = UDim2.fromOffset(PANEL_WIDTH, #ENTRIES * (ENTRY_HEIGHT + ENTRY_GAP) - ENTRY_GAP)
 
+	--[[
+		Above the panel, and CLAMPED so it cannot climb off the top.
+
+		The offset is half the panel's height, so the title rises by half of
+		however tall the entry stack grows — and the stack has grown from the
+		three entries this file's header used to describe to six. On a phone, six
+		rows put the title's top edge above y = 0 and the word PAUSED was drawn
+		off the screen entirely: the one label on the one screen that exists so a
+		player on a phone can always get out.
+
+		Clamped against the screen margin rather than re-laid-out, because the
+		anchored-above-the-panel position is right on every screen tall enough for
+		it and only needs a floor. UDim2 cannot express "the higher of these", so
+		it is resolved here against the viewport at build time.
+	]]
 	local title = Widgets.label(layer, "Title", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
 	title.AnchorPoint = Vector2.new(0.5, 1)
-	title.Position = UDim2.new(0.5, 0, 0.5, -(panel.Size.Y.Offset * 0.5 + LAYOUT.ScreenMargin * 2))
+	local camera = Workspace.CurrentCamera
+	local viewportY = if camera then camera.ViewportSize.Y else 0
+	local wanted = viewportY * 0.5 - (panel.Size.Y.Offset * 0.5 + LAYOUT.ScreenMargin * 2)
+	-- The anchor is the label's BOTTOM edge, so the floor has to clear its own
+	-- height as well as the margin — the same +6 the Size below uses.
+	local floor = LAYOUT.ScreenMargin + TEXT.Display + 6
+	title.Position = UDim2.new(0.5, 0, 0, math.max(wanted, floor))
 	title.Size = UDim2.new(0.8, 0, 0, TEXT.Display + 6)
 	title.TextXAlignment = Enum.TextXAlignment.Center
 	title.Text = "PAUSED"
