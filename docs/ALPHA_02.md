@@ -1,6 +1,6 @@
 # Alpha Testing 02
 
-Build stamp **`2026-09-06u-alpha02`**. It is printed in the server log at boot
+Build stamp **`2026-09-06v-alpha02`**. It is printed in the server log at boot
 and is the fastest way to tell whether the place you are in is the build you
 think it is — check it first, before reporting anything.
 
@@ -159,13 +159,15 @@ one change most likely to show up on a handset, and it is not device-scaled,
 deliberately: corpses are replicated instances every client shares, so one
 player's hardware must not decide how many bodies everyone else sees.
 
-**The hazardous waste's particles were cut before shipping.** As first written it
-put roughly 450 large soft particles on screen at four zones, against the bile
-jar's 126 — three and a half times the most expensive thing this system could
-previously do, on a zone that also lasts two and a half times as long. These are
+**The hazardous waste's particles were cut before shipping.** As first written
+it put roughly 450 large soft particles on screen at four zones — three and a
+half times the most expensive thing this system had ever done, on a zone that
+lasts fifty seconds, so four at once is likely rather than exotic. These are
 server-side emitters on a replicated part, so a phone cannot scale them the way
-it scales a blood burst. Retuned to 183: more than the jar, because it is a
-bigger and longer-lived thing, and not a different order of cost.
+it scales a blood burst; they have to be affordable on the weakest device in the
+server. Retuned to 183 at four zones. **This is the one number in the game I
+would most like a phone to argue with** — it was chosen by counting emitters,
+not by looking at a handset.
 
 **Nothing else added per-frame work.** The new asset checks run once at join
 (one `PreloadAsync` for the whole sound bank, which also warms it, so the first
@@ -206,9 +208,76 @@ Honest list. None of these are worth a report.
 
 ---
 
-## What to actually watch for
+## The first session, in order
 
-Ranked by how likely it is to be wrong, not by how bad it would be.
+Do this alone, on a desktop, before anybody else is in the server. It is about
+fifteen minutes and it is ordered so that a failure early makes the later steps
+pointless — stop and report rather than pushing past one.
+
+Everything below has a **stated expected result**. Where the real one differs,
+that difference is the report; "it felt wrong" is not actionable and "I expected
+X and got Y" always is.
+
+### A. Does it boot
+
+1. Press Play. Read the server banner. → **`0 failed` on both lines**, and the
+   stamp reads `2026-09-06v-alpha02`.
+2. Open the client console (F9). → `[ImageCheck]`, `[SoundCheck]` and
+   `[PlaceholderFactory]` each report. Grey-boxed entries are fine; **failures
+   are not**.
+
+A failure in either step is the whole session. Paste the log and stop.
+
+### B. The two things most likely to be broken
+
+These are the changes with the least prior testing, so they come first.
+
+3. **Boomer bile.** Let a Boomer burst on you.
+   → Your screen goes green for about **eleven seconds**. From a vomit, about
+   **seven**. This did nothing at all until this build, so treat a working
+   result as new information rather than as normal.
+4. **The fire button throws.** Select a throwable and pull the trigger.
+   → It throws, **where you are looking** — aim at a balcony and it should land
+   up there, not at your feet. Then do it again with a medkit selected (it
+   should start healing) and with pills (it should take them).
+
+### C. The new items
+
+5. **Hazardous waste.** Find one, throw it down a corridor you are *not*
+   standing in. → A green zone; the horde walks to it and **stays** for about
+   fifty seconds. It should coat nobody — if your screen goes green from
+   standing in it, that is a bug, and a specific one: that is the Boomer's job
+   and this item is not supposed to have it.
+6. **Flare gun.** Buy it ($3,500, SECONDARY). Shoot a Common.
+   → It **does not die** — twelve damage — but it **catches fire** and burns
+   down. One shell, four-second reload. If it kills on impact, the damage
+   number is wrong.
+
+### D. Bodies and frame rate
+
+7. Kill twenty Commons with headshots. → **The bodies stay.** They used to
+   vanish, because every headshot gibbed. Corpses stop at 48 and the oldest is
+   recycled after that.
+8. Play to a wave 12 horde and watch the frame rate. **On a phone if you have
+   one.** This is the change most likely to cost performance and the least
+   possible to verify by reasoning.
+
+### E. The other two schemes
+
+9. **Controller.** Fire, aim, reload, the D-pad slots. Tap **View** → pause
+   menu. *Hold* **View** → ability cards, and no pause menu on release.
+10. **Phone.** The eight-button pad, and the hotbar tiles as slot buttons —
+    one tap selects, a second tap on a consumable uses it. Sprint is always on;
+    there is no button and there should not be one.
+
+`docs/CONTROLS.md` is the full table for all three.
+
+---
+
+## After that: what to actually watch for
+
+Once it works, these are the judgement calls — ranked by how likely they are to
+be *wrong*, not by how bad it would be.
 
 1. **Does the fire button throwing feel right**, or does it eat clicks people
    meant as shots?
@@ -216,7 +285,9 @@ Ranked by how likely it is to be wrong, not by how bad it would be.
    from the floor, in a dark room, before anybody explains it?
 3. **Frame rate during a horde on a phone**, now that bodies persist.
 4. **The flare gun's damage.** Twelve is deliberately almost nothing.
-5. **Anything on a controller or a phone that a desktop player would not find.**
+5. **Is anything missing now the bile jar is gone?** It was the short-range
+   "get them off me" panic button. Between the pipe bomb and the molotov I do
+   not think there is a hole, but that is a guess and a session will settle it.
 
 ---
 
