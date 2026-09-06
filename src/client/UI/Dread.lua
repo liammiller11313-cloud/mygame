@@ -73,6 +73,8 @@ local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ImageCheck = require(script.Parent.ImageCheck)
+
 local DREAD = UITheme.Dread
 
 local Dread = {}
@@ -282,6 +284,12 @@ function Dread:init()
 	trove:add(hazeGui)
 
 	hazeTiled = DREAD.HazeImage ~= ""
+	--[[ Only says anything once somebody actually sets one — an empty HazeImage
+	     is the shipped default and a deliberate choice, not a missing asset. If
+	     a tile IS set and fails, this layer becomes two invisible full-screen
+	     frames and the game looks exactly like the version without grain, which
+	     is a bug nobody could find by looking. See ImageCheck. ]]
+	ImageCheck.verify(DREAD.HazeImage, "the dread haze tile")
 
 	buildEdges()
 	buildHazeLayer("HazeA", DREAD.HazeAngleA)

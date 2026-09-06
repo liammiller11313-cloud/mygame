@@ -558,6 +558,7 @@ Handles `Remotes.Event.ThrowItem`. Pipe bomb (attracts the horde, then explodes 
 | `UI/MapVoteController.lua` | `"MapVoteController"` | end-of-round and fresh-server map vote |
 | `UI/ScaleLayer.lua` | *(none — a helper, not a controller)* | resolution independence for every ScreenGui |
 | `UI/GamepadFocus.lua` | *(none — a helper)* | GuiService.SelectedObject, so a controller can reach a screen |
+| `UI/ImageCheck.lua` | *(none — a helper)* | fetches every image id once and warns by name when one will not draw |
 | `UI/TouchController.lua` | `"TouchController"` | the on-screen pad, only under the touch scheme |
 | `UI/SettingsController.lua` | `"SettingsController"` | every player preference, and the panel that edits them |
 

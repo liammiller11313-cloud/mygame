@@ -123,11 +123,25 @@ Two `scripts/audit.py` checks exist because of bugs in this area:
 
 - **A cue that does not exist.** Every sound played by name must have a row in
   `AudioConfig`. A missing one warns once at startup and is then silent forever.
-- **A menu photograph that never arrives.** Not an audit check — it cannot be
-  one, because whether an asset resolves is a fact about the client running it,
-  not about the source. `MenuBackdrop.verifyImage` preloads the id once and warns
-  by name if it fails, because the failure mode is a black menu that looks
-  deliberate. The usual cause is a **decal** id where an image id was wanted.
+- **A picture that never arrives.** Not an audit check — it cannot be one,
+  because whether an asset resolves is a fact about the client running it, not
+  about the source. Every image id in the game goes through `UI/ImageCheck`,
+  which validates its shape immediately, fetches it once, and warns **by name**
+  when it fails. Four callers: the menu photograph, the three map cards, the
+  splash mark, and the dread haze tile if one is ever set.
+
+  This exists because the menu backdrop was set to a **decal** id for a day.
+  Uploading a picture makes two assets — the image, and a `Decal` that wraps it
+  — and the id shown on a Creator Store page, an inventory tile and the toolbox
+  is the *decal's*. An `ImageLabel` wants the one inside and draws nothing when
+  handed the wrapper. Both ids are real and the same length; nothing about the
+  config tells them apart. Insert the decal in Studio and read the id off its
+  `Texture` property.
+
+  Every one of these failures leaves behind something that looks like a design
+  decision — a black menu, a blank map card, a boot glow over nothing — which is
+  the whole reason the check has to exist. Nobody files a bug against a screen
+  that looks intentional.
 - **A property the class does not have.** Setting one throws, and inside a
   controller's `init()` the boot runner swallows it and reports one failed
   service among forty — the symptom is a layer of the interface that silently

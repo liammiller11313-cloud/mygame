@@ -38,6 +38,8 @@ local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 
+local ImageCheck = require(script.Parent.ImageCheck)
+
 local COLOR = UITheme.Color
 
 local IMAGE = "rbxassetid://120745043873992"
@@ -234,6 +236,13 @@ function SplashController:init()
 	mark.BackgroundTransparency = 1
 	mark.BorderSizePixel = 0
 	mark.Image = IMAGE
+	--[[ The splash's own PreloadAsync below is BOUNDED and deliberately ignores
+	     its result — it exists to stop the chime landing on nothing, and it must
+	     give up quickly because everything it waits for is spent on a black
+	     screen. So it cannot be the thing that reports a bad id: a mark that
+	     never loads is a boot sequence that fades a glow up over nothing and
+	     then proceeds normally, which nobody would ever file. See ImageCheck. ]]
+	ImageCheck.verify(IMAGE, "the splash mark")
 	--[[ Invisible until the sequence raises it. Starting at 0 and tweening down
 	     would show one frame of a full-brightness logo on a black screen, which
 	     is the one frame the whole fade exists to avoid. ]]

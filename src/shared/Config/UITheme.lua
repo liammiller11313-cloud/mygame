@@ -159,14 +159,29 @@ UITheme.Grime = table.freeze({
 	background that has failed. Raise it and check the title, not the picture.
 ]]
 UITheme.Backdrop = table.freeze({
-	--[[ The photograph behind the main menu. Swapped 2026-09-05; the grade below
-	     was authored against the previous one and is deliberately left alone,
-	     because every number in it is a READABILITY constraint rather than a
-	     flattering one — the scrim exists to keep white headline type legible and
-	     the vignette is measured against the menu's own two columns. Both hold
-	     for any picture. If the new one wants a warmer or cooler cast, Tint is
-	     the number to move and it is the only one that is purely taste. ]]
-	Image = "rbxassetid://111807251881801",
+	--[[
+		The photograph behind the main menu.
+
+		THIS IS AN IMAGE ID AND IT HAS TO BE. It was 111807251881801 for a day,
+		which is the DECAL — the wrapper object you get when you upload a picture
+		and the id every Creator Store page and inventory tile shows you. An
+		ImageLabel wants the image inside that wrapper and draws nothing at all
+		when handed the wrapper itself. Both ids are real, both are yours, and
+		only one of them renders; nothing about the config can tell them apart.
+		To find the right one: open the decal in Studio and read the id off its
+		Texture property. MenuBackdrop.verifyImage now fetches this at boot and
+		warns by name if it ever fails again, because the way this breaks is a
+		black menu that looks like a design decision.
+
+		The grade below was authored against an earlier picture and is
+		deliberately left alone, because every number in it is a READABILITY
+		constraint rather than a flattering one — the scrim exists to keep white
+		headline type legible and the vignette is measured against the menu's own
+		two columns. Both hold for any picture. If this one wants a warmer or
+		cooler cast, Tint is the number to move and it is the only one here that
+		is purely taste.
+	]]
+	Image = "rbxassetid://78563803199573",
 
 	--[[ Multiplied into the image, so it both grades and darkens. Warm, because
 	     the bulb is the only warm thing left in this game's palette and the round

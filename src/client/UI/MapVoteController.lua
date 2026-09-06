@@ -27,6 +27,7 @@ local UITheme = require(Shared.Config.UITheme)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
 local FreeCursor = require(script.Parent.FreeCursor)
+local ImageCheck = require(script.Parent.ImageCheck)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local UiSound = require(script.Parent.UiSound)
 
@@ -261,6 +262,14 @@ local function buildCard(option: any, index: number, _total: number)
 		     so stretching would show every map through a squashed lens. ]]
 		picture.ScaleType = Enum.ScaleType.Crop
 		picture.Image = option.image
+		--[[ A card whose picture does not load is a plain dark tile with the map
+		     name on it, which is a perfectly acceptable-looking card — so
+		     nobody would ever report it. See ImageCheck. The name comes from
+		     the server's own option list, so the warning says which map. ]]
+		ImageCheck.verify(
+			option.image,
+			string.format("the %s map card", tostring(option.displayName or option.id))
+		)
 		--[[ Dimmed a little even before the scrim. A full-brightness photograph
 		     under this interface's type reads as a web banner; this game is set
 		     at dusk and the card should look like it belongs to it. ]]
