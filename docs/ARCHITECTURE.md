@@ -365,6 +365,7 @@ Client rules:
 - Every `ScreenGui` is built in code (no `.rbxmx`), parented to `PlayerGui`,
   with `ResetOnSpawn = false` and the `DisplayOrder` from `UITheme.DisplayOrder`.
 - All UI reads colour, size, font and timing from `UITheme`. No literal colours.
+  `docs/LOOK.md` is the map of which number does what.
 - One `RunService.RenderStepped` connection per controller, maximum.
 
 ---

@@ -1430,6 +1430,61 @@ for _path, _text in code.items():
         )
 
 
+# ── 34. A property the class does not have ──────────────────────────────────
+#
+# Setting one throws, and in this codebase a throw during a controller's init()
+# is caught by the boot runner and reported as one failed service among forty.
+# The symptom is not an error anybody chases: it is a layer of the interface
+# that silently does not exist, on a screen nobody thought to check.
+#
+# That is exactly how it happened. A full-screen atmosphere layer set `Active`
+# on its ScreenGui — a real property, on GuiObject, which ScreenGui is not — and
+# the entire effect would have drawn nothing at all while every test of the code
+# around it passed.
+#
+# Only the small, closed classes are listed. A Frame or a TextLabel has upwards
+# of eighty inherited properties and a list of those would be wrong within a
+# release; these seven are leaf classes with short, stable surfaces, which is
+# what makes an exhaustive list defensible at all.
+_UI_PROPS = {
+    "ScreenGui": {
+        "Enabled", "DisplayOrder", "IgnoreGuiInset", "ResetOnSpawn", "ZIndexBehavior",
+        "ClipToDeviceSafeArea", "ScreenInsets", "SafeAreaCompatibility", "OnTopOfCoreBlur",
+        "SelectionBehaviorUp", "SelectionBehaviorDown", "SelectionBehaviorLeft",
+        "SelectionBehaviorRight", "SelectionGroup", "AutoLocalize", "RootLocalizationTable",
+    },
+    "UIGradient": {"Color", "Enabled", "Offset", "Rotation", "Transparency"},
+    "UIStroke": {"ApplyStrokeMode", "Color", "Enabled", "LineJoinMode", "Thickness", "Transparency"},
+    "UIScale": {"Scale"},
+    "UIPadding": {"PaddingBottom", "PaddingLeft", "PaddingRight", "PaddingTop"},
+    "UICorner": {"CornerRadius"},
+    "UIAspectRatioConstraint": {"AspectRatio", "AspectType", "DominantAxis"},
+}
+# Every Instance has these, whatever it is.
+_UI_COMMON = {"Name", "Parent", "Archivable"}
+
+for _path, _text in code.items():
+    for _m in re.finditer(r'\b(?:local\s+)?(\w+)\s*=\s*Instance\.new\("(\w+)"\)', _text):
+        _var, _cls = _m.group(1), _m.group(2)
+        _allowed = _UI_PROPS.get(_cls)
+        if not _allowed:
+            continue
+        # Only up to the point the same name is pointed at a different instance.
+        _tail = _text[_m.end():]
+        _next = re.search(r"\b" + re.escape(_var) + r"\s*=\s*Instance\.new\(", _tail)
+        _region = _tail[: _next.start()] if _next else _tail
+        for _pm in re.finditer(r"\b" + re.escape(_var) + r"\.(\w+)\s*=[^=]", _region):
+            _prop = _pm.group(1)
+            if _prop in _allowed or _prop in _UI_COMMON:
+                continue
+            problems.append(
+                f"{rel(_path)}:{_text[: _m.end() + _pm.start()].count(chr(10)) + 1}  sets "
+                f"{_var}.{_prop}, and {_var} is a {_cls}, which has no such property. "
+                f"This throws at runtime; inside a controller's init() the boot runner "
+                f"swallows it and the whole layer silently does not exist"
+            )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")
