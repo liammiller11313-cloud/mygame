@@ -776,20 +776,22 @@ end
 	Puts a dead survivor back in the fight at RespawnHealth.
 
 	SurvivorService owns respawning; this only chooses the health and the spot.
-	The private `_respawn` is used when there is no public equivalent, because the
-	alternative — spawnSurvivor — returns a survivor at FULL health, which would
-	make dying during a wave strictly better than being hurt by it.
+	It calls the PRIVATE `_respawn` deliberately: the public alternative,
+	spawnSurvivor, returns a survivor at FULL health, which would make dying
+	during a wave strictly better than being hurt by it.
+
+	There used to be a `survivors.respawn` branch ahead of this one, tried first
+	and never taken because no such method has ever existed. It was worse than
+	dead: it omitted the _releaseBody call below, so the day anybody added a
+	public respawn it would have quietly started leaving a defib-able corpse
+	behind a living survivor. A guard for a method nobody has written is not
+	future-proofing.
 ]]
 function RoundService:_respawnSurvivor(survivors, player: Player, slot: number)
 	local cframe: CFrame? = nil
 	local level = Registry.find("LevelService")
 	if level and typeof(level.getSurvivorSpawnCFrame) == "function" then
 		cframe = level:getSurvivorSpawnCFrame(slot)
-	end
-
-	if typeof(survivors.respawn) == "function" then
-		survivors:respawn(player, cframe, CLASSIC.RespawnHealth)
-		return
 	end
 
 	if typeof(survivors._respawn) == "function" then
@@ -806,7 +808,7 @@ function RoundService:_respawnSurvivor(survivors, player: Player, slot: number)
 	warnOnce(
 		"norespawn",
 		string.format(
-			"SurvivorService exposes no respawn(player, cframe, health); breather respawns fall back "
+			"SurvivorService exposes no _respawn(player, cframe, health); breather respawns fall back "
 				.. "to spawnSurvivor and arrive at full health instead of %d",
 			CLASSIC.RespawnHealth
 		)

@@ -92,6 +92,16 @@ if command -v python3 >/dev/null 2>&1 && [ -f scripts/audit.py ]; then
   python3 scripts/audit.py || exit 1
 fi
 
+# Every remote has two halves in two different files, and a half is invisible.
+# The bug this exists for is in ProjectileService's own header: InputController
+# sent ThrowItem and nothing anywhere listened, so every throwable in the game
+# was inert — no error, no warning, just a button that did nothing. audit.py
+# checks that a remote NAME exists; this checks that both ends were wired.
+if command -v python3 >/dev/null 2>&1 && [ -f scripts/remotes.py ]; then
+  echo
+  python3 scripts/remotes.py || exit 1
+fi
+
 # A carried item is a chain of eight links across six files — map folder, spawn
 # point, pickup, slot, hand, use, effect, refill — and every one of them has
 # broken at least once, always silently. items.py walks the chain itself rather

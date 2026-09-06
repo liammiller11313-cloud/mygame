@@ -207,7 +207,7 @@ for cat in ("WeaponFire", "WeaponReload", "Impact", "Gore", "Infected", "Survivo
             if m.group(1) not in keys:
                 problems.append(f"{rel(p)}:{lineno(text, m.start())}  AudioConfig.{cat}.{m.group(1)} does not exist")
 
-# ── 5b. GameConfig keys, through an alias ───────────────────────────────────
+# ── 5b. EVERY config module's keys, direct and through an alias ─────────────
 # The bug this exists for, caught the hard way: ShotPattern was edited to read
 # GameConfig.Recoil.FirstShotScale and friends in the same change that was
 # supposed to add them — and the half that added them silently did not apply.
@@ -216,34 +216,55 @@ for cat in ("WeaponFire", "WeaponReload", "Impact", "Gore", "Infected", "Survivo
 # stylua parses it, selene sees a table index on a defined name, and check 5
 # only knows about AudioConfig.
 #
-# Aliased on purpose, because that is how these are actually used — nobody
-# writes GameConfig.Recoil.ViewScale at the call site, they write
+# This started as a GameConfig-only check and covered one module out of
+# twenty-one. Generalised, because nothing about that bug was specific to
+# GameConfig — it is the shape of every frozen namespace read through a short
+# alias in forty files, and the other twenty modules had no cover at all.
+#
+# Aliased on purpose, because that is how these are actually used: nobody writes
+# GameConfig.Recoil.ViewScale at the call site, they write
 # `local RECOIL = GameConfig.Recoil` once and RECOIL.ViewScale after. Check 3
 # learned the same lesson for Attributes.
-_game_text = strip_comments(read(SRC / "shared/Config/GameConfig.lua"))
-_game_groups = {}
-for _group in re.findall(r"^GameConfig\.(\w+) = table\.freeze\(\{", _game_text, re.M):
-    _keys = table_keys(_game_text, f"GameConfig.{_group}")
-    if _keys:
-        _game_groups[_group] = _keys
+_cfg_groups = {}
+for _f in sorted((SRC / "shared/Config").glob("*.lua")):
+    _mod = _f.stem
+    _text = strip_comments(read(_f))
+    _g = {}
+    for _group in re.findall(rf"^{_mod}\.(\w+)\s*=\s*(?:table\.freeze\()?\{{", _text, re.M):
+        _keys = table_keys(_text, f"{_mod}.{_group}")
+        if _keys:
+            _g[_group] = _keys
+    if _g:
+        _cfg_groups[_mod] = _g
 
+_seen_cfg = set()
 for p, text in sources.items():
-    _aliases = dict(re.findall(r"local\s+(\w+)\s*=\s*GameConfig\.(\w+)\b", text))
-    for _alias, _group in _aliases.items():
-        if _group not in _game_groups:
-            continue
-        for m in re.finditer(rf"\b{_alias}\.(\w+)", text):
-            if m.group(1) not in _game_groups[_group]:
-                problems.append(
-                    f"{rel(p)}:{lineno(text, m.start())}  {_alias}.{m.group(1)} "
-                    f"(GameConfig.{_group}) does not exist"
-                )
-    for _group, _keys in _game_groups.items():
-        for m in re.finditer(rf"GameConfig\.{_group}\.(\w+)", text):
-            if m.group(1) not in _keys:
-                problems.append(
-                    f"{rel(p)}:{lineno(text, m.start())}  GameConfig.{_group}.{m.group(1)} does not exist"
-                )
+    for _mod, _groups in _cfg_groups.items():
+        # Direct reads: Config.Group.Key
+        for _group, _keys in _groups.items():
+            for m in re.finditer(rf"\b{_mod}\.{_group}\.(\w+)", text):
+                if m.group(1) not in _keys:
+                    _msg = (f"{rel(p)}:{lineno(text, m.start())}  "
+                            f"{_mod}.{_group}.{m.group(1)} does not exist")
+                    if _msg not in _seen_cfg:
+                        _seen_cfg.add(_msg)
+                        problems.append(_msg)
+        # Aliased reads: `local A = Config.Group` … `A.Key`.
+        #
+        # Deliberately NOT `local A = Config.Group[k]`, which binds one ELEMENT
+        # of the group and has entirely different keys — SettingsConfig.Difficulty
+        # is a table of profiles, and `profile.incomingDamage` is a real read of
+        # one of them rather than a missing key on the group.
+        for _alias, _group in re.findall(rf"local\s+(\w+)\s*=\s*{_mod}\.(\w+)\s*(?![\[.\w])", text):
+            if _group not in _groups:
+                continue
+            for m in re.finditer(rf"\b{_alias}\.(\w+)", text):
+                if m.group(1) not in _groups[_group]:
+                    _msg = (f"{rel(p)}:{lineno(text, m.start())}  "
+                            f"{_alias}.{m.group(1)} ({_mod}.{_group}) does not exist")
+                    if _msg not in _seen_cfg:
+                        _seen_cfg.add(_msg)
+                        problems.append(_msg)
 
 # ── 6. Module hygiene ───────────────────────────────────────────────────────
 for p, text in raw.items():

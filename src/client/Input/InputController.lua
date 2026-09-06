@@ -123,8 +123,9 @@ local Action = table.freeze({
 	is TouchController's, keyed on the action name, because the arrangement is a
 	thumb arc rather than a list and only the thing that knows where the HUD
 	already sits can decide it. A screen covered in buttons is a screen you cannot
-	see a Hunter through, so the pad is deliberately six — and one of those six
-	only appears when there is something to interact with.
+	see a Hunter through, so the pad is kept to the verbs that earn one — eight,
+	and the eighth changes what it does rather than being a ninth: it is USE when
+	there is something to use and PING otherwise.
 ]]
 local BINDINGS: { Binding } = {
 	{
@@ -224,12 +225,13 @@ local BINDINGS: { Binding } = {
 	--[[ Keyboard only, and no touch button. A pad has no free face or shoulder
 	     button left — the view button opens the pause menu, which is where
 	     BACKPACK sits for a controller and for a phone — and the touch pad is
-	     deliberately six buttons, because a screen covered in them is a screen
-	     you cannot see a Hunter through. ]]
+	     deliberately small, because a screen covered in buttons is a screen you
+	     cannot see a Hunter through. ]]
 	{ action = Action.Backpack, keys = { Enum.KeyCode.B } },
 	--[[ Keyboard only, for the same reasons BACKPACK is: no pad button is free
-	     and the touch pad is deliberately six. Both panels sit in the pause menu,
-	     which is how a controller and a phone reach them. ]]
+	     and the touch pad is already as wide as a phone can spare. Both panels
+	     sit in the pause menu, which is how a controller and a phone reach
+	     them. ]]
 	{ action = Action.Requisitions, keys = { Enum.KeyCode.T } },
 }
 

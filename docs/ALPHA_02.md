@@ -22,7 +22,7 @@ otherwise discover the slow way.
   start       37 ran, 0 failed
 ```
 
-(37 on the server; the client boots 47 controllers and prints its own banner.)
+(37 on the server; the client boots 46 controllers and prints its own banner.)
 
 **`failed` must be 0 on both lines.** A module that fails init is now skipped at
 start rather than run half-built, so one broken service is one line rather than
@@ -73,8 +73,14 @@ Hazardous Wastes/  Hazardous Waste 1 … 7      ← new this build
 ./scripts/check.sh
 ```
 
-Format, undefined names, the code audit, **every item chain**, and the economy
-model. All five must be clean.
+Format, undefined names, the code audit, **every remote's two ends**, **every
+item chain**, and the economy model. All six must be clean.
+
+The remote check is new this build and it is worth knowing what it is for: a
+remote has two halves in two different files, and a missing half is invisible —
+no error, no warning, just a button that does nothing. That is not hypothetical
+here. Every throwable in the game was inert for weeks because the client sent
+`ThrowItem` and nothing listened.
 
 ### 5. Test on a phone and a controller, not only a desktop
 
@@ -189,7 +195,8 @@ Honest list. None of these are worth a report.
 - **The ambush and fake-out are gone**, not broken — deleted rather than left as
   tuned config for a feature with no code path. See `docs/BACKLOG.md`.
 - **Three audio cues are defined and never played**: `UI.MenuPage`,
-  `WeaponReload.Bolt`, `Gore.Squelch`.
+  `WeaponReload.Bolt`, `Gore.Squelch`. Re-checked this build against all 92
+  cues in the bank; it is still exactly these three.
 - **The ammo-crate broadcast has no consumer.** The server tells everyone which
   crate went and when it returns; only the person who used it is told anything.
 - **`MainMenuController` is at 181 top-level locals** against Luau's 200 limit.

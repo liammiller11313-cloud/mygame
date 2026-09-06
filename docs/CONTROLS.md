@@ -11,21 +11,30 @@ editing it by hand.
 | Reload | R | Y | RELOAD button |
 | Shove | Middle mouse | RB | PUSH button |
 | Melee weapon | V | LB | MELEE button |
-| Sprint | Shift | L3 | — |
+| Sprint | Shift | L3 | *always on* |
 | Jump | Space | A | JUMP button |
 | Crouch | Ctrl / C | B | CROUCH button |
 | Use / revive / pick up | E | X | USE button |
-| Use the held item | H | — | — |
+| Use the held item | H, or **fire** | **Fire** (RT) | **FIRE button** |
 | Throw | G, or **fire** | **Fire** (RT), or D-pad ► twice | **FIRE button**, or the tile twice |
 | Swap weapon | — | D-pad ◄ | — |
-| Primary | 1 | — | — |
-| Secondary | 2 | — | — |
-| Throwable | 3 | D-pad ► | — |
-| Health item | 4 | D-pad ▼ | — |
-| Pills | 5 | D-pad ▲ | — |
-| Ping | Q | R3 | — |
-| Backpack | B | — | — |
-| Requisitions | T | — | — |
+| Primary | 1 | — | hotbar tile |
+| Secondary | 2 | — | hotbar tile |
+| Throwable | 3 | D-pad ► | hotbar tile |
+| Health item | 4 | D-pad ▼ | hotbar tile |
+| Pills | 5 | D-pad ▲ | hotbar tile |
+| Ping | Q | R3 | USE button, when there is nothing to use |
+| Backpack | B | pause menu | pause menu |
+| Requisitions | T | pause menu | pause menu |
+
+**On the three dashes that are not gaps.** Touch has no sprint button because
+touch *always* sprints — the pad is eight buttons wide on a five-inch screen and
+a ninth for something a player wants on permanently is a button that is always
+held. The five slot rows have no pad or touch button of their own because the
+hotbar is already on screen saying what is in each slot: on touch its tiles are
+the tap targets, and a controller reaches the three that matter on the D-pad.
+One tap selects; a second tap on a consumable uses it, the same press-again rule
+the D-pad follows.
 
 ## The trigger spends what is in your hand
 
