@@ -212,6 +212,72 @@ local ABILITIES = {
 			end)
 		end,
 	},
+
+	-- The Molten Walrus. Breathes a stream of fire for a couple of seconds,
+	-- burning in ticks rather than all at once - so stepping out of the
+	-- stream, or ducking behind cover, actually saves you.
+	Molten = {
+		Cooldown = 10,
+
+		Activate = function(player, root, humanoid)
+			local DURATION = 2 -- how long the stream lasts
+			local TICK = 0.2 -- how often it burns whoever is caught in it
+			local DAMAGE = 6 -- per tick, so about 60 over a full stream
+			local RANGE = 18 -- studs the flame reaches
+			local CONE = 0.75 -- tighter than a swipe: a stream, not a splash
+			local OFFSET = 3 -- studs in front of you the flame starts
+
+			-- An invisible part carrying Roblox's built-in Fire effect. Fire
+			-- needs no uploaded texture, which is why this works in a blank
+			-- place with nothing in it.
+			local nozzle = Instance.new("Part")
+			nozzle.Size = Vector3.new(1, 1, 1)
+			nozzle.Transparency = 1
+			nozzle.Anchored = true
+			nozzle.CanCollide = false
+			nozzle.CanQuery = false -- so it never blocks a line-of-sight check
+			nozzle.CanTouch = false
+			nozzle.CFrame = root.CFrame * CFrame.new(0, 0, -OFFSET)
+			nozzle.Parent = workspace
+
+			local fire = Instance.new("Fire")
+			fire.Size = 14
+			fire.Heat = 20
+			fire.Color = Color3.fromRGB(255, 140, 40)
+			fire.SecondaryColor = Color3.fromRGB(255, 60, 0)
+			fire.Parent = nozzle
+
+			-- Half a second past the end, so the last flames fade instead of
+			-- vanishing mid-flicker.
+			Debris:AddItem(nozzle, DURATION + 0.5)
+
+			-- task.spawn so the stream runs on its own and the server gets
+			-- straight back to handling everyone else.
+			task.spawn(function()
+				local elapsed = 0
+
+				while elapsed < DURATION do
+					-- Died or left mid-breath? Stop burning.
+					if humanoid.Health <= 0 or not root.Parent then
+						break
+					end
+
+					-- Keep the flame in front of them as they walk and turn.
+					nozzle.CFrame = root.CFrame * CFrame.new(0, 0, -OFFSET)
+
+					for _, target in ipairs(findTargets(player, root, RANGE, CONE)) do
+						dealDamage(player, target, DAMAGE)
+					end
+
+					-- task.wait hands back how long it really waited, which
+					-- is never exactly TICK.
+					elapsed += task.wait(TICK)
+				end
+
+				fire.Enabled = false -- stop making flame; let the rest burn out
+			end)
+		end,
+	},
 }
 
 -- ============================================================

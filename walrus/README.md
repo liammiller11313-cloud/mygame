@@ -58,6 +58,7 @@ keeps their cooldown instead of paying for nothing.
 | `Basic` | 1s | Tusk swipe. 20 damage in a 130° cone, 12 studs, plus a shove. |
 | `Charge` | 4s | A lunge forward. No damage — there as an example of a non-attack. |
 | `Invisible` | 45s | 4 seconds hidden. Costs 25 health up front. |
+| `Molten` | 10s | Breathes fire for 2 seconds. ~6 damage per 0.2s tick in an 80° cone, 18 studs. |
 
 Every number worth tuning is a named constant at the top of its ability.
 
@@ -82,6 +83,24 @@ step with the server without having to ask it.
 both reach the same person on a busy server, and two `leaderstats` folders
 would break the leaderboard.
 
+## Saving
+
+`WalrusLeaderboard` loads each player's Equipped value on join and writes it
+back on leave, plus on server shutdown via `BindToClose` — `PlayerRemoving`
+does not reliably fire when a whole server goes down.
+
+**It will not work until the place is published and Game Settings → Security →
+Enable Studio Access to API Services is ticked.** Until then every call throws
+a 403 into the Output window.
+
+A read that fails is recorded in `loadFailed`, and those players are never
+saved. Without that, one Roblox outage would quietly reset everyone who joined
+during it — the save would run on leave and write the default over data that
+was fine all along.
+
+The save is a table rather than a bare string so a second field can be added
+later without invalidating saves written today.
+
 ## Testing
 
 Use **Test → Players: 2 → Start**. Most of this is invisible in single-player:
@@ -94,4 +113,7 @@ invisible walrus really is invisible from the outside.
   controls, so it can look inconsistent under lag.
 - Kills only count from direct damage. Shoving someone off the map credits
   nobody.
-- Nothing is saved. Equipped resets to `None` when a player rejoins.
+- Kills is a per-round score, not a lifetime total, so it deliberately isn't
+  saved. Add it to the `data` table in `saveData` if you want it to persist.
+- Saving uses `SetAsync`, which is the simple choice. If a player ever ends up
+  on two servers at once, the last write wins.
