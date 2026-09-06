@@ -38,6 +38,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
+local Registry = require(Shared.Util.Registry)
 
 local SPAWNING = DirectorConfig.Spawning
 
@@ -82,10 +83,50 @@ local function bodyScale(definition, referenceHeight: number): number
 	return 1
 end
 
+--[[
+	How tall this kind really is, preferring the measurement over the arithmetic.
+
+	PlaceholderFactory is holding the prepared template and can simply look; both
+	branches below are estimates of the same number and both were wrong for the
+	same reason. `scale` times the grey-box's 5.2 describes a body built out of
+	SHAPES, and every rig in a real place is the artist's — a Tank at 2.35 works
+	out to 12.2 and measures 13.6, so the spawner reserved a space a stud and a
+	half shorter than the thing it put in it.
+
+	The config answer is kept as a fallback rather than deleted, because it is
+	the right answer for a kind whose rig has not been built yet — during the
+	boot prewarm, or on a place with an empty Infected folder — and because
+	SpawnVolume must not be able to fail for want of another service.
+]]
+local function finishedHeight(kind: string?, definition, referenceHeight: number): number
+	if typeof(kind) == "string" then
+		local factory = Registry.find("PlaceholderFactory")
+		if factory and typeof(factory.measuredHeight) == "function" then
+			local ok, measured = pcall(factory.measuredHeight, factory, kind)
+			if ok and typeof(measured) == "number" and measured > 0 then
+				return measured
+			end
+		end
+	end
+	return referenceHeight * math.max(bodyScale(definition, referenceHeight), 0.1)
+end
+
+--[[
+	The box to reserve for one body of this kind.
+
+	Height is the measured one. WIDTH AND DEPTH ARE NOT, and that is deliberate
+	twice over: the measurement cannot supply them honestly — a T-posed rig
+	measures arm span, and this file's own reference size is narrower than arm
+	span on purpose, because testing the full span rejects most doorways — so
+	they stay proportions of the height, which is the only part of the shape the
+	grey-box gets right.
+]]
 function SpawnVolume.sizeFor(kind: string?): Vector3
 	local base = SPAWNING.SpawnBodySize
 	local definition = if typeof(kind) == "string" then InfectedConfig.get(kind) else nil
-	return base * math.max(bodyScale(definition, base.Y), 0.1)
+	local height = finishedHeight(kind, definition, base.Y)
+	local ratio = height / math.max(base.Y, 0.1)
+	return Vector3.new(base.X * ratio, height, base.Z * ratio)
 end
 
 --[[

@@ -301,13 +301,6 @@ single strongest argument in this file for treating prose as code.
 
 ### Still open
 
-- **Sound ids are the last unchecked asset class.** Images and animations both
-  verify at boot; the 68 ids in `AudioConfig` do not. The engine does name a
-  failed sound in the player's own console, so this is weaker than the image
-  case was — but a per-client audio failure is still invisible to the developer.
-- **`SpawnBodySize` and `InfectedBrain`'s `AgentRadius`** describe the same body
-  differently, and both are grey-box arithmetic applied to artist rigs — the
-  same mistake the boss check just had fixed.
 - **`InfectedPoseController`** holds its cull and stride bands as literals, and
   duplicates the desktop defaults between module scope and `adoptDeviceBands`.
 - **The ammo-crate broadcast has no consumer.** The server sends which crate

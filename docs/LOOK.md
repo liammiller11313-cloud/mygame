@@ -138,6 +138,16 @@ Two `scripts/audit.py` checks exist because of bugs in this area:
   config tells them apart. Insert the decal in Studio and read the id off its
   `Texture` property.
 
+  The same check exists for **sound**, in `Audio/SoundCheck`, and audio needs it
+  more rather than less. Roblox does print a line when a sound fails — which it
+  does not for an image — but that line names a bare number, is invisible to
+  script, and appears only in the console of the player it failed for. Audio is
+  licensed per *place*, so an id uploaded under the wrong account is silent for
+  everyone and plays perfectly in Studio for whoever uploaded it: the developer
+  is the one person structurally guaranteed not to hear the problem. And
+  `AudioConfig` ships deliberate blanks, so a missing cue reads as a row nobody
+  has filled in yet rather than as a failure.
+
   Every one of these failures leaves behind something that looks like a design
   decision — a black menu, a blank map card, a boot glow over nothing — which is
   the whole reason the check has to exist. Nobody files a bug against a screen

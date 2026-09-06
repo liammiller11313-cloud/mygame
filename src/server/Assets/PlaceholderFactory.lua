@@ -1863,6 +1863,50 @@ local function variantsFor(kind: string): { Model }
 	return prepared
 end
 
+--[[
+	How tall a body of this kind ACTUALLY comes out, in studs, measured from the
+	prepared template. Nil for a kind with no rig.
+
+	The one honest answer to a question two other systems were each guessing at.
+	SpawnVolume reserved space using the grey-box's 5.2 studs times the kind's
+	`scale`, and InfectedBrain sized its pathfinding agent from 5.4 times the
+	same — so both described a Tank as roughly twelve studs when the rig that
+	actually spawns measures 13.6, and both described the Metallic from a `scale`
+	that only ever builds its fallback. Nothing in any config can know an
+	artist's units; this can, because it is holding the artist's model.
+
+	HEIGHT ONLY, and that restriction is the whole lesson of the boss-clearance
+	fix. A bounding box is honest about stature and lies about width: rigs are
+	saved in a T-pose, so the X extent is fingertip-to-fingertip and a human body
+	measures about as wide as it is tall. Callers that want a width derive it
+	from proportions they choose; they do not read it from here, because it is
+	not in here to read.
+
+	Cached per kind. The measurement costs a bounding box on a template that is
+	already built, and the answer cannot change for the life of the server.
+]]
+local measuredHeights: { [string]: number } = {}
+
+function PlaceholderFactory:measuredHeight(kind: string): number?
+	if typeof(kind) ~= "string" then
+		return nil
+	end
+	local cached = measuredHeights[kind]
+	if cached then
+		return cached
+	end
+	local template = variantsFor(kind)[1]
+	if not template then
+		return nil
+	end
+	local _, size = template:GetBoundingBox()
+	if size.Y <= 0 then
+		return nil
+	end
+	measuredHeights[kind] = size.Y
+	return size.Y
+end
+
 --[[ A finished, unparented rig for `kind`, or nil for an unknown kind. A
      SustainPeak horde asks for this 46 times, so it is a table index and a
      clone and nothing else. ]]

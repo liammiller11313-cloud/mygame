@@ -91,6 +91,10 @@ local CONTROLLERS = {
 	"UI/MapVoteController",
 	-- After the HUD, because it lays itself out around where the hotbar already is.
 	"UI/TouchController",
+	--[[ Order does not matter to it: it reads AudioConfig and asks Roblox, and
+	     touches nothing else in the game. It is here so it sits with the audio
+	     it is about. ]]
+	"Audio/SoundCheck",
 	"Audio/MusicController",
 	-- Reads Attributes.Player.IsSprinting, which SurvivorService publishes.
 	"Audio/FootstepController",

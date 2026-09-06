@@ -78,6 +78,7 @@ local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local InfectedAnimator = require(script.Parent.InfectedAnimator)
 local RigUtil = require(Shared.Util.RigUtil)
+local SpawnVolume = require(script.Parent.Parent.Director.SpawnVolume)
 local Trove = require(Shared.Util.Trove)
 local Types = require(Shared.Types)
 
@@ -347,9 +348,31 @@ function InfectedBrain.new(model: Model, definition: any)
 
 	-- One Path instance per brain, reused for every ComputeAsync. Creating one
 	-- per re-path would allocate an Instance a second per zombie.
+	--[[
+		The agent, sized from the body that will actually stand in it.
+
+		Both numbers used to be a constant times `definition.scale`, and that is
+		wrong in two ways at once. `scale` is a multiplier on the GREY-BOX rig,
+		so for a supplied Tank it described a body a stud shorter than the one
+		that spawns; and for a kind sized by `targetHeight` — the Metallic —
+		`scale` only ever builds the fallback, so the agent was sized from a
+		body the game never uses.
+
+		SpawnVolume answers the same question for the same body, and the two
+		disagreeing is worse than either being wrong: the placer clears a gap and
+		the pathfinder then refuses to route through it, so the Director puts
+		bodies where they cannot walk out of. They read one measurement now.
+
+		The RADIUS still comes from proportions rather than from the measurement,
+		for the reason SpawnVolume gives at length: a T-posed rig measures arm
+		span, and planning a path around a zombie's fingertips rejects most
+		doorways in the game. It is half the spawn box's width, so a body is
+		routed through exactly the gaps it is allowed to stand in.
+	]]
+	local bodySize = SpawnVolume.sizeFor(definition.id)
 	local path = PathfindingService:CreatePath({
-		AgentRadius = 2.2 * (definition.scale or 1),
-		AgentHeight = 5.4 * (definition.scale or 1),
+		AgentRadius = bodySize.X * 0.5,
+		AgentHeight = bodySize.Y,
 		AgentCanJump = true,
 	})
 	self.path = trove:add(path)
