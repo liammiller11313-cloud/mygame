@@ -941,8 +941,15 @@ end
 --[[ The ground under the ghost, which is the spot the player picked. Falls back
      to a Director-found point when that spot is illegal, because refusing the
      spawn outright would leave a dead player staring at a button that does
-     nothing and no way to find out why. ]]
-local function resolveSpawnPosition(slot: any): Vector3?
+     nothing and no way to find out why.
+
+     `kind` is passed through to the fallback and that is not optional. Without
+     it SpawnPlacement reserves room for the LARGEST body in the game, which is
+     the Metallic at seventeen studs — so a player asking to be a Jockey was
+     asking the map for a hole a quarter taller than a Tank, and on any map that
+     had none, the button did exactly the nothing this comment promises it
+     would not. ]]
+local function resolveSpawnPosition(slot: any, kind: string): Vector3?
 	local root = slot.ghostRoot
 	if root and root.Parent then
 		local ignore = { slot.ghost }
@@ -961,7 +968,7 @@ local function resolveSpawnPosition(slot: any): Vector3?
 	if #characters == 0 then
 		return if root and root.Parent then root.Position else nil
 	end
-	local position = SpawnPlacement.find(characters, nil)
+	local position = SpawnPlacement.find(characters, { kind = kind })
 	return position
 end
 
@@ -1134,7 +1141,7 @@ function VersusService:requestSpawnAs(player: Player, kind: string): boolean
 	end
 
 	slot.spawning = true
-	local position = resolveSpawnPosition(slot)
+	local position = resolveSpawnPosition(slot, kind)
 	if not position then
 		slot.spawning = false
 		return false

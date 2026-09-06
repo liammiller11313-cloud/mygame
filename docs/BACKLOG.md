@@ -1,8 +1,14 @@
 # Backlog
 
-Captured 2026-08-20, reviewed 2026-09-05. Roughly ordered by how broken each one
+Captured 2026-08-20, reviewed 2026-09-06. Roughly ordered by how broken each one
 is rather than how big — a thing that traps the mouse is worse than a thing that
 is merely missing.
+
+> **2026-09-06 was a bug-fixing day and it has its own section at the bottom.**
+> Three player reports went in and eleven defects came out, because every one of
+> the three turned out to be a symptom of something other than what it looked
+> like. If you read one thing from it, read *What kept going wrong* — the same
+> mistake is behind most of them.
 
 Six of the original nine are built. They are kept at the bottom rather than
 deleted, because "we tried that" is worth more than a shorter file, and because
@@ -216,6 +222,72 @@ prints every boss's finished size and warns by name if one stands more than 1.35
 times a Tank — a ratio rather than a clearance in studs, because the first
 absolute written there was arithmetic on the grey-box rigs and fired on the Tank
 itself the first time it ran on a real place.
+
+---
+
+## The 2026-09-06 pass
+
+Three reports from playing the game: a pipe bomb that could not be thrown,
+zombies that vanished when shot, and audio that broke around adrenaline. None of
+the three was what it looked like.
+
+### What kept going wrong
+
+**A number was measured against the wrong thing, and prose was believed instead
+of code.** Nearly every defect below is one of those two.
+
+- The boss clearance check fired on the Tank, because 15 x 8 was arithmetic on
+  the grey-box rigs and every real rig is an artist's. It is a ratio against a
+  measured Tank now.
+- The Metallic was sized "a third taller than a Tank" against a Tank that does
+  not exist. 14 studs was x1.03 of a real one — the same size, which is the one
+  thing a second boss must not be. Now 17.
+- The Common's `gibThreshold` of 45 read as "past which the body comes apart"
+  and meant "any headshot", because nobody checked 45 against 50 health and a
+  4x head multiplier.
+- `overkillRatio` was unbounded, so on the smallest body in the game it was a
+  constant rather than a variable. `GoreService`'s own `CUT_PRECEDENCE` note had
+  **noticed** this and routed around it rather than fixing it.
+- Five map-item warnings fired on every boot because a comment asserted that
+  services register after `init()`. They register before it.
+- `MapItemService`'s header said dying leaves your items in the world. It
+  destroys them.
+- `InventoryService.pickup`'s comment promised nothing is ever silently
+  destroyed while ignoring the return value that says whether it was.
+- `dismemberable` answered two questions at once, so the Boomer — three comments
+  call bursting its whole identity — was the only special that could not burst.
+
+### Fixed
+
+| | |
+|---|---|
+| Throwables | the fire button throws, aimed down the camera; controller and touch get a throw for the first time |
+| Bodies | ordinary kills ragdoll instead of gibbing — Common gib cases 199 → 105 |
+| Boomer | can burst at all, which it never could |
+| Adrenaline | no longer kills an in-flight reload; sprint footsteps read the right flag |
+| Audio | reloads, gunshots and melee swings no longer reach the player who made them twice |
+| Map items | spawn points refill after a throw, a teammate heal, a defib and a death |
+| Medkits | a pickup whose drop cannot be built is refused rather than eating your kit |
+| Bosses | measured against a Tank, like against like, width reported and not asserted |
+| Versus | the spawn button passes the chosen kind, so it stops asking for a Metallic-sized hole |
+| Menu | the backdrop is an image id, and `ImageCheck` can now tell an image from a decal |
+| M1A EBR | reaches cut precedence, which `0.95 - 0.45 < 0.5` had been quietly denying it |
+
+### Still open from this pass
+
+- **Sound ids are the last unchecked asset class.** Images and animations both
+  verify at boot; the 68 ids in `AudioConfig` do not. The engine does name a
+  failed sound in the player's own console, so this is weaker than the image
+  case was — but a per-client audio failure is still invisible to the developer.
+- **`SpawnBodySize` and `InfectedBrain`'s `AgentRadius`** describe the same body
+  differently, and both are grey-box arithmetic applied to artist rigs — the
+  same mistake the boss check just had fixed.
+- **Twelve declared-and-fired signals with nothing connected.** `audit.py` notes
+  them every run. Each is either a missing consumer or dead weight, and until
+  somebody decides which, they are twelve lines of noise hiding the next real
+  note.
+- **`InfectedPoseController`** holds its cull and stride bands as literals, and
+  duplicates the desktop defaults between module scope and `adoptDeviceBands`.
 
 ---
 

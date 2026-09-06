@@ -540,8 +540,15 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		what happened before, was not cheaper in any sense that matters.
 	]]
 	--[[ Once per search rather than per attempt: the kind cannot change inside a
-	     find, and sizeFor walks the config. Absent kind takes the largest body,
-	     which is the safe direction — a gap that fits a Tank fits everything. ]]
+	     find, and sizeFor walks the config.
+
+	     An absent kind takes the LARGEST body, which is the safe direction and
+	     is not the cheap one it reads as. That used to be a Tank, and "a gap
+	     that fits a Tank fits everything" was true and comfortable; the largest
+	     body is now the Metallic at seventeen studs, a quarter taller again, and
+	     a map with no gap that big returns nothing at all. Pass a kind whenever
+	     you have one — a caller who knows it is asking for a Jockey and does not
+	     say so is asking for a hole two body-widths too big. ]]
 	local bodySize = if opts.kind then SpawnVolume.sizeFor(opts.kind) else SpawnVolume.largestSize()
 
 	local strictMaxSquared = maxDistanceSquared
