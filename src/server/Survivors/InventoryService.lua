@@ -722,8 +722,10 @@ function InventoryService:dropWeapon(player: Player, slot: string): Model?
 	return model
 end
 
---[[ Takes a pickup off the floor. Picking up a weapon for an occupied slot drops
-     the old one where the new one was, so nothing is ever silently destroyed. ]]
+--[[ Takes a pickup off the floor. Picking up into an occupied slot drops the old
+     one where the new one was, so nothing is ever silently destroyed — and when
+     the drop cannot be built, the pickup is refused rather than the promise
+     being broken. See the note inside. ]]
 function InventoryService:pickup(player: Player, model: Instance): boolean
 	if typeof(model) ~= "Instance" or model.Parent == nil then
 		return false
@@ -738,17 +740,34 @@ function InventoryService:pickup(player: Player, model: Instance): boolean
 	local existing = record.slots[slot]
 	local granted: boolean
 
+	--[[
+		The old one goes on the floor BEFORE the new one is granted, and the
+		answer to whether that worked is not thrown away.
+
+		dropWeapon returns nil, and leaves the slot untouched, when
+		PlaceholderFactory cannot build a pickup model for what is in it. That is
+		not hypothetical: the medkit is documented to build nothing on a map that
+		places no medkits, where every other item falls through to a built-in
+		model. The slot then still held the kit, giveItem overwrote it, and the
+		kit was destroyed — silently, in the one function whose own comment
+		promises that "nothing is ever silently destroyed".
+
+		So a failed drop REFUSES THE PICKUP. The player keeps what they had, the
+		thing on the floor stays on the floor, and they can try again after
+		dropping deliberately. Losing a medkit you were carrying because you
+		brushed past a defibrillator is far worse than a pickup that does not
+		take, and unlike the pickup it is not something the player can see happen
+		or undo.
+	]]
+	if existing and not self:dropWeapon(player, slot) then
+		return false
+	end
+
 	if WeaponConfig.get(itemId) then
 		local ammo = tonumber(model:GetAttribute(PICKUP.Ammo))
 		local reserve = tonumber(model:GetAttribute(PICKUP.Reserve))
-		if existing then
-			self:dropWeapon(player, slot)
-		end
 		granted = self:giveWeapon(player, itemId, ammo, reserve)
 	else
-		if existing then
-			self:dropWeapon(player, slot)
-		end
 		granted = self:giveItem(player, slot, itemId)
 	end
 

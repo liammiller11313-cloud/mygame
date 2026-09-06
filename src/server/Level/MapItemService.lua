@@ -24,17 +24,31 @@
 	it — there is no second copy to keep in sync, and nothing that can drift.
 
 	── WHEN A SPAWN POINT REFILLS ───────────────────────────────────────────────
-	On the SPEND, and not before. Four things can empty a slot — using the item,
-	dropping it, swapping it for another, and dying — and only the first destroys
-	anything. The other three leave it lying in the world, so refilling on those
-	would print items: carrying an unused kit around must not quietly restock the
-	map behind you, or a team that hoards ends up with more than a team that
-	uses. InventoryService.itemConsumed fires for the first and only the first,
-	which is why this listens to that rather than to the slot change.
+	When the item stops existing, and only then. Four things can empty a slot:
 
-	The one case that needs a safety net is a carrier who leaves the server: the
-	item goes with them, nothing is consumed, and the map is one poorer for the
-	rest of the round. That refills too, on the same clock.
+	    using it     destroyed   -> refill
+	    dying        destroyed   -> refill
+	    dropping it  on the floor -> no
+	    swapping it  on the floor -> no
+
+	Dropping and swapping both leave the item lying in the world — pickup calls
+	dropWeapon on an occupied slot before it grants — so refilling on those would
+	print items, and carrying an unused kit around must never quietly restock the
+	map behind you, or a team that hoards ends up with more than a team that
+	uses. That is why this listens to InventoryService.itemConsumed rather than
+	to the slot changing: the signal means destroyed, not emptied.
+
+	DYING IS ALSO A DESTROY, and this file believed otherwise for a long time —
+	the paragraph above used to list it beside dropping. InventoryService.clearAll
+	wipes every slot on death and puts nothing on the floor, so a survivor who
+	went down holding the only molotov in the level took it with them and their
+	spawn point sat claimed by a player who could never spend it. Three deaths
+	per survivor per round is up to twelve items a map could quietly lose. It
+	refills now, on the same clock as everything else.
+
+	The other case needing a safety net is a carrier who LEAVES: the item goes
+	with them, nothing is consumed, and the map is one poorer for the rest of the
+	round. The tick catches that one, because no event is guaranteed to.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -444,23 +458,29 @@ function MapItemService:_onPickedUp(player: Player, _slot: string, _itemId: stri
 	     naming somebody who had not held a molotov for ten minutes — and printed
 	     a second one the moment they disconnected.
 
-	     ── AND IT IS startRefill, NOT `carrier = nil` ──────────────────────────
-	     Clearing the carrier alone strands the spot forever, and the first
-	     version of this loop did exactly that. A taken spot has no `live` model,
-	     no `refillAt`, and its carrier is the ONLY thread back to it: _step's
-	     disconnect net needs a carrier to notice one left, and _onConsumed needs
-	     one to know which spot emptied. Drop the carrier without setting a clock
-	     and nothing in this file can ever reach that spot again — pick up a
-	     molotov, then a pipe bomb, and the molotov's room is empty for the rest
-	     of the round.
+	     ── AND IT LETS GO WITHOUT REFILLING, WHICH LOOKS LIKE A LEAK ───────────
+	     The spot is left with no model, no carrier and no clock, so nothing in
+	     this file can ever reach it again. That is deliberate and it is the
+	     conservation rule at the top of this header: swapping does not DESTROY
+	     the old item, it drops it. InventoryService.pickup calls dropWeapon on
+	     an occupied slot before granting, so the molotov you swapped away is
+	     lying on the floor behind you. The map is not short one molotov, so a
+	     refill would print one — the spot has already delivered what it owed.
 
-	     Refilling is also the honest answer rather than merely the safe one.
-	     InventoryService.giveItem overwrites an occupied slot outright, so the
-	     item that was there is GONE — not dropped, not on the floor, however
-	     much an earlier version of this comment claimed otherwise. The map is
-	     genuinely one molotov short, which is precisely what the refill clock is
-	     for. startRefill is idempotent and refuses a spot that already has a
-	     model or is already counting down, so this cannot shorten a live one. ]]
+	     This was briefly changed to startRefill on the reasoning that giveItem
+	     overwrites a slot outright and the old item is destroyed. giveItem does,
+	     and it is not the path a pickup takes: pickup drops FIRST and then grants
+	     into an emptied slot. The distinction is worth the paragraph because the
+	     two functions are one line apart and only one of them is what a player
+	     walking over a pipe bomb actually runs.
+
+	     There is a genuine hole underneath this, and it is in that drop rather
+	     than here: pickup IGNORES dropWeapon's return, and dropWeapon returns nil
+	     without clearing the slot when PlaceholderFactory has no pickup model to
+	     build — which is the medkit's documented behaviour on a map that places
+	     none. Then giveItem overwrites, and the kit is destroyed in silence with
+	     its spot still naming its carrier. Fixing that belongs in pickup, where
+	     the answer is known. ]]
 	local taken: Spot? = nil
 	for _, spot in spots do
 		if spot.family.key == key and spot.index == index and spot.live == model then
@@ -475,7 +495,7 @@ function MapItemService:_onPickedUp(player: Player, _slot: string, _itemId: stri
 
 	for _, spot in spots do
 		if spot ~= taken and spot.family.slot == taken.family.slot and spot.carrier == player then
-			startRefill(spot)
+			spot.carrier = nil
 		end
 	end
 end
@@ -491,6 +511,18 @@ function MapItemService:_onConsumed(player: Player, _slot: string, itemId: strin
 			-- Only one: a survivor carries at most one of any item, so the first
 			-- spot that names them is the one that just emptied.
 			return
+		end
+	end
+end
+
+--[[ Everything this player was carrying is gone at once — they died, and
+     InventoryService.clearAll destroyed the lot rather than dropping it. Every
+     spot naming them goes back on its clock; startRefill ignores any that
+     already has a model or is already counting down. ]]
+function MapItemService:_onCarrierLostEverything(player: Player)
+	for _, spot in spots do
+		if spot.carrier == player then
+			startRefill(spot)
 		end
 	end
 end
@@ -523,6 +555,16 @@ function MapItemService:start()
 	if mapService and mapService.mapChanged then
 		serviceTrove:add(mapService.mapChanged:connect(function()
 			self:rebuild()
+		end))
+	end
+
+	--[[ Death, which destroys what a survivor was carrying. Connected here rather
+	     than folded into the tick because it is an EVENT with a known player: the
+	     tick's disconnect net exists only because leaving has no reliable one. ]]
+	local survivors = Registry.find("SurvivorService")
+	if survivors and survivors.died then
+		serviceTrove:add(survivors.died:connect(function(player: Player)
+			self:_onCarrierLostEverything(player)
 		end))
 	end
 
