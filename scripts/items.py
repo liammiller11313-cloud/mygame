@@ -124,6 +124,25 @@ need("_onCarrierLostEverything" in FILES["mapitems"],
      "nothing refills a spawn point when its carrier dies, and clearAll destroys "
      "what they were holding rather than dropping it")
 
+# ── 3b. every slot is reachable on every scheme ────────────────────────────
+# A verb a controller or a phone cannot reach is a verb those players do not
+# have, and it fails silently — nothing errors, the button simply is not there.
+# Desktop has the number row; a pad reaches Primary/Secondary through
+# CycleWeapon and the rest through the D-pad; touch reaches all five through the
+# hotbar tiles, which is the ONLY route it has.
+inp = read("client/Input/InputController.lua")
+for slot, padkey in (("Primary", "CycleWeapon"), ("Secondary", "CycleWeapon"),
+                     ("Throwable", "DPadRight"), ("Health", "DPadDown"), ("Pills", "DPadUp")):
+    need("Enums.Slot.%s" % slot in inp,
+         "slot %r has no binding row in InputController, so no scheme can select it" % slot)
+need("DPadLeft" in inp,
+     "CycleWeapon has lost its D-pad key; a controller can no longer reach the "
+     "primary or the secondary, because neither has a D-pad row of its own")
+need("entry.tap.Active = touch" in read("client/UI/HudController.lua")
+     or "tap.Active" in read("client/UI/HudController.lua"),
+     "the hotbar tiles are never made tappable, which is the only way a touch "
+     "player can select any slot at all")
+
 # ── 4. what a survivor is holding is actually drawn ────────────────────────
 for slot in ("Health", "Pills", "Throwable"):
     need("Enums.Slot.%s]" % slot in FILES["carry"],

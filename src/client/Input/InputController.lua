@@ -650,7 +650,23 @@ local function forward(action: string)
 		-- method that is assigned further down the file than this closure.
 		local pressAgain = scheme == Scheme.Gamepad or scheme == Scheme.Touch
 		if pressAgain and CONSUMABLE_SLOTS[binding.slot] and selectedSlot() == binding.slot then
-			Remotes.Event.UseItem:FireServer(binding.slot)
+			--[[ A throwable goes down the THROW path, not the use path, because
+			     only one of the two aims.
+
+			     UseItem sends no origin and no direction, so ProjectileService
+			     falls back to the server's view of the character — a level
+			     LookVector. That is what a controller and a phone got for every
+			     throw they have ever made: a bomb aimed at the floor in front of
+			     them however far up or down the player was looking, while a
+			     desktop player's G sent a camera ray. Both schemes now throw
+			     where they are looking, which is also what the fire button does
+			     on all three. ]]
+			if binding.slot == Enums.Slot.Throwable then
+				local origin, direction = cameraRay()
+				Remotes.Event.ThrowItem:FireServer({ origin = origin, direction = direction, power = 1 })
+			else
+				Remotes.Event.UseItem:FireServer(binding.slot)
+			end
 			lastSelect.slot = ""
 			return
 		end

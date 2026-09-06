@@ -16,7 +16,7 @@ editing it by hand.
 | Crouch | Ctrl / C | B | CROUCH button |
 | Use / revive / pick up | E | X | USE button |
 | Use the held item | H | — | — |
-| Throw | G, or **fire** | **Fire** (RT) | **FIRE button** |
+| Throw | G, or **fire** | **Fire** (RT), or D-pad ► twice | **FIRE button**, or the tile twice |
 | Swap weapon | — | D-pad ◄ | — |
 | Primary | 1 | — | — |
 | Secondary | 2 | — | — |
@@ -49,6 +49,11 @@ players can throw without knowing an undocumented gesture.
 
 It aims down the **camera**, not the character. A bomb goes where the crosshair
 is — up onto a balcony, down a stairwell — rather than flat out in front of you.
+That is true on **all three** schemes now. It was not: selecting a throwable
+twice on a pad or a phone used to send it through the *use* path, which carries
+no direction at all, so the server aimed it with a level look vector and every
+console and mobile throw went at the floor in front of the player however far up
+they were looking.
 
 ## Three deaths and your round is over
 
