@@ -1641,9 +1641,6 @@ function SurvivorService:defibrillate(player: Player): boolean
 		cframe = body:GetPivot()
 	end
 	self:_releaseBody(player)
-
-	record.incapCount = 0
-	record.blackAndWhite = false
 	self:_respawn(player, cframe, S.DefibReviveHealth)
 	return true
 end
@@ -1667,9 +1664,6 @@ function SurvivorService:rescueFromCloset(closet: Instance): Player?
 	end
 
 	self:_releaseBody(player)
-	local record = records[player]
-	record.incapCount = 0
-	record.blackAndWhite = false
 	self:_respawn(player, cframe, S.DefibReviveHealth)
 	return player
 end
@@ -1727,6 +1721,20 @@ function SurvivorService:_respawn(player: Player, cframe: CFrame?, health: numbe
 	record.stamina = S.MaxStamina
 	record.sprintLocked = false
 	record.spawnCFrame = cframe
+
+	--[[ The incap ledger, cleared HERE rather than at two of the three call
+	     sites.
+
+	     A fresh body is a fresh ledger — that is what "you get up again" means,
+	     and the defib and the closet both said so by clearing these two lines
+	     immediately before calling this. The breather's respawn goes through
+	     RoundService, which deliberately does not touch survivor state ("this
+	     only chooses the health and the spot"), so it was the one way back into
+	     a body that handed it over still black and white with two falls already
+	     against it. The next knockdown was your last, on a life you had just
+	     been given. Three doors, one rule, and it lives behind the door. ]]
+	record.incapCount = 0
+	record.blackAndWhite = false
 
 	local index = table.find(awaitingRescue, player)
 	if index then

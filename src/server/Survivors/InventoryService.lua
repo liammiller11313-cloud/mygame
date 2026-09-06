@@ -564,12 +564,13 @@ function InventoryService:useItem(player: Player, slot: string): boolean
 			end
 			return false
 		end
-		if projectiles:throw(player, entry.itemId) then
-			self:_clearSlot(record, slot)
-			self.itemConsumed:fire(player, slot, entry.itemId)
-			return true
-		end
-		return false
+		--[[ throw() spends the item itself, through consumeSlot, which clears the
+		     slot and fires itemConsumed. Doing either again here was harmless
+		     only by luck: the second clear is a no-op and the second signal found
+		     a spawn point whose carrier had already been let go. It became a
+		     duplicate the moment consumeSlot learned to announce a spend — before
+		     that this was the ONLY fire on the path and had to be here. ]]
+		return projectiles:throw(player, entry.itemId)
 	end
 
 	-- Primary and secondary are fired, not used.

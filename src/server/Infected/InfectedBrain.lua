@@ -527,8 +527,16 @@ function InfectedBrain:chill(scale: number, duration: number)
 	self.chillUntil = math.max(self.chillUntil, now + math.max(duration, 0))
 	--[[ Re-asserted now rather than on the next state change. A body already
 	     walking would otherwise keep its old speed until it happened to want a
-	     new one, which for a Common chasing somebody can be several seconds. ]]
-	self:_setSpeed(self.speed / math.max(self.speedScale * self.chillScale, 1e-3) * self.chillScale)
+	     new one, which for a Common chasing somebody can be several seconds.
+
+	     Stated as the speed the body WANTS, not recovered from the speed it has.
+	     _setSpeed takes an unscaled intent and multiplies both scales into it,
+	     while self.speed is the SCALED result it last wrote — so this used to
+	     divide by the scales to work backwards, and used the NEW chill in a
+	     divisor for a value scaled with the OLD one. Every chill after the first
+	     landed on a speed off by the ratio between them. The two other callers
+	     have always passed the intent; now all three do. ]]
+	self:_setSpeed(if self.target then self.chaseSpeed else self.definition.walkSpeed)
 end
 
 function InfectedBrain:stagger(duration: number)
@@ -661,7 +669,13 @@ function InfectedBrain:update(dt: number, snapshot: any)
 	     the moment it thaws rather than whenever it next changes state. ]]
 	if self.chillScale < 1 and os.clock() >= self.chillUntil then
 		self.chillScale = 1
-		self:_setSpeed(self.baseSpeed)
+		--[[ The speed this body should be running at, which is what the stagger
+		     recovery below asks for too. It used to read self.baseSpeed, a field
+		     nothing in the repository has ever assigned — _setSpeed multiplies
+		     its argument by two scales, so a thawing body did arithmetic on nil
+		     and threw straight out of update(). Every chilled infected stopped
+		     thinking the moment its chill expired. ]]
+		self:_setSpeed(if self.target then self.chaseSpeed else self.definition.walkSpeed)
 	end
 
 	--[[

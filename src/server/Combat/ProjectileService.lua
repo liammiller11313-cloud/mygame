@@ -1345,7 +1345,17 @@ function ProjectileService:_stepLureZone(record: any, index: number, now: number
 		     exactly this — every listener applies its own hearing range, so who
 		     comes running is the config's decision and not this file's. ]]
 		if infected then
-			infected:reportNoise(entry.character, spec.noiseWeight, remaining)
+			--[[ The COATING's clock, not the puddle's. `remaining` is how long
+			     the splash has left to live, and it was being handed to the
+			     survivor as the duration of the noise flag on their body — so
+			     somebody coated by a jar about to dry attracted the horde for a
+			     second, and somebody coated by a fresh one for twenty. The
+			     screen effect two lines above has always used a fixed fade, and
+			     a survivor is coated at most once per zone, so nothing came
+			     along later to reconcile them. Both halves of the item now end
+			     together: you stop being blind and you stop being the target on
+			     the same clock. ]]
+			infected:reportNoise(entry.character, spec.noiseWeight, GoreConfig.ScreenBlood.BoomerBileFadeTime)
 		end
 	end
 end

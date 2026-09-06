@@ -34,6 +34,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local Enums = require(Shared.Enums)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Registry = require(Shared.Util.Registry)
@@ -190,6 +191,18 @@ local function isTouch(): boolean
 	end
 	local ok, touch = pcall(input.isTouchScheme, input)
 	return ok and touch == true
+end
+
+--[[ Whether the main menu is up. Same three lines every panel in this folder
+     carries, and for the same reason: a panel opened OVER the menu must not
+     hand the round back when it closes. ]]
+local function menuIsOpen(): boolean
+	local menu = Registry.find("MainMenuController")
+	if not menu or typeof(menu.isOpen) ~= "function" then
+		return false
+	end
+	local ok, open = pcall(menu.isOpen, menu)
+	return ok and open == true
 end
 
 local function callController(name: string, method: string, ...: any)
@@ -547,7 +560,10 @@ local function show(mode: string, width: number, height: number, heading: string
 	docBody.Visible = mode == "document"
 	gui.Enabled = true
 
-	setSuppressed(true)
+	--[[ Unless the menu already has it, like every other panel in this folder.
+	     Suppressing unconditionally means the close below hands the round back
+	     even when the main menu is still up over it. ]]
+	setSuppressed(not menuIsOpen())
 	FreeCursor.take(restore)
 	--[[ A pad lands on a key rather than nowhere. Without this the keypad was
 	     answerable only with a mouse, which on a console is the same as not being
@@ -609,6 +625,12 @@ function VaultController:close()
 	GamepadFocus.release(nil)
 	FreeCursor.giveBack(restore)
 	setSuppressed(false)
+	--[[ And the menu takes its suppression back, which this was the one panel
+	     close in the folder that never asked for. Without it a keypad closed
+	     over the main menu handed input to a round that is not running. ]]
+	if menuIsOpen() then
+		callController("MainMenuController", "reassertSuppression")
+	end
 	UiSound.play(AudioConfig.UI.MenuBack)
 end
 
@@ -619,6 +641,21 @@ function VaultController:init()
 end
 
 function VaultController:start()
+	--[[
+		The round ending closes this, and nothing used to.
+
+		Every other screen is torn down by the round leaving InProgress. This one
+		listened only to its own four puzzle remotes, so a player standing at the
+		keypad when the last survivor went down kept a full-screen panel over the
+		results poster — holding the cursor and the input lock, and then handing
+		both back to a round that no longer exists when they finally closed it.
+	]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
+		if state.open and Attributes.get(Workspace, GA.RoundState, "") ~= Enums.RoundState.InProgress then
+			self:close()
+		end
+	end)
+
 	--[[ The server's answer, and the only thing that decides what this screen
 	     says after ENTER. A refusal keeps the panel open with the code still in
 	     the readout so the player can see what they typed; success closes it,

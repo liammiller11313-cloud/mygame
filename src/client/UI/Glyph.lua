@@ -30,6 +30,15 @@ local Registry = require(Shared.Util.Registry)
 
 local Glyph = {}
 
+--[[ What a person calls a mouse button, as against what the enum calls it.
+     These arrive as Enum.UserInputType rather than Enum.KeyCode, which is why
+     they need their own table and their own pass. ]]
+local MOUSE: { [string]: string } = {
+	MouseButton1 = "LMB",
+	MouseButton2 = "RMB",
+	MouseButton3 = "MMB",
+}
+
 local GAMEPAD: { [string]: string } = {
 	DPadUp = "▲",
 	DPadDown = "▼",
@@ -81,11 +90,22 @@ function Glyph.forKeys(keys: { any }, scheme: string?): string
 			end
 		end
 	end
+	--[[ The mouse, which is not a KeyCode at all. Fire and Aim are the only two
+	     bindings in the game whose desktop key is a UserInputType, so they slid
+	     past the ASCII loop above and landed in the last-resort one below — which
+	     upper-cases the enum's own name and told players to press MOUSEBUTTON1.
+	     LMB is what a person calls it. ]]
 	for _, key in keys do
-		if typeof(key) == "EnumItem" and not Glyph.isGamepadKey(key) then
-			return string.upper(key.Name)
+		if typeof(key) == "EnumItem" and key.EnumType == Enum.UserInputType and MOUSE[key.Name] then
+			return MOUSE[key.Name]
 		end
 	end
+
+	--[[ Last resort, and it deliberately does NOT print the enum's name any more.
+	     That fallback was written for the D-pad-style names this module's header
+	     rejects, and every time it fired it produced exactly the kind of string
+	     the header exists to prevent. A question mark is honest; MOUSEBUTTON1 is
+	     not. ]]
 	return "?"
 end
 

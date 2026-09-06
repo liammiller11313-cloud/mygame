@@ -255,6 +255,21 @@ local function warnFriendlyFire(attacker: Player?, damageType: string?)
 	if damageType == Enums.DamageType.Melee then
 		return
 	end
+	--[[ And never for a HAZARD, which is a different mistake or none at all.
+
+	     "DON'T SHOOT TEAM MATES" is about a shot you aimed. A fire pool re-tests
+	     every body in it four times a second for its whole life, naming the
+	     thrower as the attacker, so a teammate who walks into a molotov that was
+	     already burning made the thrower shout at themselves on a loop — for a
+	     place they chose before that teammate was standing in it. An airstrike is
+	     the same shape.
+
+	     The words are also simply wrong for both: nobody shot anybody. Until
+	     there is a message that fits a hazard, silence beats the wrong sentence
+	     on a four-second timer. ]]
+	if damageType == Enums.DamageType.Fire or damageType == Enums.DamageType.Explosive then
+		return
+	end
 	local now = os.clock()
 	local last = lastFriendlyWarnAt[attacker]
 	if last and now - last < GameConfig.Survivor.FriendlyFireWarnCooldown then

@@ -308,8 +308,22 @@ function MapVoteService:_step()
 	end
 end
 
+--[[ Changing your vote is allowed and a vote is a button somebody presses, so
+     the only thing this rules out is a client sending at packet rate. Each
+     accepted change broadcasts a full tally to every player in the server, and
+     the one guard on the path — refusing a vote for the map you already picked
+     — is defeated by alternating between two of them. Every other client-facing
+     handler in the game has one of these. ]]
+local CAST_COOLDOWN = 0.35
+
 function MapVoteService:init()
+	local lastCastAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
 	serviceTrove:connect(Remotes.Event.CastMapVote.OnServerEvent, function(player, mapId)
+		local now = os.clock()
+		if lastCastAt[player] and now - lastCastAt[player] < CAST_COOLDOWN then
+			return
+		end
+		lastCastAt[player] = now
 		self:cast(player, mapId)
 	end)
 	serviceTrove:connect(Players.PlayerRemoving, function(player)

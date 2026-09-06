@@ -1495,12 +1495,29 @@ end
 	keyboard did not — so arrows pressed while the pause menu was up still moved a
 	cursor on a card nobody could see.
 
-	The shop, the settings panel and the pause menu all draw above the picker's
-	layer, so anything open there is covering it. Asked by method rather than
-	tracked, because these are four independent screens and a flag mirrored from
-	each of them is four things to keep in sync.
+	EVERY panel on the Settings layer draws above the picker, which sits on Vote,
+	and this list named three of the eight. The five that were missing are not
+	edge cases — the backpack, requisitions, career, abilities and play are the
+	screens a player actually opens during the pick window, each with its own
+	full-screen scrim, and every one of them left the picker taking gamepad input
+	underneath it.
+
+	Asked by method rather than tracked, because these are independent screens and
+	a flag mirrored from each is one more thing to keep in sync. Listed rather
+	than derived from DisplayOrder because a controller does not expose the layer
+	it drew on, and inventing that accessor across eight files to save a line here
+	is the more expensive answer.
 ]]
-local COVERING_SCREENS = { "ShopController", "SettingsController", "PauseController" }
+local COVERING_SCREENS = {
+	"ShopController",
+	"SettingsController",
+	"PauseController",
+	"BackpackController",
+	"RequisitionController",
+	"CareerController",
+	"AbilityPanelController",
+	"PlayController",
+}
 
 local function pickerObscured(): boolean
 	if state.open or menuIsOpen() then

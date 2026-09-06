@@ -869,6 +869,20 @@ function RoundService:startRound(requestedMode: string?)
 		return
 	end
 
+	--[[ The Director's temperament for this round, rolled here because this is
+	     where a round begins and nowhere else was calling it.
+
+	     beginRound is the only caller of rollTemperament, and nothing called
+	     beginRound — so state.temperament sat on its initialiser, Temperaments[1]
+	     = "Measured", for the entire life of the server. Every round anybody has
+	     ever played has had the same Director personality, and the boot line
+	     claiming one was rolled printed for a roll that never happened. The wave
+	     hook beside it (beginWave) was wired; the round hook was not. ]]
+	local temperament = Registry.find("DirectorTemperament")
+	if temperament and typeof(temperament.beginRound) == "function" then
+		pcall(temperament.beginRound, temperament)
+	end
+
 	mode = if typeof(requestedMode) == "string" and GameModeConfig.Modes[requestedMode]
 		then requestedMode
 		else GameModeConfig.DefaultMode
