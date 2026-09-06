@@ -1062,10 +1062,26 @@ end
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function WeaponController:init()
+	--[[ Every attribute that can change what is in the player's hands or what it
+	     has in it.
+
+	     MeleeId was missing, and it is a real gap rather than a tidiness one:
+	     activeWeaponId reads it, so picking a different melee off the floor while
+	     the melee slot is selected changes what should be drawn — and nothing
+	     told this function to look, so the old one stayed in frame until the next
+	     slot switch.
+
+	     The three consumable ids are deliberately NOT here. Nothing on the client
+	     draws them: the medkit, the pills and the throwable a player sees in
+	     their own hands are the SERVER's hands mount, left visible to its owner
+	     because no viewmodel is standing in for it — see hideOwnWorldWeapon. The
+	     server rebuilds that mount from its own loadout signal, so watching the
+	     ids here would be a refresh with nothing to refresh. ]]
 	local WATCHED = {
 		LA.ActiveSlot,
 		LA.PrimaryId,
 		LA.SecondaryId,
+		LA.MeleeId,
 		LA.PrimaryAmmo,
 		LA.SecondaryAmmo,
 		LA.PrimaryReserve,
