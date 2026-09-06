@@ -273,7 +273,33 @@ of code.** Nearly every defect below is one of those two.
 | Menu | the backdrop is an image id, and `ImageCheck` can now tell an image from a decal |
 | M1A EBR | reaches cut precedence, which `0.95 - 0.45 < 0.5` had been quietly denying it |
 
-### Still open from this pass
+### The eight-area hunt
+
+Run after the fixes above, across service lifecycle, remotes and attributes,
+state machines, the Director, the interface, economy and progression, combat
+edges, and half-wired features. Forty-seven findings; the seven ranked highest
+were all real, and one of them was a bug this same day's work had introduced.
+
+Worth keeping from it, because it is the same lesson twice more:
+
+- **A phantom survivor blocked every team wipe.** Leaving the match only cleared
+  the survivor record while a round was *running* — and Victory, TeamWipe and
+  Lobby all report it is not, which is exactly when the results screen fires it.
+  Records outlive rounds. Treating "a round is running" as "a record exists" is
+  what did it.
+- **The wave boss was dropped forever** on a failed placement, under a comment
+  saying something else would re-offer it. That something returns on its first
+  line in wave mode.
+- **`dismemberable` was answering two questions**, so the Boomer — three comments
+  call bursting its whole identity — was the only special that could not burst.
+- **The M1A EBR missed cut precedence by 6e-17**, because `0.95 - 0.45` is not
+  `0.5` in binary.
+
+Twenty of the forty-seven were stale comments, and four of the morning's bugs
+had been *described accurately by a comment* and shipped anyway. That is the
+single strongest argument in this file for treating prose as code.
+
+### Still open
 
 - **Sound ids are the last unchecked asset class.** Images and animations both
   verify at boot; the 68 ids in `AudioConfig` do not. The engine does name a
@@ -282,12 +308,19 @@ of code.** Nearly every defect below is one of those two.
 - **`SpawnBodySize` and `InfectedBrain`'s `AgentRadius`** describe the same body
   differently, and both are grey-box arithmetic applied to artist rigs — the
   same mistake the boss check just had fixed.
-- **Twelve declared-and-fired signals with nothing connected.** `audit.py` notes
-  them every run. Each is either a missing consumer or dead weight, and until
-  somebody decides which, they are twelve lines of noise hiding the next real
-  note.
 - **`InfectedPoseController`** holds its cull and stride bands as literals, and
   duplicates the desktop defaults between module scope and `adoptDeviceBands`.
+- **The Director's ambush and fake-out are configured and unreachable.** Seven
+  tuned fields, a per-temperament chance on all six temperaments, and
+  `shouldAmbush` / `shouldFakeout` that nothing calls. Either build the two
+  paths or delete the config — but that is a design decision, not a cleanup, so
+  it is left for a person to make.
+- **The ammo-crate broadcast has no consumer.** The server sends which crate
+  went, its index and its respawn time to everybody; the only handler reads one
+  field for one player. A burned crate is information the team needs, and the
+  wire already carries it.
+- **Three audio cues are defined with real ids and never played** —
+  `UI.MenuPage`, `WeaponReload.Bolt`, `Gore.Squelch`.
 
 ---
 
