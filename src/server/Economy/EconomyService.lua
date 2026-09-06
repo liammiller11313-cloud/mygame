@@ -44,7 +44,6 @@ local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
-local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
 local GA = Attributes.Game
@@ -58,7 +57,6 @@ local EconomyService = {}
 --[[ (player: Player, itemId: string, price: number) — after a successful
      purchase. For anything that wants to react to an unlock: an announcement,
      a stat, a badge. ]]
-EconomyService.purchased = Signal.new()
 
 local serviceTrove = Trove.new()
 
@@ -319,7 +317,6 @@ local function onPurchase(player: Player, itemId: any)
 		ok = true,
 		price = price,
 	})
-	EconomyService.purchased:fire(player, itemId, price)
 
 	--[[ Written immediately. An unlock is the single thing in this game a player
 	     would be most upset to lose to a server crash, and it is rare enough

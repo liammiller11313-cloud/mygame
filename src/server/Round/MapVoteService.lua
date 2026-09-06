@@ -31,14 +31,11 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
-local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
 local VOTE = MapConfig.Vote
 
 local MapVoteService = {}
-
-MapVoteService.voteFinished = Signal.new() -- (winnerId: string)
 
 local serviceTrove = Trove.new()
 
@@ -213,8 +210,6 @@ function MapVoteService:_finish(winner: string)
 	if mapService then
 		mapService:prewarm(winner)
 	end
-
-	MapVoteService.voteFinished:fire(winner)
 end
 
 --[[ Ends the vote early — used when a round is forced to start before the clock

@@ -124,9 +124,6 @@ function ProfileController:canAfford(itemId: string): boolean
 	return price ~= nil and state.dollars >= price
 end
 
---[[ The three, as stored. Returned by reference on purpose: the loadout screen
-     edits a COPY it makes itself and sends the result, so nothing here is ever
-     half-edited by a screen that was closed midway. ]]
 function ProfileController:ownsAbility(id: string): boolean
 	return state.abilities[id] == true
 end
@@ -153,6 +150,9 @@ function ProfileController:abilitySlotOf(id: string): number
 	return 0
 end
 
+--[[ The three, as stored. Returned by reference on purpose: the loadout screen
+     edits a COPY it makes itself and sends the result, so nothing here is ever
+     half-edited by a screen that was closed midway. ]]
 function ProfileController:getLoadouts(): { LoadoutConfig.Loadout }
 	return state.loadouts
 end

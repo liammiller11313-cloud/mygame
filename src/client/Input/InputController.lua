@@ -290,8 +290,6 @@ InputController.Action = Action
 --[[ Aggregate streams, for anything that wants the whole keymap at once (a
      rebinding UI, an input-echo debug overlay). Per-action signals are cheaper
      for a single consumer — see onBegan/onEnded. ]]
-InputController.actionBegan = Signal.new() -- (action: string)
-InputController.actionEnded = Signal.new() -- (action: string)
 
 --[[
 	Which kind of thing the player is holding.
@@ -429,9 +427,7 @@ local function setDown(action: string, isDown: boolean)
 		perAction:fire(action)
 	end
 	if isDown then
-		InputController.actionBegan:fire(action)
 	else
-		InputController.actionEnded:fire(action)
 	end
 end
 

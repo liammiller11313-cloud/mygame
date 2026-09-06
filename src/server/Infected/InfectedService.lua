@@ -86,7 +86,6 @@ InfectedService._burnLights = 0
 
 --[[ (model: Model, kind: string) — fired after the rig is parented and its
      brain and special module are live. ]]
-InfectedService.spawned = Signal.new()
 
 --[[ (model: Model, kind: string, ctx: DamageContext?) — fired once, after the
      body is flagged dead and its brain is gone, before GoreService touches it. ]]
@@ -600,7 +599,6 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?,
 		end
 	end
 
-	self.spawned:fire(model, kind)
 	return model
 end
 

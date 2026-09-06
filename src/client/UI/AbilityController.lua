@@ -906,15 +906,21 @@ function AbilityController:start()
 	end)
 
 	--[[ Rebinding changes what the corner of a card says, and so does picking up
-	     a controller — the prompt is per-scheme, so both have to redraw it. ]]
+	     a controller — the prompt is per-scheme, so both have to redraw it.
+
+	     Only the second half used to be wired. The rebind listener asked for
+	     `input.created`, which is not a field of InputController at all — the
+	     only `created` in that file is a local inside signalIn — so the guard was
+	     nil, the branch never connected, and a rebound ability key kept showing
+	     the old letter until something else happened to redraw the card.
+	     SettingsController.changed is the signal a rebind actually fires. ]]
+	local settings = Registry.find("SettingsController")
+	if settings and settings.changed then
+		trove:add(settings.changed:connect(refreshSlots))
+	end
 	local input = Registry.find("InputController")
-	if input then
-		if input.created then
-			trove:add(input.created:connect(refreshSlots))
-		end
-		if input.schemeChanged then
-			trove:add(input.schemeChanged:connect(refreshSlots))
-		end
+	if input and input.schemeChanged then
+		trove:add(input.schemeChanged:connect(refreshSlots))
 	end
 
 	trove:connect(RunService.RenderStepped, step)

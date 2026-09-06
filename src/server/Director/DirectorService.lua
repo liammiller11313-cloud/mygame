@@ -99,7 +99,6 @@ local InfectedConfig = require(Shared.Config.InfectedConfig)
 local ModifierConfig = require(Shared.Config.ModifierConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
-local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
 local SpawnPlacement = require(script.Parent.SpawnPlacement)
@@ -280,7 +279,6 @@ local DEFAULT_BUDGET: WaveBudget = table.freeze({
 local DirectorService = {}
 
 --[[ (newState: string, oldState: string) ]]
-DirectorService.pacingChanged = Signal.new()
 
 local random = Random.new()
 
@@ -1168,7 +1166,6 @@ function DirectorService:_setState(newState: string)
 	self:_dropQueued(SOURCE_POPULATION)
 
 	setGameAttribute(Attributes.Game.PacingState, newState)
-	self.pacingChanged:fire(newState, previous)
 	broadcast(EVENT.Pacing, {
 		state = newState,
 		previous = previous,

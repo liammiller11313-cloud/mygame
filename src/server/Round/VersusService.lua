@@ -80,7 +80,6 @@ local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local RigUtil = require(Shared.Util.RigUtil)
-local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
 -- Not a service: a plain placement module, required directly the same way
@@ -157,11 +156,8 @@ local VersusService = {}
 
 --[[ (player: Player, role: string, side: string) — fired on every assignment
      and every swap, alongside the VersusTeamChanged remote. ]]
-VersusService.teamChanged = Signal.new()
 --[[ (scores: {[string]: number}, half: number) — a half was scored. ]]
-VersusService.halfScored = Signal.new()
 --[[ (scores: {[string]: number}, winner: string?) — both halves are done. ]]
-VersusService.matchEnded = Signal.new()
 
 local serviceTrove = Trove.new()
 
@@ -251,7 +247,6 @@ local function announce(player: Player, slot: any)
 		kind = slot.kind,
 		model = slot.body,
 	})
-	VersusService.teamChanged:fire(player, role, slot.side)
 end
 
 --[[
@@ -1427,8 +1422,6 @@ function VersusService:_scoreHalf(outcome: string)
 			then not survivorsWon
 			else survivorsWon
 	end
-
-	self.halfScored:fire(self:getScores(), half)
 end
 
 --[[
@@ -1441,7 +1434,7 @@ end
 
 	ORDERING: this is written by _scoreHalf, which runs from this service's own
 	roundEnded handler. Callers must therefore be connected to roundEnded AFTER
-	this service — which they are, because Signal fires in connection order and
+	this service — which they are, because a signal fires in connection order and
 	connection order is the MODULES list in init.server.lua, where both payout
 	services sit below Round/VersusService. That comment says so too.
 ]]
@@ -1614,7 +1607,6 @@ function VersusService:_onRoundEnded(outcome: string)
 		elseif final[SIDE_B] > final[SIDE_A] then
 			winner = SIDE_B
 		end
-		self.matchEnded:fire(final, winner)
 
 		-- A fresh match on the same server, sides kept, halves and scores reset.
 		half = 0

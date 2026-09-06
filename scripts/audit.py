@@ -839,31 +839,56 @@ for p, text in code.items():
 # A note rather than a problem: a signal with no consumer yet is a normal state
 # during development, and the point is to make it visible rather than to fail
 # the build over it.
-SIGNAL_DECL_RE = re.compile(r"(?:^|\n)\s*(?:local\s+)?[\w.]*?(\w+)\s*=\s*Signal\.new\(\)")
+# A FIELD, not a bare local. `Module.thing = Signal.new()` is a public signal
+# somebody is expected to connect to; `local x = Signal.new()` inside a factory
+# is private plumbing handed out by a method, and its consumers reach it through
+# that method rather than by name — InputController's per-action store is the
+# example, and counting it produced a note nobody could ever action.
+SIGNAL_DECL_RE = re.compile(r"(?:^|\n)\s*[\w.]+\.(\w+)\s*=\s*Signal\.new\(\)")
 
 declared = {}   # signal name -> file that declares it
 for p, text in sources.items():
     for m in SIGNAL_DECL_RE.finditer(text):
         declared.setdefault(m.group(1), []).append((p, lineno(text, m.start())))
 
+# A connect is only evidence for a DECLARING FILE if the connecting file could
+# plausibly be talking to that module. Without this the census matched by bare
+# name across the whole tree, so two modules that both declare `fired` covered
+# for each other and an entirely unconsumed signal never appeared — which is
+# exactly what hid WeaponController.fired behind BallisticsService.fired.
+def _mentions_module(decl_path, consumer_path):
+    # `code` keeps string literals; `sources` blanks them, and a module is very
+    # often named ONLY inside one — Registry.find("SettingsController"). Reading
+    # the blanked text here made every Registry-based consumer invisible.
+    stem = pathlib.Path(decl_path).stem
+    return re.search(r"\b" + re.escape(stem) + r"\b", code[consumer_path]) is not None
+
+
 for name, sites in sorted(declared.items()):
-    consumed = False
-    for p, text in sources.items():
-        # `x.name:connect(` / `:once(` anywhere, including the declaring file.
-        if re.search(r"[.:]" + re.escape(name) + r"\s*[:.]\s*(?:connect|Connect|once|Once)\b", text):
-            consumed = True
-            break
-        # Passed to something that will connect it: `trove:connect(x.name, fn)`.
-        if re.search(r"connect\s*\(\s*[\w.]*\.?" + re.escape(name) + r"\s*,", text):
-            consumed = True
-            break
-    if not consumed:
-        where = ", ".join(f"{rel(f)}:{ln}" for f, ln in sites)
-        notes.append(
-            f"{where}  Signal '{name}' is declared and fired but nothing connects to it "
-            f"— either a consumer is missing, or a direct call/attribute already does the job "
-            f"and the signal is dead weight"
-        )
+    shared = len(sites) > 1
+    for decl_path, decl_line in sites:
+        consumed = False
+        for p, text in sources.items():
+            # A name declared in ONE place is answered by a connect anywhere: the
+            # reference is unambiguous. A name declared in several has to be
+            # answered by a file that at least names the module it belongs to,
+            # or one module's consumer silently vouches for another's.
+            if shared and p != decl_path and not _mentions_module(decl_path, p):
+                continue
+            # `x.name:connect(` / `:once(` anywhere, including the declaring file.
+            if re.search(r"[.:]" + re.escape(name) + r"\s*[:.]\s*(?:connect|Connect|once|Once)\b", text):
+                consumed = True
+                break
+            # Passed to something that will connect it: `trove:connect(x.name, fn)`.
+            if re.search(r"connect\s*\(\s*[\w.]*\.?" + re.escape(name) + r"\s*,", text):
+                consumed = True
+                break
+        if not consumed:
+            notes.append(
+                f"{rel(decl_path)}:{decl_line}  Signal '{name}' is declared and fired but nothing "
+                f"connects to it — either a consumer is missing, or a direct call/attribute already "
+                f"does the job and the signal is dead weight"
+            )
 
 
 

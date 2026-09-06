@@ -500,6 +500,16 @@ end
 local function runPhase(phase: string): (number, number)
 	local ran, failed = 0, 0
 	for _, entry in loaded do
+		--[[ A module whose earlier phase threw has nothing to start. This ran
+		     start() on half-built objects, which is how one broken init became a
+		     second, less legible error in a later phase — and this file already
+		     knows the shape of that problem: matchmakingService() refuses to hand
+		     a player to a service whose start() failed, for exactly this reason.
+		     The banner has already reported it; running more of it adds noise,
+		     not recovery. ]]
+		if failures[entry.path] then
+			continue
+		end
 		local service = entry.service
 		if typeof(service) ~= "table" then
 			continue

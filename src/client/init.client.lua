@@ -248,6 +248,12 @@ end
 local function runPhase(phase: string): (number, number)
 	local ran, failed = 0, 0
 	for _, entry in loaded do
+		--[[ Same rule the server bootstrap keeps: a controller whose earlier
+		     phase threw has nothing to start, and starting it half-built turns
+		     one legible failure into two. The banner has already named it. ]]
+		if failures[entry.path] then
+			continue
+		end
 		local method = entry.module[phase]
 		if typeof(method) == "function" then
 			local ok, err = xpcall(method, traceback, entry.module)

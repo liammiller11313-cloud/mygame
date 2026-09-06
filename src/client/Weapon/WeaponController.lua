@@ -139,11 +139,7 @@ local CANNOT_FIRE: { [string]: boolean } = {
 
 local WeaponController = {}
 
-WeaponController.fired = Signal.new() -- (weaponId, definition, seed, origin, direction, spread)
-WeaponController.dryFired = Signal.new() -- (weaponId, definition)
 WeaponController.weaponChanged = Signal.new() -- (weaponId, definition?)
-WeaponController.aimChanged = Signal.new() -- (isAiming)
-WeaponController.reloadChanged = Signal.new() -- (isReloading, perShell)
 WeaponController.ammoChanged = Signal.new() -- (ammo, reserve)
 
 local player = Players.LocalPlayer
@@ -416,7 +412,6 @@ local function endReload(finished: boolean)
 	if viewmodel then
 		viewmodel:onReloadFinished(finished)
 	end
-	WeaponController.reloadChanged:fire(false, perShell)
 end
 
 local function pushWeapon()
@@ -681,7 +676,6 @@ local function dryFire()
 	if viewmodel then
 		viewmodel:onDryFire()
 	end
-	WeaponController.dryFired:fire(state.weaponId, state.definition)
 
 	-- Pulling an empty trigger IS the reload command. Making the player press a
 	-- second key to say what they obviously meant is a tax on panic.
@@ -874,8 +868,6 @@ local function fireOnce()
 		seed = seed,
 		clientTime = Workspace:GetServerTimeNow(),
 	})
-
-	WeaponController.fired:fire(definition.id, definition, seed, origin, direction, spread)
 end
 
 -- ── reloading ───────────────────────────────────────────────────────────────
@@ -915,7 +907,6 @@ function WeaponController:beginReload(): boolean
 	if viewmodel then
 		viewmodel:onReloadStarted(definition, state.reload.perShell)
 	end
-	WeaponController.reloadChanged:fire(true, state.reload.perShell)
 	return true
 end
 
@@ -1007,7 +998,6 @@ function WeaponController:setAiming(value: boolean)
 	if viewmodel then
 		viewmodel:setAiming(value)
 	end
-	WeaponController.aimChanged:fire(value)
 end
 
 function WeaponController:shove()
