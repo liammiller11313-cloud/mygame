@@ -349,6 +349,100 @@ WeaponConfig.Definitions = {
 		knockback = 38,
 	},
 
+	--[[
+		The flare gun. A secondary that does almost no damage and is worth
+		carrying anyway.
+
+		Twelve on impact will not kill a Common — that is deliberate and it is
+		the whole design. What it does is `ignites`, the same burn the molotov
+		and the flamethrower own, so the shot is a fuse rather than a bullet:
+		the body walks two more seconds and then goes down on fire, and the
+		bodies behind it walk through what is left. Against a horde that is a
+		slow answer and a bad one. Against a special coming down a corridor
+		alone it is one shell.
+
+		ONE SHELL, and a reload longer than a Magnum's. You break it, the spent
+		case comes out, a new one goes in. Everything about the rhythm is meant
+		to make the shot a decision — there is no second one for four seconds
+		and nothing else in your hands until there is.
+
+		AND IT LIGHTS THE ROOM. The flare burns where it lands. In a game called
+		Fading Light, with a torch deliberately weaker than its own fog and a
+		blackout event that kills every fixture in the map, this is the only
+		thing a player carries that pushes the dark back — which is most of the
+		reason to own one and none of the reason it is priced where it is.
+	]]
+	[Enums.Weapon.FlareGun] = {
+		id = Enums.Weapon.FlareGun,
+		displayName = "Flare Gun",
+		modelName = "Flare Gun",
+		slot = Enums.Slot.Secondary,
+		class = "Pistol",
+		fireMode = "Semi",
+
+		damage = 12,
+		rpm = 60,
+		pellets = 1,
+		magSize = 1,
+		reserveMax = -1,
+		-- A flare stops in the first thing it touches. It is a lit stick, not a
+		-- bullet, and one that punched through two bodies would set neither.
+		penetration = 0,
+		penetrationFalloff = 1.0,
+
+		--[[ No falloff worth the name. The impact damage is already negligible,
+		     and the burn it starts does not care how far it travelled — so a
+		     flare across a courtyard lights the thing it hits exactly as well as
+		     one at arm's length. That is the one generous thing about it. ]]
+		falloffStart = 300,
+		falloffEnd = 900,
+		falloffMin = 0.85,
+		maxRange = 900,
+
+		spreadHip = 2.0,
+		spreadAim = 0.4,
+		spreadMoving = 1.4,
+		spreadMax = 5.0,
+		bloomPerShot = 0,
+		bloomRecovery = 5.0,
+
+		recoilVertical = 2.2,
+		recoilHorizontal = 0.5,
+		recoilRecovery = 7.0,
+		kickback = 0.22,
+
+		--[[ Four seconds, break-action, one shell at a time. reloadPerShell is
+		     what makes the hand carry a round to the breech rather than slap a
+		     magazine in — see AmmoConfig.Magazines.FlareShell, which is the LIVE
+		     shell, as against the spent case in Casings. ]]
+		reloadTime = 4.0,
+		reloadPerShell = 4.0,
+		drawTime = 0.4,
+		aimTime = 0.2,
+
+		walkSpeedScale = 1.0,
+		aimWalkSpeedScale = 0.75,
+		aimFov = 62,
+
+		shakeMagnitude = 1.2,
+		shakeRoughness = 8,
+		--[[ Fat, slow and hot. The one tracer in the game a player is supposed
+		     to WATCH — it is how you know where the fire is about to start. ]]
+		tracerWidth = 0.26,
+		tracerColor = Color3.fromRGB(255, 138, 46),
+		muzzleFlashSize = 2.2,
+		shellEject = true,
+
+		--[[ It sets things alight and it does not take them apart, exactly as
+		     the flamethrower does not. A burned body stays a body. ]]
+		gibPower = 0.0,
+		dismemberPower = 0.0,
+		knockback = 6,
+
+		-- The whole weapon, in one field. See DamageService.
+		ignites = true,
+	},
+
 	--[[ Two magazines' worth without a reload, and it is the reason the pair
 	     exists: the 1911 places shots and this one keeps firing. Nine millimetre
 	     means three body shots on a Common where the .45 takes two, so the

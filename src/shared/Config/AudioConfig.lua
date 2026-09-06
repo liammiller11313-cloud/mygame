@@ -215,6 +215,13 @@ AudioConfig.WeaponFire = {
 	[Enums.Weapon.DualBerettas] = sound(ID.PistolShot, 0.66, 1.08, 1.18, 300, 4),
 	[Enums.Weapon.Glock18] = sound(ID.PistolShot, 0.62, 1.12, 1.22, 290, 4),
 	[Enums.Weapon.SawnOff] = sound(ID.ShotgunBlast, 1.0, 1.02, 1.1, 480, 5),
+	--[[ A flare gun is a hollow THUMP, not a crack — a low-pressure shell
+	     lobbing a lit stick. The shotgun sample dropped a long way and quietened
+	     is the closest thing in the bank: the blast's body without its snap. It
+	     also carries further than its volume suggests (420) on purpose, because
+	     the flare that follows is visible across the whole street and a team
+	     should hear where it came from before they see it land. ]]
+	[Enums.Weapon.FlareGun] = sound(ID.ShotgunBlast, 0.62, 0.72, 0.78, 420, 4),
 	[Enums.Weapon.Shotgun] = sound(ID.ShotgunBlast, 1.0, 0.96, 1.04, 500, 5),
 	--[[ One shotgun sample, four guns, pitched apart. The DAO-12 sits highest
 	     because twelve rapid shells reading as twelve of the same boom is a wall

@@ -29,6 +29,11 @@ Enums.Weapon = table.freeze({
 	     working". It is a secondary by slot only — priced, loaded and reloaded so
 	     that carrying it means giving up the fallback the slot exists for. ]]
 	RPG7 = "RPG7",
+	--[[ Secondary: a signal pistol, and the cheapest way into the burn the
+	     molotov owns. One shell, a long reload, and damage that barely troubles
+	     a Common on impact — what it does is set them alight and light the room
+	     doing it, in a game whose own title is about that running out. ]]
+	FlareGun = "FlareGun",
 	--[[ The seventh, from the supplied models. Capacity rather than punch — see
 	     WeaponConfig. ]]
 	M9 = "M9",

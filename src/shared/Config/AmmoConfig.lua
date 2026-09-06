@@ -135,6 +135,28 @@ AmmoConfig.Casings = {
 		lifetime = 5.0,
 		bounce = true,
 	},
+	["flare"] = {
+		--[[ 26.5mm, so fatter and shorter than a 12ga hull, and the model name
+		     is the SPENT one on purpose: this folder is what comes OUT of a gun.
+		     The live shell is a separate model in Magazines — see FlareShell
+		     below, and docs/AMMO_MODELS.md, which spells the pair out because
+		     "Flare Shell" and "Flare Shell (spent)" are one character apart and
+		     they go in different folders. ]]
+		model = "Flare Shell (spent)",
+		size = Vector3.new(0.15, 0.15, 0.26),
+		--[[ Scorched, not red. A fired flare case is blackened at the mouth, and
+		     an unfired-looking case on the floor next to a burning body is the
+		     kind of small lie a player notices without being able to say why. ]]
+		color = Color3.fromRGB(96, 74, 62),
+		material = Enum.Material.Plastic,
+		--[[ Break-action: the case is not thrown by a slide, it is tipped out by
+		     hand. So it barely leaves the gun and it does not skitter. ]]
+		ejectSpeed = 3,
+		ejectUp = 4,
+		spin = 5,
+		lifetime = 6.0,
+		bounce = false,
+	},
 } :: { [string]: CasingDefinition }
 
 --[[ Magazines, by family. A dropped magazine is the clearest possible signal
@@ -217,6 +239,25 @@ AmmoConfig.Magazines = {
 		lifetime = 2,
 		perShellRound = true,
 	},
+	FlareShell = {
+		--[[ The LIVE shell, and the other half of the pair. perShellRound is
+		     what puts it in the hand on the way to the breech rather than
+		     dropping it on the floor: a break-action gun loads one round, and
+		     the reload IS watching that round go in.
+
+		     Its spent twin lives in Casings under "Flare Shell (spent)". One
+		     letter of difference and two different folders, which is exactly why
+		     both are named in docs/AMMO_MODELS.md. ]]
+		model = "Flare Shell",
+		size = Vector3.new(0.15, 0.15, 0.3),
+		-- Unfired: the orange every flare in this game is, so the round in the
+		-- hand and the light it becomes are obviously the same object.
+		color = Color3.fromRGB(226, 108, 42),
+		material = Enum.Material.Plastic,
+		dropSpeed = 0,
+		lifetime = 2,
+		perShellRound = true,
+	},
 } :: { [string]: MagazineDefinition }
 
 --[[ Which calibre and magazine each weapon uses. Grouped by what the gun really
@@ -225,6 +266,7 @@ AmmoConfig.Magazines = {
 AmmoConfig.Weapons = {
 	[Enums.Weapon.M1911A1] = { casing = "45acp", magazine = "PistolMag" },
 	[Enums.Weapon.Magnum357] = { casing = "357", magazine = "RevolverSpeedloader" },
+	[Enums.Weapon.FlareGun] = { casing = "flare", magazine = "FlareShell" },
 	--[[ These three shipped without a row here, so they ejected nothing and
 	     reloaded nothing visible — the one piece of feedback that says a pistol
 	     is a pistol, missing on three of the five. ]]

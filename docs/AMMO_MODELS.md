@@ -35,8 +35,22 @@ ReplicatedStorage/
 | **Rifle ammo** | M4A1, HK416A5, Mk 18 CQBR, Scoped Mk-18 | `Casing_556` | `Mag_STANAG` |
 | **AK ammo** | AKM, AK-12, AKS-74U | `Casing_762`, `Casing_556` | `Mag_AK` |
 | **Sniper ammo** | M1A EBR | `Casing_762` | `Mag_Marksman` |
+| **Flare ammo** | Flare Gun | `Flare Shell (spent)` | `Flare Shell` |
 
 Floor pickups: `AmmoPile`, `AmmoBox`, `ShellBox`.
+
+> **The flare pair is the one to get right.** The two names are one word apart
+> and they go in different folders, because they are two different objects the
+> player sees at two different moments:
+>
+> - `Magazines/Flare Shell` — the **live** round. Break-action guns load one at a
+>   time, so this is the shell your hand carries to the breech, and watching it
+>   go in *is* the reload.
+> - `Casings/Flare Shell (spent)` — the **fired** case, tipped out when you break
+>   the gun open. Scorched, not orange.
+>
+> Put either one in the other folder and you get a spent case going into a gun,
+> or a live shell falling out of one. Both load fine and both look wrong.
 
 ## If you do replace one
 

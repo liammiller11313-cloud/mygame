@@ -291,6 +291,13 @@ EconomyConfig.Catalogue = table.freeze({
 	{ id = Enums.Weapon.M9, category = "SECONDARY", price = 900 },
 	{ id = Enums.Weapon.DualBerettas, category = "SECONDARY", price = 1500 },
 	{ id = Enums.Weapon.Glock18, category = "SECONDARY", price = 2800 },
+	--[[ Between the Glock and the Sawn-Off, which is where a sidegrade belongs
+	     and not where its damage would put it. Twelve on impact is nothing; what
+	     is being bought is the burn, and the burn is the molotov's, which means
+	     this is the cheapest permanent way into an effect the game otherwise
+	     rations one throwable at a time. The light it makes is worth nothing to
+	     the economy and quite a lot at three in the morning on Blackout. ]]
+	{ id = Enums.Weapon.FlareGun, category = "SECONDARY", price = 3500 },
 	{ id = Enums.Weapon.SawnOff, category = "SECONDARY", price = 4200 },
 	{ id = Enums.Weapon.Magnum357, category = "SECONDARY", price = 6000 },
 	--[[

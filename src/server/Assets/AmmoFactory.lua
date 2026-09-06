@@ -652,6 +652,15 @@ function AmmoFactory:build(): number
 		return buildShotgunHull("12ga", C["12ga"].size, false)
 	end))
 
+	--[[ A flare shell is a shotgun hull that is fatter and shorter, so it is
+	     built as one. `loaded` is what separates the pair: false is the fired
+	     case that comes out of the gun, true is the live round that goes in, and
+	     they are two models in two different folders because they are two
+	     different objects a player sees at two different moments. ]]
+	count(place(casings, C["flare"].model, function()
+		return buildShotgunHull("FlareSpent", C["flare"].size, false)
+	end))
+
 	count(place(magazines, M.PistolMag.model, function()
 		return buildBoxMagazine("PistolMag", M.PistolMag.size, STEEL, Enum.Material.Metal, 0, true)
 	end))
@@ -679,6 +688,9 @@ function AmmoFactory:build(): number
 	end))
 	count(place(magazines, M.ShotgunShell.model, function()
 		return buildShotgunHull("Round12ga", M.ShotgunShell.size, true)
+	end))
+	count(place(magazines, M.FlareShell.model, function()
+		return buildShotgunHull("FlareRound", M.FlareShell.size, true)
 	end))
 
 	count(place(pickups, AmmoConfig.Pickups.Box, function()

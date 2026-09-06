@@ -21,6 +21,18 @@ ServerStorage
         └── Knife
 ```
 
+> **A wrapper model is fine.** `Flare Gun` containing `SAIPH Flare Gun`
+> containing the parts works exactly like parts sat directly in it — the
+> pipeline collects them through `GetDescendants` and looks for a `Handle`
+> recursively. Only the name of the OUTER entry has to match the table.
+>
+> The flare gun also wants **two ammo models**, and they are in a different
+> place: see `docs/AMMO_MODELS.md`. `Flare Shell` (live) and
+> `Flare Shell (spent)` (fired) go in `ReplicatedStorage/Assets/Ammo/Magazines`
+> and `.../Casings` respectively — not in `Weapons`, and not in ServerStorage,
+> because casings are a client-side effect and only ReplicatedStorage is
+> searched for them.
+
 You do **not** need a second copy for first person. One model is used for both
 the weapon in your hands and the one everybody else sees you carrying. Add
 `Assets/Viewmodels/<name>` only if you deliberately want a *different*,
@@ -86,6 +98,7 @@ Same folder, same rules.
 | Secondary | Glock 18 | `Glock 18` · `Glock18` |
 | Secondary | Sawn-Off | `Sawn-Off` · `SawnOff` |
 | Secondary | RPG-7 | `RPG-7` · `RPG7` |
+| Secondary | Flare Gun | `Flare Gun` · `FlareGun` |
 | Primary | Shotgun | `Shotgun` |
 | Primary | Tactical Shotty | `Tactical Shotty` · `TacticalShotty` |
 | Primary | M1014 | `M1014` |
