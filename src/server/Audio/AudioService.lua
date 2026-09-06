@@ -35,6 +35,16 @@
 	doing for the handful of sounds that have an owner and wrong for everything
 	else, which is why it is opt-in per call.
 
+	Six call sites pass one, covering the three sounds in this game that a
+	player makes and hears themselves: the gunshot (BallisticsService), the
+	melee swing (MeleeService), and the four reload cues (InventoryService).
+	Everything
+	else is deliberately not excluded — an impact, a body falling, a teammate's
+	pills — because nobody has already heard those.
+
+	Bullet impacts look like they qualify and do not: the client never plays
+	them, on purpose. See the note at the top of ImpactController.
+
 	Positional sounds live on a temporary anchored emitter part. That part is
 	CanQuery = false and CanTouch = false, which is not cosmetic: an emitter that
 	answers raycasts would stop the next bullet fired through the space where the

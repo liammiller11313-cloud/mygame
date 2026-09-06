@@ -511,9 +511,21 @@ function BallisticsService:resolveShot(
 		spread = spread,
 	})
 
+	--[[ Everyone but the shooter, for the same reason the WeaponFired remote
+	     above them excludes the shooter: they have already had it. The client
+	     plays its own gunshot flat and immediate on the frame the trigger goes
+	     down, so a world emitter at the muzzle reached them a round trip later
+	     as a slapback echo of their own gun — on every shot, all game.
+
+	     The cost is bounded and was designed for exactly this call. _playExcluding
+	     gathers listeners inside the definition's own rolloff and nobody else, so
+	     a four-player team spread across a map is usually one or two emitters
+	     rather than three; it admits ONCE against the category budget however
+	     many it builds; and it picks the id and the pitch once, so the team hears
+	     one gunshot from one gun rather than a chord. ]]
 	local audio = Registry.find("AudioService")
 	if audio then
-		audio:playAt(AudioConfig.WeaponFire[weaponId], origin)
+		audio:playAt(AudioConfig.WeaponFire[weaponId], origin, nil, shooter)
 	end
 
 	--[[ After the remote and the sound, before the rays. Everything a listener

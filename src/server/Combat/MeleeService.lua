@@ -642,9 +642,12 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 		spread = 0,
 	})
 
+	--[[ Everyone but the swinger, who heard it locally on the frame they swung.
+	     Same reasoning as the gunshot in BallisticsService, and the same reason
+	     the WeaponFired remote above excludes them. ]]
 	local audio = Registry.find("AudioService")
 	if audio then
-		audio:playAt(AudioConfig.WeaponFire[weaponId], apex)
+		audio:playAt(AudioConfig.WeaponFire[weaponId], apex, nil, player)
 	end
 
 	local candidates: { Candidate } = {}
