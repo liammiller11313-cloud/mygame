@@ -8,10 +8,16 @@
 	server validates against it, and neither has an opinion the other does not
 	share.
 
-	── WHY ONLY THESE THREE SLOTS ──────────────────────────────────────────────
-	A loadout sets Primary, Secondary and Melee and nothing else. Medkits, pills
-	and throwables stay where they are — on the floor of the map, found by
+	── WHY ONLY THESE THREE WEAPON SLOTS ───────────────────────────────────────
+	A loadout sets Primary, Secondary and Melee, and no other WEAPON. Medkits,
+	pills and throwables stay where they are — on the floor of the map, found by
 	looking.
+
+	It does also carry the two ability slots, which moved onto the loadout from
+	the account and live in the same flat table (see ABILITY_SLOTS below). They
+	are not weapons and they do not touch the rule this paragraph is about, but
+	"and nothing else" was flatly wrong forty lines above the code that defines
+	them.
 
 	That is a deliberate line rather than a missing feature. The scavenging loop
 	is most of what makes a Left 4 Dead map worth walking through slowly: the

@@ -12,11 +12,16 @@
 	ONE WEAPON IS WORTH ABOUT TWO WON ROUNDS. That is the number every other
 	number here is derived from:
 
-	  a round pays  ~$1,000 in kills + $1,100 for a win + $60 a wave survived
-	                ≈ $2,500 for a won round, ~$1,000 for a deep loss
-	  the roster    31 purchasable weapons, $157,000
-	  therefore     ≈ 62 winning rounds at 1.99 each, and a loss still moves you
+	  a round pays  ~$1,030 in kills + $1,100 for a win + $28 a wave survived
+	                ≈ $2,550 for a won round, ~$1,000 for a deep loss
+	  the roster    32 purchasable weapons, $160,500
+	  therefore     ≈ 62 winning rounds at 1.94 each, and a loss still moves you
 	                forward
+
+	  (The wave bonus was 60 when the round was seven waves; it is 28 across
+	  fifteen. This summary kept the old figure for a while and its own arithmetic
+	  stopped adding up to its own total, which is what these lines are FOR.
+	  scripts/economy.py prints all of it — read that before this.)
 
 	This used to read "the whole roster in 30-40 rounds", and that was the same
 	rule while the roster was twenty weapons: 39 rounds across 20 of them IS 1.95
@@ -38,17 +43,22 @@
 	  it out of the roster sum on purpose — see the field itself. economy.py
 	  prints it on its own line, at ten further won rounds, so it is measured
 	  rather than exempt. Anything else priced above the ladder belongs there too.
-	  Three secondaries went in at $8,500 and took this from 35 rounds to 39. The
-	  NEXT priced thing added to the catalogue fails scripts/economy.py, and the
-	  fix at that point is the income side — as it was when the melee roster went
-	  in — but it cannot be the win bonus alone: raising VictoryBonus to 1250 buys
-	  36 rounds and drags the kill share to 37%, against the 45% the section below
-	  calls the number to protect. Raise kill rewards, or raise both.
 
-	`scripts/economy.py` recomputes that from this table and fails if it has
-	drifted out of the 30-40 band. The paragraph above is only true because
-	something checks it — the first draft of these numbers said 39 and the model
-	said 18, which is the whole reason that script exists.
+	  There is headroom now and there was not always: a weapon costs 1.94 won
+	  rounds against a 1.6-2.4 target, so the next one added pays for itself. The
+	  paragraph that used to sit here said the opposite — that the next priced
+	  thing would fail the check — and it was a note from the era when the target
+	  was an absolute 30-40 round count for the whole roster rather than a cost
+	  per weapon. It contradicted the headroom line four paragraphs above it.
+
+	  If it ever DOES tighten, the fix is the income side, and it cannot be the
+	  win bonus alone: raising VictoryBonus drags the kill share down, and the
+	  section below calls that the number to protect.
+
+	`scripts/economy.py` recomputes all of it from this table and fails when it
+	drifts. The paragraph above is only true because something checks it — the
+	first draft of these numbers said 39 and the model said 18, which is the
+	whole reason that script exists.
 
 	── WHY A LOSS STILL PAYS ────────────────────────────────────────────────────
 	A wipe on wave 6 is forty minutes of good play that happened to end badly, and

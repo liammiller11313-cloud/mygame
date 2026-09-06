@@ -1228,9 +1228,12 @@ function RoundService:_startIfReady()
 		This is the whole reason the main menu kept vanishing, and it took two
 		goes to get right because there are two callers. The check below asks
 		whether MatchmakingService has `started`, and during the boot the honest
-		answer is "not yet" — RoundService is third in the module list and
-		matchmaking is fifth. Read as "there is no matchmaking here", that starts
-		a round in the middle of boot.
+		answer is "not yet" — it starts several entries after this one, and that
+		stays true however the list is reordered because a service cannot have
+		started before the phase reaches it. (The exact positions used to be
+		written down here and drifted the first time a module was inserted
+		between them.) Read as "there is no matchmaking here", that starts a
+		round in the middle of boot.
 
 		Deferring the call at the end of start() fixed only that one caller.
 		Players.PlayerAdded is the other, and in Studio's Play Solo the player
@@ -1507,8 +1510,12 @@ function RoundService:_step()
 		end
 		cursor += 1
 		if cursor > #schedule then
-			-- Reaching the end of the last wave alive is the win, at four survivors or
-			-- at one: VictoryRequiresAllAlive is false and means it.
+			-- Reaching the end of the last wave alive is the win, at four survivors
+			-- or at one. Unconditional, and deliberately: GameModeConfig has a
+			-- VictoryRequiresAllAlive flag set false, but nothing reads it, so
+			-- naming it here read as "this line honours the flag" when in fact
+			-- flipping it would change nothing at all. Either wire it up or drop
+			-- it; until then the behaviour is stated rather than delegated.
 			self:endRound(Enums.RoundState.Victory)
 			return
 		end
@@ -1759,10 +1766,12 @@ function RoundService:start()
 		Deferred, not called here.
 
 		This runs during the bootstrap's start phase, and MatchmakingService is
-		two entries further down the list — so at this instant its `started` flag
-		is still false and _startIfReady cannot tell "no matchmaking on this
-		server" from "matchmaking has not had its turn yet". It read the second as
-		the first and started a round at boot.
+		further down the list — so at this instant its `started` flag is still
+		false and _startIfReady cannot tell "no matchmaking on this server" from
+		"matchmaking has not had its turn yet". It read the second as the first
+		and started a round at boot. (How MANY entries further down was written
+		here once and stopped being true the moment one was inserted between
+		them; what matters is only that it is after.)
 
 		Live servers hid it: players arrive after the boot completes, so the
 		PlayerAdded path always saw a started matchmaking. Studio's Play Solo does

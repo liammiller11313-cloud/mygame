@@ -51,9 +51,16 @@
 	    accent
 	    lock      the session lock above; never handed to the rest of the game
 
-	Nothing else. Round stats and settings are deliberately absent: this key is
-	read and written on every join and leave, and every field added to it is
-	weight on the one operation a player waits for.
+	    loadoutNames    what the player called each of the three
+	    abilities       the permanent unlock set
+	    abilitySlots    which two are equipped
+
+	Nothing else — and the three above were missing from this list while
+	`serialise` wrote them and `migrate` read them back, which is exactly the
+	kind of quiet drift a list ending in "nothing else" invites. Round stats and
+	settings are deliberately absent: this key is read and written on every join
+	and leave, and every field added to it is weight on the one operation a
+	player waits for.
 
 	── WHY THE LEVEL IS NOT A FIELD ─────────────────────────────────────────────
 	It would be a second copy of something `xp` already says, and the only thing

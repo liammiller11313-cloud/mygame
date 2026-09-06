@@ -354,9 +354,16 @@ end
 	What Scrip is FOR.
 
 	A currency with nothing to buy is a number, and a number is not a reward. The
-	pass is the sink, and it is deliberately the only one: Scrip cannot be
-	converted to Dollars, cannot be spent in the shop, and buys nothing that
-	changes how a gun behaves.
+	pass is the PERMANENT sink — the thing Scrip accumulates toward across
+	sessions — and it was the only one when this was written.
+
+	Requisitions are the second, and they are a different shape rather than a
+	contradiction: bought mid-round, spent immediately, gone when the round ends.
+	Some of them DO change how a gun behaves for that round — the field drill
+	reloads everyone a quarter faster, incendiary rounds set the horde alight —
+	so the claim below that Scrip never touches combat is true of the pass and
+	false of the catalogue. Scrip still cannot become Dollars and still buys
+	nothing in the shop.
 
 	── WHY NOTHING HERE AFFECTS COMBAT ─────────────────────────────────────────
 	Every reward is a name or a colour. That is not modesty about the art budget;

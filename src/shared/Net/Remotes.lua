@@ -62,7 +62,10 @@ local EVENTS: { string } = {
 
 	-- ── Server → Client: combat feedback ────────────────────────────────────
 	"WeaponFired", -- {shooter, weaponId, origin, direction, seed} — for OTHER players
-	"HitConfirmed", -- {region, damage, killed, isHeadshot, position, kind?} — hitmarker fuel
+	-- damageType and isBoss are not decoration: HitmarkerController branches on
+	-- both to pick the hit-stop length, so a sender that omits them silently
+	-- downgrades a Tank hit to an ordinary one.
+	"HitConfirmed", -- {region, damage, killed, isHeadshot, position, damageType, isBoss, kind?}
 	"DamageTaken", -- {amount, sourcePosition, damageType} — vignette + direction arrow
 	"GoreEvent", -- {model, level, part, direction, force}
 	"ImpactEffect", -- {position, normal, material, damageType}
@@ -80,10 +83,14 @@ local EVENTS: { string } = {
 	"ObjectiveChanged", -- {text: string, progress: number?}
 	"KillFeed", -- {killer: string, victim: string, weaponId: string, headshot: boolean}
 	"StatsUpdated", -- {player, stats} — end-of-round tally
-	--[[ A short warning shown to ONE player, centred, in their face. For things
-	     the game has to say about what they just did rather than about what is
-	     happening — the friendly-fire notice is the first. ]]
-	"Notice", -- {text: string, tone: string?}  tone: "Warn" (default) | "Good"
+	--[[ A short line centred in the player's face. For things the game has to
+	     say about what somebody just DID, rather than about what is happening.
+
+	     Fired both ways, and the manifest used to promise only the first: the
+	     friendly-fire notice goes to one player, and a survivor going down is
+	     broadcast to the whole team, which is the reason `sting` exists — the
+	     team's copy sounds, so a downed callout is heard as well as read. ]]
+	"Notice", -- {text: string, tone: string?, sting: boolean?}  tone: "Warn" (default) | "Good"
 
 	-- ── Round structure & matchmaking ───────────────────────────────────────
 	"WaveChanged", -- {index, name, announcement, isBreather, endsAt}

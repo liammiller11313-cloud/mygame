@@ -973,10 +973,15 @@ local function stepLobby()
 	end
 end
 
---[[ Everything this service does on a clock, in one connection. Round state is
-     polled rather than subscribed so that load order cannot matter: RoundService
-     may register after this module, and a missed signal would leave the lobby
-     dead for the life of the server. ]]
+--[[ Everything this service does on a clock, in one connection.
+
+     Round state is polled rather than subscribed, and the reason given used to
+     be a boot-order race that cannot happen: every module is required, and
+     registers, before any init() or start() runs, so nothing can register after
+     another module's lifecycle code. The polling is still right for two reasons
+     that are real — it survives RoundService failing to load at all, and it
+     survives round state changing without anybody firing a signal about it,
+     which is the failure a missed subscription cannot recover from. ]]
 function MatchmakingService:_step()
 	local running = roundIsRunning()
 	if running ~= wasRunning then

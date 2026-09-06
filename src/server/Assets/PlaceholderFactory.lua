@@ -2838,7 +2838,9 @@ function PlaceholderFactory:buildPickup(slot: string, itemId: string): Model?
 		kit on an item pad in every map after it.
 
 		It also has to be ahead of the boot-time prewarm, which calls this for
-		every pickup id before MapItemService exists. Down in the chain, that call
+		every pickup id before MapItemService has SCANNED a map. Not before it
+		exists — it is registered by then, and reading those as the same thing is
+		what produced five bogus warnings on every boot. See the guard below. Down in the chain, that call
 		would have found no template, fallen through to the generic crate, and
 		cached the CRATE as the medkit for the life of the server.
 	]]

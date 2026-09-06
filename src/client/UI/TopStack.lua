@@ -76,11 +76,18 @@ local nextToken = 0
 
 --[[ The bottom of the wave block, which is where the stack starts.
 
-     Re-read on every query rather than cached at build time: the controllers
-     that use this build their GUIs during init, and WaveController may not have
-     registered yet when they do. Falling back to the screen margin means a card
-     built before the round block exists still lands somewhere sane instead of at
-     y = 0 under Roblox's own top bar. ]]
+     Re-read on every query rather than cached at build time, because the wave
+     block MOVES — it resizes with the wave pips and it is not there at all in
+     the lobby, so a height measured once is a height that is wrong for most of
+     a session.
+
+     Not for the reason this used to give. It claimed WaveController might not
+     have registered when other controllers build their GUIs during init, and the
+     bootstrap makes that impossible: every module is required, and registers,
+     before any init() runs. The fallback is still worth keeping for the case
+     that IS possible — WaveController failing to load at all — where the screen
+     margin puts a card somewhere sane instead of at y = 0 under Roblox's own
+     top bar. ]]
 local function base(): number
 	local waves = Registry.find("WaveController")
 	if waves and typeof(waves.getReservedTopHeight) == "function" then

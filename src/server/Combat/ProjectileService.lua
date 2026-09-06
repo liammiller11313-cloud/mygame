@@ -1,14 +1,14 @@
 --!nonstrict
 --[[
-	ProjectileService — the three things you throw.
+	ProjectileService — the four things you throw.
 
-	Pipe bombs, molotovs and bile jars are placed by ItemPlacer, picked up by
-	InventoryService and drawn in the HUD, and until this module existed none of
-	them could ever be used: InputController sent Remotes.Event.ThrowItem and
-	nobody was listening. This is the listener.
+	Pipe bombs, molotovs, bile jars and hazardous waste are placed in the map or
+	by ItemPlacer, picked up by InventoryService and drawn in the HUD, and until
+	this module existed none of them could ever be used: InputController sent
+	Remotes.Event.ThrowItem and nobody was listening. This is the listener.
 
 	── WHAT EACH ONE IS FOR ────────────────────────────────────────────────────
-	They are not three flavours of grenade. Each answers a different problem, and
+	They are not four flavours of grenade. Each answers a different problem, and
 	a team that reads which one they are holding correctly survives a wave they
 	otherwise would not.
 
@@ -25,6 +25,11 @@
 	  BILE JAR   is the Boomer effect without the Boomer: it makes something else
 	             more interesting than you are. Thrown at the floor it is a
 	             gathering point; thrown at a teammate it is a very funny mistake.
+	  HAZARDOUS  is the jar's opposite number, and shares its machinery rather
+	  WASTE      than its job: fifty seconds, wider, coats nobody. The jar is a
+	             panic button aimed at a BODY; this is a plan aimed at a FLOOR,
+	             put down before a wave to decide where it goes. See the ZONES
+	             table, which is where the two are actually kept apart.
 
 	── AUTHORITY ───────────────────────────────────────────────────────────────
 	The client sends an origin, a direction and a power, and every one of those
@@ -164,9 +169,16 @@ local FIRE_SPREAD_TIME = 3.5
 local FIRE_HEIGHT = 9 -- vertical reach; fire on the floor below must not burn you
 
 --[[ Survivors burn too, and that is not an oversight — a molotov you cannot
-     stand in is what makes it a wall. DamageService then applies the difficulty's
-     friendly-fire scale on top, so this is the Expert number and Normal quarters
-     it. Infected are NOT damaged from here: InfectedService:ignite owns burning,
+     stand in is what makes it a wall.
+
+     ONLY THE THROWER, THOUGH, AND THIS USED TO CLAIM OTHERWISE. The fire tick
+     names the thrower as the attacker, so for anybody ELSE DamageService takes
+     its FriendlyFireEnabled == false branch and blocks the damage outright,
+     before the difficulty's friendly-fire scale is ever reached. The scale this
+     comment described as quartering the burn on Normal only ever applies to the
+     person who threw it, who is deliberately not protected from their own fire.
+     So a molotov is a wall to you and to the horde, and a warm inconvenience to
+     your team. Infected are NOT damaged from here: InfectedService:ignite owns burning,
      including the 150/s that makes fire the answer to a Tank. ]]
 local FIRE_SURVIVOR_DPS = 34
 

@@ -91,10 +91,15 @@ InfectedService._burnLights = 0
      body is flagged dead and its brain is gone, before GoreService touches it. ]]
 InfectedService.died = Signal.new()
 
---[[ (position: Vector3, fromSpawn: boolean) — a common was taken off the board
-     because it could not reach anybody. See MAROON_TIME. `fromSpawn` is true
-     when it never closed ANY ground, which means the place it was put was never
-     reachable and the Director should stop offering that cell. ]]
+--[[ (position: Vector3, fromSpawn: boolean, spawnedAt: number, window: number)
+     — a common was taken off the board because it could not reach anybody. See
+     MAROON_TIME.
+
+     `fromSpawn` is true when it never closed ANY ground, which means the place
+     it was put was never reachable. The last two are what make that actionable
+     and were missing from this line: the Director blames the node nearest where
+     the body was PUT rather than where it was reaped, so it needs the spawn
+     time, and `window` is how long the body was given before being judged. ]]
 InfectedService.marooned = Signal.new()
 
 -- ── Update budget (see the header) ──────────────────────────────────────────

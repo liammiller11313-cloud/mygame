@@ -113,7 +113,12 @@ local COLLISION_RULES: { { any } } = {
 	it has nothing to say until there is a round to be far through.
 ]]
 local MODULES = {
-	-- Maps first: the world has to exist before anything that reads it loads.
+	--[[ Maps first, and "first" means first to START rather than first to have a
+     world. MapService:init only adopts stray models and prints an inventory;
+     the live map is built by its start(), which is the first call of the start
+     phase — so nothing below this line can read the world during load or during
+     init, whatever order it sits in. What the position actually buys is that
+     when the world DOES appear, it appears before any other start() runs. ]]
 	"Level/MapService",
 	"Round/MapVoteService",
 	"Round/RoundService",

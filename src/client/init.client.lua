@@ -74,10 +74,13 @@ local CONTROLLERS = {
 	"UI/WaveController",
 	-- After WaveController, whose block height it asks for to sit underneath it.
 	"UI/EventController",
-	--[[ After WaveController, not before: it sits under that block and pushes the
-	     HUD's top inset past itself while a Tank is up. WaveController sets the
-	     resting inset once in its own start(), so a module that pushes a bigger
-	     one has to start after it or be silently overwritten. ]]
+	--[[ After WaveController, because it draws under that block and measures its
+	     bottom edge to know where to start. It used to say WaveController sets a
+	     "resting inset" in start() that a later module has to overwrite; no such
+	     thing exists any more — TopStack replaced the inset with a claim, and the
+	     boss bar takes a slot in it rather than pushing a number past somebody
+	     else's. The ORDER still matters, for the plainer reason that TopStack
+	     measures the wave block and the wave block has to be built. ]]
 	"UI/BossBarController",
 	"UI/CrosshairController",
 	"UI/HitmarkerController",

@@ -683,16 +683,21 @@ UITheme.DisplayOrder = table.freeze({
 	     everything, because a teleport has to end on black. ]]
 	Menu = 80,
 	Vote = 85,
-	--[[ Above both, because these are modals the player opened deliberately and
-	     they open from inside either of them. A settings panel with a vote card
-	     drawn through it is a settings panel nobody can read. The shop and the
-	     loadout screen share this layer: they are the same kind of thing and
-	     they are never open at the same time. ]]
 	--[[ Between the vote and the panels. Above the end-of-round card and the
 	     vote because it is a reward for the round both of those are about, and
 	     BELOW the shop and the settings panel because those are things the
 	     player opened on purpose and a toast must never land on top of one. ]]
 	Award = 86,
+	--[[ Above the menu and the vote, because everything on this layer is a modal
+	     the player opened deliberately, from inside one of them. A settings panel
+	     with a vote card drawn through it is a settings panel nobody can read.
+
+	     NINE screens share it, not the two this used to name: settings, the shop,
+	     the loadout editor, the backpack, requisitions, career, abilities, play
+	     and the vault. They are the same kind of thing and only one is ever open
+	     — which is a rule nothing enforces, so anything that needs to know
+	     whether one of them is covering it has to ask them all. LoadoutController's
+	     COVERING_SCREENS is that list, and it named three of them for a while. ]]
 	Settings = 88,
 	--[[ Above the shop and the loadout screen, because the lobby countdown has to
 	     be readable from INSIDE them. The lobby waits for somebody to pick a mode

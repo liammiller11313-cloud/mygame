@@ -2270,11 +2270,15 @@ function SurvivorService:start()
 		Attributes.set(player, Attributes.Player.IsCrouching, crouching)
 	end)
 
-	--[[ Sprint, asked for the same way. NOT throttled and NOT published as an
-	     attribute: it changes nothing anybody else can see, it is read only by
-	     _computeWalkSpeed on this side, and a dropped release here would pin a
-	     player at sprint speed with no key held — the same failure the crouch
-	     handler above refuses to allow. ]]
+	--[[ Sprint, asked for the same way, and NOT throttled — a dropped release
+	     here would pin a player at sprint speed with no key held, which is the
+	     same failure the crouch handler above refuses to allow.
+
+	     It IS published, though, which this used to deny. `record.sprinting` is
+	     one of the terms behind Attributes.Player.IsSprinting, a replicated
+	     attribute the footstep layer reads to choose between the walk and sprint
+	     samples — so what is being decided here is audible to everybody near
+	     you, not just to _computeWalkSpeed on this side. ]]
 	serviceTrove:connect(Remotes.Event.SetSprintState.OnServerEvent, function(player, wanted)
 		local record = records[player]
 		if not record then

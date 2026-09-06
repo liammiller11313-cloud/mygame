@@ -1989,9 +1989,16 @@ function HudController:start()
 
 	--[[ A crate is a bigger moment than a pickup: it is the resupply you crossed
 	     the map for, and it is gone for nearly three minutes afterwards. So it
-	     says how many rounds it gave rather than just flashing a slot, and it
-	     tells the whole team which crate went — a burned crate is information
-	     everyone needs when they plan where to fall back to. ]]
+	     says how many rounds it gave rather than just flashing a slot.
+
+	     IT DOES NOT YET TELL THE TEAM, which this used to claim. The server
+	     broadcasts to everyone and sends the crate, its index and its respawn
+	     time along with the count — and the only handler in the game is this
+	     one, which reads `given` for the player who used it and drops the rest
+	     on the floor. Everybody else receives the packet and does nothing with
+	     it. The payload is right and the consumer is missing: a burned crate is
+	     information the whole team needs when they plan where to fall back to,
+	     and the pieces to say so are already on the wire. ]]
 	trove:connect(Remotes.Event.AmmoCrateUsed.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" then
 			return

@@ -467,7 +467,14 @@ GameModeConfig.Classic = table.freeze({
 	MaxPlayers = 8,
 	MinPlayersToStart = 1, -- solo is allowed; the Director scales down for it
 
-	-- Reaching the end of wave 15 alive is a win, even at one survivor left.
+	--[[ Reaching the end of wave 15 alive is a win, even at one survivor left.
+
+	     NOT READ BY ANYTHING. RoundService's victory branch is unconditional and
+	     matches what this says, so the behaviour is right and the flag is
+	     decoration — flipping it to true would not make the game require all
+	     four. Left in place rather than deleted because "all must survive" is a
+	     real mode someone may want, and the wiring is one condition; but until
+	     that exists this line describes an intention, not a switch. ]]
 	VictoryRequiresAllAlive = false,
 	--[[
 		A team that cannot recover ends the round, rather than running the clock.
