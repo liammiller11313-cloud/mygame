@@ -672,11 +672,26 @@ function SurvivorService:_applyHumanoid(record)
 		appliedSpeed above it uses, with the same nil sentinel so the first tick
 		always publishes.
 	]]
+	--[[ The hurt test comes from _baseWalkSpeed and never from a copy of it.
+
+	     This line asked _effective directly, which is a THIRD private copy of a
+	     number that has now disagreed with itself twice. _effective knows about
+	     temporary health and nothing about adrenaline, so a survivor on low
+	     health with a shot in them was moving at full sprint speed while this
+	     published "not sprinting" — and IsSprinting has exactly one consumer,
+	     FootstepController, so the whole visible effect was a sprinting survivor
+	     making walking noises, then swapping sample mid-stride when the
+	     temporary health drained back under the line at no change in speed.
+
+	     _baseWalkSpeed is the one function that knows the answer, and it returns
+	     the boolean beside the speed for exactly this reason. See
+	     docs/ADRENALINE.md, which describes this failure happening once already. ]]
+	local _, hurt = self:_baseWalkSpeed(record)
 	local sprinting = record.sprinting
 		and not record.sprintLocked
 		and not record.crouching
 		and record.stamina > 0
-		and self:_effective(record) >= S.HurtThreshold
+		and not hurt
 		and speed > 0
 	if record.appliedSprint ~= sprinting then
 		record.appliedSprint = sprinting

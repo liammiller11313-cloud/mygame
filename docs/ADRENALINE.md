@@ -78,6 +78,14 @@ is the one test, `_baseWalkSpeed` is where the limp is lifted, and
 > real velocity against what walking *should* look like, so two copies of that
 > number are two things that can disagree — and they did, over adrenaline, in a
 > way that deleted your sprint for the item's whole duration.
+>
+> A **third** copy was found later, in the line that publishes `IsSprinting`. It
+> asked `_effective` directly, which knows about temporary health and nothing
+> about adrenaline, so a hurt survivor with a shot in them ran at full speed
+> while the game told everyone they were walking. `IsSprinting` has one consumer
+> — the footsteps — so that is exactly what it sounded like, and the sample
+> swapped mid-stride a few seconds later when the temporary health drained back
+> under the line at no change in speed. Ask `_baseWalkSpeed`. Always.
 
 ## Models
 

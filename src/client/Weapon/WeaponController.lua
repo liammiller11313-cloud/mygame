@@ -1121,16 +1121,53 @@ function WeaponController:init()
 		end)
 	end
 
+	--[[
+		Whether the last state we saw was one that takes the gun away.
+
+		The force-refresh below used to run on EVERY edge of this attribute, on
+		the reasoning in its old comment — "going down swaps the weapon out from
+		under us". That is true of going down and of nothing else, and this
+		attribute also carries Hurt and Healthy, which change nothing about what
+		is in your hands.
+
+		A forced refresh is not a re-read. It sets `switched` true whether or not
+		anything switched, and the switch path ends a reload, kills the weapon
+		loop and clears the firing flag. So crossing the hurt line MID-RELOAD
+		killed the client's half of that reload while the server carried on with
+		its own: you heard the magazine come out on the frame you pressed R, then
+		never heard it go back in — the client's own cues live in stepReload,
+		which had stopped — and got the server's copy a round trip later, off
+		your own body, positional and rolled off instead of flat and immediate.
+		The viewmodel dropped the pose early, the HUD kept the word RELOADING lit
+		over a bar that had vanished, a shotgun's per-shell clicks stopped while
+		its ammo count kept climbing, and a flamethrower's sustained loop was cut
+		dead mid-burst.
+
+		ADRENALINE IS THE RELIABLE WAY TO SEE IT, which is why it was reported as
+		a pair. Twenty-five temporary health carries a hurt survivor back over
+		HurtThreshold on the frame the shot goes in, and the same twenty-five
+		drains back under it a few seconds later — two crossings per shot, each
+		landing on whatever reload happens to be in flight.
+
+		So the force is spent on the transition that actually justifies it, and
+		every other edge gets the ordinary re-read, which still notices a real
+		weapon change because it compares the ids.
+	]]
+	local wasBlocked = CANNOT_FIRE[survivorState()] == true
+
 	trove:connect(player:GetAttributeChangedSignal(PA.State), function()
 		local survivor = survivorState()
-		if CANNOT_FIRE[survivor] then
+		local blocked = CANNOT_FIRE[survivor] == true
+		if blocked then
 			state.firing = false
 			setWeaponLoop(nil, false)
 			endReload(false)
 			WeaponController:setAiming(false)
 		end
-		-- Going down swaps the weapon out from under us; re-read everything.
-		refreshLoadout(true)
+		local changed = blocked ~= wasBlocked
+		wasBlocked = blocked
+		-- Going down, or getting back up, swaps the weapon out from under us.
+		refreshLoadout(changed)
 	end)
 end
 

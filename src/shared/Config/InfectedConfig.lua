@@ -123,7 +123,32 @@ InfectedConfig.Definitions = {
 		scale = 1.0,
 		outlineColor = Color3.fromRGB(214, 62, 48),
 
-		gibThreshold = 45,
+		--[[
+			200, and it was 45 — which against 50 health did not mean "past which
+			the body comes apart" but "any headshot at all".
+
+			The arithmetic nobody did: a head hit is multiplied by four, so the
+			WEAKEST gun in the game puts 96 into a 50-health Common and overkills
+			by 46. Every rifle in the roster cleared 45 on a headshot, gibThreshold
+			is a SUFFICIENT condition rather than an extra gate, and gib() deletes
+			the body outright. So the ordinary kill in this game — a headshot on a
+			Common — never left anything behind, and the 35-second protected
+			corpse a headshot is supposed to EARN had never once been created.
+			Two features pointed at the same moment, and this one silently won.
+
+			200 sits in the gap between what the heaviest scoped rifle delivers to
+			a head (158) and what a magnum does (222). So the gate now fires for
+			hand cannons, sniper rifles and melee — the weapons whose whole
+			identity is that the target stops being a shape — and rifle fire is
+			handed back to the score, where the weapon rather than the arithmetic
+			of a small body decides.
+
+			It is a much bigger multiple of health than any other kind's, and that
+			is not an inconsistency to tidy up: the Common is the only body small
+			enough that one hit can overkill it several times over, and it is the
+			one every other number in this file was never tested against.
+		]]
+		gibThreshold = 200,
 		dismemberable = true,
 		--[[ 35, up from 22. The number is the one asked for, but the reason it
 		     was reachable is GoreService freezing a corpse once it settles: a

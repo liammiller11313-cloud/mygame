@@ -455,7 +455,11 @@ function GoreService:evaluate(model: Model, ctx, overkill: number, maxHealth: nu
 	local definition = InfectedConfig.get(model:GetAttribute(Attributes.Infected.Kind) or "")
 	local weapon = if ctx.weaponId then WeaponConfig.get(ctx.weaponId) else nil
 
-	local overkillRatio = math.max(overkill, 0) / math.max(maxHealth, 1)
+	--[[ Capped, and the cap is load-bearing rather than defensive. An uncapped
+	     ratio on a 50-health Common is 0.9 to 6.6 for any headshot at all, which
+	     swamps the weapon, the region and the range put together. See
+	     GoreConfig.Scoring.OverkillRatioCap. ]]
+	local overkillRatio = math.min(math.max(overkill, 0) / math.max(maxHealth, 1), SCORING.OverkillRatioCap)
 	local score = overkillRatio * SCORING.OverkillWeight
 	if weapon then
 		score += weapon.gibPower * SCORING.WeaponGibWeight

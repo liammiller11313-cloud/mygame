@@ -113,13 +113,19 @@ InventoryService.itemConsumed = Signal.new()
 local records: { [Player]: any } = {}
 local serviceTrove = Trove.new()
 
-local function playAt(definition, part: BasePart?)
+--[[ `exclude` is the player who has already heard this one locally. See the
+     note on leaving a listener out in AudioService: the reloading player's own
+     client plays every reload cue flat and immediately on the frame they press
+     R, so a world emitter on their own body reaches them a round trip later as
+     a flam against a sound they already heard. Everyone else still hears it
+     from where it happened, which is the point of playing it at all. ]]
+local function playAt(definition, part: BasePart?, exclude: Player?)
 	if not part then
 		return
 	end
 	local audio = Registry.find("AudioService")
 	if audio then
-		audio:playOn(definition, part)
+		audio:playOn(definition, part, exclude)
 	end
 end
 
@@ -479,7 +485,7 @@ function InventoryService:beginReload(player: Player): boolean
 		timer = 0,
 	}
 	self:_publish(record)
-	playAt(AudioConfig.WeaponReload.MagOut, rootOf(player))
+	playAt(AudioConfig.WeaponReload.MagOut, rootOf(player), player)
 	return true
 end
 
@@ -858,7 +864,7 @@ function InventoryService:_loadShell(record, entry, definition): boolean
 		entry.reserve -= 1
 	end
 	self:_publish(record)
-	playAt(AudioConfig.WeaponReload.ShellInsert, rootOf(record.player))
+	playAt(AudioConfig.WeaponReload.ShellInsert, rootOf(record.player), record.player)
 	return true
 end
 
@@ -874,7 +880,7 @@ function InventoryService:_loadMagazine(record, entry, definition)
 	end
 	entry.ammo += taken
 	self:_publish(record)
-	playAt(AudioConfig.WeaponReload.MagIn, rootOf(record.player))
+	playAt(AudioConfig.WeaponReload.MagIn, rootOf(record.player), record.player)
 end
 
 function InventoryService:_stepReload(record, dt: number)
@@ -918,7 +924,7 @@ function InventoryService:_stepReload(record, dt: number)
 	end
 
 	if reload.phase == PHASE_TAIL and reload.timer >= reloadTimeFor(definition) then
-		playAt(AudioConfig.WeaponReload.Pump, rootOf(record.player))
+		playAt(AudioConfig.WeaponReload.Pump, rootOf(record.player), record.player)
 		self:_endReload(record)
 	end
 end
