@@ -4,12 +4,17 @@
 	WHERE THIS GOES:  ServerScriptService
 	WHAT KIND:        Script   (NOT a LocalScript)
 
-	Knocks people around when they get bonked, and pays the bonker an icicle.
+	Knocks people flying when they get bonked, drops them for a couple of
+	seconds, and pays the bonker an icicle.
+
+	How hard you hit comes from your equipped walrus's Power in
+	WalrusConfig, so a stronger walrus really does send people further.
 
 	Expects, from elsewhere in your game:
 	  * ReplicatedStorage.SlapEvent      - a RemoteEvent the client fires
-	  * character.Walrus                 - the walrus model, so lobby players
-										   without one can't bonk
+	  * ReplicatedStorage.WalrusConfig   - the ModuleScript
+	  * character.Walrus                 - the walrus model, so lobby
+										   players without one can't bonk
 	  * character.Walrus.BonkSound       - optional
 	  * leaderstats.Icicles              - optional, the payout
 ]]
@@ -18,6 +23,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local bonkEvent = ReplicatedStorage:WaitForChild("SlapEvent")
+local WalrusConfig = require(ReplicatedStorage:WaitForChild("WalrusConfig"))
 
 local COOLDOWN = 1 -- seconds between bonks
 
@@ -27,8 +33,12 @@ local BONK_WIDTH = 5
 local BONK_HEIGHT = 5
 local BONK_REACH = 12 -- studs in front of you the bonk reaches
 
-local KNOCKBACK = 70
-local UPWARD_FORCE = 25
+-- Knockback per point of Power. Power 10 gives 70, which is what the whole
+-- game was tuned around before walruses had stats at all.
+local KNOCKBACK_PER_POWER = 7
+local UPWARD_FORCE = 25 -- flat, so strong walruses hit further, not higher
+
+local RAGDOLL_TIME = 2 -- seconds you're on the floor after being bonked
 
 local ICICLES_PER_BONK = 1
 local DUMMY_NAME = "BonkDummy"
@@ -44,6 +54,50 @@ local nextBonk = {}
 Players.PlayerRemoving:Connect(function(player)
 	nextBonk[player] = nil
 end)
+
+-- ============================================================
+--  RAGDOLL
+-- ============================================================
+
+-- Which knockdown is currently in charge of each character. Bonk someone
+-- who's already down and the newer one takes over, so the older timer
+-- doesn't stand them up early.
+--
+-- Weak keys: when a character is destroyed on respawn, its entry can be
+-- collected instead of sitting here for the rest of the round.
+local knockdown = setmetatable({}, { __mode = "k" })
+
+local function knockDown(character, seconds)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	local token = (knockdown[character] or 0) + 1
+	knockdown[character] = token
+
+	-- PlatformStand goes limp and stays down until we turn it off. It works
+	-- on any rig and can't detach the walrus model the way swapping the
+	-- character's joints for constraints can.
+	humanoid.PlatformStand = true
+
+	task.delay(seconds, function()
+		-- A later bonk owns them now; let that one stand them back up.
+		if knockdown[character] ~= token then
+			return
+		end
+		knockdown[character] = nil
+
+		-- They may have died or respawned while they were down.
+		if humanoid.Parent and humanoid.Health > 0 then
+			humanoid.PlatformStand = false
+		end
+	end)
+end
+
+-- ============================================================
+--  FINDING WHO GOT HIT
+-- ============================================================
 
 -- Which character a hit part belongs to.
 --
@@ -88,6 +142,10 @@ local function payIcicle(player)
 	end
 end
 
+-- ============================================================
+--  THE BONK
+-- ============================================================
+
 bonkEvent.OnServerEvent:Connect(function(player)
 	-- No walrus, no bonk. Players in the lobby don't have one.
 	local character = player.Character
@@ -105,9 +163,9 @@ bonkEvent.OnServerEvent:Connect(function(player)
 		return
 	end
 
-	-- Don't let a dead walrus keep swinging.
+	-- Don't let a dead walrus keep swinging - or one that's flat on its back.
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if humanoid and humanoid.Health <= 0 then
+	if humanoid and (humanoid.Health <= 0 or humanoid.PlatformStand) then
 		return
 	end
 
@@ -117,6 +175,10 @@ bonkEvent.OnServerEvent:Connect(function(player)
 		return
 	end
 	nextBonk[player] = now + COOLDOWN
+
+	-- How hard this walrus hits.
+	local stats = WalrusConfig.get(player:GetAttribute("EquippedWalrus") or WalrusConfig.Starter)
+	local knockback = stats.Power * KNOCKBACK_PER_POWER
 
 	-- Ask the engine what's in the box directly, rather than building a real
 	-- Part to ask with. The old way replicated an invisible part to every
@@ -146,13 +208,17 @@ bonkEvent.OnServerEvent:Connect(function(player)
 			if otherRoot and isAlive and canSee(root, otherRoot, character, targetCharacter) then
 				hitAnyone = true
 
+				-- Drop them first. Going limp before the shove lands is what
+				-- makes them tumble instead of skating along upright.
+				knockDown(targetCharacter, RAGDOLL_TIME)
+
 				-- Away from you. Two characters standing in exactly the same
 				-- spot give a zero-length direction, which has no .Unit -
 				-- fall back to where you're facing.
 				local offset = otherRoot.Position - root.Position
 				local direction = (offset.Magnitude > 0) and offset.Unit or root.CFrame.LookVector
 
-				otherRoot.AssemblyLinearVelocity = direction * KNOCKBACK + Vector3.new(0, UPWARD_FORCE, 0)
+				otherRoot.AssemblyLinearVelocity = direction * knockback + Vector3.new(0, UPWARD_FORCE, 0)
 
 				if otherPlayer then
 					payIcicle(player)
