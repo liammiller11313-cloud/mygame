@@ -100,6 +100,19 @@ for kind in THROWABLES:
          "throwable %r has no line in BackpackController, so the backpack shows "
          "a blank description for it" % kind)
 
+# ── 2b. every consumable is actually SPENT by something ─────────────────────
+# A slot item that nothing consumes is an item you can pick up, see in your hand
+# and never use — which looks exactly like an item that is not implemented yet,
+# and is how pain pills came to be swallowed at full health for no effect.
+for pill in PILLS:
+    need("Enums.PillItem.%s" % pill in FILES["survivor"],
+         "pill %r is never named in SurvivorService, so applyPills has no branch "
+         "for it — picking it up works, using it silently does nothing" % pill)
+for item in HEALTH:
+    need("Enums.HealthItem.%s" % item in FILES["inventory"],
+         "health item %r is never named in InventoryService, so useItem has no "
+         "branch for it" % item)
+
 # ── 3. the consumption paths that refill a spot ─────────────────────────────
 need("self.itemConsumed:fire" in FILES["inventory"],
      "InventoryService never fires itemConsumed; MapItemService listens to that "

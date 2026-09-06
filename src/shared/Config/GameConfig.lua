@@ -26,7 +26,7 @@ local GameConfig = {}
 	none. If it is stale, the log says so honestly: the code in Studio is at least
 	as new as this date, and no newer than the push that set it.
 ]]
-GameConfig.BuildStamp = "2026-09-06s"
+GameConfig.BuildStamp = "2026-09-06t"
 
 --[[
 	What the game calls itself, on screen.

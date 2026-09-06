@@ -1356,6 +1356,31 @@ function SurvivorService:applyPills(player: Player, itemId: string): boolean
 		playAt(AudioConfig.Survivor.AdrenalineUse, record.root)
 		return true
 	elseif itemId == Enums.PillItem.PainPills then
+		--[[
+			Refused when there is nowhere to put it, so the bottle is not spent.
+
+			Temporary health is clamped to the same ceiling as real health, so a
+			survivor at full gets granted nothing — and this used to return true
+			anyway. InventoryService reads that as a successful use: the slot is
+			cleared, the spawn point starts refilling and the pills are gone. A
+			player at 100 health swallowed a bottle, heard the rattle, watched no
+			number change and had nothing left to swallow later. "Pain pills do
+			nothing" is that, and it is the worst version of it, because the
+			single most valuable moment to be holding pills is before you take
+			damage rather than after.
+
+			Adrenaline is deliberately NOT refused the same way. Its health is
+			the least interesting thing it gives you — the speed, the stamina and
+			the use-rate are the item — so taking one at full health is a
+			legitimate decision. Pills at full health are only ever a mistake.
+		]]
+		if self:_effective(record) >= self:_cap(record) then
+			Remotes.Event.Notice:FireClient(player, {
+				text = "ALREADY AT FULL HEALTH",
+				tone = "Warn",
+			})
+			return false
+		end
 		record.tempDecay = S.PillDecayPerSecond
 		self:heal(player, S.PillHealth, true)
 		playAt(AudioConfig.Survivor.PillsUse, record.root)
