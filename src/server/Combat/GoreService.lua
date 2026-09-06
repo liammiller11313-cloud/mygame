@@ -150,14 +150,26 @@ local DISMEMBER_WEIGHT = 0.5
 	    PPSh-41    0.18 - 0.04 = 0.14
 	    shotgun    1.00 - 1.00 = 0.00   bursts
 
-	It has to be precedence and not more arithmetic. The machete deals 300 to a
-	50-health Common, so overkillRatio alone is 5.0 on a chest hit and 23.0
-	through the 4x head multiplier; no weighting that is added to or multiplied
-	into the score survives numbers that size, and every swing keeps reading as a
-	point-blank shotgun blast. 0.5 claims the machete and the two marksman
-	rifles — the three weapons WeaponConfig describes as taking a head off
-	cleanly — and leaves every automatic (0.38 and below) and the shotgun (0.00)
-	scoring exactly as they did.
+	It has to be precedence and not more arithmetic — and the reason WHY is worth
+	keeping, because this comment saw the real bug and walked past it.
+
+	It argued: the machete deals 300 to a 50-health Common, so overkillRatio
+	alone is 5.0 on a chest hit and 23.0 through the 4x head multiplier, and no
+	weighting added to or multiplied into a score survives numbers that size. All
+	of that was true, and the conclusion drawn from it was that the CUT had to
+	jump the queue. The conclusion that was not drawn is that a term reaching 23
+	in a formula gated at 1.15 is a broken term, and it was breaking far more
+	than the machete: it burst every Common shot in the head by anything, which
+	is most of the kills in this game. See GoreConfig.Scoring.OverkillRatioCap,
+	which caps it at 0.5 and is a year of "why do bodies vanish" in one number.
+
+	Precedence is still right, and now for its own reason rather than as a way
+	around the arithmetic: a machete should take the limb it struck whatever the
+	score would have said, because "the machete takes heads off cleanly" is a
+	statement about the weapon and not about how hard it happened to hit. 0.5
+	claims the machete and the two marksman rifles — the three weapons
+	WeaponConfig describes that way — and leaves every automatic (0.38 and below)
+	and the shotgun (0.00) scoring exactly as they did.
 ]]
 local CUT_PRECEDENCE = 0.5
 
@@ -425,14 +437,21 @@ end
 --[[
 	GoreConfig.Scoring's formula, verbatim:
 
-	    score = overkillRatio * OverkillWeight
-	          + weapon.gibPower * WeaponGibWeight
+	    score = overkillRatio * OverkillWeight        (ratio capped at
+	          + weapon.gibPower * WeaponGibWeight      OverkillRatioCap)
 	          + RegionBonus[region]
 	          + ContactBonus            (when distance < ContactRange)
 
 	Everything after the arithmetic is a gate, in strict precedence order. The
 	gates matter as much as the score: they are what keeps a Tank falling in one
 	piece and a Boomer never doing so.
+
+	AND ONE OF THE GATES IS NOT A GATE ON THE SCORE AT ALL. A kind's own
+	gibThreshold bursts it on raw overkill whatever the formula said, which is
+	how "this one always comes apart" gets written for a single archetype — and
+	how a threshold set carelessly low overrules every term above it in silence.
+	Read a gibThreshold against its kind's HEALTH and against the 4x head
+	multiplier before believing it says what it means to.
 
 	The dismember gate additionally weights the weapon's `dismemberPower`, which
 	GoreConfig's formula has no term for and which nothing was reading — see

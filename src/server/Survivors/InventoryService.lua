@@ -587,7 +587,35 @@ function InventoryService:consumeSlot(player: Player, slot: string, expectedItem
 	if expectedItemId and entry.itemId ~= expectedItemId then
 		return false
 	end
+	local itemId = entry.itemId
 	self:_clearSlot(record, slot)
+	--[[
+		It ANNOUNCES, and for a long time it did not.
+
+		`itemConsumed` means one specific thing — the item is gone from the world
+		rather than merely out of this slot — and MapItemService listens to it and
+		to nothing else, deliberately: dropping, swapping and dying all empty a
+		slot too, and refilling on those would print items into the map behind a
+		team that hoards. That is why _clearSlot is silent and dropItem stays
+		silent with it.
+
+		But every caller of THIS function is a genuine spend, and there are three:
+		a thrown molotov or pipe bomb, a medkit spent on a teammate, and a
+		defibrillator spent reviving one. All three destroyed the item and told
+		nobody, so all three left their map spawn point holding a carrier that
+		would never consume, never drop and never disconnect — dead for the rest
+		of the round, one fewer medkit in the level every time somebody healed a
+		friend rather than themselves.
+
+		Healing YOURSELF always worked, which is what hid it: that path goes
+		through the use timer and fires the signal at the end. The two things a
+		medkit is for behaved differently and only one of them was right.
+
+		Throwing was the same story with a smaller audience until the trigger
+		learned to throw — the remote path comes through here, so what used to
+		affect players who had found the G key now affects everybody.
+	]]
+	self.itemConsumed:fire(player, slot, itemId)
 	return true
 end
 
