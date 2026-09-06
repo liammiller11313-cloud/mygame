@@ -184,6 +184,12 @@ function SurvivorService:_ensureRecord(player: Player)
 		     _computeWalkSpeed for why a silent client must keep sprinting. ]]
 		sprinting = true,
 		ledgeRemaining = 0,
+		--[[ Where a hanging survivor is held, and where they end up when the hang
+		     ends by either route. Both are handed in by LedgeService, which is the
+		     only thing that knows the geometry; this service only has to remember
+		     them for as long as the state lasts. ]]
+		ledgePose = nil :: CFrame?,
+		ledgeRecovery = nil :: Vector3?,
 
 		pinnedBy = nil,
 		pinnedKind = "",
@@ -407,12 +413,77 @@ function SurvivorService:_setBreathing(record, on: boolean)
 	end
 end
 
+--[[
+	Holds a hanging body still at the lip.
+
+	Anchoring the ROOT is enough: everything else is jointed to it, so the whole
+	character stops where it is put. The Humanoid keeps reporting Freefall and
+	that is fine — it has nothing left to move, since _applyHumanoid has already
+	taken its speed and its jump away.
+]]
+local function holdAtLedge(record)
+	local root = record.root
+	if not root or not root.Parent or not record.ledgePose then
+		return
+	end
+	root.Anchored = true
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	root.CFrame = record.ledgePose
+end
+
+--[[
+	Lets go, whichever way the hang ended, and puts the body somewhere reachable.
+
+	The recovery point is used for BOTH endings and that is deliberate. Being
+	pulled up obviously belongs on the ledge. Letting go is the interesting one:
+	the timer running out incapacitates rather than kills, and a body left to
+	drop would finish that fall somewhere under the map with a bleed-out timer
+	only the person watching it can see. They collapse at the edge instead — a
+	small fiction, and the alternative is a teammate you are told to save and
+	cannot reach.
+]]
+local function releaseLedge(record)
+	record.ledgeRemaining = 0
+	local root = record.root
+	local pose = record.ledgePose
+	local recovery = record.ledgeRecovery
+	record.ledgePose = nil
+	record.ledgeRecovery = nil
+
+	if not root or not root.Parent then
+		return
+	end
+	root.Anchored = false
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	if recovery then
+		--[[ The pose's rotation, the recovery point's position: they come up
+		     facing the way they were hanging, which is inland, rather than
+		     spinning to face the drop they just came off. ]]
+		local facing = if pose then pose.Rotation else CFrame.identity
+		root.CFrame = CFrame.new(recovery) * facing
+	end
+	--[[ Back to the client that owns it. An anchored part is server-simulated,
+	     and a character left that way feels laggy to the person playing it. ]]
+	pcall(function()
+		root:SetNetworkOwnershipAuto()
+	end)
+end
+
 function SurvivorService:_setState(record, newState: string)
 	local previous = record.state
 	if previous == newState then
 		return
 	end
 	record.state = newState
+
+	--[[ Every way out of a hang comes through here — pulled up, let go, killed,
+	     or the round ending under them — so this is the one place that can let
+	     the body go without something having to remember to. ]]
+	if previous == STATE.LedgeHanging then
+		releaseLedge(record)
+	end
 
 	--[[ A body that is not upright is not crouching. The client normally clears
 	     this itself — releasing the key sends the release, and a menu opening
@@ -766,6 +837,17 @@ function SurvivorService:spawnSurvivor(player: Player)
 	local index = table.find(awaitingRescue, player)
 	if index then
 		table.remove(awaitingRescue, index)
+	end
+
+	--[[ Let go of the old body BEFORE the reference to it is dropped.
+
+	     _setState below does release a ledge hold, and here it would be too late:
+	     record.root is nil by then, so the release finds nothing to unanchor and
+	     an anchored body is left hanging at the lip for the rest of the round.
+	     Respawning mid-hang is the case — a round reset under somebody who is
+	     still holding on. ]]
+	if record.state == STATE.LedgeHanging then
+		releaseLedge(record)
 	end
 
 	-- Drop the old rig before announcing the new state, so nothing tries to push
@@ -1302,9 +1384,16 @@ function SurvivorService:incapacitate(player: Player, ctx)
 	playAt(AudioConfig.Survivor.Incap, record.root)
 end
 
---[[ Hanging off a ledge: a countdown, a slow drain, and a teammate who has to
-     stop shooting to pull you up. Letting go spends one of your lives. ]]
-function SurvivorService:ledgeHang(player: Player)
+--[[
+	Hanging off a ledge: a countdown, a slow drain, and a teammate who has to
+	stop shooting to pull you up. Letting go spends one of your lives.
+
+	`pose` and `recovery` come from LedgeService, which owns the geometry — where
+	the lip is and where the solid ground behind it is. Both are optional so a
+	caller with no opinion (a scripted moment, a test) still gets the state; the
+	body simply is not moved, and _setState still puts it back on the way out.
+]]
+function SurvivorService:ledgeHang(player: Player, pose: CFrame?, recovery: Vector3?)
 	local record = records[player]
 	if not record or not self:_isUpright(record) then
 		return
@@ -1316,6 +1405,11 @@ function SurvivorService:ledgeHang(player: Player)
 
 	record.ledgeRemaining = S.LedgeHangTime
 	record.incapHealth = S.IncapHealth
+	record.ledgePose = pose
+	record.ledgeRecovery = recovery
+	--[[ Before the state change, so the body is already still by the time
+	     _applyHumanoid and every client see it hanging. ]]
+	holdAtLedge(record)
 	self:_setState(record, STATE.LedgeHanging)
 	self:_publish(record)
 end
@@ -1599,6 +1693,12 @@ function SurvivorService:_respawn(player: Player, cframe: CFrame?, health: numbe
 	local index = table.find(awaitingRescue, player)
 	if index then
 		table.remove(awaitingRescue, index)
+	end
+
+	-- Same reason as spawnSurvivor: the release below cannot unanchor a root the
+	-- record has already let go of, and the body would hang there for the round.
+	if record.state == STATE.LedgeHanging then
+		releaseLedge(record)
 	end
 
 	record.charTrove:clean()

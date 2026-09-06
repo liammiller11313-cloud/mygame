@@ -176,6 +176,9 @@ local MODULES = {
 	-- Both listen to InventoryService's signals, so they load after it. MapItemService
 	-- owns the spawn points; CarryVisualService owns what ends up on a back.
 	"Level/MapItemService",
+	--[[ After SurvivorService, whose state it reads and whose ledgeHang it calls,
+	     and after MapService, whose map it measures. ]]
+	"Level/LedgeService",
 	"Survivors/CarryVisualService",
 	"Combat/GoreService",
 	"Combat/DamageService",

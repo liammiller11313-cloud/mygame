@@ -162,6 +162,60 @@ in the world, so refilling on those would print bottles.
 
 ---
 
+## Ledges you can survive
+
+Tag a Part **`FL_LedgeCatch`** and lay it along the lip of a drop. A survivor who
+falls through it grabs the edge instead of dying.
+
+```
+Zombieville/
+    <a part tagged FL_LedgeCatch, along the balcony edge>
+```
+
+No attributes, no orientation to get right, no script. The game makes the part
+invisible and completely inert on load — no collision, no queries — so a catch
+volume can never block a shot, a shove or a prompt.
+
+### Sizing it
+
+**The top of the box is the lip.** Put it level with the floor you can walk off
+and let it hang down over the edge. A survivor is only caught once they are
+*below* that line, which is what stops the volume grabbing people who jump near
+the edge — and they will, constantly, because the edge is where the fighting is.
+
+**Reach out, not just down.** Depth costs nothing: the check samples the path a
+body actually took, so even a shallow box catches a fall from any height. What a
+shallow box misses is a fast one going *sideways*. Modelled against every way to
+leave a ledge:
+
+| Net reaches out… | stepped off | sprinted off | charged off at 44 | launched by a Tank |
+|---|---|---|---|---|
+| 6 studs | caught | caught | **missed** | **missed** |
+| 16 studs | caught | caught | caught | caught |
+
+**Cover the whole edge.** Length along the lip is the easy one to get right.
+
+### What happens
+
+- **They hang** just below the lip, facing back the way they came. They cannot
+  move, shoot or be shot.
+- **A teammate pulls them up** — a one-second hold, the same prompt shape as a
+  revive. They land on the solid ground behind the lip.
+- **Or they let go** after sixty seconds, or sooner if the slow bleed finishes
+  them. That **incapacitates** rather than kills, and costs one of the three
+  lives a round allows.
+- Either way they end up **at the edge, not at the bottom**. Incapacitating
+  someone mid-air over the drop they just fell down would be a body nobody can
+  reach and a timer the team can only watch.
+
+The numbers are `GameConfig.Survivor.LedgeHangTime`, `LedgeHangDamagePerSecond`
+and `LedgePullTime`; the geometry is `MapConfig.Ledges`.
+
+> Mark the ones you want to be a moment. A ledge somebody has to be pulled off
+> only means something if most drops still simply kill you.
+
+---
+
 ## Ammo crates
 
 Inside **each** map, put a folder called `Ammo Crate`:

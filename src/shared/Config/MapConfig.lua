@@ -303,6 +303,83 @@ function MapConfig.mapItemFor(itemId: string?): MapItemFamily?
 end
 
 --[[
+	── LEDGES YOU CAN SURVIVE ──────────────────────────────────────────────────
+
+	A drop marked with a catch volume does not kill a survivor who walks off it.
+	They grab the lip instead, hang there bleeding on a clock, and a teammate has
+	to stop shooting and pull them up — which is the same shape as being
+	incapacitated and is deliberately more frightening, because the person who
+	comes to help is standing at the edge of the thing that just nearly took you.
+
+	── HOW A DESIGNER MARKS ONE ────────────────────────────────────────────────
+	Tag a Part `FL_LedgeCatch` and lay it along the lip of the drop, hanging down
+	over the edge. Anything falling through that box is caught. That is all — no
+	attributes, no orientation to get right, no script.
+
+	Size it generously, and OUT as well as down. It is a net rather than a line:
+	the check samples the path a body actually took, so depth costs nothing and
+	a shallow box still catches a fall from any height. What a shallow box cannot
+	catch is a fast one going SIDEWAYS — modelled, a survivor charged off an edge
+	at 44 studs a second, or launched by a Tank, clears a net that only reaches
+	six studs out from the lip and never touches it. Sixteen out catches every
+	way there is to leave a ledge, including both of those.
+
+	Length along the lip matters for the same reason and is easier to get right:
+	cover the whole edge somebody can walk off.
+
+	The top of the box is the LIP, and that is load-bearing. A survivor is only
+	caught once their origin is below it, which is what stops a catch volume
+	overlapping the walkway beside it from grabbing anybody who jumps near the
+	edge — and they will, constantly, because the edge is where the fighting is.
+
+	The parts are made invisible and inert on load — no collision, no queries —
+	so a catch volume can never block a shot or a shove. That is why the test is
+	arithmetic against the box rather than a raycast: a volume a bullet can hit
+	is a volume that eats bullets, and an invisible wall in front of a drop is a
+	worse bug than the one this feature fixes.
+
+	── WHAT IT IS NOT FOR ──────────────────────────────────────────────────────
+	Not every drop. A ledge you can be pulled off of is a place a team has to
+	commit somebody to, and that only means something if most drops still simply
+	kill you. Mark the ones you want to be a moment.
+]]
+MapConfig.Ledges = table.freeze({
+	Tag = "FL_LedgeCatch",
+
+	--[[ Studs per second of DOWNWARD speed before a survivor counts as falling.
+	     Above a walk and below a step off a kerb, so crossing a catch volume on
+	     a walkway that runs through one does not grab you. ]]
+	MinFallSpeed = 14,
+
+	--[[ How far the body's origin sits below the lip. A survivor's root is about
+	     three studs off the floor when standing, so this is roughly "hands on the
+	     edge, feet in the air". ]]
+	HangDrop = 2.6,
+
+	--[[ Where a survivor ends up when the hang ends — this far back from the lip,
+	     on the solid side. Used for BOTH endings, and the second one is the
+	     reason it exists: a survivor who lets go is incapacitated rather than
+	     killed (see SurvivorService), and incapacitating them in mid-air over the
+	     drop they just fell down means a body nobody can reach and a timer the
+	     team can only watch. They collapse at the edge instead. ]]
+	RecoveryInset = 3.5,
+	RecoveryRise = 4.0, -- how far above the lip to search downward from
+	RecoveryProbe = 14, -- how far down to look for the floor before giving up
+
+	--[[ Seconds before the same survivor can be caught again. Without it a
+	     survivor placed back at the lip is inside the volume they were just
+	     rescued from, and one step in the wrong direction is a second hang
+	     before the first has finished replicating. ]]
+	Grace = 2.0,
+
+	--[[ How far apart the path is sampled. The check walks the line from where a
+	     body was to where it is; at terminal velocity that line is longer than a
+	     shallow catch volume is deep, so testing only the endpoints would let a
+	     fast fall pass straight through the net. ]]
+	SampleStep = 1.5,
+})
+
+--[[
 	How a medkit rides on a survivor's back.
 
 	Only the medkit: it is the one carried item big enough to read as a

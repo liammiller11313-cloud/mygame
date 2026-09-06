@@ -51,24 +51,6 @@ of the same size is fine, then `EliteTiers.scale` is a field that lies and shoul
 go, and the tier's outline colour is doing the "this one is different" job on its
 own. Say which in the tier's comment either way.
 
-### 2b. Ledge hanging is built and unreachable
-
-Found 2026-09-05 by sweeping for public methods nothing calls.
-
-`SurvivorState.LedgeHanging` is a complete feature. `SurvivorService:ledgeHang`
-puts a survivor into it, `_computeWalkSpeed` pins them still, the damage tick
-bleeds them at `LedgeHangDamagePerSecond`, `_classify` offers a teammate a
-`Pull Up` prompt at `LedgePullTime`, and `GameConfig.Survivor` carries all three
-numbers. **Nothing anywhere calls `ledgeHang`**, so no survivor has ever hung
-off anything.
-
-What is missing is only the trigger, and it is a map-authoring decision rather
-than a repair: something has to decide that a fall was a ledge rather than a
-death. The obvious shape is the one every other map feature here uses — a
-tagged part along the drop, the way `FL_ItemSpawn` and the panic triggers work —
-so a designer marks the ledges they want survivable and everything downstream
-already exists. Worth doing before the state rots; nothing is testing it.
-
 ### 3. Difficulty only changes incoming damage
 
 `SettingsConfig.Difficulty` is one knob — `incomingDamage` at 1.0 / 0.7 / 0.45.
@@ -173,6 +155,28 @@ what made raising the ceiling to 48 affordable. `corpseLifetime` is 35 for a
 Common. Not device-scaled, deliberately: corpses are replicated instances every
 client shares, so one player's hardware must not decide how many bodies everyone
 else sees.
+
+### Ledge hanging was built and unreachable — **fixed**
+
+Raised 2026-09-05, closed the same day. `SurvivorService:ledgeHang` was a
+complete feature — the state, the pull-up prompt, the drain, the countdown, the
+HUD line, the crosshair and ability lockouts, all three config numbers — that
+nothing anywhere called, so no survivor had ever hung off anything.
+
+The missing piece was a trigger, and `Level/LedgeService` is it: a designer tags
+a part `FL_LedgeCatch` along a lip and anything falling through it is caught.
+Two things about the build worth keeping:
+
+- **It is arithmetic, not a raycast.** The obvious version is an invisible part
+  you raycast against, and it is a trap: an invisible part a ray can hit is one a
+  bullet can hit, so the feature would have hung an invisible wall in front of
+  every marked drop. Testing the box in Lua lets the volumes be `CanQuery = false`
+  and untouchable by anything in the physics world.
+- **Being inside the box is not enough — you have to be below the lip.** A catch
+  volume laid along an edge overlaps the walkway beside it, and an eighth of a
+  second after a jump you are descending fast enough to pass the falling gate
+  while still entirely on the ledge. Modelling it showed hopping near an edge
+  grabbed you; one comparison fixed it.
 
 ### Bosses were a schedule you could memorise — **built**
 

@@ -501,6 +501,21 @@ It is also where the ART for these three comes from: `getTemplate(itemId)` hands
 back the map's own model, and both `PlaceholderFactory` (pads) and
 `CarryVisualService` (backs) use it, so there is no second copy to keep in sync.
 
+### `Level/LedgeService.lua` → `"LedgeService"`
+
+Turns a fall off an `FL_LedgeCatch` volume into a hang. Owns the geometry and
+nothing else: it works out where the lip is, which way the survivor was going and
+where the solid ground behind it is, then hands all three to
+`SurvivorService:ledgeHang`. That service owns the state, the clock and the body;
+this one knows nothing about survivors beyond "upright" and "falling".
+
+The test is **arithmetic against the cached box, not a raycast**, and that is the
+whole reason the volumes can be `CanQuery = false`: an invisible part a ray can
+hit is one a *bullet* can hit, and a wall that eats shots fired over a balcony
+would be a worse bug than the one this fixes. It samples the line between each
+body's last position and its current one, so a fast fall cannot tunnel through a
+shallow net — endpoints alone miss a 4-stud net from 82 of 115 start heights.
+
 ### `Survivors/CarryVisualService.lua` → `"CarryVisualService"`
 
 Mirrors the Health slot onto the character, so the kit is visible on a survivor's
