@@ -406,19 +406,31 @@ function MapItemService:_onPickedUp(player: Player, _slot: string, _itemId: stri
 		return -- not one of ours; a Director-placed pad item, or a dropped one
 	end
 
+	--[[ The spot this model came from is found by family AND index. Everything
+	     the player was carrying in the SAME SLOT is then let go of, which is a
+	     wider net than the same family on purpose: a slot holds one item, so
+	     picking anything up into it means whatever was there is now on the floor.
+
+	     Family alone was enough while the two pill types were the only pair
+	     sharing a slot and swapping between them was rare. The throwables broke
+	     it: molotovs and pipe bombs are different families in the same slot and
+	     players trade one for the other constantly, so a molotov spot went on
+	     naming somebody who had not held a molotov for ten minutes — and printed
+	     a second one the moment they disconnected. ]]
+	local taken: Spot? = nil
 	for _, spot in spots do
-		if spot.family.key ~= key then
-			continue
-		end
-		if spot.index == index and spot.live == model then
+		if spot.family.key == key and spot.index == index and spot.live == model then
+			taken = spot
 			markTaken(spot, player)
-		elseif spot.carrier == player then
-			--[[ They were already down as the carrier of a DIFFERENT spot in this
-			     family, which can only mean they swapped: the old item is lying on
-			     the floor where they picked this one up. It is still in the world,
-			     so that spot must not refill — but it must also stop naming
-			     somebody, or their disconnect would print a second copy of an item
-			     that never left. ]]
+			break
+		end
+	end
+	if not taken then
+		return
+	end
+
+	for _, spot in spots do
+		if spot ~= taken and spot.family.slot == taken.family.slot and spot.carrier == player then
 			spot.carrier = nil
 		end
 	end

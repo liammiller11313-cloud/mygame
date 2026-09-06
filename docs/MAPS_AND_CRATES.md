@@ -74,9 +74,9 @@ event — so tag those two by hand when you want them.
 
 ---
 
-## Health items
+## Items in the map
 
-Three folders inside **each** map, one per item:
+Five folders inside **each** map, one per item:
 
 ```
 Zombieville/
@@ -86,6 +86,10 @@ Zombieville/
         Pain Pills 1 ... Pain Pills 9
     Adrenaline Shots/
         Adrenaline Shot 1 ... Adrenaline Shot 7
+    Molotovs/
+        Molotov 1 ... Molotov 6
+    Pipe Bombs/
+        Pipe Bomb 1 ... Pipe Bomb 7
 ```
 
 **You don't tag anything.** Same rule as the crates — the game finds each folder
@@ -105,8 +109,10 @@ with no outline on them.)
 **Your models are the game's models.** These folders are not only *where* the
 items are — they are what the items *look like*, everywhere. When the Director
 drops pills on an item pad partway through a wave, it copies the model standing
-in your map rather than building its own. Change the prop in the map and the
-whole game changes with it; there is no second copy to keep in sync.
+in your map rather than building its own. A molotov in a hand, lying on a pad,
+and turning over in the air is the same object all three times. Change the prop
+in the map and the whole game changes with it; there is no second copy to keep
+in sync.
 
 > If a folder is missing or misnamed, the server says so by name at boot and
 > lists what folders the map *does* have. Pills and adrenaline fall back to a
@@ -116,6 +122,31 @@ whole game changes with it; there is no second copy to keep in sync.
 
 The whole contract lives in `MapConfig.MapItems`, one entry per family, if you
 want a fourth.
+
+### How throwables behave
+
+Molotovs and pipe bombs are placed in the level rather than handed out by the
+Director, and that is the point: a throwable on a shelf is a reason to go and
+look at the shelf. It is the cheapest thing a level can do to make its own rooms
+worth walking into.
+
+- **Walk up and take it.** It fills your Throwable slot and you can see it in
+  your hand — yours and everyone else's.
+- **Swap freely.** Picking up a pipe bomb while carrying a molotov drops the
+  molotov where you are standing, as your own model, for somebody else to find.
+- **Throw it** on your normal throw input. The object turning over in the air is
+  the same model.
+- **The spawn point refills 40 seconds after it is thrown** — not after it is
+  picked up. Faster than a medkit and there are more of them, because throwables
+  are meant to be *spent*: one somebody is saving for later is one doing nothing.
+
+The **bile jar** is unchanged — no map folder, still placed by the Director from
+the built-in model. Give it a `Bile Jars` folder and one entry in
+`MapConfig.MapItems` and it joins the other two; nothing else has to change.
+
+> `Assets/Throwables` still works as a fallback for anything the map does not
+> place, and the game no longer creates empty folders in there for the two that
+> it does.
 
 ### How medkits behave
 

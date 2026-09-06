@@ -285,6 +285,50 @@ MapConfig.MapItems = table.freeze({
 		leaveGhost = true,
 		ghostTransparency = 0.9,
 	}),
+
+	--[[
+		THE THROWABLES, which used to come out of an assets folder and now come
+		out of the map like everything else here.
+
+		That is a design decision rather than a tidying one. A throwable in an
+		assets folder is something the Director hands you; a throwable standing on
+		a shelf is a reason to go and look at the shelf. It is the cheapest thing
+		a level can do to make its own rooms worth walking into, and it is most of
+		why exploring a Left 4 Dead map is worth the time it costs.
+
+		More of them than there are medkits, and they refill faster, because they
+		are meant to be SPENT. A pipe bomb somebody is saving for later is a pipe
+		bomb doing nothing, and a map that makes you feel rich in them is a map
+		where you throw one at the horde instead of backing down a corridor.
+
+		The bile jar has no family here and is left exactly as it was — the
+		built-in model, placed by the Director. Give it a folder and an entry and
+		it joins these two; nothing else has to change.
+	]]
+	table.freeze({
+		key = "Molotovs",
+		folderName = "Molotovs",
+		modelName = "Molotov",
+		expectedCount = 6,
+		slot = Enums.Slot.Throwable,
+		itemId = Enums.Throwable.Molotov,
+		tag = "FL_MolotovPickup",
+		respawnSeconds = 40,
+		leaveGhost = true,
+		ghostTransparency = 0.9,
+	}),
+	table.freeze({
+		key = "PipeBombs",
+		folderName = "Pipe Bombs",
+		modelName = "Pipe Bomb",
+		expectedCount = 7,
+		slot = Enums.Slot.Throwable,
+		itemId = Enums.Throwable.PipeBomb,
+		tag = "FL_PipeBombPickup",
+		respawnSeconds = 40,
+		leaveGhost = true,
+		ghostTransparency = 0.9,
+	}),
 }) :: { MapItemFamily }
 
 --[[ The family that supplies an item id, or nil for one the map does not place.

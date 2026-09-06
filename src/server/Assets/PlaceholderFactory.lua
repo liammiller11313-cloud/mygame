@@ -2625,6 +2625,34 @@ end
 
 local throwableTemplates: { [string]: Model? } = {}
 
+--[[ Which of those were built from the LIVE MAP rather than from an assets
+     folder, and are therefore only good for as long as that map is loaded. An
+     assets-folder throwable is prepared once for the life of the server, as
+     everything else here is; a map one has to go when its map does. ]]
+local mapSourcedThrowables: { [string]: boolean } = {}
+
+--[[
+	Throws away every template taken from the map that has just been unloaded.
+
+	Called on a map swap. Without it the second round of a server hands out the
+	first round's molotov: the prepared clone survives in ServerStorage long after
+	the level it was copied from stopped existing, and nothing about it says which
+	map it came from.
+
+	Only the map-sourced ones. Rebuilding a bile jar that came out of an assets
+	folder would be work for an answer that cannot have changed.
+]]
+local function clearMapTemplates()
+	for kind in mapSourcedThrowables do
+		local template = throwableTemplates[kind]
+		if template then
+			(template :: Model):Destroy()
+		end
+		throwableTemplates[kind] = nil
+	end
+	table.clear(mapSourcedThrowables)
+end
+
 --[[
 	The model a throwable is drawn as, or nil when the user has not supplied one.
 
@@ -2639,31 +2667,80 @@ local throwableTemplates: { [string]: Model? } = {}
 	was a hardcoded cylinder that never asked. So a user who supplied a molotov saw
 	it in exactly one of the three places it appears.
 
-	Prepared once, like everything else here. Welded to its own Handle so it
-	travels as one object, and every part made non-queryable — a thrown bottle
-	must never stop a bullet meant for the zombie behind it.
+	── AND THE MAP COMES FIRST ─────────────────────────────────────────────────
+	Molotovs and pipe bombs are placed by hand in the level now, in the folders
+	MapConfig.MapItems names, and that is where their model comes from. The assets
+	folder is still read for anything the map does not supply — the bile jar —
+	so nothing that worked before stops working.
+
+	The map's answer is NOT cached across a map swap. Everything else in this file
+	is prepared once and kept for the life of the server, which is correct for a
+	thing that came out of an assets folder and wrong for a thing that came out of
+	a level: caching Clinton's molotov would put Clinton's molotov in every map
+	after it. See clearMapTemplates, and the same note above buildPickup.
+
+	Prepared once per map, then. Welded to its own Handle so it travels as one
+	object, and every part made non-queryable — a thrown bottle must never stop a
+	bullet meant for the zombie behind it.
 ]]
 function PlaceholderFactory:buildThrowableModel(kind: string): Model?
 	if typeof(kind) ~= "string" then
 		return nil
 	end
 	local source = throwableTemplates[kind]
+	local fromMap = false
 	if source == nil then
-		--[[ Cached as `false` rather than left nil, so a kind with no model is
-		     looked up once per server rather than once per throw. A horde's worth
-		     of pipe bombs is a lot of folder walks for an answer that cannot
-		     change. ]]
-		local supplied = suppliedEntry("Throwables", { kind })
-		local candidates = if supplied then modelsIn(supplied) else {}
-		local built = candidates[1] and cloneAsModel(candidates[1])
+		--[[ The live map first. getTemplate hands back the pristine copy taken
+		     before the model was dressed as a pickup, which is the same object the
+		     player has been walking past all round. ]]
+		local built: Model? = nil
+		if MapConfig.mapItemFor(kind) then
+			local mapItems: any = Registry.find("MapItemService")
+			local template = mapItems
+				and typeof(mapItems.getTemplate) == "function"
+				and mapItems:getTemplate(kind)
+			if template then
+				built = (template :: Model):Clone()
+				fromMap = true
+			end
+		end
+
+		--[[ Then the assets folder, for a throwable no map places. Unchanged
+		     behaviour for the bile jar, and the escape hatch for anybody who
+		     would rather supply one model than place thirteen. ]]
 		if not built then
-			throwableTemplates[kind] = false :: any
+			local supplied = suppliedEntry("Throwables", { kind })
+			local candidates = if supplied then modelsIn(supplied) else {}
+			built = candidates[1] and cloneAsModel(candidates[1])
+		end
+
+		if not built then
+			--[[
+				A miss is remembered ONLY when it cannot change.
+
+				The negative answer used to be cached unconditionally, so a kind
+				with no model was looked up once per server rather than once per
+				throw — a horde's worth of pipe bombs is a lot of folder walks for
+				an answer that could not change. It can change now: a map-supplied
+				throwable asked for before its map is standing has no template
+				yet, and caching that would leave the kind permanently modelless
+				for the life of the server, on every map after it.
+
+				So the bile jar's miss is still cached — nothing about an assets
+				folder moves — and a map kind's is not, and pays one folder walk
+				per throw for as long as its map really has none.
+			]]
+			if not MapConfig.mapItemFor(kind) then
+				throwableTemplates[kind] = false :: any
+			end
 			return nil
 		end
 		sanitise(built)
 
 		local anchor = built.PrimaryPart or built:FindFirstChildWhichIsA("BasePart", true)
 		if not anchor then
+			--[[ A model with no parts, which IS a fact about the model and not
+			     about when it was asked for. Cached either way. ]]
 			built:Destroy()
 			throwableTemplates[kind] = false :: any
 			return nil
@@ -2688,6 +2765,9 @@ function PlaceholderFactory:buildThrowableModel(kind: string): Model?
 
 		source = park("Throwables", kind, built)
 		throwableTemplates[kind] = source
+		if fromMap then
+			mapSourcedThrowables[kind] = true
+		end
 	end
 	if not source then
 		return nil
@@ -4054,13 +4134,24 @@ end
 ]]
 function PlaceholderFactory:ensureAssetFolders()
 	local assets = folderIn(ReplicatedStorage, ASSETS_FOLDER)
-	--[[ A folder per throwable, for the same reason the rig folders exist: a user
-	     with a molotov model has nowhere obvious to put it until the game has
-	     shown them where. Named by the enum id verbatim, which is what
-	     buildThrowableModel looks up. ]]
-	local throwables = folderIn(assets, "Throwables")
+	--[[
+		A folder per throwable the MAP does not place.
+
+		Molotovs and pipe bombs come out of the level now — see
+		MapConfig.MapItems — so making them a home in here would be making a home
+		nobody should put anything in, every boot, for the rest of the game's
+		life. Worse than useless: an empty folder next to a full one reads as the
+		place things go.
+
+		The bile jar has no family and still wants somewhere, so the folder is
+		made only for what is left, and only made at all if anything is left.
+	]]
 	local madeThrowables = {}
 	for _, kind in Enums.Throwable do
+		if MapConfig.mapItemFor(kind) then
+			continue
+		end
+		local throwables = folderIn(assets, "Throwables")
 		if not throwables:FindFirstChild(kind) then
 			folderIn(throwables, kind)
 			table.insert(madeThrowables, kind)
@@ -4072,7 +4163,7 @@ function PlaceholderFactory:ensureAssetFolders()
 			string.format(
 				"[PlaceholderFactory] made empty throwable folders for: %s — drop a model or a "
 					.. "Tool into Assets.Throwables.<Id> and it is used in the hand, on the floor "
-					.. "and in flight on the next run.",
+					.. "and in flight on the next run. The rest are placed in the map instead.",
 				table.concat(madeThrowables, ", ")
 			)
 		)
@@ -4114,6 +4205,16 @@ function PlaceholderFactory:init()
 	-- Assets exist before any other service's start() runs, which is what lets
 	-- LevelService index the map's tags in its own start() without waiting.
 	self:ensureAssets()
+end
+
+--[[ A map arriving invalidates everything this file copied out of the last one.
+     Connected in start() rather than init() because MapService registers itself
+     in the same pass and may not exist yet when init() runs. ]]
+function PlaceholderFactory:start()
+	local mapService = Registry.find("MapService")
+	if mapService and mapService.mapChanged then
+		mapService.mapChanged:connect(clearMapTemplates)
+	end
 end
 
 Registry.register("PlaceholderFactory", PlaceholderFactory)

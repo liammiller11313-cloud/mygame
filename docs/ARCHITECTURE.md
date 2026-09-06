@@ -490,8 +490,9 @@ Two rules:
 
 ### `Level/MapItemService.lua` → `"MapItemService"`
 
-Owns every item folder in the live map — `Medkits`, `Pain Pills` and
-`Adrenaline Shots`, declared in `MapConfig.MapItems`. Dresses each model as a
+Owns every item folder in the live map — `Medkits`, `Pain Pills`,
+`Adrenaline Shots`, `Molotovs` and `Pipe Bombs`, declared in
+`MapConfig.MapItems`. Dresses each model as a
 pickup where it stands and refills that spot once the item it produced is
 **spent**. Listens to `InventoryService.pickedUp` and `.itemConsumed` — not
 `.changed`, which cannot tell a spend from a drop, a swap or a death, and
