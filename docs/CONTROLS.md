@@ -36,6 +36,18 @@ the tap targets, and a controller reaches the three that matter on the D-pad.
 One tap selects; a second tap on a consumable uses it, the same press-again rule
 the D-pad follows.
 
+## On a console with a pointer
+
+A PS5 drives a cursor with the DualSense touchpad, and an Xbox has a virtual
+cursor. Both arrive as ordinary mouse input, and the menus now get out of their
+way: while the pointer is moving, the orange selection highlight is cleared and
+the cursor clicks whatever it is over. Touch the stick or the D-pad and the
+highlight comes straight back where it was.
+
+A console also stays a console. Clicking the touchpad used to flip the game to
+the desktop scheme and show keyboard glyphs on hardware with no keyboard
+attached; a ten-foot interface now refuses that outright.
+
 ## The trigger spends what is in your hand
 
 With a **gun** out, the fire button shoots. With anything else out, it uses that

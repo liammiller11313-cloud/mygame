@@ -2,7 +2,8 @@
 --[[
 	GamepadFocus — making the menus usable without a pointer.
 
-	A controller has no cursor. Roblox's answer is GuiService.SelectedObject: set
+	A controller usually has no cursor — see the pointer note further down for
+	the console that does. Roblox's answer is GuiService.SelectedObject: set
 	it to a button and the D-pad and left stick walk between Selectable siblings,
 	with A activating whatever is highlighted. Nothing happens until something
 	sets it, which is why a menu that works perfectly with a mouse is a dead
@@ -29,6 +30,7 @@
 
 local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Registry = require(Shared.Util.Registry)
@@ -43,6 +45,46 @@ local GamepadFocus = {}
      instance it can parent inside the selected object, and handing the same one
      to two buttons means only the second ever shows it. ]]
 local template: Frame? = nil
+
+--[[
+	── WHEN THE CONTROLLER HAS A POINTER AFTER ALL ─────────────────────────────
+
+	The header above says "a controller has no cursor". A PS5 does: the DualSense
+	touchpad drives a pointer, and the player expects it to move freely and click
+	whatever it is over.
+
+	Forced selection fights that, and loses in the most confusing possible way.
+	The highlight sits on whichever button `capture` chose, the pointer moves
+	somewhere else entirely, and the two disagree about what is about to be
+	pressed. Nothing is broken enough to look broken — it just does the wrong
+	thing.
+
+	So: while a pointer is being used, this module stands down. Selection is
+	cleared, `capture` becomes a no-op, and the cursor owns the screen. The
+	moment the player goes back to the stick or the D-pad, the last captured
+	button is selected again — because putting the pad down and picking it back
+	up is a thing people do mid-menu, and a console that then has no highlight
+	and no cursor is a dead screen.
+
+	Detected from the pointer moving rather than from any PS5 API, because Roblox
+	exposes none: the touchpad arrives as ordinary mouse input. That also makes
+	this correct for the Xbox virtual cursor, which behaves the same way.
+]]
+local pointerActive = false
+local lastCaptured: GuiObject? = nil
+local watching = false
+
+--[[ How far a stick has to be pushed to count as navigating. Well above the
+     resting noise of a worn thumbstick, which would otherwise take the screen
+     back from the pointer every frame without the player touching anything. ]]
+local STICK_DEADZONE = 0.25
+
+local NAV_KEYS: { [Enum.KeyCode]: boolean } = {
+	[Enum.KeyCode.DPadUp] = true,
+	[Enum.KeyCode.DPadDown] = true,
+	[Enum.KeyCode.DPadLeft] = true,
+	[Enum.KeyCode.DPadRight] = true,
+}
 
 local function highlightTemplate(): Frame
 	if template then
@@ -81,6 +123,64 @@ local function isGamepad(): boolean
 	return ok and scheme == "Gamepad"
 end
 
+--[[ The pointer has been used: hand the screen to it and take the highlight
+     off, so what is lit and what is under the cursor cannot disagree. ]]
+local function pointerTookOver()
+	if pointerActive or not isGamepad() then
+		return
+	end
+	pointerActive = true
+	GuiService.SelectedObject = nil
+end
+
+--[[ The stick or the D-pad has been used: take the screen back, and put the
+     highlight where it was rather than nowhere. ]]
+local function padTookOver()
+	if not pointerActive then
+		return
+	end
+	pointerActive = false
+	local button = lastCaptured
+	if button and button.Parent and button.Visible and isGamepad() then
+		GuiService.SelectedObject = button
+	end
+end
+
+--[[ Connected on first use rather than at require time. A player who never
+     opens a screen never needs this, and a desktop never needs it at all —
+     both handlers check the scheme before doing anything. ]]
+local function watchPointer()
+	if watching then
+		return
+	end
+	watching = true
+
+	UserInputService.InputChanged:Connect(function(input: InputObject)
+		local kind = input.UserInputType
+		if kind == Enum.UserInputType.MouseMovement then
+			--[[ Only a real movement. A pointer parked on a console still emits
+			     the occasional zero-delta change, and taking the screen off the
+			     stick for that would make the highlight flicker. ]]
+			if math.abs(input.Delta.X) + math.abs(input.Delta.Y) > 0 then
+				pointerTookOver()
+			end
+		elseif kind == Enum.UserInputType.Gamepad1 and input.KeyCode == Enum.KeyCode.Thumbstick1 then
+			if input.Position.Magnitude >= STICK_DEADZONE then
+				padTookOver()
+			end
+		end
+	end)
+
+	UserInputService.InputBegan:Connect(function(input: InputObject)
+		local kind = input.UserInputType
+		if kind == Enum.UserInputType.MouseButton1 then
+			pointerTookOver()
+		elseif kind == Enum.UserInputType.Gamepad1 and NAV_KEYS[input.KeyCode] then
+			padTookOver()
+		end
+	end)
+end
+
 --[[ Makes one button reachable by a controller and gives it the themed
      highlight. Safe to call on anything; a non-GuiObject is ignored rather than
      erroring, because the callers pass whatever their layout produced. ]]
@@ -100,10 +200,21 @@ function GamepadFocus.capture(button: Instance?)
 	if not isGamepad() then
 		return
 	end
-	if button and button:IsA("GuiObject") and button.Visible then
-		GamepadFocus.style(button)
-		GuiService.SelectedObject = button
+	watchPointer()
+	if not (button and button:IsA("GuiObject") and button.Visible) then
+		return
 	end
+	--[[ Styled either way. The highlight has to already be on the button for
+	     padTookOver to have something to put selection back onto, and a button
+	     that is merely Selectable costs nothing while the cursor is in use. ]]
+	GamepadFocus.style(button)
+	lastCaptured = button
+	--[[ Remembered, not selected. While the pointer owns the screen, forcing
+	     selection here is the exact fight this module gave up. ]]
+	if pointerActive then
+		return
+	end
+	GuiService.SelectedObject = button
 end
 
 --[[ Hands selection back. Called when a screen closes — including when it closes
@@ -114,6 +225,11 @@ function GamepadFocus.release(button: Instance?)
 	-- frame would otherwise have the second wipe the first's replacement.
 	if button == nil or GuiService.SelectedObject == button then
 		GuiService.SelectedObject = nil
+	end
+	--[[ And forget it, so a stick nudge after this screen is gone does not
+	     select a button that closed with it. ]]
+	if button == nil or lastCaptured == button then
+		lastCaptured = nil
 	end
 end
 

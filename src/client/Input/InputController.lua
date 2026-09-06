@@ -444,7 +444,26 @@ end
 	interface back to keyboard glyphs every time the stick nudged the pointer.
 	Focus and the motion sensors are excluded for the same reason: none of them
 	is somebody choosing an input.
+
+	── AND A CONSOLE IS NEVER A DESKTOP ────────────────────────────────────────
+	Excluding MouseMovement was half the job. A PS5 drives a pointer with the
+	DualSense touchpad, and CLICKING it arrives as MouseButton1 — a deliberate
+	press by anybody's definition, so the guess above was right in general and
+	wrong here. The console showed keyboard glyphs the first time a player
+	tapped the touchpad, on hardware with no keyboard attached.
+
+	IsTenFootInterface is definitive and does not change for the life of the
+	session, so it is read once and it vetoes Desktop outright. A console player
+	using the pointer is still a console player; the pointer is one of the ways
+	that platform drives a UI, not a different platform.
 ]]
+local IS_TEN_FOOT = (function(): boolean
+	local ok, value = pcall(function()
+		return GuiService:IsTenFootInterface()
+	end)
+	return ok and value == true
+end)()
+
 local function schemeFor(inputType: Enum.UserInputType): string?
 	if inputType == Enum.UserInputType.Touch then
 		return Scheme.Touch
@@ -459,7 +478,7 @@ local function schemeFor(inputType: Enum.UserInputType): string?
 		or inputType == Enum.UserInputType.MouseButton3
 		or inputType == Enum.UserInputType.MouseWheel
 	then
-		return Scheme.Desktop
+		return if IS_TEN_FOOT then nil else Scheme.Desktop
 	end
 	return nil
 end
