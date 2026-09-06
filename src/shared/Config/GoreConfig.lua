@@ -32,12 +32,32 @@ GoreConfig.Enabled = true
 	          + regionBonus
 	          + contactBonus        (added when the shot was inside ContactRange)
 	    gib       when score >= GibScore
+	              OR when overkill >= the kind's own gibThreshold
 	    dismember when score >= DismemberScore and the region is a limb or head
 	    otherwise a clean ragdoll kill
 
-	`overkillRatio` is (damage dealt - health remaining) / maxHealth, so hitting a
-	Common for 300 with a machete reads as enormous overkill and takes the head
-	clean off, while chipping the last 2 HP off a Tank does not.
+	`overkillRatio` is (damage dealt - health remaining) / maxHealth, CAPPED at
+	OverkillRatioCap. The cap is not defensive tidying and the second gate is not
+	a footnote; between them they are most of what decides whether this game
+	leaves a body, and leaving either out of this summary is how the Common spent
+	months bursting on every headshot with nobody able to see why from here.
+
+	THE SECOND GATE IS SUFFICIENT ON ITS OWN. `overkill >= gibThreshold` bursts a
+	body whatever the score says, which is what makes it possible to write "this
+	kind always comes apart" for one archetype without touching the formula. It
+	is also how a threshold set too low silently overrules every other input, so
+	read a kind's gibThreshold against its HEALTH and against a four-times head
+	multiplier before believing it means what it says.
+
+	THE CAP EXISTS BECAUSE THE RATIO IS UNBOUNDED. A body small enough for one
+	hit to overkill it several times over pins this term at its maximum for every
+	kill, at which point it is not a term, it is a constant — and a large one,
+	next to three others that total at most 1.5. See OverkillRatioCap.
+
+	What the weights are FOR, once both of those are respected: a point-blank
+	shotgun blast should gib, a pistol round to the shin should not, a machete
+	should take the head off cleanly rather than burst anything, and the player
+	should feel the difference without ever being told the rule.
 ]]
 GoreConfig.Scoring = table.freeze({
 	OverkillWeight = 0.55,

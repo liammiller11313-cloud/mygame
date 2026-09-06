@@ -1,9 +1,18 @@
 # Sound & Music Brief — Fading Light
 
-Every id in `src/shared/Config/AudioConfig.lua` is empty on purpose. Audio asset
-ids are account-specific and can't be guessed — a made-up number either fails to
-load or pulls somebody else's unrelated audio into your game. So the game runs
-silent until you fill them in, warning once per missing id and then staying quiet.
+**Most of this bank is filled in now.** Sixty-eight ids in
+`src/shared/Config/AudioConfig.lua` are real; a handful of rows are still `""`
+and a few more are stand-ins wearing the wrong sample. This document is the list
+of what is still wanted, not a brief for an empty bank.
+
+An empty row is silent on purpose and warns once at startup, then stays quiet.
+
+> **A silent cue does not prove the row is empty.** Audio is licensed per place:
+> an id that is moderated, private, or uploaded under an account that does not
+> own this place fails **per player** — it plays perfectly in Studio for whoever
+> uploaded it and is silent for everyone else, and the game's own code cannot
+> see the difference. If a cue is missing in a real server and its row is
+> populated, that is the first thing to check.
 
 Volumes, pitch ranges, rolloff distances and voice priorities are **already
 tuned** in that file. You only supply ids.
@@ -145,7 +154,7 @@ will sound wrong every time it fades up mid-round.
 
 ```lua
 [Enums.Weapon.M1911A1] = {
-    id = "rbxassetid://YOUR_ID_HERE",   -- was ""
+    id = "rbxassetid://0000000000",   -- replace the zeros with the id, digits only
     volume = 0.7,
     ...
 }

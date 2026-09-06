@@ -433,17 +433,34 @@ function MapItemService:_onPickedUp(player: Player, _slot: string, _itemId: stri
 		return -- not one of ours; a Director-placed pad item, or a dropped one
 	end
 
-	--[[ The spot this model came from is found by family AND index. Everything
-	     the player was carrying in the SAME SLOT is then let go of, which is a
-	     wider net than the same family on purpose: a slot holds one item, so
-	     picking anything up into it means whatever was there is now on the floor.
+	--[[ The spot this model came from is found by family AND index. Every OTHER
+	     spot in the same SLOT that still names this player is then sent back to
+	     its refill clock, which is a wider net than the same family on purpose.
 
 	     Family alone was enough while the two pill types were the only pair
 	     sharing a slot and swapping between them was rare. The throwables broke
 	     it: molotovs and pipe bombs are different families in the same slot and
 	     players trade one for the other constantly, so a molotov spot went on
 	     naming somebody who had not held a molotov for ten minutes — and printed
-	     a second one the moment they disconnected. ]]
+	     a second one the moment they disconnected.
+
+	     ── AND IT IS startRefill, NOT `carrier = nil` ──────────────────────────
+	     Clearing the carrier alone strands the spot forever, and the first
+	     version of this loop did exactly that. A taken spot has no `live` model,
+	     no `refillAt`, and its carrier is the ONLY thread back to it: _step's
+	     disconnect net needs a carrier to notice one left, and _onConsumed needs
+	     one to know which spot emptied. Drop the carrier without setting a clock
+	     and nothing in this file can ever reach that spot again — pick up a
+	     molotov, then a pipe bomb, and the molotov's room is empty for the rest
+	     of the round.
+
+	     Refilling is also the honest answer rather than merely the safe one.
+	     InventoryService.giveItem overwrites an occupied slot outright, so the
+	     item that was there is GONE — not dropped, not on the floor, however
+	     much an earlier version of this comment claimed otherwise. The map is
+	     genuinely one molotov short, which is precisely what the refill clock is
+	     for. startRefill is idempotent and refuses a spot that already has a
+	     model or is already counting down, so this cannot shorten a live one. ]]
 	local taken: Spot? = nil
 	for _, spot in spots do
 		if spot.family.key == key and spot.index == index and spot.live == model then
@@ -458,7 +475,7 @@ function MapItemService:_onPickedUp(player: Player, _slot: string, _itemId: stri
 
 	for _, spot in spots do
 		if spot ~= taken and spot.family.slot == taken.family.slot and spot.carrier == player then
-			spot.carrier = nil
+			startRefill(spot)
 		end
 	end
 end

@@ -49,6 +49,7 @@
 ]]
 
 local ContentProvider = game:GetService("ContentProvider")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local ImageCheck = {}
 
@@ -73,10 +74,18 @@ end
 --[[ The advice, once, because it is the whole value of the warning and it has
      to be in every one of them — a log line that says "failed" and stops has
      told somebody they have a problem and not how to look at it. ]]
+local DECAL_FIX = "Insert the decal in Studio and read the id off its Texture property — that is the "
+	.. "image, and it is what an ImageLabel wants."
+
 local ADVICE = "The usual cause is a DECAL id: the id shown on a Creator Store page or an inventory "
-	.. "tile wraps the image rather than being it. Insert the decal in Studio and read the id off its "
-	.. "Texture property. Otherwise the asset is private, in moderation, or owned by an account that "
-	.. "does not own this place — which fails per player and still loads in Studio for whoever uploaded it."
+	.. "tile wraps the image rather than being it. "
+	.. DECAL_FIX
+	.. " Otherwise the asset is private, in moderation, or owned by an account that does not own this "
+	.. "place — which fails per player and still loads in Studio for whoever uploaded it."
+
+-- Roblox's own numbering. An ImageLabel draws the first and cannot draw the second.
+local ASSET_TYPE_IMAGE = 1
+local ASSET_TYPE_DECAL = 13
 
 --[[
 	Typos, caught without a network.
@@ -125,6 +134,67 @@ local function shapeProblem(id: string): string?
 end
 
 --[[
+	What Roblox thinks this asset actually IS.
+
+	This is the check that the rest of this module could not make, and the
+	admission is worth writing down: the two checks above CANNOT catch a decal
+	id, which is the failure this whole file was written for. A decal's id is
+	numeric, so the shape gate passes it. The decal asset genuinely exists and
+	genuinely downloads, so the fetch gate reports Success. Both say fine, and
+	the ImageLabel still draws nothing, because neither of them ever asked what
+	kind of thing the id names.
+
+	GetProductInfo does. AssetTypeId is 1 for an Image and 13 for a Decal, and
+	they are the only two answers this ever expects to see.
+
+	It is separate from the fetch for a reason: it is an HTTP call, it yields,
+	and it is rate limited, so it is worth spending on a handful of ids named in
+	a config once per client and would be wrong to spend per instance. It is also
+	allowed to fail without meaning anything — a request that times out tells you
+	nothing about the asset, so a failure here is silent rather than reported.
+	The FETCH is what proves the picture arrives; this only explains a picture
+	that arrived and did not draw.
+]]
+local function verifyType(id: string, digits: string)
+	local assetId = tonumber(digits)
+	if not assetId then
+		return
+	end
+	local ok, info = pcall(function()
+		return MarketplaceService:GetProductInfo(assetId, Enum.InfoType.Asset)
+	end)
+	if not ok or typeof(info) ~= "table" then
+		return -- the network, not the asset. See above.
+	end
+
+	local assetType = tonumber(info.AssetTypeId)
+	if assetType == ASSET_TYPE_IMAGE then
+		return
+	end
+	if assetType == ASSET_TYPE_DECAL then
+		warn(
+			string.format(
+				"[ImageCheck] %s is a DECAL, not an image, so it will not draw. %s",
+				describe(id),
+				DECAL_FIX
+			)
+		)
+		return
+	end
+	warn(
+		string.format(
+			"[ImageCheck] %s is asset type %s, which an ImageLabel cannot draw. It wants an Image "
+				.. "(type %d); a Decal (type %d) is the usual mistake. %s",
+			describe(id),
+			tostring(assetType),
+			ASSET_TYPE_IMAGE,
+			ASSET_TYPE_DECAL,
+			DECAL_FIX
+		)
+	)
+end
+
+--[[
 	Check one image id, and say so by name if it is not going to draw.
 
 	`what` is what a person would call this picture — "the menu photograph",
@@ -154,6 +224,16 @@ function ImageCheck.verify(id: unknown, what: string)
 		names[id] = { what }
 	end
 
+	--[[ Once per id, and the guard sits ABOVE the shape check rather than below
+	     it. Not every caller asks once: MapVoteController verifies its three
+	     cards as it builds them, so it asks again every time the vote opens. A
+	     malformed id that warned per call would print three lines a round for
+	     the rest of the server's life. ]]
+	if seen[id] then
+		return
+	end
+	seen[id] = true
+
 	--[[ Shape first, and it stops here if the shape is wrong: PreloadAsync
 	     THROWS on a malformed content string rather than reporting it, so a
 	     typo sent to the fetch becomes an error in a pcall and a worse
@@ -164,15 +244,19 @@ function ImageCheck.verify(id: unknown, what: string)
 		return
 	end
 
-	if seen[id] then
-		return
-	end
-	seen[id] = true
-
 	--[[ Spawned. PreloadAsync yields until the id resolves or gives up, and one
 	     the client cannot see takes seconds to give up. Nothing that builds a
-	     screen should wait on a network round trip to do it. ]]
+	     screen should wait on a network round trip to do it. The type lookup
+	     yields as well, and rides the same thread for the same reason. ]]
 	task.spawn(function()
+		--[[ rbxthumb:// and rbxgameasset:// have no asset id to ask about — one
+		     is a live query and the other a name — so they get the fetch check
+		     and nothing else. See shapeProblem, which lets both through. ]]
+		local digits = string.match(id, "^rbxassetid://(%d+)$")
+		if digits then
+			verifyType(id, digits)
+		end
+
 		local ok, err = pcall(function()
 			ContentProvider:PreloadAsync({ id }, function(_content: string, fetchStatus: any)
 				if fetchStatus == Enum.AssetFetchStatus.Success then

@@ -150,7 +150,29 @@ local function run()
 	local preloaded = false
 	task.spawn(function()
 		pcall(function()
-			ContentProvider:PreloadAsync({ mark, chime })
+			--[[ The callback form, so a failure is NAMED. The plain call returns
+			     the same way whether an id resolved or gave up, which is fine for
+			     the timing this preload exists to fix and useless for anything
+			     else — and the mark already gets its own named check through
+			     ImageCheck above, so the chime was the one asset in this file
+			     that could fail in silence. Losing it costs the sequence its
+			     whole point: the eye and the ear are supposed to get the same
+			     event, and a bloom with nothing under it just looks slow. ]]
+			ContentProvider:PreloadAsync({ mark, chime }, function(content: string, fetchStatus: any)
+				if fetchStatus == Enum.AssetFetchStatus.Success or content ~= CHIME then
+					return
+				end
+				warn(
+					string.format(
+						"[SplashController] the splash chime %s could not be fetched (%s), so the boot "
+							.. "sequence will play silent. Audio is licensed per place: an id uploaded "
+							.. "under an account that does not own this one fails for every player and "
+							.. "still plays in Studio for whoever uploaded it.",
+						CHIME,
+						tostring(fetchStatus)
+					)
+				)
+			end)
 		end)
 		preloaded = true
 	end)
