@@ -310,17 +310,52 @@ single strongest argument in this file for treating prose as code.
   same mistake the boss check just had fixed.
 - **`InfectedPoseController`** holds its cull and stride bands as literals, and
   duplicates the desktop defaults between module scope and `adoptDeviceBands`.
-- **The Director's ambush and fake-out are configured and unreachable.** Seven
-  tuned fields, a per-temperament chance on all six temperaments, and
-  `shouldAmbush` / `shouldFakeout` that nothing calls. Either build the two
-  paths or delete the config — but that is a design decision, not a cleanup, so
-  it is left for a person to make.
 - **The ammo-crate broadcast has no consumer.** The server sends which crate
   went, its index and its respawn time to everybody; the only handler reads one
   field for one player. A burned crate is information the team needs, and the
   wire already carries it.
 - **Three audio cues are defined with real ids and never played** —
   `UI.MenuPage`, `WeaponReload.Bolt`, `Gore.Squelch`.
+
+---
+
+## Deleted rather than built
+
+### The Director's ambush and fake-out — **config removed 2026-09-06**
+
+Configured, tuned per temperament, and unreachable: `DirectorConfig.Ambush`
+(seven fields), `DirectorConfig.Fakeout` (four), an `ambushChance` and a
+`fakeoutChance` on all six temperaments, and `shouldAmbush` / `shouldFakeout` /
+`rollFakeoutDelay` that nothing ever called. There was no dormant-spawn concept
+anywhere in the Director for the first to drive, and no build-up to cancel for
+the second.
+
+It is deleted rather than wired up, and the argument it made is kept here
+because it is a good one and whoever builds this should start from it:
+
+> **AMBUSH** — a group placed silently ahead of the team, dormant until they are
+> close, instead of walked in from behind. This is the single biggest thing the
+> base pacing machine lacks. A trickle that always arrives from behind is
+> learnable within one round; a crowd that was already waiting in the building
+> you are about to enter is not, and it is how Left 4 Dead makes a corridor
+> frightening on the second playthrough.
+>
+> **FAKE-OUT** — a build-up that deliberately does not deliver. The horde audio
+> rises, the population ticks up, and then it stops — and lands thirty seconds
+> later when the team has decided it was nothing. Used sparingly: a Director
+> that cries wolf constantly just teaches players to ignore the cue.
+
+The numbers it was tuned to, for the same reason: ambush groups of 6-16 placed
+90-260 studs along the team's own direction of travel, waking inside 46 studs,
+giving up after 75 seconds so a team that never goes that way does not leave a
+frozen crowd in the level, one at a time. Fake-outs delayed 14-34 seconds, the
+real one 1.25x harder for having been doubted, one per wave.
+
+**Why deleted:** tuned constants for a feature with no code path are worse than
+nothing. They read as a system that exists, they survive review because they
+look considered, and the next person to touch the Director budgets around a
+layer that has never once run. The two paths are a real feature and a real
+piece of work; when somebody does it, this entry is the brief.
 
 ---
 

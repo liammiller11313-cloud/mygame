@@ -51,8 +51,6 @@ local state = {
 	kills = 0,
 	damageTaken = 0,
 	windowStart = 0,
-
-	fakeoutsThisWave = 0,
 }
 
 local function now(): number
@@ -97,7 +95,6 @@ function DirectorTemperament:beginRound()
 	state.kills = 0
 	state.damageTaken = 0
 	state.windowStart = now()
-	state.fakeoutsThisWave = 0
 	rollMood()
 
 	print(string.format("[Director] temperament for this round: %s", state.temperament.displayName))
@@ -106,7 +103,6 @@ end
 
 function DirectorTemperament:beginWave(waveIndex: number)
 	state.waveIndex = waveIndex
-	state.fakeoutsThisWave = 0
 	rollMood()
 end
 
@@ -218,23 +214,6 @@ function DirectorTemperament:getBurstScale(): number
 	return math.max(1 - burst * 0.55, 0.25)
 end
 
-function DirectorTemperament:shouldAmbush(): boolean
-	return random:NextNumber() < state.temperament.ambushChance
-end
-
---[[ Fake-outs are capped per wave. A Director that cries wolf constantly just
-     teaches players to ignore the cue, which costs it the tool entirely. ]]
-function DirectorTemperament:shouldFakeout(): boolean
-	if state.fakeoutsThisWave >= DirectorConfig.Fakeout.MaxPerWave then
-		return false
-	end
-	if random:NextNumber() < state.temperament.fakeoutChance then
-		state.fakeoutsThisWave += 1
-		return true
-	end
-	return false
-end
-
 function DirectorTemperament:shouldPairSpecials(): boolean
 	return random:NextNumber() < state.temperament.pairChance
 end
@@ -245,11 +224,6 @@ end
      team from simply always facing forward. ]]
 function DirectorTemperament:shouldFlank(): boolean
 	return random:NextNumber() < state.temperament.flankChance
-end
-
-function DirectorTemperament:rollFakeoutDelay(): number
-	local f = DirectorConfig.Fakeout
-	return random:NextNumber(f.MinDelay, f.MaxDelay)
 end
 
 --[[ A one-line summary for the debug overlay and the round log. Being able to

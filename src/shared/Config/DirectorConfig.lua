@@ -222,8 +222,6 @@ export type Temperament = {
 	specialRate: number, -- multiplier on the gap between specials
 	burstiness: number, -- 0 steady stream, 1 arrives in clumps
 
-	ambushChance: number, -- odds a wave opens with a pre-placed silent group
-	fakeoutChance: number, -- odds a build-up deliberately does not deliver
 	pairChance: number, -- odds two specials are sent together
 	flankChance: number, -- odds a group spawns BEHIND the team instead of ahead
 }
@@ -239,8 +237,6 @@ DirectorConfig.Temperaments = {
 		spawnRate = 1.0,
 		specialRate = 1.0,
 		burstiness = 0.35,
-		ambushChance = 0.15,
-		fakeoutChance = 0.15,
 		pairChance = 0.10,
 		flankChance = 0.20,
 	},
@@ -254,8 +250,6 @@ DirectorConfig.Temperaments = {
 		spawnRate = 0.72,
 		specialRate = 1.25,
 		burstiness = 0.85,
-		ambushChance = 0.45,
-		fakeoutChance = 0.35,
 		pairChance = 0.25,
 		flankChance = 0.30,
 	},
@@ -269,8 +263,6 @@ DirectorConfig.Temperaments = {
 		spawnRate = 1.35,
 		specialRate = 0.85,
 		burstiness = 0.12,
-		ambushChance = 0.10,
-		fakeoutChance = 0.08,
 		pairChance = 0.15,
 		flankChance = 0.25,
 	},
@@ -284,8 +276,6 @@ DirectorConfig.Temperaments = {
 		spawnRate = 0.9,
 		specialRate = 0.6,
 		burstiness = 0.4,
-		ambushChance = 0.3,
-		fakeoutChance = 0.2,
 		pairChance = 0.45,
 		flankChance = 0.5,
 	},
@@ -299,8 +289,6 @@ DirectorConfig.Temperaments = {
 		spawnRate = 1.15,
 		specialRate = 1.5,
 		burstiness = 0.7,
-		ambushChance = 0.2,
-		fakeoutChance = 0.12,
 		pairChance = 0.05,
 		flankChance = 0.35,
 	},
@@ -314,8 +302,6 @@ DirectorConfig.Temperaments = {
 		spawnRate = 1.0,
 		specialRate = 0.9,
 		burstiness = 0.6,
-		ambushChance = 0.35,
-		fakeoutChance = 0.4,
 		pairChance = 0.3,
 		flankChance = 0.45,
 	},
@@ -330,40 +316,6 @@ DirectorConfig.Mood = table.freeze({
 	SpecialRateJitter = 0.25,
 	-- Erratic rerolls mid-wave; everything else holds its mood for the wave.
 	ErraticRerollSeconds = 22,
-})
-
---[[
-	AMBUSH — a group placed silently ahead of the team, dormant until they are
-	close, instead of walked in from behind.
-
-	This is the single biggest thing the base pacing machine lacks. A trickle
-	that always arrives from behind is learnable within one round; a crowd that
-	was already waiting in the building you are about to enter is not, and it is
-	how Left 4 Dead makes a corridor frightening on the second playthrough.
-]]
-DirectorConfig.Ambush = table.freeze({
-	MinSize = 6,
-	MaxSize = 16,
-	-- Placed this far along the team's own direction of travel.
-	MinFlowAhead = 90,
-	MaxFlowAhead = 260,
-	-- They stand still and silent until a survivor is inside this range.
-	TriggerRadius = 46,
-	-- And give up and behave normally after this long, so a team that never goes
-	-- that way does not leave a frozen crowd in the level forever.
-	PatienceSeconds = 75,
-	MaxConcurrent = 1,
-})
-
---[[ A build-up that deliberately does not deliver. The horde audio rises, the
-     population ticks up, and then it stops — and lands thirty seconds later
-     when the team has decided it was nothing. Used sparingly: a Director that
-     cries wolf constantly just teaches players to ignore the cue. ]]
-DirectorConfig.Fakeout = table.freeze({
-	MinDelay = 14,
-	MaxDelay = 34,
-	FollowUpScale = 1.25, -- the real one hits harder for having been doubted
-	MaxPerWave = 1,
 })
 
 --[[
