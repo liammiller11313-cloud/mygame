@@ -474,17 +474,26 @@ local muzzle: Attachment? = nil
 	  * The muzzle ALTERNATES. One flash, moved to whichever gun just fired,
 	    because that is the whole read of a dual-wield: the guns take turns.
 
-	`muzzleAlt` is the left gun's. `muzzle` stays the right one so that every
-	existing reader — the tracer origin, the flash, getMuzzlePosition — keeps
-	working unchanged for every weapon that is not a pair.
+	One table rather than five loose locals, for two reasons. This file is near
+	Luau's 200-per-scope ceiling and every top-level name spends some of it; and
+	both muzzles are resolved ONCE at build time here rather than being searched
+	for per shot, which at the pair's 620rpm was a full GetDescendants walk on
+	the frame the player is least able to spare one.
+
+	`muzzle` still points at whichever gun last fired, so every existing reader —
+	the tracer origin, the flash, getMuzzlePosition — keeps working unchanged for
+	every weapon that is not a pair.
 ]]
-local muzzleAlt: Attachment? = nil
-local dualLeft: Model? = nil
-local dualRight: Model? = nil
---[[ Which gun fires the NEXT shot. Starts false so the first round of a
-     magazine comes out of the right hand, which is the one the player's eye is
-     already on. ]]
-local dualNextIsLeft = false
+local dual = {
+	left = nil :: Model?,
+	right = nil :: Model?,
+	muzzleLeft = nil :: Attachment?,
+	muzzleRight = nil :: Attachment?,
+	--[[ Which gun fires the NEXT shot. Starts false so the first round of a
+	     magazine comes out of the right hand, which is the one the player's eye
+	     is already on. ]]
+	nextIsLeft = false,
+}
 local flashPart: BasePart? = nil
 local flashLight: PointLight? = nil
 local flashSparks: ParticleEmitter? = nil
@@ -1029,17 +1038,26 @@ local SUPPORT_DROP = 0.22
 	Multiplied by the model's own size where that makes sense, so a pair of
 	compacts and a pair of hand cannons both end up in frame.
 ]]
---[[ Half the distance between the two guns, in multiples of ONE gun's own
-     width — see poseDualHalves for why not the pair's.
+--[[
+	How a pair is arranged in front of the camera. One table, like `dual` below,
+	because this file is near Luau's per-scope local ceiling and three constants
+	that are only ever read together do not need three names.
 
-     Was 1.5, which was arithmetic rather than observation and came out wrong on
-     screen: the right gun sits right of centre because that is where a single
-     pistol's viewmodel is tuned to sit, so 1.5 widths of separation left the
-     LEFT gun sitting on the centre line instead of mirroring it. Doubled, which
-     puts the pair either side of the crosshair with the midpoint near it. ]]
-local DUAL_SPREAD = 3.0
-local DUAL_FORWARD = 0.10
-local DUAL_CANT = math.rad(7)
+	Spread is HALF the distance between the two guns, in multiples of ONE gun's
+	own width — see poseDualHalves for why not the pair's. It was 1.5, which was
+	arithmetic rather than observation and came out wrong on screen: the right
+	gun sits right of centre because that is where a single pistol's viewmodel is
+	tuned to sit, so 1.5 widths of separation left the LEFT gun on the centre
+	line instead of mirroring it. 3.0 puts the pair either side of the crosshair.
+
+	Forward is in multiples of one gun's length, and Cant is the outward yaw that
+	makes the pair read as held rather than floating.
+]]
+local DUAL = table.freeze({
+	Spread = 3.0,
+	Forward = 0.10,
+	Cant = math.rad(7),
+})
 
 local RIGHT_RUN = Vector3.new(0.42, -0.34, 1.0)
 local LEFT_RUN = Vector3.new(-0.58, -0.30, 1.0)
@@ -1273,8 +1291,8 @@ local function poseDualHalves(built: Model): boolean
 	local ok, _, size = pcall(function()
 		return (right :: Model):GetBoundingBox()
 	end)
-	local spread = if ok and size then math.max(size.X, 0.25) * DUAL_SPREAD else DUAL_SPREAD
-	local forward = if ok and size then math.max(size.Z, 0.4) * DUAL_FORWARD else DUAL_FORWARD
+	local spread = if ok and size then math.max(size.X, 0.25) * DUAL.Spread else DUAL.Spread
+	local forward = if ok and size then math.max(size.Z, 0.4) * DUAL.Forward else DUAL.Forward
 
 	--[[
 		THE RIGHT GUN DOES NOT MOVE SIDEWAYS, AND THAT IS DELIBERATE.
@@ -1293,12 +1311,12 @@ local function poseDualHalves(built: Model): boolean
 		honest: your pistol, and another one in the other hand.
 	]]
 	local origin = built:GetPivot()
-	right:PivotTo(origin * CFrame.new(0, 0, -forward) * CFrame.Angles(0, -DUAL_CANT, 0))
-	left:PivotTo(origin * CFrame.new(-spread * 2, 0, -forward) * CFrame.Angles(0, DUAL_CANT, 0))
+	right:PivotTo(origin * CFrame.new(0, 0, -forward) * CFrame.Angles(0, -DUAL.Cant, 0))
+	left:PivotTo(origin * CFrame.new(-spread * 2, 0, -forward) * CFrame.Angles(0, DUAL.Cant, 0))
 
-	dualLeft = left :: Model
-	dualRight = right :: Model
-	dualNextIsLeft = false
+	dual.left = left :: Model
+	dual.right = right :: Model
+	dual.nextIsLeft = false
 	return true
 end
 
@@ -1308,8 +1326,8 @@ end
 local function buildDualArms(built: Model, character: Model?, drop: number, depth: number)
 	for _, entry in
 		{
-			{ half = dualRight, run = RIGHT_RUN, chain = R15_RIGHT, r6 = "Right Arm", side = 1 },
-			{ half = dualLeft, run = LEFT_RUN, chain = R15_LEFT, r6 = "Left Arm", side = -1 },
+			{ half = dual.right, run = RIGHT_RUN, chain = R15_RIGHT, r6 = "Right Arm", side = 1 },
+			{ half = dual.left, run = LEFT_RUN, chain = R15_LEFT, r6 = "Left Arm", side = -1 },
 		}
 	do
 		local half = entry.half
@@ -1374,7 +1392,7 @@ local function buildArms(built: Model, definition: any)
 	     gun, at its own gun's grip. Returning before the pistol early-return
 	     below, which exists for the opposite reason — a lone pistol has nothing
 	     for a second hand to do. ]]
-	if dualLeft and dualRight then
+	if dual.left and dual.right then
 		buildDualArms(built, character, drop, depth)
 		releaseCharacter(character)
 		return
@@ -1439,10 +1457,11 @@ local function destroyModel()
 		model = nil
 	end
 	muzzle = nil
-	muzzleAlt = nil
-	dualLeft = nil
-	dualRight = nil
-	dualNextIsLeft = false
+	dual.left = nil
+	dual.right = nil
+	dual.muzzleLeft = nil
+	dual.muzzleRight = nil
+	dual.nextIsLeft = false
 	flashPart = nil
 	flashLight = nil
 	flashSparks = nil
@@ -1614,8 +1633,9 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	     attachments hang off them. Measuring the muzzle first would record where
 	     the guns were in the model rather than where they are in the hand. ]]
 	if poseDualHalves(built) then
-		muzzle = findMuzzleIn(dualRight)
-		muzzleAlt = findMuzzleIn(dualLeft)
+		dual.muzzleRight = findMuzzleIn(dual.right)
+		dual.muzzleLeft = findMuzzleIn(dual.left)
+		muzzle = dual.muzzleRight
 	end
 	--[[ The fallback is also the ordinary path: one gun, one muzzle, invented at
 	     the front of the box when the art shipped none. ]]
@@ -2006,9 +2026,9 @@ function ViewmodelController:onFired(definition: any, _seed: number)
 		flash did — they are read from the same place one line apart, and a
 		tracer from the other hand is the tell that would make this look broken.
 	]]
-	if muzzleAlt and dualLeft and dualRight then
-		local firing = if dualNextIsLeft then muzzleAlt else findMuzzleIn(dualRight)
-		dualNextIsLeft = not dualNextIsLeft
+	if dual.muzzleLeft and dual.muzzleRight then
+		local firing = if dual.nextIsLeft then dual.muzzleLeft else dual.muzzleRight
+		dual.nextIsLeft = not dual.nextIsLeft
 		if firing then
 			muzzle = firing
 			if flashPart then

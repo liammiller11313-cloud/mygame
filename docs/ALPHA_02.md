@@ -1,6 +1,6 @@
 # Alpha Testing 02
 
-Build stamp **`2026-09-06w-alpha02`**. It is printed in the server log at boot
+Build stamp **`2026-09-06x-alpha02`**. It is printed in the server log at boot
 and is the fastest way to tell whether the place you are in is the build you
 think it is — check it first, before reporting anything.
 
@@ -213,10 +213,45 @@ Honest list. None of these are worth a report.
   cues in the bank; it is still exactly these three.
 - **The ammo-crate broadcast has no consumer.** The server tells everyone which
   crate went and when it returns; only the person who used it is told anything.
-- **`MainMenuController` is at 181 top-level locals** against Luau's 200 limit.
-  It compiles. It will stop compiling if it keeps growing.
+- **Two files are near Luau's 200-locals-per-scope limit**: `MainMenuController`
+  at 181 and `ViewmodelController` at 167. Both compile. Both stop compiling if
+  they keep growing, and the fix is splitting them rather than shaving names.
 - **Jump on iPad** is unverified since the pad was reworked — the original
   report predates that change and nobody has re-tested it.
+- **The Metallic boss has parts named `Part` and `triangle`.** They are not in
+  `GameConfig.PartRegions`, so shots on them score as a **torso** hit. That is a
+  reasonable default for armour plating and wrong if either of them covers the
+  head — worth one look at the rig in Studio. The boot log names them.
+
+---
+
+## Not an issue with the game — but it will stop your test
+
+If the client console says every sound failed:
+
+```
+[SoundCheck] 57 of 57 sound id(s) across 110 cue(s) will not play on this client.
+```
+
+…that is **not** 57 broken ids. Roblox audio is private by default and granted
+**per experience**, and Studio says which in a line that is easy to scroll past:
+
+> The experience doesn't have access permission to use asset id … *Click to
+> share access*
+
+All-or-nothing failure means one of three things, in order of likelihood:
+
+1. **The place is not published.** An unpublished place has no experience for
+   the permission to be granted *to*, so every private id fails at once.
+2. **Account mismatch** — audio uploaded under a personal account into a
+   group-owned place, or the other way round.
+3. **They are not yours.** Ids taken from a Creator Store page cannot be granted
+   at all and need re-uploading under the account that owns the place.
+
+The same applies to the two images, with one extra cause: an id copied from a
+Creator Store page or an inventory tile is usually a **decal**, which wraps the
+image rather than being it. Insert the decal in Studio and read the id off its
+`Texture` property.
 
 ---
 
@@ -233,7 +268,7 @@ X and got Y" always is.
 ### A. Does it boot
 
 1. Press Play. Read the server banner. → **`0 failed` on both lines**, and the
-   stamp reads `2026-09-06w-alpha02`.
+   stamp reads `2026-09-06x-alpha02`.
 2. Open the client console (F9). → `[ImageCheck]`, `[SoundCheck]` and
    `[PlaceholderFactory]` each report. Grey-boxed entries are fine; **failures
    are not**.

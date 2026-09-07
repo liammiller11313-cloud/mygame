@@ -1077,7 +1077,15 @@ end
 
 local function auditHitRegions(kind: string, model: Model)
 	local hasHead = false
-	local unknown = {}
+	--[[ Distinct NAMES, with how many parts carry each. The list used to be one
+	     entry per part and capped at eight, which on the rigs that actually have
+	     this problem is the worst possible combination: a model with thirty
+	     parts called "Part" spent the whole budget saying so and hid every other
+	     name behind it. The name is the actionable thing — it is what goes in
+	     GameConfig.PartRegions — and the count is only there to say how much of
+	     the body is affected. ]]
+	local counts: { [string]: number } = {}
+	local order: { string } = {}
 	for _, part in RigUtil.getBodyParts(model) do
 		--[[ A part nothing can raycast against cannot score as anything, so it is
 		     not a hit-region problem. Reporting it would be telling somebody to
@@ -1088,9 +1096,24 @@ local function auditHitRegions(kind: string, model: Model)
 		local region = GameConfig.PartRegions[part.Name]
 		if region == Enums.HitRegion.Head then
 			hasHead = true
-		elseif not region and #unknown < 8 then
-			table.insert(unknown, part.Name)
+		elseif not region then
+			if not counts[part.Name] then
+				counts[part.Name] = 0
+				table.insert(order, part.Name)
+			end
+			counts[part.Name] += 1
 		end
+	end
+
+	local unknown = {}
+	table.sort(order)
+	for _, name in order do
+		if #unknown >= 8 then
+			table.insert(unknown, string.format("and %d more name(s)", #order - 8))
+			break
+		end
+		local count = counts[name]
+		table.insert(unknown, if count > 1 then string.format("%s x%d", name, count) else name)
 	end
 	if not hasHead then
 		warnOnce(
