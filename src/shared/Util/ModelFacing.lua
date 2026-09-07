@@ -17,10 +17,12 @@
 	So the assumption is now MEASURED rather than assumed, once, here, by both.
 
 	── HOW IT DECIDES ──────────────────────────────────────────────────────────
-	  1. A MUZZLE ATTACHMENT, if the model has one. Exact, and already this
-	     game's documented convention — an artist whose gun comes out wrong fixes
-	     it by putting one at the end of the barrel, which they may want anyway
-	     so the flash and the tracers leave from the right place.
+	  1. A MUZZLE ATTACHMENT THE ARTIST PLACED, if the model has one. Exact, and
+	     already this game's documented convention — an artist whose gun comes
+	     out wrong fixes it by putting one at the end of the barrel, which they
+	     may want anyway so the flash and the tracers leave from the right place.
+	     An INVENTED muzzle does not count and must not; see InventedAttribute
+	     below for the circle that caused.
 	  2. Otherwise the LONGEST AXIS, pointed away from the grip. A gun is longer
 	     than it is wide, and the end furthest from the part you hold it by is the
 	     end the rounds come out of.
@@ -90,11 +92,37 @@ function ModelFacing.extents(model: Model, frame: CFrame): (Vector3, Vector3)
 	return low, high
 end
 
+--[[
+	The attribute an INVENTED muzzle carries, and the reason this module has to
+	know about it at all.
+
+	── THE CIRCLE THIS BREAKS ──────────────────────────────────────────────────
+	PlaceholderFactory guarantees every weapon a Muzzle, inventing one at the
+	forward-most point of the model ALONG -Z when the art shipped none. It then
+	asks this module which way the gun points, and step 1 below found that
+	invented attachment and answered "-Z" — which is not a measurement, it is the
+	assumption that placed it, handed back.
+
+	The consequence was silent and total: no supplied model without an
+	artist-authored Muzzle was ever straightened, because every one of them read
+	as already correct. The fallback that exists precisely to catch a gun built
+	on the wrong axis could not be reached, and LastWasGuess stayed false so
+	nothing warned either. A shotgun modelled barrel-up was held barrel-up, and
+	the log said nothing.
+
+	So an invented muzzle is marked, and ignored here. Only an attachment a
+	PERSON placed is evidence about what a person built.
+]]
+ModelFacing.InventedAttribute = "FL_Invented"
+
 local function muzzleIn(model: Model): Attachment?
 	local best: Attachment? = nil
 	local bestRank = math.huge
 	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("Attachment") then
+		if
+			descendant:IsA("Attachment")
+			and descendant:GetAttribute(ModelFacing.InventedAttribute) ~= true
+		then
 			local rank = table.find(ModelFacing.MuzzleNames, descendant.Name)
 			if rank and rank < bestRank then
 				best, bestRank = descendant :: Attachment, rank

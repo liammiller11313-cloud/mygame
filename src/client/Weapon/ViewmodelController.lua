@@ -1382,6 +1382,11 @@ local function ensureMuzzle(built: Model, host: BasePart): Attachment
 	local boxCFrame, size = built:GetBoundingBox()
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "Muzzle"
+	--[[ Marked invented, like the server's. This one is placed along -Z, which
+	     is correct here because pinPivot has already straightened the model —
+	     but ModelFacing must still never read it back as evidence of how the
+	     art was built. See ModelFacing.InventedAttribute. ]]
+	attachment:SetAttribute(ModelFacing.InventedAttribute, true)
 	attachment.Parent = host
 	attachment.WorldCFrame = boxCFrame * CFrame.new(0, 0, -size.Z * 0.5)
 	return attachment

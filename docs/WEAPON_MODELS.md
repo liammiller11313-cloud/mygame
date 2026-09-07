@@ -234,13 +234,23 @@ modelled as a child Model with a part called `Handle` in it looks identical from
 the outside. If the flag is set and the model cannot be split, the boot log says
 so and the pair is held as one gun in one hand rather than not at all.
 
-## If a gun comes out sideways — in either hand
+## If a gun comes out sideways, or standing on end
 
 The first-person pose assumes a weapon's barrel runs down its own **-Z**. A gun
-modelled along X — a perfectly ordinary way to build one — used to be drawn lying
-across the bottom of the screen pointing at the edge of it, and looked enormous
-doing it, because you were seeing its whole length side-on instead of
+modelled along X or Y — perfectly ordinary ways to build one — used to be drawn
+lying across the bottom of the screen or standing upright in it, and looked
+enormous doing it, because you were seeing its whole length side-on instead of
 foreshortened down the barrel.
+
+> **This was broken until now, and silently.** The straightening below existed
+> and could never run. Every weapon is guaranteed a `Muzzle` — one is invented at
+> the model's -Z end when the art ships none — and the facing check looked for a
+> muzzle *first*, found that invented one, and concluded the barrel ran down -Z.
+> It was reading back the assumption that placed it. So no supplied model without
+> a hand-placed `Muzzle` was ever straightened, and the warning that would have
+> told you never fired either. An invented muzzle is now marked and ignored by
+> the facing check, and is placed along the real barrel rather than along -Z.
+> If a gun of yours has been standing on end, sync this build and look again.
 
 The **world** model had the same problem from the other side: the grip that gets
 invented for a weapon with no `Grip` attachment was a position and nothing else,

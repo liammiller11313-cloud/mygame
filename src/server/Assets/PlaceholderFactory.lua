@@ -2365,9 +2365,38 @@ local function ensureMuzzle(model: Model, handle: BasePart): Attachment
 	end
 
 	local min, max = extentsIn(subject, handle.CFrame)
+	local centre = (min + max) * 0.5
+
+	--[[
+		The far end of the barrel, along the barrel — not along -Z.
+
+		Placing it at the -Z face assumes the answer to the question the whole
+		facing system exists to ask, and on a gun modelled barrel-up it put the
+		muzzle on the SIDE of the receiver. Asked here, before the attachment
+		exists, so ModelFacing is reading the model rather than reading this.
+
+		Nil means it could not tell, which for a model whose longest axis is
+		already Z is the same as "-Z" — so the old expression is the fallback and
+		a correctly built gun is placed exactly where it always was.
+	]]
+	local forward = ModelFacing.forwardOf(model, handle, handle.CFrame)
+	local point: Vector3
+	if forward then
+		local half = (max - min) * 0.5
+		local reach = math.abs(forward.X) * half.X
+			+ math.abs(forward.Y) * half.Y
+			+ math.abs(forward.Z) * half.Z
+		point = centre + forward * reach
+	else
+		point = Vector3.new(centre.X, centre.Y, min.Z)
+	end
+
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "Muzzle"
-	attachment.CFrame = CFrame.new((min.X + max.X) * 0.5, (min.Y + max.Y) * 0.5, min.Z)
+	attachment.CFrame = CFrame.new(point)
+	--[[ Marked, so ModelFacing does not later mistake this for evidence about
+	     which way the artist built the gun. See ModelFacing.InventedAttribute. ]]
+	attachment:SetAttribute(ModelFacing.InventedAttribute, true)
 	attachment.Parent = handle
 	return attachment
 end
