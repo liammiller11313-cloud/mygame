@@ -139,6 +139,26 @@ export type WeaponDefinition = {
 	]]
 	dualWield: boolean?,
 	--[[
+		Extra roll about the barrel, in DEGREES, for a model whose own roll is
+		wrong once it has been pointed the right way.
+
+		Pointing a gun forward and rolling it upright are two different
+		questions, and the pipeline can only answer the first. It measures the
+		barrel and straightens the model onto it — but for a gun modelled
+		barrel-UP there is no meaningful "up" left to read, so the roll it picks
+		is an arbitrary perpendicular. Which is fine for a cylinder and wrong for
+		anything with a sight rail.
+
+		Positive is COUNTER-CLOCKWISE from the player's own view, looking down
+		the barrel. Nil on almost every gun: a model built the usual way is
+		already upright and a default of anything but zero would tilt the whole
+		roster to fix one weapon.
+
+		A `Muzzle` attachment does NOT solve this — it fixes where the barrel
+		points, which is the other question.
+	]]
+	modelRoll: number?,
+	--[[
 		Whether this weapon is FOUND rather than bought.
 
 		A floor-only weapon is deliberately absent from EconomyConfig.Catalogue —
@@ -858,6 +878,12 @@ WeaponConfig.Definitions = {
 		recoilHorizontal = 0.85,
 		recoilRecovery = 6.8,
 		kickback = 0.36,
+
+		--[[ A quarter turn counter-clockwise. This model is built barrel-UP, so
+		     the pipeline straightens it onto its longest axis and then has no
+		     "up" left to read — see modelRoll. This is the roll that reads
+		     upright on screen. ]]
+		modelRoll = 90,
 
 		reloadTime = 0.75,
 		reloadPerShell = 0.42,

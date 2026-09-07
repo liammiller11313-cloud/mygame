@@ -234,6 +234,33 @@ modelled as a child Model with a part called `Handle` in it looks identical from
 the outside. If the flag is set and the model cannot be split, the boot log says
 so and the pair is held as one gun in one hand rather than not at all.
 
+## If a gun is pointing right but lying on its side
+
+Pointing a gun forward and rolling it upright are two different questions, and
+the pipeline can only answer the first. It measures the barrel and straightens
+the model onto it — but for a gun modelled **barrel-up** there is no meaningful
+"up" left to read, so the roll it lands on is an arbitrary perpendicular. Fine
+for a cylinder, wrong for anything with a sight rail.
+
+`WeaponConfig.modelRoll` is the correction, in **degrees, counter-clockwise from
+the player's own view looking down the barrel**:
+
+```lua
+[Enums.Weapon.TacticalShotty] = {
+    …
+    modelRoll = 90,
+```
+
+It applies in **both** hands — first person and the world model everyone else
+sees — because a gun that is upright in your hands and on its side in your
+teammate's is worse than one that is wrong in both. It also applies whether or
+not the model needed straightening, and whether or not you shipped your own
+`Grip`: a roll that stopped working the moment somebody improved their model
+would be worse than no setting at all.
+
+A `Muzzle` attachment does **not** fix this — that settles which way the barrel
+points, which is the other question.
+
 ## If a gun comes out sideways, or standing on end
 
 The first-person pose assumes a weapon's barrel runs down its own **-Z**. A gun

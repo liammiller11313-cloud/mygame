@@ -891,14 +891,25 @@ end
 --[[ Which way a supplied model is built, and whether that is close enough to
      forward to leave alone. Shared with the WORLD model's grip — see
      Shared/Util/ModelFacing, whose header carries the reasoning for both. ]]
-local function pinPivot(built: Model, host: BasePart)
+local function pinPivot(built: Model, host: BasePart, definition: any)
 	local pivot = built:GetPivot()
 	local low, high = ModelFacing.extents(built, pivot)
 	local centre = (low + high) * 0.5
 
+	--[[ A hand-authored roll about the barrel, in radians. Applied whether or
+	     not the model needed straightening, because pointing a gun forward and
+	     rolling it upright are different questions and a model can be right
+	     about the first and wrong about the second. See WeaponConfig.modelRoll. ]]
+	--[[ NEGATED, and that is not a typo. PivotTo applies target * pivot^-1 to the
+	     geometry, so post-multiplying the pivot by Rz(t) rotates the MODEL by
+	     -t. Config says counter-clockwise-from-the-player and means it; the sign
+	     flip is what makes those the same thing. ]]
+	local rollDegrees = if definition then tonumber(definition.modelRoll) or 0 else 0
+	local roll = math.rad(-rollDegrees)
+
 	local forward = ModelFacing.forwardOf(built, host, pivot)
-	if ModelFacing.isForward(forward) then
-		-- Already pointing the right way, or unreadable. Old behaviour exactly.
+	if ModelFacing.isForward(forward) and roll == 0 then
+		-- Already pointing the right way and asking for no roll. Old behaviour.
 		if built.PrimaryPart then
 			return
 		end
@@ -911,13 +922,29 @@ local function pinPivot(built: Model, host: BasePart)
 	     So straightening a model means giving up the artist's choice of pivot —
 	     which is the cheaper of the two, since a pivot only decides where the
 	     model is measured from and the orientation decides whether it is a gun or
-	     a plank lying across the screen. ]]
+	     a plank lying across the screen.
+
+	     A roll needs the same trade for the same reason, which is why it cannot
+	     be applied in the early return above. ]]
 	built.PrimaryPart = nil
 
+	--[[ A model already facing forward is rolled about its OWN -Z rather than
+	     about a re-derived barrel: there is nothing to straighten, and running
+	     it through lookAt would throw away a deliberate cant the tolerance was
+	     written to preserve. ]]
+	local aim = forward
+	if ModelFacing.isForward(aim) then
+		aim = -Vector3.zAxis
+	end
+
 	--[[ Roll is taken from world up unless the barrel IS up, where there is no
-	     meaningful up left and any perpendicular will do. ]]
-	local up = if math.abs(forward.Y) > 0.9 then Vector3.zAxis else Vector3.yAxis
-	built.WorldPivot = pivot * CFrame.new(centre) * CFrame.lookAt(Vector3.zero, forward, up)
+	     meaningful up left and any perpendicular will do — which is exactly the
+	     case modelRoll exists to correct by hand. ]]
+	local up = if math.abs(aim.Y) > 0.9 then Vector3.zAxis else Vector3.yAxis
+	built.WorldPivot = pivot
+		* CFrame.new(centre)
+		* CFrame.lookAt(Vector3.zero, aim, up)
+		* CFrame.Angles(0, 0, roll)
 end
 
 --[[
@@ -1577,7 +1604,7 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	end
 
 	built.Name = "FL_Viewmodel"
-	pinPivot(built, host)
+	pinPivot(built, host, definition)
 	-- Fit before measuring anything off the model: the muzzle, the sight and the
 	-- flash are all placed against its final geometry.
 	fitScale(built, pose)

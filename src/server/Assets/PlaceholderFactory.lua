@@ -2333,9 +2333,32 @@ local function ensureGrip(model: Model, handle: BasePart, invented: boolean, lon
 	local backFraction = if longGun then 0.28 else 0.55
 	local downFraction = if longGun then 0.62 else 0.42
 	local position = -f * (reach * backFraction) - u * (drop * downFraction)
+
 	attachment.CFrame = CFrame.lookAt(position, position + f, u)
 	attachment.Parent = handle
 	return attachment
+end
+
+--[[
+	The hand-authored roll about the barrel, so third person agrees with first.
+
+	Applied HERE rather than inside ensureGrip, and to whatever grip that
+	returned — because ensureGrip hands back the ARTIST'S own attachment
+	untouched when the model shipped one, and a roll that worked only on invented
+	grips would be a setting that silently stopped applying the moment somebody
+	improved their model.
+
+	Negated for the same reason the viewmodel negates it: holdPose aligns this
+	attachment TO the hand, so rolling the attachment by t rolls the model by -t.
+	Both hands apply Rz(-modelRoll) and both rotate the gun the way
+	WeaponConfig.modelRoll says.
+]]
+local function applyModelRoll(grip: Attachment?, degrees: number?)
+	local roll = tonumber(degrees) or 0
+	if not grip or roll == 0 then
+		return
+	end
+	grip.CFrame = grip.CFrame * CFrame.Angles(0, 0, math.rad(-roll))
 end
 
 local function ensureMuzzle(model: Model, handle: BasePart): Attachment
@@ -2528,7 +2551,8 @@ local function adoptDualWeapon(model: Model, halves: { Model }, weaponId: string
 		     every number taken off it would be wrong for either. ]]
 		ensureMuzzle(half, handle)
 		local hadGrip = findAttachmentNamed(half, "Grip") ~= nil
-		ensureGrip(half, handle, invented, false)
+		local pairDefinition = WeaponConfig.get(weaponId)
+		applyModelRoll(ensureGrip(half, handle, invented, false), pairDefinition and pairDefinition.modelRoll)
 		--[[ Reported like any other guessed grip. A pair took the dual branch and
 		     never reached the single path's bookkeeping, so a pair whose halves
 		     carried neither a Handle nor a Grip was the one weapon in the game
@@ -2593,7 +2617,10 @@ local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): 
 	     camera would need to line them up. ]]
 	local class = definition and definition.class or ""
 	local hadGrip = findAttachmentNamed(model, "Grip") ~= nil
-	ensureGrip(model, handle, invented, LONG_GUN_CLASS[class] == true)
+	applyModelRoll(
+		ensureGrip(model, handle, invented, LONG_GUN_CLASS[class] == true),
+		definition and definition.modelRoll
+	)
 
 	--[[ Named, once per weapon, when BOTH halves of where-to-hold-it were
 	     guessed. A model that shipped either a Handle part or a Grip attachment
