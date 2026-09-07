@@ -1003,10 +1003,14 @@ local SUPPORT_DROP = 0.22
 	compacts and a pair of hand cannons both end up in frame.
 ]]
 --[[ Half the distance between the two guns, in multiples of ONE gun's own
-     width — see poseDualHalves for why not the pair's. 1.5 widths each way puts
-     two pistols about three widths apart, which is hands-apart rather than
-     wrists-crossed. ]]
-local DUAL_SPREAD = 1.5
+     width — see poseDualHalves for why not the pair's.
+
+     Was 1.5, which was arithmetic rather than observation and came out wrong on
+     screen: the right gun sits right of centre because that is where a single
+     pistol's viewmodel is tuned to sit, so 1.5 widths of separation left the
+     LEFT gun sitting on the centre line instead of mirroring it. Doubled, which
+     puts the pair either side of the crosshair with the midpoint near it. ]]
+local DUAL_SPREAD = 3.0
 local DUAL_FORWARD = 0.10
 local DUAL_CANT = math.rad(7)
 

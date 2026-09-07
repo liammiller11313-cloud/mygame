@@ -2498,7 +2498,15 @@ local function adoptDualWeapon(model: Model, halves: { Model }, weaponId: string
 		     are; the pair's box spans both guns and the gap between them, and
 		     every number taken off it would be wrong for either. ]]
 		ensureMuzzle(half, handle)
+		local hadGrip = findAttachmentNamed(half, "Grip") ~= nil
 		ensureGrip(half, handle, invented, false)
+		--[[ Reported like any other guessed grip. A pair took the dual branch and
+		     never reached the single path's bookkeeping, so a pair whose halves
+		     carried neither a Handle nor a Grip was the one weapon in the game
+		     that could be held wrong without saying so. ]]
+		if invented and not hadGrip and not viewmodel then
+			guessedGrips[weaponId] = true
+		end
 		if half == right then
 			primary = handle
 		end

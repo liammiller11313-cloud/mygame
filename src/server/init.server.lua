@@ -353,10 +353,15 @@ end
 -- would report the factory's work back to the user as their own models.
 
 --[[ How many models the user supplied under a category for the first of `names`
-     that exists: a Model is one, a Folder of variants is however many Models it
-     holds. Both storage roots and the name priority order mirror what
-     PlaceholderFactory itself looks for, so the banner and the factory can never
-     disagree about whether a gun is real. ]]
+     that exists: a Model or a Tool is one, a Folder of variants is however many
+     it holds. Both storage roots and the name priority order mirror what
+     PlaceholderFactory itself looks for.
+
+     THIS RUNS BEFORE THE FACTORY DOES, which is the thing to remember when the
+     two lines disagree. It is a survey of what is in the folders, taken before
+     any module has loaded, so that a place whose factory failed outright still
+     gets an honest answer. The factory's own line reports what the game ENDED UP
+     with, which is the more useful number when both exist. ]]
 local function suppliedModels(category: string, names: { string }): number
 	for _, name in names do
 		for _, root in { ReplicatedStorage, ServerStorage } do
@@ -364,13 +369,18 @@ local function suppliedModels(category: string, names: { string }): number
 			local folder = assets and assets:FindFirstChild(category)
 			local entry = folder and folder:FindFirstChild(name)
 			if entry then
-				if entry:IsA("Model") then
+				--[[ A Tool counts. PlaceholderFactory accepts "a Model or a TOOL"
+				     because Roblox hands you a weapon as a Tool and that is what
+				     most supplied props are; counting only Models here is what
+				     made this line disagree with the factory's four lines above
+				     it about whether an asset exists. ]]
+				if entry:IsA("Model") or entry:IsA("Tool") then
 					return 1
 				end
 				if entry:IsA("Folder") then
 					local count = 0
 					for _, child in entry:GetChildren() do
-						if child:IsA("Model") then
+						if child:IsA("Model") or child:IsA("Tool") then
 							count += 1
 						end
 					end
@@ -398,7 +408,12 @@ local function surveyAssets(): string
 		if suppliedModels("Weapons", names) > 0 then
 			weapons += 1
 		end
-		if suppliedModels("Viewmodels", names) > 0 then
+		--[[ A first-person model falls back to the WORLD model — see the
+		     "ONE MODEL, THREE PLACES" note in PlaceholderFactory. Counting only
+		     literal Viewmodels entries reported 15 of 37 while the factory,
+		     four lines earlier in the same log, reported 37 of 37. Both numbers
+		     were true and the pair of them was useless. ]]
+		if suppliedModels("Viewmodels", names) > 0 or suppliedModels("Weapons", names) > 0 then
 			viewmodels += 1
 		end
 	end

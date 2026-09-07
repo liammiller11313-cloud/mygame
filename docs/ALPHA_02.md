@@ -18,21 +18,32 @@ otherwise discover the slow way.
 
 ```
   modules     37 of 37 loaded
-  init        37 ran, 0 failed
-  start       37 ran, 0 failed
+  init        32 ran, 0 failed
+  start       32 ran, 0 failed
 ```
 
 (37 on the server; the client boots 46 controllers and prints its own banner.)
 
-**`failed` must be 0 on both lines.** A module that fails init is now skipped at
-start rather than run half-built, so one broken service is one line rather than
-a cascade — but it is still a service the game does not have.
+**Only `failed` matters, and it must be 0 on both lines.** `ran` is lower than
+`loaded` and that is not a fault: it counts the modules that *have* an `init` or
+a `start` at all, and five services need neither — they do their whole job when
+they are required. A module that fails init is skipped at start rather than run
+half-built, so one broken service is one line rather than a cascade; it is still
+a service the game does not have.
 
 Then the asset line. Anything on the grey-boxed side is a stand-in, not a bug:
 
 ```
-  assets      weapons 32 supplied / 5 grey-boxed · viewmodels 32 / 5 · infected 10 / 0
+  assets      weapons 34/37 · viewmodels 37/37 · infected 10/10 kinds
 ```
+
+There are **two** asset lines and they answer different questions. The
+`[PlaceholderFactory]` one, printed just above the banner, is what the game
+ended up with. The banner's is a survey of the folders taken before any module
+loaded, so that a place whose factory failed outright still gets an honest
+answer. They used to disagree — the survey did not know that a first-person
+model falls back to the world model, and reported 15 viewmodels of 37 where the
+factory reported 37. If they disagree again, the factory's is the real one.
 
 ### 2. Check the new asset ids resolved
 
@@ -42,9 +53,10 @@ joining, not just the server output. Each names the thing rather than a number:
 - `[ImageCheck]` — the menu photograph, the three map cards, the splash mark.
   It now also refuses a **decal** id, which is the mistake that cost a day: the
   id shown on a Creator Store page wraps the image rather than being it.
-- `[SoundCheck]` — all 68 audio ids, in one preload. **Silence is not proof of
-  success here** — `AudioConfig` ships deliberate blanks, so a missing cue reads
-  as an unfinished row.
+- `[SoundCheck]` — all 57 ids behind 110 cues, in one preload. **Silence is not
+  proof of success here** — `AudioConfig` ships deliberate blanks, so a missing
+  cue reads as an unfinished row. Several cues share one id, which is why the
+  two numbers differ and why one failed id takes a handful of cues with it.
 - `[PlaceholderFactory]` — which weapons and rigs are still stand-ins.
 
 > **The failure mode you cannot see from your own machine.** Both images and
