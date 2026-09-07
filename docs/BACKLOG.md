@@ -309,6 +309,60 @@ single strongest argument in this file for treating prose as code.
   wire already carries it.
 - **Three audio cues are defined with real ids and never played** —
   `UI.MenuPage`, `WeaponReload.Bolt`, `Gore.Squelch`.
+- **Two files are near Luau's 200-locals-per-scope ceiling** — `MainMenuController`
+  at 181 and `ViewmodelController` at 167. Both compile. The fix is splitting
+  them, not shaving names, and it is a job on its own.
+
+### The second half of the day, and its own pattern
+
+The morning's theme was a number measured against the wrong thing. The
+afternoon's was narrower and stranger: **a system reading back its own
+assumption and reporting it as a measurement.** Four separate bugs, one shape.
+
+- **The invented muzzle answered the facing question.** Every weapon is
+  guaranteed a `Muzzle`, invented at the model's -Z end when the art ships none.
+  The facing check looks for a muzzle first, found that one, and concluded the
+  barrel runs down -Z. So no supplied model without a hand-placed muzzle was
+  **ever** straightened, and the warning that would have said so could not fire
+  either. A shotgun modelled barrel-up was held barrel-up, silently, for weeks.
+- **`BorderBright` was byte-for-byte `Accent`,** with a comment calling it "the
+  accent, used as a rule". Four screens used the pair as a ladder — the hotbar,
+  the map vote, the loadout, requisitions — so in every one of them two states
+  the code believed were distinct rendered identically.
+- **The boot banner's asset line was computed before the modules loaded,** so it
+  reported what was in the folders while `PlaceholderFactory` four lines above
+  reported what the game ended up with. Its own comment claimed the two "can
+  never disagree". They disagreed by 22 viewmodels.
+- **And the diagnostic written to catch the first of these had the same bug.**
+  `ensureGrip` returns early for a model with its own `Grip`, before the line
+  that records the verdict — so the report filed the *previous* weapon's answer
+  under this one's name. Caught in the end-of-day sweep, before anybody trusted
+  it. A diagnostic that confidently reports the wrong gun is worse than none.
+
+The lesson is cheap to state and was expensive four times: **a thing you
+generated is not evidence.** Mark it, or do not read it back.
+
+### Also that afternoon
+
+- The **bile jar** was retired — the hazardous waste replaced it rather than
+  joining it — and **Boomer bile was found never to reach the screen at all**:
+  `applyBile` set an attribute no client reads, and the only sender of the green
+  wash was the jar's coat path. The Boomer's entire threat had never worked.
+- A **console player fell through the floor on join**. Not streaming — network
+  ownership: the client gets its character before it has the map, simulates a
+  fall with no floor, and the server takes it because the client is the owner.
+  The root is held until that client reports ready.
+- **A PS5 touchpad click flipped the game to keyboard glyphs**, and forced
+  gamepad selection fought the cursor. Both fixed.
+- **Dual pistols became two guns in two hands**, in both views.
+- **Every supplied gun was held by its geometric middle** — `ensureGrip`
+  measured a 0.4-stud invented cube instead of the model, so both offsets
+  collapsed to a tenth of a stud.
+- **`scripts/remotes.py`** now checks all 84 remotes have both ends wired, and
+  the config-key audit went from 3 modules to 15.
+- **The UI's two failing contrasts were measured and fixed** — `TextDim` at
+  2.73:1 and `Border` at 1.47:1 — and the panels got quarantine tape, dirtier
+  surfaces and a frame you can see.
 
 ---
 

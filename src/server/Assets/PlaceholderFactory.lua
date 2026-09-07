@@ -2236,6 +2236,14 @@ local LONG_GUN_CLASS = table.freeze({
 })
 
 local function ensureGrip(model: Model, handle: BasePart, invented: boolean, longGun: boolean): Attachment
+	--[[ Cleared FIRST, before the early return below can skip past the place it
+	     is set. A model that ships its own Grip leaves this function without
+	     inferring anything, and recordFacing would otherwise read whatever the
+	     PREVIOUS weapon concluded and file it under this one's name — a
+	     diagnostic that confidently reports the wrong gun's answer is worse than
+	     no diagnostic, and this one was written to be trusted. ]]
+	lastFacing = nil
+
 	local existing = findAttachmentNamed(model, "Grip")
 	if existing then
 		return existing
@@ -2415,11 +2423,19 @@ end
 	reporting both would print every weapon twice and say nothing new.
 ]]
 local function recordFacing(weaponId: string, viewmodel: boolean)
-	if viewmodel or not lastFacing then
+	if viewmodel then
 		return
 	end
 	local facing = lastFacing
 	lastFacing = nil
+	if not facing then
+		--[[ ensureGrip returned the artist's own Grip without inferring
+		     anything, so there is no verdict to report and saying so is the
+		     honest line: this model's orientation is whatever its author built,
+		     which is the answer we most want and the one we cannot check. ]]
+		facingVerdicts[weaponId] = "its own Grip attachment, nothing inferred"
+		return
+	end
 
 	local direction = facing.forward
 	local axis = "-Z"
@@ -2643,6 +2659,14 @@ local function adoptDualWeapon(model: Model, halves: { Model }, weaponId: string
 			ensureGrip(half, handle, invented, false),
 			pairDefinition and pairDefinition.modelRotation
 		)
+		--[[ Reported for a pair too, and under the pair's id. ModelFacing's own
+		     header calls a dual-wield the case its longest-axis guess is least
+		     able to read — so it is the last weapon that should be missing from
+		     the report, and it was. The right half wins the key: both halves are
+		     the same gun measured the same way. ]]
+		if half == right then
+			recordFacing(weaponId, viewmodel)
+		end
 		--[[ Reported like any other guessed grip. A pair took the dual branch and
 		     never reached the single path's bookkeeping, so a pair whose halves
 		     carried neither a Handle nor a Grip was the one weapon in the game
