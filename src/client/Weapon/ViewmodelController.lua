@@ -908,16 +908,20 @@ local function pinPivot(built: Model, host: BasePart, definition: any)
 	--[[ A hand-authored roll about the barrel, in radians. Applied whether or
 	     not the model needed straightening, because pointing a gun forward and
 	     rolling it upright are different questions and a model can be right
-	     about the first and wrong about the second. See WeaponConfig.modelRoll. ]]
-	--[[ NEGATED, and that is not a typo. PivotTo applies target * pivot^-1 to the
-	     geometry, so post-multiplying the pivot by Rz(t) rotates the MODEL by
-	     -t. Config says counter-clockwise-from-the-player and means it; the sign
-	     flip is what makes those the same thing. ]]
-	local rollDegrees = if definition then tonumber(definition.modelRoll) or 0 else 0
-	local roll = math.rad(-rollDegrees)
+	     about the first and wrong about the second, and a model can be wrong in
+	     ways the measurement cannot see at all. See WeaponConfig.modelRotation.
+
+	     NEGATED, and that is not a typo. PivotTo applies target * pivot^-1 to
+	     the geometry, so post-multiplying the pivot by R rotates the MODEL by
+	     R inverse. The config says what the model should do; the sign flip is
+	     what makes that true. ]]
+	local wanted = if definition then definition.modelRotation else nil
+	local spin = if typeof(wanted) == "Vector3"
+		then CFrame.Angles(math.rad(-wanted.X), math.rad(-wanted.Y), math.rad(-wanted.Z))
+		else CFrame.identity
 
 	local forward = ModelFacing.forwardOf(built, host, pivot)
-	if ModelFacing.isForward(forward) and roll == 0 then
+	if ModelFacing.isForward(forward) and spin == CFrame.identity then
 		-- Already pointing the right way and asking for no roll. Old behaviour.
 		if built.PrimaryPart then
 			return
@@ -948,12 +952,9 @@ local function pinPivot(built: Model, host: BasePart, definition: any)
 
 	--[[ Roll is taken from world up unless the barrel IS up, where there is no
 	     meaningful up left and any perpendicular will do — which is exactly the
-	     case modelRoll exists to correct by hand. ]]
+	     case modelRotation exists to correct by hand. ]]
 	local up = if math.abs(aim.Y) > 0.9 then Vector3.zAxis else Vector3.yAxis
-	built.WorldPivot = pivot
-		* CFrame.new(centre)
-		* CFrame.lookAt(Vector3.zero, aim, up)
-		* CFrame.Angles(0, 0, roll)
+	built.WorldPivot = pivot * CFrame.new(centre) * CFrame.lookAt(Vector3.zero, aim, up) * spin
 end
 
 --[[

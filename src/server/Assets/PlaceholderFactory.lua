@@ -2213,6 +2213,15 @@ local BARREL_NAMES = table.freeze({
      them. Filled by adoptWeapon; read once at boot. ]]
 local guessedGrips: { [string]: boolean } = {}
 
+--[[ What ensureGrip last concluded about which way a model points, and whether
+     it measured that or assumed it. Written there because that is where the
+     answer is computed, read by adoptWeapon which is the only thing that knows
+     the weapon's id, and reported once at boot. ]]
+local lastFacing: { forward: Vector3?, guessed: boolean, straightened: boolean }? = nil
+--[[ weaponId -> the sentence describing what was decided about its facing. World
+     models only: a viewmodel is the same model measured the same way. ]]
+local facingVerdicts: { [string]: string } = {}
+
 --[[ Classes whose box extends well past the hand — a stock, a receiver, a
      barrel. A pistol and a melee weapon are the other shape: the hand is near
      the back of the model because the model is mostly grip. ]]
@@ -2276,6 +2285,17 @@ local function ensureGrip(model: Model, handle: BasePart, invented: boolean, lon
 	     be wrong about — a dual-wield pair is longest along whichever way the
 	     artist arranged the two, which is not measurable from outside — and the
 	     fix is one Muzzle attachment. See docs/WEAPON_MODELS.md. ]]
+	--[[ Filed for the boot report whether or not anything was done about it.
+	     The warning below only fires when the model WAS straightened, which
+	     leaves the failing case — "decided it was already forward, and was
+	     wrong" — completely silent. That is the case somebody is looking at when
+	     a gun comes out sideways and the log says nothing. ]]
+	lastFacing = {
+		forward = forward,
+		guessed = ModelFacing.LastWasGuess,
+		straightened = not ModelFacing.isForward(forward),
+	}
+
 	if ModelFacing.LastWasGuess and not ModelFacing.isForward(forward) then
 		--[[ model.Name, not the weapon id: adoptWeapon renames the model AFTER
 		     this runs, so what is here is still what the artist called the folder
@@ -2373,15 +2393,59 @@ end
 
 	Negated for the same reason the viewmodel negates it: holdPose aligns this
 	attachment TO the hand, so rolling the attachment by t rolls the model by -t.
-	Both hands apply Rz(-modelRoll) and both rotate the gun the way
-	WeaponConfig.modelRoll says.
+	Both hands apply the negated angles and both rotate the gun the way
+	WeaponConfig.modelRotation says.
 ]]
-local function applyModelRoll(grip: Attachment?, degrees: number?)
-	local roll = tonumber(degrees) or 0
-	if not grip or roll == 0 then
+local function applyModelRotation(grip: Attachment?, rotation: Vector3?)
+	if not grip or typeof(rotation) ~= "Vector3" or rotation.Magnitude == 0 then
 		return
 	end
-	grip.CFrame = grip.CFrame * CFrame.Angles(0, 0, math.rad(-roll))
+	--[[ Negated on all three axes for the reason the single-axis version was:
+	     holdPose aligns this attachment TO the hand, so rotating the attachment
+	     by r rotates the model by -r. The config says what the MODEL should do
+	     and this is what makes that true. ]]
+	grip.CFrame = grip.CFrame
+		* CFrame.Angles(math.rad(-rotation.X), math.rad(-rotation.Y), math.rad(-rotation.Z))
+end
+
+--[[
+	Files what was decided about a model's facing, for the boot report.
+
+	World models only. A viewmodel is the same model measured the same way, so
+	reporting both would print every weapon twice and say nothing new.
+]]
+local function recordFacing(weaponId: string, viewmodel: boolean)
+	if viewmodel or not lastFacing then
+		return
+	end
+	local facing = lastFacing
+	lastFacing = nil
+
+	local direction = facing.forward
+	local axis = "-Z"
+	if direction then
+		local x, y, z = math.abs(direction.X), math.abs(direction.Y), math.abs(direction.Z)
+		if x >= y and x >= z then
+			axis = if direction.X > 0 then "+X" else "-X"
+		elseif y >= z then
+			axis = if direction.Y > 0 then "+Y" else "-Y"
+		else
+			axis = if direction.Z > 0 then "+Z" else "-Z"
+		end
+	end
+
+	if not facing.guessed then
+		facingVerdicts[weaponId] = string.format("%s from its own Muzzle attachment", axis)
+	elseif facing.straightened then
+		facingVerdicts[weaponId] = string.format("%s guessed from its longest axis, STRAIGHTENED", axis)
+	else
+		--[[ The silent case, and the one worth reading. Nothing was measured and
+		     nothing was changed: the model was assumed to be built the right way
+		     round because its longest axis is already its Z, or because no axis
+		     was long enough to argue with. If a gun looks wrong and this is what
+		     the log says about it, the assumption is what is wrong. ]]
+		facingVerdicts[weaponId] = "-Z ASSUMED, nothing measured"
+	end
 end
 
 local function ensureMuzzle(model: Model, handle: BasePart): Attachment
@@ -2575,7 +2639,10 @@ local function adoptDualWeapon(model: Model, halves: { Model }, weaponId: string
 		ensureMuzzle(half, handle)
 		local hadGrip = findAttachmentNamed(half, "Grip") ~= nil
 		local pairDefinition = WeaponConfig.get(weaponId)
-		applyModelRoll(ensureGrip(half, handle, invented, false), pairDefinition and pairDefinition.modelRoll)
+		applyModelRotation(
+			ensureGrip(half, handle, invented, false),
+			pairDefinition and pairDefinition.modelRotation
+		)
 		--[[ Reported like any other guessed grip. A pair took the dual branch and
 		     never reached the single path's bookkeeping, so a pair whose halves
 		     carried neither a Handle nor a Grip was the one weapon in the game
@@ -2640,10 +2707,11 @@ local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): 
 	     camera would need to line them up. ]]
 	local class = definition and definition.class or ""
 	local hadGrip = findAttachmentNamed(model, "Grip") ~= nil
-	applyModelRoll(
+	applyModelRotation(
 		ensureGrip(model, handle, invented, LONG_GUN_CLASS[class] == true),
-		definition and definition.modelRoll
+		definition and definition.modelRotation
 	)
+	recordFacing(weaponId, viewmodel)
 
 	--[[ Named, once per weapon, when BOTH halves of where-to-hold-it were
 	     guessed. A model that shipped either a Handle part or a Grip attachment
@@ -4530,6 +4598,40 @@ function PlaceholderFactory:ensureAssets()
 					.. "— to make it exact. See docs/WEAPON_MODELS.md: %s",
 				#guessed,
 				table.concat(guessed, " · ")
+			)
+		)
+	end
+
+	--[[
+		WHICH WAY EACH SUPPLIED GUN WAS DECIDED TO POINT, AND ON WHAT EVIDENCE.
+
+		Printed for every supplied model rather than only the ones that got
+		changed, because the failure that costs a day is the SILENT one: a model
+		the pipeline assumed was already built barrel-down-Z, was wrong about,
+		and therefore said nothing at all about. A gun that comes out sideways
+		with an empty log is a gun nobody can debug.
+
+		Three verdicts, in descending order of how much they can be trusted:
+		measured from an artist's own Muzzle, guessed from the longest axis and
+		straightened, or assumed and left alone. If a weapon looks wrong in the
+		hand, find it here first — the verdict says whether the pipeline made a
+		decision about it or simply never looked.
+	]]
+	local facingLines = {}
+	for weaponId, verdict in facingVerdicts do
+		table.insert(facingLines, string.format("%s: %s", weaponId, verdict))
+	end
+	if #facingLines > 0 then
+		table.sort(facingLines)
+		print(
+			string.format(
+				"[PlaceholderFactory] which way each supplied weapon was taken to point — "
+					.. "%q means measured, %q means changed, %q means neither. Override any of them "
+					.. "with WeaponConfig.modelRotation. See docs/WEAPON_MODELS.md: %s",
+				"from its own Muzzle attachment",
+				"STRAIGHTENED",
+				"ASSUMED",
+				table.concat(facingLines, " · ")
 			)
 		)
 	end

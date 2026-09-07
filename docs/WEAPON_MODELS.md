@@ -234,6 +234,24 @@ modelled as a child Model with a part called `Handle` in it looks identical from
 the outside. If the flag is set and the model cannot be split, the boot log says
 so and the pair is held as one gun in one hand rather than not at all.
 
+## The boot log tells you what it decided about every gun
+
+Read this before changing anything, because the pipeline has three verdicts and
+only one of them means it actually looked:
+
+```
+[PlaceholderFactory] which way each supplied weapon was taken to point —
+  M4A1: -Z from its own Muzzle attachment          ← measured. exact.
+  AKM: +Y guessed from its longest axis, STRAIGHTENED   ← changed, on a guess
+  TacticalShotty: -Z ASSUMED, nothing measured     ← never looked
+```
+
+**`ASSUMED` is the one that costs a day.** It means the model's longest axis was
+already its Z, or no axis was long enough to argue with, so the pipeline decided
+the gun was built the right way round and left it alone. If a weapon looks wrong
+in the hand and its line says `ASSUMED`, the assumption is what is wrong — not
+the grip, not the scale.
+
 ## If a gun is pointing right but lying on its side
 
 Pointing a gun forward and rolling it upright are two different questions, and
@@ -242,14 +260,19 @@ the model onto it — but for a gun modelled **barrel-up** there is no meaningfu
 "up" left to read, so the roll it lands on is an arbitrary perpendicular. Fine
 for a cylinder, wrong for anything with a sight rail.
 
-`WeaponConfig.modelRoll` is the correction, in **degrees, counter-clockwise from
-the player's own view looking down the barrel**:
+`WeaponConfig.modelRotation` is the correction — **degrees about the model's own
+X, Y and Z**, applied on top of whatever the pipeline concluded:
 
 ```lua
 [Enums.Weapon.TacticalShotty] = {
     …
-    modelRoll = 90,
+    modelRotation = Vector3.new(0, 0, 90),
 ```
+
+Three axes rather than one, because a single roll about Z is enough for a gun
+that is upright but face-on and no use at all for one pointing the wrong way
+entirely. Rotating about an axis that is itself wrong just produces a differently
+wrong answer.
 
 It applies in **both** hands — first person and the world model everyone else
 sees — because a gun that is upright in your hands and on its side in your

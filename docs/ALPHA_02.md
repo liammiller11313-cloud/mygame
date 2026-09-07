@@ -1,6 +1,6 @@
 # Alpha Testing 02
 
-Build stamp **`2026-09-07a-alpha02`**. It is printed in the server log at boot
+Build stamp **`2026-09-07b-alpha02`**. It is printed in the server log at boot
 and is the fastest way to tell whether the place you are in is the build you
 think it is — check it first, before reporting anything.
 
@@ -270,7 +270,7 @@ X and got Y" always is.
 ### A. Does it boot
 
 1. Press Play. Read the server banner. → **`0 failed` on both lines**, and the
-   stamp reads `2026-09-07a-alpha02`.
+   stamp reads `2026-09-07b-alpha02`.
 2. Open the client console (F9). → `[ImageCheck]`, `[SoundCheck]` and
    `[PlaceholderFactory]` each report. Grey-boxed entries are fine; **failures
    are not**.
