@@ -954,10 +954,25 @@ local function refreshItems()
 			elseif filled then 0.3
 			else 0.62
 
+		--[[
+			THREE STEPS, AND IT USED TO BE TWO WEARING THREE NAMES.
+
+			The selected slot asked for COLOR.Accent and a merely-filled one for
+			COLOR.BorderBright, which reads in code as a deliberate distinction
+			and is not one: both are 226,148,44. They are aliases. So the tile you
+			are actually holding and the tiles you merely own drew the SAME
+			border, and the only thing separating them was one pixel of thickness
+			and a background transparency — which is why the bar reads as five
+			similar boxes rather than as one selected thing among four.
+
+			AccentBright for the held slot is the fix. The ladder is now visible
+			at a glance and means something at each step: bright orange is in your
+			hands, orange is in your kit, grey is a slot you have nothing for.
+		]]
 		local base = if not reachable
 			then COLOR.Border
-			elseif selected and filled then COLOR.Accent
-			elseif filled then COLOR.BorderBright
+			elseif selected and filled then COLOR.AccentBright
+			elseif filled then COLOR.Accent
 			else COLOR.Border
 
 		-- The flash rides on top of whatever the slot's resting colour is, so a

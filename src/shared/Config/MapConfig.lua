@@ -85,7 +85,7 @@ MapConfig.Maps = {
 		     briefing. The author's own words, with an "an" and one fewer full
 		     stop. ]]
 		blurb = "It's an endless maze, there is no exit... or is there?",
-		image = "rbxassetid://7718344330",
+		image = "rbxassetid://3254834849",
 	},
 } :: { MapDefinition }
 

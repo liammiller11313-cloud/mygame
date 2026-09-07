@@ -29,12 +29,61 @@ UITheme.Color = table.freeze({
 	Background = Color3.fromRGB(7, 6, 6),
 	Panel = Color3.fromRGB(13, 12, 11),
 	PanelRaised = Color3.fromRGB(22, 20, 18),
-	Border = Color3.fromRGB(52, 47, 40),
-	BorderBright = Color3.fromRGB(226, 148, 44), -- the accent, used as a rule
+	--[[
+		The line around everything, and it was invisible.
+
+		52,47,40 against the panel's 13,12,11 is a contrast ratio of **1.47:1**.
+		The threshold at which a boundary is considered perceivable at all is
+		3:1, so every panel, tile and button in the game was drawing an edge that
+		was, measurably, not there. That is the whole of the "the buttons aren't
+		clear" report: a tile whose fill is nearly its border's colour is not a
+		button, it is a word floating on a dark screen, and no amount of layout
+		fixes it.
+
+		109,99,84 is the same warm grey scaled until it reaches **3.32:1** — over
+		the line on the panel and on the raised panel both. It is still a quiet
+		border. It is now a border.
+	]]
+	Border = Color3.fromRGB(109, 99, 84),
+	--[[
+		THE MIDDLE RUNG, WHICH WAS MISSING.
+
+		This was 226,148,44 — byte for byte the same value as Accent below, with
+		a comment calling it "the accent, used as a rule". It was an alias, and
+		four screens were using it as if it were not.
+
+		Every ladder in the interface is written as
+		Border < BorderBright < Accent < AccentBright. The map vote wants "a map
+		somebody voted for" under "the map YOU voted for"; the loadout wants "the
+		active slate" under "the one you are editing"; the hotbar wanted "in your
+		kit" under "in your hands". All four asked for two different colours and
+		all four got one, so in every case the two states rendered identically
+		and the code looked like it was already handling something it was not.
+
+		170,120,52 is a real rung: 1.53:1 against Border and 1.56:1 against
+		Accent, so it is as far from each neighbour as they are from each other.
+		The four steps now read as four steps — dark, lit, bright, brightest —
+		which is the whole of "make the buttons clearer" in one value.
+	]]
+	BorderBright = Color3.fromRGB(170, 120, 52),
 
 	TextPrimary = Color3.fromRGB(240, 236, 228),
 	TextSecondary = Color3.fromRGB(154, 147, 136),
-	TextDim = Color3.fromRGB(92, 87, 79),
+	--[[
+		"Dim" has to mean quiet, not unreadable, and this meant unreadable.
+
+		92,87,79 on the panel is **2.73:1** — a long way under the 4.5:1 that
+		body text needs. This is the colour the empty hotbar slots are drawn in,
+		so THROWABLE, HEALTH and PILLS — the three tiles that tell you what you
+		are missing — were the least legible text on the screen. The information
+		a player most needs mid-horde was the hardest to read.
+
+		132,125,114 is **4.80:1**, which passes, and still sits clearly below
+		TextSecondary's 6.42 so the three-step hierarchy survives: bright, quiet,
+		quieter. Nothing about the design changes except that the bottom step is
+		now actually readable.
+	]]
+	TextDim = Color3.fromRGB(132, 125, 114),
 
 	-- The signature orange. Used for the objective line, interact prompts, wave
 	-- announcements, and anything the game wants read before the player thinks.
@@ -326,8 +375,16 @@ UITheme.Layout = table.freeze({
 	ScreenMargin = 22,
 	PanelPadding = 10,
 	ElementGap = 6,
-	CornerRadius = 2, -- L4D is squared off; rounding it makes it look mobile
-	BorderThickness = 1,
+	--[[ Zero, not two. "L4D is squared off; rounding it makes it look mobile"
+	     was already the rule and two pixels was hedging it — at a 2px radius the
+	     corner reads as a soft app tile rather than as something stamped out of
+	     sheet metal. Square is the genre. ]]
+	CornerRadius = 0,
+	--[[ Two, not one. A hairline is a diagram of a box; two pixels is a box.
+	     Together with the border colour above this is most of what turns a panel
+	     from a floating label into a stencilled equipment crate, and it is the
+	     single cheapest thing that makes a button look pressable. ]]
+	BorderThickness = 2,
 
 	SurvivorPanelWidth = 214,
 	SurvivorPanelHeight = 42,

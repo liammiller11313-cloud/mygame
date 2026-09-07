@@ -1,6 +1,6 @@
 # Alpha Testing 02
 
-Build stamp **`2026-09-06y-alpha02`**. It is printed in the server log at boot
+Build stamp **`2026-09-06z-alpha02`**. It is printed in the server log at boot
 and is the fastest way to tell whether the place you are in is the build you
 think it is — check it first, before reporting anything.
 
@@ -270,7 +270,7 @@ X and got Y" always is.
 ### A. Does it boot
 
 1. Press Play. Read the server banner. → **`0 failed` on both lines**, and the
-   stamp reads `2026-09-06y-alpha02`.
+   stamp reads `2026-09-06z-alpha02`.
 2. Open the client console (F9). → `[ImageCheck]`, `[SoundCheck]` and
    `[PlaceholderFactory]` each report. Grey-boxed entries are fine; **failures
    are not**.
@@ -311,31 +311,54 @@ These are the changes with the least prior testing, so they come first.
    one.** This is the change most likely to cost performance and the least
    possible to verify by reasoning.
 
-### E. The four fixes that landed after this brief was written
+### E. The interface
+
+The poll asked for a better UI and this build is the first pass. It is
+deliberately not a redesign — the layout is unchanged — it is the measured
+readability problems fixed.
+
+11. **Look at an empty hotbar slot** (THROWABLE / HEALTH / PILLS with nothing
+    in them). → Readable. That text was at **2.73:1** contrast, a long way under
+    the 4.5:1 body text needs; it is now 4.80:1. It was the least legible thing
+    on screen and it is what tells you what you are missing.
+12. **Look at the hotbar as a whole.** → **Four visible steps**: bright orange
+    is the gun in your hands, orange is a slot with something in it, dim orange
+    is a state a panel wants to highlight, grey is empty. The held slot and a
+    merely-filled slot used to draw the *same* border colour.
+13. **Panels and buttons have edges now.** → The border was **1.47:1** against
+    the panel it sat on, under the 3:1 at which a boundary is perceivable at
+    all; it is 3.32:1 and two pixels instead of one, with square corners. This
+    is the "the buttons aren't clear" report: a tile whose edge you cannot see
+    is not a button.
+14. **The map vote and the loadout.** → "The map you voted for" vs "a map
+    somebody voted for", and "the slate you are editing" vs "the active slate",
+    are now different colours. They were the same one.
+
+### F. The four fixes that landed before that
 
 These are the newest code in the build and therefore the least exercised.
 
-11. **Join an active match** — ideally from the console, which is where it was
+15. **Join an active match** — ideally from the console, which is where it was
     reported. → You arrive **standing on the floor**, not through it. You may
     stand still for a beat while the map finishes arriving; that is the fix
     working, not a freeze. If it lasts more than a second or two, say so.
-12. **The dual pistols.** Buy them, look down. → **Two guns, one per hand**, an
+16. **The dual pistols.** Buy them, look down. → **Two guns, one per hand**, an
     arm on each, spread apart rather than overlapping. Fire: the hands
     **alternate**, and the flash and tracer come from the gun that fired. Look
     at a teammate holding them — one pistol per hand there too.
-13. **The tactical shotgun in the hand.** → Held at the wrist of the stock, not
+17. **The tactical shotgun in the hand.** → Held at the wrist of the stock, not
     by its middle with the stock through the forearm. Check the client console
     for a `[PlaceholderFactory]` line naming models whose grip had to be
     guessed — that list is what to add a `Grip` attachment to.
-14. **PS5 touchpad.** Move the cursor in a menu → the orange highlight goes away
+18. **PS5 touchpad.** Move the cursor in a menu → the orange highlight goes away
     and the cursor clicks what it is over. Touch the stick → the highlight comes
     straight back. Tap the touchpad → glyphs stay **console**, not keyboard.
 
-### F. The other two schemes
+### G. The other two schemes
 
-15. **Controller.** Fire, aim, reload, the D-pad slots. Tap **View** → pause
+19. **Controller.** Fire, aim, reload, the D-pad slots. Tap **View** → pause
     menu. *Hold* **View** → ability cards, and no pause menu on release.
-16. **Phone.** The eight-button pad, and the hotbar tiles as slot buttons —
+20. **Phone.** The eight-button pad, and the hotbar tiles as slot buttons —
     one tap selects, a second tap on a consumable uses it. Sprint is always on;
     there is no button and there should not be one.
 
