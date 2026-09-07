@@ -362,8 +362,9 @@ local DEFINITIONS: { PuzzleDefinition } = {
 
 PuzzleConfig.Puzzles = table.freeze(DEFINITIONS) :: { PuzzleDefinition }
 
---[[ The puzzle authored for a map, or nil. Nil is the normal answer for two of
-     the three maps and must never be an error. ]]
+--[[ The puzzle authored for a map, or nil. Nil is the NORMAL answer — a puzzle
+     is a per-map thing somebody sits down and writes, so most of the roster has
+     none and only Clinton has one today. It must never be an error. ]]
 function PuzzleConfig.forMap(mapId: string?): PuzzleDefinition?
 	if typeof(mapId) ~= "string" then
 		return nil

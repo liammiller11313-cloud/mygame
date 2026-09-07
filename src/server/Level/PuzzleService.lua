@@ -659,8 +659,9 @@ end
 	Rolls a fresh puzzle into the live map.
 
 	Called from the round starting rather than from the map loading — see the
-	header. Returns false when there is nothing to arm, which is the normal
-	answer on two of the three maps and must never be an error.
+	header. Returns false when there is nothing to arm, which is the NORMAL
+	answer on most of the roster — only Clinton has a puzzle authored today —
+	and must never be an error.
 ]]
 function PuzzleService:arm(random: Random?)
 	self:clear()

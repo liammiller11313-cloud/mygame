@@ -294,8 +294,9 @@ Attributes.Game = table.freeze({
 	     SurvivorService already owns and four clients reimplementing it is four
 	     chances to disagree with the server about whether the round can start. ]]
 	--[[ The optional vault side objective. Present says a puzzle is armed in this
-	     map at all — two of the three maps never set it — and Solved is what the
-	     keypad UI reads to stop offering a code for a door that is already open. ]]
+	     map at all — most maps never set it, and only Clinton has one authored
+	     today — and Solved is what the keypad UI reads to stop offering a code
+	     for a door that is already open. ]]
 	VaultPresent = "FL_VaultPresent", -- boolean
 	--[[ How many of the vault's clues the TEAM holds, and how many there are.
 	     Team-wide on Workspace rather than per player, because four survivors

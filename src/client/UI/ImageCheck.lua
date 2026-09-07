@@ -54,7 +54,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local ImageCheck = {}
 
 --[[ One fetch per id for the lifetime of the client, however many callers ask.
-     The map vote asks for its three cards every time it opens, and a vote that
+     The map vote asks for one card per map every time it opens, and a vote that
      re-fetches on every round would be three requests a map for nothing. ]]
 local seen: { [string]: boolean } = {}
 
@@ -225,10 +225,10 @@ function ImageCheck.verify(id: unknown, what: string)
 	end
 
 	--[[ Once per id, and the guard sits ABOVE the shape check rather than below
-	     it. Not every caller asks once: MapVoteController verifies its three
-	     cards as it builds them, so it asks again every time the vote opens. A
-	     malformed id that warned per call would print three lines a round for
-	     the rest of the server's life. ]]
+	     it. Not every caller asks once: MapVoteController verifies one card per
+	     map as it builds them, so it asks again every time the vote opens. A
+	     malformed id that warned per call would print a line per map per round
+	     for the rest of the server's life. ]]
 	if seen[id] then
 		return
 	end

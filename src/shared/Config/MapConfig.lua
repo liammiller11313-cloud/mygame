@@ -75,6 +75,18 @@ MapConfig.Maps = {
 		     listening to. Tune it here rather than in the map. ]]
 		musicVolume = 0.45,
 	},
+	{
+		id = "Backrooms",
+		displayName = "BACKROOMS",
+		--[[ A different SHAPE of blurb from the other three, deliberately. Those
+		     are three fragments naming what the map is and what to bring, which
+		     is the right thing to say about a street or a corridor. This map's
+		     whole idea is not knowing, so its line is a hook rather than a
+		     briefing. The author's own words, with an "an" and one fewer full
+		     stop. ]]
+		blurb = "It's an endless maze, there is no exit... or is there?",
+		image = "rbxassetid://7718344330",
+	},
 } :: { MapDefinition }
 
 --[[

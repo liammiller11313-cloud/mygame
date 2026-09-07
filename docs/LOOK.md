@@ -127,7 +127,7 @@ Two `scripts/audit.py` checks exist because of bugs in this area:
   because whether an asset resolves is a fact about the client running it, not
   about the source. Every image id in the game goes through `UI/ImageCheck`,
   which validates its shape immediately, fetches it once, and warns **by name**
-  when it fails. Four callers: the menu photograph, the three map cards, the
+  when it fails. Four callers: the menu photograph, one card per map, the
   splash mark, and the dread haze tile if one is ever set.
 
   This exists because the menu backdrop was set to a **decal** id for a day.

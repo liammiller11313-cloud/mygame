@@ -1,6 +1,6 @@
 # Alpha Testing 02
 
-Build stamp **`2026-09-06x-alpha02`**. It is printed in the server log at boot
+Build stamp **`2026-09-06y-alpha02`**. It is printed in the server log at boot
 and is the fastest way to tell whether the place you are in is the build you
 think it is — check it first, before reporting anything.
 
@@ -50,7 +50,8 @@ factory reported 37. If they disagree again, the factory's is the real one.
 Three checks run on the **client**, so open the client console (F9) after
 joining, not just the server output. Each names the thing rather than a number:
 
-- `[ImageCheck]` — the menu photograph, the three map cards, the splash mark.
+- `[ImageCheck]` — the menu photograph, one card per map (four now, with
+  Backrooms), the splash mark.
   It now also refuses a **decal** id, which is the mistake that cost a day: the
   id shown on a Creator Store page wraps the image rather than being it.
 - `[SoundCheck]` — all 57 ids behind 110 cues, in one preload. **Silence is not
@@ -67,7 +68,8 @@ joining, not just the server output. Each names the thing rather than a number:
 
 ### 3. Put the map items in
 
-Six folders per map. Missing folders are not fatal — the Director falls back —
+Six folders per map, and there are **four maps now** — Backrooms is new this
+build. Missing folders are not fatal — the Director falls back —
 but the map-item warnings at boot tell you exactly which are absent:
 
 ```
@@ -268,7 +270,7 @@ X and got Y" always is.
 ### A. Does it boot
 
 1. Press Play. Read the server banner. → **`0 failed` on both lines**, and the
-   stamp reads `2026-09-06x-alpha02`.
+   stamp reads `2026-09-06y-alpha02`.
 2. Open the client console (F9). → `[ImageCheck]`, `[SoundCheck]` and
    `[PlaceholderFactory]` each report. Grey-boxed entries are fine; **failures
    are not**.
