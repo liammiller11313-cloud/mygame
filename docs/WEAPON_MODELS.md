@@ -184,6 +184,56 @@ tracers and the flash all become exact as well.
 > palm, stock through the forearm. On a long weapon that reads exactly as "it
 > does not fit in the hand".
 
+## A pair: two guns, one in each hand
+
+The dual pistols are the only one of these today. The model is **one Model
+containing two child Models, each a whole gun with its own `Handle`** — which is
+what you get by building one pistol and duplicating it:
+
+```
+Dual Pistol
+├── CZ-75          ← a Handle somewhere inside
+│   ├── Handle
+│   └── … slide, mag, bolt, parts
+└── CZ-75(2)       ← its own Handle
+    ├── Handle
+    └── …
+```
+
+Nothing about the naming matters. `CZ-75(2)` is what Roblox calls a duplicate
+and it is fine; the pipeline renames the halves `FL_Right` and `FL_Left` itself.
+
+**Which gun ends up in which hand is decided by geometry, not by Explorer
+order** — whichever half sits further along the model's −X is the left one. So
+arrange them the way you want them held and it will match. If you build them
+stacked, or one exactly on top of the other, there is no left and right to read
+and it falls back to child order.
+
+**You do not need to pose them side by side.** The first-person view discards
+your spacing and places them itself: the right gun goes exactly where a single
+pistol's viewmodel already sits, and the left one across from it, both canted
+slightly outward. Build them wherever is convenient.
+
+Each half goes through the whole weapon pipeline on its own, so each gets its
+own `Grip` and its own `Muzzle` — and each will use **your** attachment if you
+put one in. A `Grip` in each half is the difference between the pair being held
+exactly where you meant and being held where the proportions guess.
+
+What happens then:
+
+| | |
+|---|---|
+| **Third person** | one gun welded to each hand, each at its own `Grip` |
+| **First person** | both guns in frame, an arm posed on each |
+| **Firing** | alternates hands; the flash and the tracer both come from the gun that fired |
+| **Ammo** | one pool for the pair — `magSize` is the pair's, not one gun's |
+
+Declared with `dualWield = true` in `WeaponConfig`. The flag is required: the
+geometry alone cannot be trusted to mean "pair", because a rifle whose scope was
+modelled as a child Model with a part called `Handle` in it looks identical from
+the outside. If the flag is set and the model cannot be split, the boot log says
+so and the pair is held as one gun in one hand rather than not at all.
+
 ## If a gun comes out sideways — in either hand
 
 The first-person pose assumes a weapon's barrel runs down its own **-Z**. A gun

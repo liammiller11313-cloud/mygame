@@ -2380,18 +2380,17 @@ end
 	driven by writing a CFrame every frame and must never be touched by physics;
 	a world model is left loose so whoever equips it can weld it to a hand.
 ]]
-local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): Model?
-	sanitise(model)
+--[[
+	One rigid assembly: every part under `root` welded to `handle`, and nothing
+	welded across to anything outside it.
 
-	local handle, invented = ensureHandle(model)
-	if not handle then
-		warnOnce("noparts:" .. weaponId, string.format("the %s weapon model has no parts", weaponId))
-		model:Destroy()
-		return nil
-	end
-	model.PrimaryPart = handle
-
-	for _, part in basePartsOf(model) do
+	Split out of adoptWeapon because a dual-wield is TWO of these. Welding the
+	pair into one body is what makes it impossible to put one in each hand
+	afterwards, and it is what the single-handle path did to any model that
+	happened to contain two guns.
+]]
+local function prepareAssembly(root: Instance, handle: BasePart, viewmodel: boolean)
+	for _, part in basePartsOf(root) do
 		part.CanCollide = false
 		part.Locked = true
 		if part ~= handle then
@@ -2409,12 +2408,152 @@ local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): 
 			part.Anchored = false
 		end
 	end
+end
+
+--[[
+	The two halves of a dual-wield model, as { left, right }, or nil.
+
+	What counts is a model containing two or more child Models that each carry
+	their own Handle — which is exactly how a pair is built, because each half is
+	a whole gun somebody modelled once and duplicated. Anything else is one
+	weapon and takes the ordinary path.
+
+	LEFT AND RIGHT ARE DECIDED BY GEOMETRY, not by Explorer order. A duplicated
+	child arrives called "CZ-75(2)" and there is nothing in that name, or in the
+	order Roblox returns children, that says which side the artist put it on.
+	Their pivots do: the one further along the parent's -X is the left one. If
+	they sit at the same X — stacked, or built one on top of the other — order is
+	the only tiebreak left and it is at least stable.
+]]
+local function dualHalves(model: Model): { Model }?
+	local halves: { Model } = {}
+	for _, child in model:GetChildren() do
+		if child:IsA("Model") then
+			local handle = child:FindFirstChild("Handle", true)
+			if handle and handle:IsA("BasePart") then
+				table.insert(halves, child)
+			end
+		end
+	end
+	if #halves < 2 then
+		return nil
+	end
+
+	local pivot = model:GetPivot()
+	local a, b = halves[1], halves[2]
+	local ax = pivot:PointToObjectSpace(a:GetPivot().Position).X
+	local bx = pivot:PointToObjectSpace(b:GetPivot().Position).X
+	if bx < ax then
+		a, b = b, a
+	end
+	return { a, b }
+end
+
+--[[
+	The names the two halves of a pair are found by, and the attribute that says
+	a model is one at all.
+
+	Renaming rather than tagging by position, because every consumer of this — the
+	world model, the viewmodel, the muzzle flash — wants to ask for a specific
+	side by name and none of them should have to redo the geometry test. Prefixed
+	because they are this pipeline's names inside somebody else's model.
+]]
+local DUAL_LEFT = "FL_Left"
+local DUAL_RIGHT = "FL_Right"
+local DUAL_ATTRIBUTE = "FL_DualWield"
+
+--[[
+	Prepares a pair: two guns, two assemblies, two grips, two muzzles.
+
+	Each half keeps its own Handle and is welded only to itself, which is the
+	whole point — CarryVisualService welds one to each hand and the viewmodel
+	poses an arm on each, and neither can do that with a single rigid body.
+
+	The pair's PrimaryPart is the RIGHT half's handle. Something has to answer
+	for the model as a whole — PivotTo, a dropped pickup resting on the floor,
+	the fallback path in holdPose — and the right hand is the one that holds a
+	weapon everywhere else in the game, so a pair that somehow reaches a
+	one-handed path is at least holding the correct gun.
+]]
+local function adoptDualWeapon(model: Model, halves: { Model }, weaponId: string, viewmodel: boolean): Model?
+	local left, right = halves[1], halves[2]
+	left.Name = DUAL_LEFT
+	right.Name = DUAL_RIGHT
+
+	local primary: BasePart? = nil
+	for index, half in { left, right } do
+		local handle, invented = ensureHandle(half)
+		if not handle then
+			warnOnce(
+				"nodualparts:" .. weaponId,
+				string.format("half %d of the %s pair has no parts", index, weaponId)
+			)
+			model:Destroy()
+			return nil
+		end
+		half.PrimaryPart = handle
+		prepareAssembly(half, handle, viewmodel)
+		--[[ Per half, and measured against that half rather than against the
+		     pair. A pistol's own box is what says where its grip and its muzzle
+		     are; the pair's box spans both guns and the gap between them, and
+		     every number taken off it would be wrong for either. ]]
+		ensureMuzzle(half, handle)
+		ensureGrip(half, handle, invented, false)
+		if half == right then
+			primary = handle
+		end
+	end
+
+	model.PrimaryPart = primary
+	model:SetAttribute(DUAL_ATTRIBUTE, true)
+	model.Name = weaponId
+	return model
+end
+
+local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): Model?
+	sanitise(model)
+
+	local definition = WeaponConfig.get(weaponId)
+
+	--[[
+		A PAIR, HELD IN TWO HANDS.
+
+		Only when the config says so. The geometry alone is not enough to decide
+		it: a rifle whose scope was modelled as a child Model with a part called
+		Handle in it would look identical from here, and turning that into a
+		dual-wield would be a spectacular way to break one gun to fix another.
+		WeaponConfig.dualWield is the declaration; this is the check that the art
+		can actually do it.
+	]]
+	if definition and definition.dualWield then
+		local halves = dualHalves(model)
+		if halves then
+			return adoptDualWeapon(model, halves, weaponId, viewmodel)
+		end
+		warnOnce(
+			"nodual:" .. weaponId,
+			string.format(
+				"%s is configured as a dual-wield but its model is not two models with a Handle "
+					.. "each, so it is being held as one weapon in one hand. See docs/WEAPON_MODELS.md",
+				weaponId
+			)
+		)
+	end
+
+	local handle, invented = ensureHandle(model)
+	if not handle then
+		warnOnce("noparts:" .. weaponId, string.format("the %s weapon model has no parts", weaponId))
+		model:Destroy()
+		return nil
+	end
+	model.PrimaryPart = handle
+
+	prepareAssembly(model, handle, viewmodel)
 
 	ensureMuzzle(model, handle)
 	--[[ On the viewmodel too. It costs one attachment and it means the two models
 	     agree about where the weapon is held, which is what a future third-person
 	     camera would need to line them up. ]]
-	local definition = WeaponConfig.get(weaponId)
 	local class = definition and definition.class or ""
 	local hadGrip = findAttachmentNamed(model, "Grip") ~= nil
 	ensureGrip(model, handle, invented, LONG_GUN_CLASS[class] == true)

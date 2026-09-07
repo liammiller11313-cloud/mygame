@@ -455,6 +455,36 @@ local trove = Trove.new()
 
 local model: Model? = nil
 local muzzle: Attachment? = nil
+
+--[[
+	── A PAIR, IN FIRST PERSON ─────────────────────────────────────────────────
+
+	PlaceholderFactory splits a dual-wield into two named halves with a Handle,
+	a Grip and a Muzzle each; this is the half of it the player actually looks
+	at. Three things follow from there being two guns:
+
+	  * They are POSED HERE, not where the artist left them. A pair is modelled
+	    side by side because that is how you build one, and side by side a stud
+	    apart is not what akimbo looks like down a camera. The two halves are
+	    pushed out, forward and canted, against the offsets below.
+	  * Two arms, and neither of them is the support hand. The ordinary pistol
+	    path builds a right arm and returns early precisely because a lone hand
+	    hovering beside a pistol looks wrong; here the left hand has its own gun
+	    to hold.
+	  * The muzzle ALTERNATES. One flash, moved to whichever gun just fired,
+	    because that is the whole read of a dual-wield: the guns take turns.
+
+	`muzzleAlt` is the left gun's. `muzzle` stays the right one so that every
+	existing reader — the tracer origin, the flash, getMuzzlePosition — keeps
+	working unchanged for every weapon that is not a pair.
+]]
+local muzzleAlt: Attachment? = nil
+local dualLeft: Model? = nil
+local dualRight: Model? = nil
+--[[ Which gun fires the NEXT shot. Starts false so the first round of a
+     magazine comes out of the right hand, which is the one the player's eye is
+     already on. ]]
+local dualNextIsLeft = false
 local flashPart: BasePart? = nil
 local flashLight: PointLight? = nil
 local flashSparks: ParticleEmitter? = nil
@@ -958,6 +988,28 @@ local SUPPORT_DROP = 0.22
 -- Which way each arm runs back toward the camera. The right arm comes in tighter
 -- than the left because the shooting hand sits behind the gun while the support
 -- hand reaches across for it.
+--[[
+	Where the two guns of a pair sit, relative to where one gun would.
+
+	SPREAD is sideways, so the two are far enough apart to read as two rather
+	than as one gun with a doubling artefact. FORWARD pushes them out past where
+	a single pistol sits, because two hands at the same depth crowd the middle of
+	the frame and hide what the player is shooting at. CANT is the outward yaw —
+	a few degrees each, which is the difference between "two pistols" and "one
+	pistol mirrored", and it is what makes the pair look held rather than
+	floating.
+
+	Multiplied by the model's own size where that makes sense, so a pair of
+	compacts and a pair of hand cannons both end up in frame.
+]]
+--[[ Half the distance between the two guns, in multiples of ONE gun's own
+     width — see poseDualHalves for why not the pair's. 1.5 widths each way puts
+     two pistols about three widths apart, which is hands-apart rather than
+     wrists-crossed. ]]
+local DUAL_SPREAD = 1.5
+local DUAL_FORWARD = 0.10
+local DUAL_CANT = math.rad(7)
+
 local RIGHT_RUN = Vector3.new(0.42, -0.34, 1.0)
 local LEFT_RUN = Vector3.new(-0.58, -0.30, 1.0)
 
@@ -1145,6 +1197,110 @@ end
 	floating under the barrel looks far worse than no second hand, and the whole
 	point of a sidearm silhouette is that it is held in one.
 ]]
+--[[ The Muzzle attachment inside one half of a pair. Each half is a whole gun
+     that went through the weapon pipeline, so it has one; nil means the half is
+     missing rather than that the art forgot. ]]
+local function findMuzzleIn(half: Model?): Attachment?
+	if not half then
+		return nil
+	end
+	for _, descendant in half:GetDescendants() do
+		if descendant:IsA("Attachment") and descendant.Name == "Muzzle" then
+			return descendant
+		end
+	end
+	return nil
+end
+
+--[[
+	Spreads a pair into an akimbo pose and remembers the two halves.
+
+	The artist's arrangement is deliberately discarded. A pair is modelled side
+	by side, touching, because that is how you duplicate a gun — and down a
+	camera that reads as one wide gun rather than as two. Each half is pivoted
+	to its own side of the model origin, pushed forward, and canted outward.
+
+	Returns false when the model is not a pair or is missing a half, in which
+	case everything downstream takes the ordinary single-weapon path.
+]]
+local function poseDualHalves(built: Model): boolean
+	if built:GetAttribute("FL_DualWield") ~= true then
+		return false
+	end
+	local left = built:FindFirstChild("FL_Left")
+	local right = built:FindFirstChild("FL_Right")
+	if not (left and left:IsA("Model") and right and right:IsA("Model")) then
+		return false
+	end
+
+	--[[ Measured off ONE gun, not off the pair. The pair's box spans both halves
+	     AND the gap the artist left between them, so basing the spread on it
+	     feeds the current spacing back into the new spacing — a model built with
+	     the two guns far apart would be pushed further apart still, and one built
+	     with them touching would barely move. One pistol's own width is a fixed
+	     thing to reason from. ]]
+	local ok, _, size = pcall(function()
+		return (right :: Model):GetBoundingBox()
+	end)
+	local spread = if ok and size then math.max(size.X, 0.25) * DUAL_SPREAD else DUAL_SPREAD
+	local forward = if ok and size then math.max(size.Z, 0.4) * DUAL_FORWARD else DUAL_FORWARD
+
+	--[[
+		THE RIGHT GUN DOES NOT MOVE SIDEWAYS, AND THAT IS DELIBERATE.
+
+		Placing the two halves symmetrically about the pivot is the obvious thing
+		and it is wrong here, because the pivot IS the right gun: adoptDualWeapon
+		makes its Handle the model's PrimaryPart, so GetPivot follows it and
+		moving it moves the frame everything else is measured in. A symmetric
+		placement therefore slides the whole pair off the pose the camera code
+		was tuned against.
+
+		So the right gun stays exactly where a single pistol's viewmodel already
+		sits — a position that is already tuned and already looks right — and the
+		left gun is placed across from it. The pair then straddles the centre
+		line without any of the pose table being re-derived, and the read is
+		honest: your pistol, and another one in the other hand.
+	]]
+	local origin = built:GetPivot()
+	right:PivotTo(origin * CFrame.new(0, 0, -forward) * CFrame.Angles(0, -DUAL_CANT, 0))
+	left:PivotTo(origin * CFrame.new(-spread * 2, 0, -forward) * CFrame.Angles(0, DUAL_CANT, 0))
+
+	dualLeft = left :: Model
+	dualRight = right :: Model
+	dualNextIsLeft = false
+	return true
+end
+
+--[[ One arm per gun, each at its own gun's grip rather than at the model's.
+     The pair has been spread by poseDualHalves, so the two hands end up as far
+     apart as the guns are — which is the entire point of the spread. ]]
+local function buildDualArms(built: Model, character: Model?, drop: number, depth: number)
+	for _, entry in
+		{
+			{ half = dualRight, run = RIGHT_RUN, chain = R15_RIGHT, r6 = "Right Arm", side = 1 },
+			{ half = dualLeft, run = LEFT_RUN, chain = R15_LEFT, r6 = "Left Arm", side = -1 },
+		}
+	do
+		local half = entry.half
+		if half and half.Parent then
+			--[[ The arm is placed against the PAIR's origin, like every other
+			     arm in this file, but at the offset of its own gun — so the two
+			     calls differ only in where the hand goes and which limbs are
+			     cloned. ]]
+			local at = built:GetPivot():ToObjectSpace(half:GetPivot()).Position
+			buildAvatarArm(
+				built,
+				character,
+				built:GetPivot(),
+				Vector3.new(at.X, at.Y - drop * GRIP_DROP, at.Z + depth * GRIP_BACK),
+				entry.run,
+				entry.chain,
+				entry.r6
+			)
+		end
+	end
+end
+
 local function buildArms(built: Model, definition: any)
 	local ok, _, size = pcall(function()
 		return built:GetBoundingBox()
@@ -1183,6 +1339,16 @@ local function buildArms(built: Model, definition: any)
 		or an axe swung one-handed reads as a choice, and a hand hovering in front
 		of a knife reads as a bug.
 	]]
+	--[[ A pair gets two arms and neither is a support hand: each holds its own
+	     gun, at its own gun's grip. Returning before the pistol early-return
+	     below, which exists for the opposite reason — a lone pistol has nothing
+	     for a second hand to do. ]]
+	if dualLeft and dualRight then
+		buildDualArms(built, character, drop, depth)
+		releaseCharacter(character)
+		return
+	end
+
 	if definition and (definition.class == "Pistol" or definition.fireMode == "Melee") then
 		return
 	end
@@ -1237,6 +1403,10 @@ local function destroyModel()
 		model = nil
 	end
 	muzzle = nil
+	muzzleAlt = nil
+	dualLeft = nil
+	dualRight = nil
+	dualNextIsLeft = false
 	flashPart = nil
 	flashLight = nil
 	flashSparks = nil
@@ -1404,7 +1574,18 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	fitScale(built, pose)
 
 	model = built
-	muzzle = ensureMuzzle(built, host)
+	--[[ Before the muzzle: a pair's halves are moved by this, and the muzzle
+	     attachments hang off them. Measuring the muzzle first would record where
+	     the guns were in the model rather than where they are in the hand. ]]
+	if poseDualHalves(built) then
+		muzzle = findMuzzleIn(dualRight)
+		muzzleAlt = findMuzzleIn(dualLeft)
+	end
+	--[[ The fallback is also the ordinary path: one gun, one muzzle, invented at
+	     the front of the box when the art shipped none. ]]
+	if not muzzle then
+		muzzle = ensureMuzzle(built, host)
+	end
 	current.sightOffset = sightOffsetOf(built)
 
 	buildFlash(definition)
@@ -1779,6 +1960,27 @@ function ViewmodelController:onFired(definition: any, _seed: number)
 		)
 	)
 
+	--[[
+		A PAIR TAKES TURNS.
+
+		One flash, moved to whichever gun just fired, rather than two flashes
+		alternately shown: the flash carries a light and two PointLights strobing
+		on and off at 620rpm is both more expensive and worse-looking than one
+		that moves. `muzzle` follows it so the tracer leaves the same barrel the
+		flash did — they are read from the same place one line apart, and a
+		tracer from the other hand is the tell that would make this look broken.
+	]]
+	if muzzleAlt and dualLeft and dualRight then
+		local firing = if dualNextIsLeft then muzzleAlt else findMuzzleIn(dualRight)
+		dualNextIsLeft = not dualNextIsLeft
+		if firing then
+			muzzle = firing
+			if flashPart then
+				flashPart.CFrame = firing.WorldCFrame
+			end
+		end
+	end
+
 	if flashPart and flashLight then
 		flashPart.Transparency = 0.1
 		flashLight.Enabled = true
@@ -1935,15 +2137,6 @@ end
 
 function ViewmodelController:getModel(): Model?
 	return model
-end
-
---[[ Where a tracer or a flash should originate in world space. Nil when there
-     is no weapon in frame, which callers must handle rather than assume. ]]
-function ViewmodelController:getMuzzlePosition(): Vector3?
-	if not muzzle then
-		return nil
-	end
-	return muzzle.WorldPosition
 end
 
 function ViewmodelController:isVisible(): boolean

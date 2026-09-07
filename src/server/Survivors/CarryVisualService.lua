@@ -229,6 +229,14 @@ local function handAnchor(character: Model): BasePart?
 		or character:FindFirstChild("Right Arm") :: BasePart?
 end
 
+--[[ The other hand, for a pair. Nil is not fatal here the way it is for the
+     right: a rig with no left hand holds the pair one-handed rather than not at
+     all, which is a worse-looking gun and still a gun. ]]
+local function offHandAnchor(character: Model): BasePart?
+	return character:FindFirstChild("LeftHand") :: BasePart?
+		or character:FindFirstChild("Left Arm") :: BasePart?
+end
+
 --[[
 	Where the hand actually is, in world space.
 
@@ -237,7 +245,12 @@ end
 	the far end of the part, which is true of both rig types.
 ]]
 local function handGrip(limb: BasePart): CFrame
-	local attachment = limb:FindFirstChild("RightGripAttachment")
+	--[[ Either hand's authored grip point. A left limb carries
+	     LeftGripAttachment and a right one RightGripAttachment; asking for the
+	     right on a left hand finds nothing and silently falls through to the
+	     geometric guess, which is a pistol held slightly wrong in one hand only
+	     — the kind of asymmetry that reads as the model being broken. ]]
+	local attachment = limb:FindFirstChild("LeftGripAttachment") or limb:FindFirstChild("RightGripAttachment")
 	if attachment and attachment:IsA("Attachment") then
 		return limb.CFrame * attachment.CFrame * HAND_OFFSET
 	end
@@ -601,6 +614,62 @@ local function holdPose(model: Model, target: CFrame): CFrame
 	return (target * hold:Inverse()) * model:GetPivot()
 end
 
+--[[ What PlaceholderFactory names the two halves of a pair, and the attribute
+     it marks the pair with. Read rather than re-derived: which gun is the left
+     one is a geometry question that was already answered once, at boot, against
+     the template — asking it again per equip could get a different answer for
+     the same model. ]]
+local DUAL_ATTRIBUTE = "FL_DualWield"
+local DUAL_LEFT = "FL_Left"
+local DUAL_RIGHT = "FL_Right"
+
+--[[
+	Mounts a pair: one gun in each hand.
+
+	Not `place`, and the difference is the whole feature. `place` consolidates
+	the model into ONE rigid body and welds it to ONE limb, which for a pair
+	welds both pistols to the right hand and leaves the left one hanging in the
+	air beside it. Each half is already its own assembly with its own Handle and
+	its own Grip — see PlaceholderFactory.adoptDualWeapon — so each is posed and
+	welded independently and the model itself is only a container.
+
+	Falls back to the ordinary one-handed mount when anything is missing: a rig
+	with no left hand, or a model that reached here without both halves. A pair
+	held wrong is a bug worth seeing; a pair that does not appear is a player
+	with no gun.
+]]
+local function placeDual(character: Model, right: BasePart, model: Model, mount: string): boolean
+	local leftLimb = offHandAnchor(character)
+	local leftHalf = model:FindFirstChild(DUAL_LEFT)
+	local rightHalf = model:FindFirstChild(DUAL_RIGHT)
+	if
+		not leftLimb
+		or not (leftHalf and leftHalf:IsA("Model") and leftHalf.PrimaryPart)
+		or not (rightHalf and rightHalf:IsA("Model") and rightHalf.PrimaryPart)
+	then
+		return false
+	end
+
+	model.Name = mountName(mount)
+
+	for limb, half in { [right] = rightHalf :: Model, [leftLimb] = leftHalf :: Model } do
+		--[[ Each half against its OWN grip and its own hand. holdPose returns
+		     where this model's pivot has to go for its Grip to land on the
+		     target, so running it per half is what puts two guns in two places
+		     rather than one gun twice. ]]
+		half:PivotTo(holdPose(half, handGrip(limb)))
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = limb
+		weld.Part1 = half.PrimaryPart
+		weld.Parent = half.PrimaryPart
+	end
+
+	--[[ Parented last, like `place`, so neither half is ever a loose unanchored
+	     body in the workspace for a physics step. ]]
+	model.Parent = character
+	return true
+end
+
 --[[ Builds and mounts one thing. `kind` is what HAND_SLOTS names, or "Medkit"
      for the back. Returns false when there is nothing sensible to show, which is
      not an error — see buildKitModel. ]]
@@ -626,6 +695,14 @@ local function attach(player: Player, mount: string, kind: string, itemId: strin
 		     unaffected, so nobody is ever left in the dark by it. ]]
 		if kind == "Weapon" then
 			addBeam(model)
+		end
+		--[[ A pair goes to two hands. Tried first and falling through on any
+		     reason it cannot — no left hand on the rig, a model that reached
+		     here without both halves — because a pair mounted one-handed is a
+		     gun that looks wrong, and no mount at all is a player holding
+		     nothing. ]]
+		if model:GetAttribute(DUAL_ATTRIBUTE) == true and placeDual(character, limb, model, mount) then
+			return model
 		end
 		local pose = holdPose(model, handGrip(limb))
 		return if place(character, limb, model, pose, mount) then model else nil

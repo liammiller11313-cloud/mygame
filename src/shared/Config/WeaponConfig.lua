@@ -124,6 +124,21 @@ export type WeaponDefinition = {
 	     the other way would be a design change disguised as a type. ]]
 	ignites: boolean?,
 	--[[
+		Whether this is a PAIR — two guns, one in each hand.
+
+		A declaration rather than something the asset pipeline works out. The
+		geometry alone cannot decide it: a rifle whose scope was modelled as a
+		child Model containing a part called Handle looks identical from the
+		outside, and treating that as a dual-wield would break one gun to fix
+		another. So the config says which weapons are pairs and the pipeline
+		checks whether the art can actually be split; when it cannot, the pair
+		falls back to one gun in one hand and says so in the log.
+
+		The magazine is the PAIR'S, not one gun's — see the note on the dual
+		pistols' magSize. Nothing else in the weapon table changes meaning.
+	]]
+	dualWield: boolean?,
+	--[[
 		Whether this weapon is FOUND rather than bought.
 
 		A floor-only weapon is deliberately absent from EconomyConfig.Catalogue —
@@ -461,10 +476,21 @@ WeaponConfig.Definitions = {
 		slot = Enums.Slot.Secondary,
 		class = "Pistol",
 		fireMode = "Semi",
+		--[[ Two guns, one in each hand. The model is two child models with a
+		     Handle each; the pipeline splits them, the world model welds one to
+		     each hand, and the viewmodel poses an arm on each and alternates the
+		     muzzle. See PlaceholderFactory.adoptDualWeapon. ]]
+		dualWield = true,
 
 		damage = 19,
 		rpm = 620,
 		pellets = 1,
+		--[[ Fifteen for the PAIR, not fifteen each. Firing alternates hands, so
+		     this is seven or eight trigger pulls per gun before the reload — and
+		     that reload racks both at once, which is what makes 2.2 seconds fair
+		     for two magazines. Doubling it because there are two guns would make
+		     this the highest-capacity secondary in the game by a wide margin and
+		     the .357 pointless. ]]
 		magSize = 15,
 		reserveMax = -1,
 		penetration = 1,
