@@ -1,6 +1,6 @@
 # Alpha Testing 02
 
-Build stamp **`2026-09-06v-alpha02`**. It is printed in the server log at boot
+Build stamp **`2026-09-06w-alpha02`**. It is printed in the server log at boot
 and is the fastest way to tell whether the place you are in is the build you
 think it is — check it first, before reporting anything.
 
@@ -221,7 +221,7 @@ X and got Y" always is.
 ### A. Does it boot
 
 1. Press Play. Read the server banner. → **`0 failed` on both lines**, and the
-   stamp reads `2026-09-06v-alpha02`.
+   stamp reads `2026-09-06w-alpha02`.
 2. Open the client console (F9). → `[ImageCheck]`, `[SoundCheck]` and
    `[PlaceholderFactory]` each report. Grey-boxed entries are fine; **failures
    are not**.
@@ -262,11 +262,31 @@ These are the changes with the least prior testing, so they come first.
    one.** This is the change most likely to cost performance and the least
    possible to verify by reasoning.
 
-### E. The other two schemes
+### E. The four fixes that landed after this brief was written
 
-9. **Controller.** Fire, aim, reload, the D-pad slots. Tap **View** → pause
-   menu. *Hold* **View** → ability cards, and no pause menu on release.
-10. **Phone.** The eight-button pad, and the hotbar tiles as slot buttons —
+These are the newest code in the build and therefore the least exercised.
+
+11. **Join an active match** — ideally from the console, which is where it was
+    reported. → You arrive **standing on the floor**, not through it. You may
+    stand still for a beat while the map finishes arriving; that is the fix
+    working, not a freeze. If it lasts more than a second or two, say so.
+12. **The dual pistols.** Buy them, look down. → **Two guns, one per hand**, an
+    arm on each, spread apart rather than overlapping. Fire: the hands
+    **alternate**, and the flash and tracer come from the gun that fired. Look
+    at a teammate holding them — one pistol per hand there too.
+13. **The tactical shotgun in the hand.** → Held at the wrist of the stock, not
+    by its middle with the stock through the forearm. Check the client console
+    for a `[PlaceholderFactory]` line naming models whose grip had to be
+    guessed — that list is what to add a `Grip` attachment to.
+14. **PS5 touchpad.** Move the cursor in a menu → the orange highlight goes away
+    and the cursor clicks what it is over. Touch the stick → the highlight comes
+    straight back. Tap the touchpad → glyphs stay **console**, not keyboard.
+
+### F. The other two schemes
+
+15. **Controller.** Fire, aim, reload, the D-pad slots. Tap **View** → pause
+    menu. *Hold* **View** → ability cards, and no pause menu on release.
+16. **Phone.** The eight-button pad, and the hotbar tiles as slot buttons —
     one tap selects, a second tap on a consumable uses it. Sprint is always on;
     there is no button and there should not be one.
 
@@ -285,7 +305,11 @@ be *wrong*, not by how bad it would be.
    from the floor, in a dark room, before anybody explains it?
 3. **Frame rate during a horde on a phone**, now that bodies persist.
 4. **The flare gun's damage.** Twelve is deliberately almost nothing.
-5. **Is anything missing now the bile jar is gone?** It was the short-range
+5. **The dual pistols' spread and cant in first person.** How far apart the two
+   guns sit, and their outward angle, were chosen by arithmetic rather than by
+   looking at them. Too close, too far, or wrongly angled is a one-line fix —
+   `DUAL_SPREAD`, `DUAL_CANT`, `DUAL_FORWARD` in `ViewmodelController`.
+6. **Is anything missing now the bile jar is gone?** It was the short-range
    "get them off me" panic button. Between the pipe bomb and the molotov I do
    not think there is a hole, but that is a guess and a session will settle it.
 
