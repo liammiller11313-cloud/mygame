@@ -41,6 +41,7 @@ local LAYOUT = UITheme.Layout
 local PANEL = UITheme.Panel
 local BRACKET = UITheme.Bracket
 local GRIME = UITheme.Grime
+local STRIPE = UITheme.Stripe
 local TEXT = UITheme.TextSize
 
 local Widgets = {}
@@ -187,6 +188,54 @@ function Widgets.brackets(frame: GuiObject, color: Color3?): ()
 	end
 end
 
+--[[
+	A band of quarantine tape — hard-edged diagonal caution stripes.
+
+	Built from a UIGradient rather than an image, which matters for three
+	reasons: it needs no uploaded asset (and this place's asset permissions are
+	exactly the thing that has been failing), it cannot arrive late or moderated,
+	and it rescales with whatever it is parented to instead of tiling wrong.
+
+	The stripes are hard-edged because a gradient is not: each band is TWO
+	keypoints at the same colour, one at its start and one a hair before the next
+	band begins, so the interpolation between them has nowhere to go. That is
+	also what caps the count — Roblox allows twenty keypoints on a ColorSequence
+	and this spends two per band.
+]]
+--[[ How far before the next band a band's second keypoint sits. Small enough to
+     read as a hard edge, large enough that two keypoints never collide into the
+     same offset, which Roblox rejects outright. ]]
+local STRIPE_EPSILON = 0.004
+
+function Widgets.hazardBand(parent: Instance, name: string, height: number?): Frame
+	local band = Widgets.frame(parent, name, STRIPE.Caution, STRIPE.Transparency)
+	band.Size = UDim2.new(1, 0, 0, height or STRIPE.Height)
+
+	local keys: { ColorSequenceKeypoint } = {}
+	local count = STRIPE.Count
+	for index = 0, count - 1 do
+		local tone = if index % 2 == 0 then STRIPE.Caution else STRIPE.Dark
+		local from = index / count
+		local to = (index + 1) / count
+		--[[ The first keypoint must sit exactly at 0 and the last exactly at 1,
+		     so the epsilon is applied only to the edges that have a neighbour. ]]
+		if index > 0 then
+			from += STRIPE_EPSILON
+		end
+		if index < count - 1 then
+			to -= STRIPE_EPSILON
+		end
+		table.insert(keys, ColorSequenceKeypoint.new(from, tone))
+		table.insert(keys, ColorSequenceKeypoint.new(to, tone))
+	end
+
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new(keys)
+	gradient.Rotation = STRIPE.Rotation
+	gradient.Parent = band
+	return band
+end
+
 --[[ The grime gradient. One call, one instance, and the panel stops being a flat
      value — see UITheme.Grime for why it is deliberately almost invisible. ]]
 function Widgets.grime(frame: GuiObject): UIGradient
@@ -248,9 +297,14 @@ function Widgets.panel(parent: Instance, trove: any, titleText: string, onClose:
 	Widgets.hover(trove, close, closeLabel)
 	trove:connect(close.Activated, onClose)
 
-	local rule = Widgets.frame(frame, "HeadRule", COLOR.BorderBright, 0)
+	--[[ Tape, not a rule. This was a two-pixel bright line, which is the header
+	     underline of every dark app ever made. Every modal in the game comes
+	     through this function, so one change here puts a band of caution stripes
+	     under the title of the shop, the loadout, settings, career and play at
+	     once — and it is the single loudest thing available for saying what kind
+	     of game this is. ]]
+	local rule = Widgets.hazardBand(frame, "HeadRule")
 	rule.Position = UDim2.fromOffset(0, PANEL.HeaderHeight)
-	rule.Size = UDim2.new(1, 0, 0, LAYOUT.BorderThickness)
 
 	return { scrim = scrim, frame = frame, title = title, close = close, rule = rule }
 end

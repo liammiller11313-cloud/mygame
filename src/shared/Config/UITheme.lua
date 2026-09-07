@@ -26,9 +26,30 @@ local UITheme = {}
 -- look radioactive. These are dark enough to read as black and warm enough to sit
 -- under the accent without fighting it.
 UITheme.Color = table.freeze({
-	Background = Color3.fromRGB(7, 6, 6),
-	Panel = Color3.fromRGB(13, 12, 11),
-	PanelRaised = Color3.fromRGB(22, 20, 18),
+	--[[
+		THE SURFACES, AND WHY THEY ARE NOT NEUTRAL ANY MORE.
+
+		These were 7,6,6 / 13,12,11 / 22,20,18 — near-black with two points of
+		warmth in them, which at these values is indistinguishable from grey. The
+		interface read as a well-made dark app, and a well-made dark app is what
+		you put a settings screen in, not a city that has stopped working.
+
+		Six points of spread between the channels instead of two reads as damp
+		concrete and old khaki rather than as a value. It is still dark; it is no
+		longer neutral, and that difference is most of what "grubbier" means when
+		you cannot afford a texture.
+
+		The ceiling on this is contrast, not taste. Every step lighter costs the
+		text and the border drawn on top: at 27,25,19 the border falls back under
+		the 3:1 at which an edge is perceivable, undoing the last pass. 21,20,15
+		is the lightest, dirtiest fill that keeps TextDim at 4.53:1 and Border at
+		3.13:1 — both still over the line.
+	]]
+	Background = Color3.fromRGB(11, 10, 8),
+	Panel = Color3.fromRGB(21, 20, 15),
+	--[[ A real step this time. It was 1.08:1 against the panel, which is not a
+	     raised surface, it is the same surface with a rounding error. ]]
+	PanelRaised = Color3.fromRGB(34, 32, 25),
 	--[[
 		The line around everything, and it was invisible.
 
@@ -174,8 +195,12 @@ UITheme.Color = table.freeze({
 	frames.
 ]]
 UITheme.Bracket = table.freeze({
-	Length = 16,
-	Thickness = 2,
+	--[[ Bigger than they were. 16x2 corner ticks on a 700px panel are a detail
+	     nobody registers; 24x3 is a frame the eye reads as deliberate, which is
+	     the difference between a panel that HAS brackets and a panel that looks
+	     bracketed. ]]
+	Length = 24,
+	Thickness = 3,
 })
 
 --[[
@@ -192,8 +217,43 @@ UITheme.Bracket = table.freeze({
 ]]
 UITheme.Grime = table.freeze({
 	TopTransparency = 0.0,
-	BottomTransparency = 0.22,
+	--[[ 0.38, not 0.22. The gradient existed to stop a panel being one flat
+	     value and at 0.22 it was doing that only to an instrument — the point of
+	     a surface that darkens toward the floor is that somebody SEES it. ]]
+	BottomTransparency = 0.38,
 	Rotation = 90,
+})
+
+--[[
+	── QUARANTINE TAPE ─────────────────────────────────────────────────────────
+
+	Diagonal caution stripes, drawn under the title of every panel in the game.
+
+	This is the fourth deliberate break in the three-colour rule, after the
+	survivor colours, the bile and the hazard green, and it is the only one that
+	is decoration rather than information. It earns that on genre alone: black
+	and yellow diagonals are the most recognisable "this area is not safe"
+	signal there is, they belong to the same world as a boarded window and a
+	spray-painted arrow, and one band of them under a panel title does more to
+	say what kind of game this is than any amount of restraint elsewhere.
+
+	Drawn with a UIGradient rather than a texture — hard-edged keypoint pairs,
+	rotated — so it costs no asset, cannot fail to load, and rescales with the
+	panel. Count is capped by Roblox's twenty-keypoint limit on a ColorSequence,
+	which is two per band.
+]]
+UITheme.Stripe = table.freeze({
+	Caution = Color3.fromRGB(214, 176, 38),
+	--[[ Not the panel colour. The dark half of the tape is darker than anything
+	     around it, which is what stops the band reading as a row of yellow
+	     dashes floating on the header. ]]
+	Dark = Color3.fromRGB(16, 15, 11),
+	Count = 8,
+	Rotation = 45,
+	Height = 6,
+	--[[ A hair of transparency. Full-strength yellow at this size pulls the eye
+	     off the title it is meant to sit under. ]]
+	Transparency = 0.12,
 })
 
 --[[

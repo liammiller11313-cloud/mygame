@@ -1,6 +1,6 @@
 # Alpha Testing 02
 
-Build stamp **`2026-09-06z-alpha02`**. It is printed in the server log at boot
+Build stamp **`2026-09-07a-alpha02`**. It is printed in the server log at boot
 and is the fastest way to tell whether the place you are in is the build you
 think it is — check it first, before reporting anything.
 
@@ -270,7 +270,7 @@ X and got Y" always is.
 ### A. Does it boot
 
 1. Press Play. Read the server banner. → **`0 failed` on both lines**, and the
-   stamp reads `2026-09-06z-alpha02`.
+   stamp reads `2026-09-07a-alpha02`.
 2. Open the client console (F9). → `[ImageCheck]`, `[SoundCheck]` and
    `[PlaceholderFactory]` each report. Grey-boxed entries are fine; **failures
    are not**.
@@ -333,32 +333,42 @@ readability problems fixed.
 14. **The map vote and the loadout.** → "The map you voted for" vs "a map
     somebody voted for", and "the slate you are editing" vs "the active slate",
     are now different colours. They were the same one.
+15. **Open any menu — shop, loadout, settings, career, play.** → A band of
+    **diagonal quarantine tape** under the title, on every one of them. It is
+    drawn with a gradient rather than an image, so it needs no uploaded asset
+    and cannot fail to load — which matters given the asset permissions above.
+16. **The panels themselves.** → Dirtier. The surfaces were near-black with two
+    points of warmth in them, which at that value is grey; they now carry six,
+    which reads as damp concrete rather than as a dark app. The corner brackets
+    are half again as large and the grime gradient is nearly twice as strong.
+    **This is the visible half of the UI work** — the last pass was measurable
+    and nearly invisible, this one is meant to be seen.
 
 ### F. The four fixes that landed before that
 
 These are the newest code in the build and therefore the least exercised.
 
-15. **Join an active match** — ideally from the console, which is where it was
+17. **Join an active match** — ideally from the console, which is where it was
     reported. → You arrive **standing on the floor**, not through it. You may
     stand still for a beat while the map finishes arriving; that is the fix
     working, not a freeze. If it lasts more than a second or two, say so.
-16. **The dual pistols.** Buy them, look down. → **Two guns, one per hand**, an
+18. **The dual pistols.** Buy them, look down. → **Two guns, one per hand**, an
     arm on each, spread apart rather than overlapping. Fire: the hands
     **alternate**, and the flash and tracer come from the gun that fired. Look
     at a teammate holding them — one pistol per hand there too.
-17. **The tactical shotgun in the hand.** → Held at the wrist of the stock, not
+19. **The tactical shotgun in the hand.** → Held at the wrist of the stock, not
     by its middle with the stock through the forearm. Check the client console
     for a `[PlaceholderFactory]` line naming models whose grip had to be
     guessed — that list is what to add a `Grip` attachment to.
-18. **PS5 touchpad.** Move the cursor in a menu → the orange highlight goes away
+20. **PS5 touchpad.** Move the cursor in a menu → the orange highlight goes away
     and the cursor clicks what it is over. Touch the stick → the highlight comes
     straight back. Tap the touchpad → glyphs stay **console**, not keyboard.
 
 ### G. The other two schemes
 
-19. **Controller.** Fire, aim, reload, the D-pad slots. Tap **View** → pause
+21. **Controller.** Fire, aim, reload, the D-pad slots. Tap **View** → pause
     menu. *Hold* **View** → ability cards, and no pause menu on release.
-20. **Phone.** The eight-button pad, and the hotbar tiles as slot buttons —
+22. **Phone.** The eight-button pad, and the hotbar tiles as slot buttons —
     one tap selects, a second tap on a consumable uses it. Sprint is always on;
     there is no button and there should not be one.
 
