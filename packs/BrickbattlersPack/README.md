@@ -24,6 +24,9 @@ because they reference no game module.
 | `SuperballClient.lua` | LocalScript | `ClassicSuperball` — replaces `Client` |
 | `PelletScript.lua` | Script (Disabled) | `ClassicSlingshot` — replaces `PelletScript` |
 | `CannonBall.lua` | Script (Disabled) | `ClassicSuperball` — replaces `CannonBall` |
+| `RocketScript.lua` | Script (Disabled) | `RocketLauncher` — replaces `RocketScript` |
+| `Paintball.lua` | Script (Disabled) | `ClassicPaintballGun` — replaces `Paintball` |
+| `Bomb.lua` | Script (Disabled) | `ClassicTimebomb` — replaces `Bomb` |
 
 The last two stay **Disabled** in the tool. They are templates cloned into each
 projectile and enabled there, which is why they are greyed out in Explorer.
@@ -134,6 +137,48 @@ on the following line then runs against a destroyed instance.
 
 `PelletScript` has the same loop written correctly — it clears the TAG — which
 is how the difference shows up. `CannonBall.lua` here destroys the tag.
+
+## The other three projectile scripts
+
+`CannonBall`'s Humanoid-destroying tag loop turned out to be a **one-off, not a
+pattern**. `RocketScript`, `Paintball` and `Bomb` all clone the creator tag
+correctly. Each had something else.
+
+**`RocketScript` — a landmine and a crash.** `error = position - shaft.Position`
+with no `local` overwrote Lua's own `error()` for the whole script; nothing
+called it, so it worked, and any line added later that tried to raise an error
+would have tried to call a Vector3 instead. Renamed to `drift`. And
+`part.Parent.Humanoid` threw on any part in the world named "Head" whose parent
+has no Humanoid — an explosion radius finds one eventually, and it killed the
+tagging for everyone else in the same blast.
+
+Its 0.1s tag lifetime is unchanged and worth watching during testing: it assumes
+the blast kills instantly, so anyone who survives a fifth of a second is a kill
+that credits nobody.
+
+**`Paintball` — the ball kept killing after it had hit you.** The `wait(2)` sat
+*inside* the Touched handler and before the disconnect, so a ball that hit a
+player stayed in the world, still connected, for two more seconds and could
+damage somebody else. A ball that hit a wall died immediately; only the ones
+that hit people lived on. It also called `untagHumanoid` after that wait, which
+deleted whatever creator tag it found — not necessarily its own — so a player
+shot by someone else in the meantime had *their* claim erased and the kill
+credited nobody. The disconnect happens first now and the tag expires on Debris.
+
+Left alone: the gun permanently repaints anything it hits under ~240 mass, with
+no way back. That is either the point of a paintball gun or a way to redecorate
+a map forever, and which one depends on the game rather than the code.
+
+**`Bomb` — a tag that outlived the bomb.** Its comment read *"tag does not need
+to expire iff all explosions lethal"*, and `untagHumanoid` sat directly beneath
+it, never called from anywhere. The "iff" was load-bearing and untrue: anyone who
+survived the blast wore the bomber's name permanently, so their next death — to
+anything — credited the bomber. Same `part.Parent.Humanoid` crash as the rocket.
+
+Both of the bomb's sound ids are legacy paths with backslashes
+(`rbxasset://sounds\clickfast.wav`). Left exactly as they were, because guessing
+replacement asset ids is inventing content. If the bomb ticks silently, that is
+why, and it is two strings rather than a code problem.
 
 ## What is deliberately NOT capped
 
