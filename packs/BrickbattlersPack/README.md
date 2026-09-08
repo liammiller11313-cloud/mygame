@@ -27,6 +27,7 @@ because they reference no game module.
 | `RocketScript.lua` | Script (Disabled) | `RocketLauncher` — replaces `RocketScript` |
 | `Paintball.lua` | Script (Disabled) | `ClassicPaintballGun` — replaces `Paintball` |
 | `Bomb.lua` | Script (Disabled) | `ClassicTimebomb` — replaces `Bomb` |
+| `SwordScript.lua` | Script | `ClassicSword` — replaces `SwordScript` |
 
 The last two stay **Disabled** in the tool. They are templates cloned into each
 projectile and enabled there, which is why they are greyed out in Explorer.
@@ -179,6 +180,45 @@ Both of the bomb's sound ids are legacy paths with backslashes
 (`rbxasset://sounds\clickfast.wav`). Left exactly as they were, because guessing
 replacement asset ids is inventing content. If the bomb ticks silently, that is
 why, and it is two strings rather than a code problem.
+
+## The sword
+
+It needed no security work at all, which is worth recording. Alone in the pack
+it has no RemoteEvent and no RemoteFunction — it runs off `Tool.Activated` and
+`Handle.Touched`, both of which the engine raises only for the holder. There is
+no packet to forge and no thread to park. It even checks the `RightGrip` weld
+before it will damage anything, which the other six do not.
+
+It had simply never dealt its slash damage.
+
+```lua
+if (Tick - LastAttack < 0.2) then Lunge() else Attack() end
+LastAttack = Tick
+--wait(0.5)
+Damage = DamageValues.BaseDamage
+```
+
+`Attack()` sets `Damage` to `SlashDamage` and returns without yielding, and the
+next line puts it straight back. The window where a slash is worth 10 was zero
+frames wide, so **every slash this sword has landed did 5**, and
+`DamageValues.SlashDamage` was dead config.
+
+The commented-out `wait(0.5)` is the original, and restoring it fixes the slash
+by breaking the lunge: `Tool.Enabled` stays false for its duration, and the
+lunge needs a *second click inside 0.2 seconds* — impossible while disabled.
+Whoever commented it out was fixing that and traded one bug for the other.
+
+Both work now because the damage window stopped being the same thing as the
+cooldown. Damage reverts on its own timer, tokened so a lunge begun during a
+slash's window is not dropped back to 5 when that window expires. `Tool.Enabled`
+returns immediately after a slash so the double-click still lands; the lunge
+still holds the tool for its grip animation, which is where its cooldown always
+was.
+
+Also: the `Animation` objects were created at the **end** of `Activated`, after
+the attack that wanted them — so `Tool:FindFirstChild("R15Slash")` was nil on the
+first swing and every R15 player's opening slash played nothing. Built once at
+load now.
 
 ## What is deliberately NOT capped
 
