@@ -59,6 +59,7 @@ local Enums = require(Shared.Enums)
 local AmmoConfig = require(Shared.Config.AmmoConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 local ModelFacing = require(Shared.Util.ModelFacing)
+local ViewmodelArms = require(script.Parent.ViewmodelArms)
 local Registry = require(Shared.Util.Registry)
 local Device = require(Shared.Util.Device)
 local Spring = require(Shared.Util.Spring)
@@ -1048,57 +1049,12 @@ local function fitScale(built: Model, pose: Pose)
 end
 
 -- ── arms ────────────────────────────────────────────────────────────────────
+--[[ Cloned from the player's own avatar, in Weapon/ViewmodelArms — every
+     function there takes what it needs as an argument, which is what let it
+     move out of this file. What a given weapon DOES with them is below: a
+     pistol gets one hand, a pair gets two grips, everything else gets a grip
+     and a forestock. ]]
 
---[[
-	First-person arms, cloned from the player's own avatar.
-
-	These are the ACTUAL arm parts off the local character, not stand-ins: the
-	same mesh, the same skin tone, the same shirt texture, the same accessories
-	if any are welded to them. That is the whole point — a player should see their
-	own hands, and a generic pair of blocks in front of a customised avatar reads
-	as somebody else's arms.
-
-	They are built as CHILDREN OF THE WEAPON MODEL rather than posed separately.
-	That is what makes them cheap: the weapon is already moved once per frame with
-	one PivotTo, and anything parented into it inherits every bit of the sway,
-	bob, recoil kick and aim transition without a second line of maths. It also
-	makes them correct by construction — hands welded to a gun cannot drift off
-	it, which is exactly the failure mode of arms driven by their own IK.
-
-	R6 and R15 both work and are handled separately, because they are genuinely
-	different problems: R6 has one part per arm, so the whole limb is a single
-	rigid piece placed at the grip. R15 has three (upper, lower, hand) and they
-	are chained so the arm bends at the elbow.
-
-	The shoulder end runs off the bottom of the frame on purpose. Nobody sees an
-	elbow in a first-person shooter, and solving for one costs geometry for
-	something the player will never look at.
-]]
-
--- Where the hands sit on the weapon, as fractions of its own bounding box, so
--- the same numbers land correctly on a pistol and on a battle rifle.
-local GRIP_BACK = 0.16 -- toward the shooter, along the weapon's length
-local GRIP_DROP = 0.34 -- below the bore line: a grip hangs under the receiver
-local SUPPORT_FORWARD = 0.28 -- the off hand, forward along the handguard
-local SUPPORT_DROP = 0.22
-
--- Which way each arm runs back toward the camera. The right arm comes in tighter
--- than the left because the shooting hand sits behind the gun while the support
--- hand reaches across for it.
---[[
-	Where the two guns of a pair sit, relative to where one gun would.
-
-	SPREAD is sideways, so the two are far enough apart to read as two rather
-	than as one gun with a doubling artefact. FORWARD pushes them out past where
-	a single pistol sits, because two hands at the same depth crowd the middle of
-	the frame and hide what the player is shooting at. CANT is the outward yaw —
-	a few degrees each, which is the difference between "two pistols" and "one
-	pistol mirrored", and it is what makes the pair look held rather than
-	floating.
-
-	Multiplied by the model's own size where that makes sense, so a pair of
-	compacts and a pair of hand cannons both end up in frame.
-]]
 --[[
 	How a pair is arranged in front of the camera. One table, like `dual` below,
 	because this file is near Luau's per-scope local ceiling and three constants
@@ -1119,186 +1075,6 @@ local DUAL = table.freeze({
 	Forward = 0.10,
 	Cant = math.rad(7),
 })
-
-local RIGHT_RUN = Vector3.new(0.42, -0.34, 1.0)
-local LEFT_RUN = Vector3.new(-0.58, -0.30, 1.0)
-
--- Fallback geometry, used only when the character has no arm to clone — which
--- happens for exactly as long as it takes an avatar to load.
-local FALLBACK_HAND = Vector3.new(0.30, 0.30, 0.34)
-local FALLBACK_THICKNESS = 0.27
-local FALLBACK_LENGTH = 1.45
-local FALLBACK_SKIN = Color3.fromRGB(198, 158, 122)
-local FALLBACK_SLEEVE = Color3.fromRGB(64, 62, 58)
-
---[[ R15 arm chain, shoulder outward. Cloning the whole chain is what lets the
-     arm bend rather than being one rigid stick. ]]
-local R15_RIGHT = { "RightUpperArm", "RightLowerArm", "RightHand" }
-local R15_LEFT = { "LeftUpperArm", "LeftLowerArm", "LeftHand" }
-
---[[ Strips a cloned avatar part down to something safe to weld onto a viewmodel:
-     no physics, no queries, no scripts that came in on an accessory. ]]
---[[
-	Strips a cloned avatar part down to something safe to weld onto a viewmodel.
-
-	THE JOINTS MUST GO FIRST, AND ALL OF THEM.
-
-	Roblox's clone semantics keep references that point OUTSIDE the cloned
-	subtree. A limb cloned off a live character therefore arrives still carrying
-	joints whose Part0 is the real body — so anchoring the clone anchors the
-	whole assembly it is still attached to, and the player's actual avatar floats
-	in the air rotating to follow the camera.
-
-	Stripping Motor6D and Weld was not enough: accessories and layered clothing
-	attach with WeldConstraint, and the older rigs use Snap and ManualWeld. So
-	this removes every JointInstance, every WeldConstraint and every Constraint,
-	and only then changes any property.
-]]
-local function prepareArmPart(part: BasePart)
-	for _, descendant in part:GetDescendants() do
-		if
-			descendant:IsA("JointInstance")
-			or descendant:IsA("WeldConstraint")
-			or descendant:IsA("Constraint")
-			or descendant:IsA("LuaSourceContainer")
-			or descendant:IsA("BodyMover")
-		then
-			descendant:Destroy()
-		end
-	end
-
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CastShadow = false
-	part.Massless = true
-end
-
---[[ Clones one avatar part by name, or nil when the character has not loaded it
-     yet. Everything about the original is kept: mesh, texture, colour, size. ]]
-local function cloneAvatarPart(character: Model?, name: string): BasePart?
-	if not character then
-		return nil
-	end
-	local source = character:FindFirstChild(name)
-	if not source or not source:IsA("BasePart") then
-		return nil
-	end
-	local clone = source:Clone()
-	prepareArmPart(clone)
-	return clone
-end
-
---[[
-	Places one arm.
-
-	`handAt` is where the hand goes, in the weapon's own frame. `run` is the
-	direction the rest of the arm travels away from it. The chain is laid out by
-	walking outward from the hand, each segment placed end to end, so an R15 arm
-	comes out bent at roughly the angle a real one would be.
-]]
-local function buildAvatarArm(
-	built: Model,
-	character: Model?,
-	origin: CFrame,
-	handAt: Vector3,
-	run: Vector3,
-	chain: { string },
-	r6Name: string
-)
-	local direction = origin:VectorToWorldSpace(run.Unit)
-	local handWorld = origin * CFrame.new(handAt)
-
-	-- R15 first: three parts, hand at the weapon, upper arm furthest away.
-	local parts: { BasePart } = {}
-	for index = #chain, 1, -1 do
-		local part = cloneAvatarPart(character, chain[index])
-		if part then
-			table.insert(parts, part)
-		end
-	end
-
-	if #parts > 0 then
-		local cursor = 0
-		-- parts[1] is the hand; each subsequent segment is pushed further back
-		-- along `direction` by its own length.
-		for _, part in parts do
-			local length = math.max(part.Size.Y, part.Size.Z, 0.2)
-			local centre = handWorld.Position + direction * (cursor + length * 0.5)
-			-- Limb meshes are authored along their own Y axis, so the arm is
-			-- aimed by pointing that axis down the run direction.
-			part.CFrame = CFrame.lookAt(centre, centre + direction) * CFrame.Angles(math.pi / 2, 0, 0)
-			part.Parent = built
-			cursor += length * 0.92 -- slight overlap, so there is no seam at a joint
-		end
-		return
-	end
-
-	-- R6: one part for the entire arm, placed so its lower end is at the grip.
-	local single = cloneAvatarPart(character, r6Name)
-	if single then
-		local length = math.max(single.Size.Y, 0.4)
-		local centre = handWorld.Position + direction * (length * 0.42)
-		single.CFrame = CFrame.lookAt(centre, centre + direction) * CFrame.Angles(math.pi / 2, 0, 0)
-		single.Parent = built
-		return
-	end
-
-	--[[ Nothing to clone. This is the window between spawning and the avatar
-	     replicating, and it is short — but a weapon floating with no hands at all
-	     during it looks far worse than a plain pair, so one is built. ]]
-	local hand = Instance.new("Part")
-	hand.Name = "FL_Hand"
-	hand.Size = FALLBACK_HAND
-	hand.Color = FALLBACK_SKIN
-	hand.Material = Enum.Material.SmoothPlastic
-	prepareArmPart(hand)
-	hand.CFrame = handWorld
-	hand.Parent = built
-
-	local mid = handWorld.Position + direction * (FALLBACK_LENGTH * 0.5 - 0.1)
-	local forearm = Instance.new("Part")
-	forearm.Name = "FL_Forearm"
-	forearm.Size = Vector3.new(FALLBACK_THICKNESS, FALLBACK_THICKNESS, FALLBACK_LENGTH)
-	forearm.Color = FALLBACK_SLEEVE
-	forearm.Material = Enum.Material.Fabric
-	prepareArmPart(forearm)
-	forearm.CFrame = CFrame.lookAt(mid, mid + direction)
-	forearm.Parent = built
-end
-
---[[
-	Safety net for the one failure this system can produce that ruins a round.
-
-	Cloning a limb off a LIVE character and anchoring the copy is only safe while
-	every joint the copy carries has been removed — Roblox preserves references
-	that point outside a cloned subtree, so a surviving joint anchors the real
-	body through it, and the player floats in the air rotating to follow the
-	camera. prepareArmPart strips every joint type there is, and this checks that
-	it worked rather than trusting it.
-
-	Cheap: a handful of parts, once per weapon swap. And it repairs rather than
-	just complaining, because a player who cannot walk does not care whose fault
-	it was.
-]]
-local function releaseCharacter(character: Model?)
-	if not character then
-		return
-	end
-	for _, part in character:GetDescendants() do
-		if part:IsA("BasePart") and part.Anchored then
-			part.Anchored = false
-			warn(
-				string.format(
-					"[ViewmodelController] %s was left anchored by an arm clone and has been released. "
-						.. "A joint type is getting past prepareArmPart.",
-					part:GetFullName()
-				)
-			)
-		end
-	end
-end
 
 --[[
 	Places both arms on a built weapon.
@@ -1390,8 +1166,20 @@ end
 local function buildDualArms(built: Model, character: Model?, drop: number, depth: number)
 	for _, entry in
 		{
-			{ half = dual.right, run = RIGHT_RUN, chain = R15_RIGHT, r6 = "Right Arm", side = 1 },
-			{ half = dual.left, run = LEFT_RUN, chain = R15_LEFT, r6 = "Left Arm", side = -1 },
+			{
+				half = dual.right,
+				run = ViewmodelArms.RightRun,
+				chain = ViewmodelArms.RightChain,
+				r6 = "Right Arm",
+				side = 1,
+			},
+			{
+				half = dual.left,
+				run = ViewmodelArms.LeftRun,
+				chain = ViewmodelArms.LeftChain,
+				r6 = "Left Arm",
+				side = -1,
+			},
 		}
 	do
 		local half = entry.half
@@ -1401,11 +1189,11 @@ local function buildDualArms(built: Model, character: Model?, drop: number, dept
 			     calls differ only in where the hand goes and which limbs are
 			     cloned. ]]
 			local at = built:GetPivot():ToObjectSpace(half:GetPivot()).Position
-			buildAvatarArm(
+			ViewmodelArms.build(
 				built,
 				character,
 				built:GetPivot(),
-				Vector3.new(at.X, at.Y - drop * GRIP_DROP, at.Z + depth * GRIP_BACK),
+				Vector3.new(at.X, at.Y - drop * ViewmodelArms.GripDrop, at.Z + depth * ViewmodelArms.GripBack),
 				entry.run,
 				entry.chain,
 				entry.r6
@@ -1428,13 +1216,13 @@ local function buildArms(built: Model, definition: any)
 	local drop = math.max(size.Y, 0.25)
 	local character = player.Character
 
-	buildAvatarArm(
+	ViewmodelArms.build(
 		built,
 		character,
 		origin,
-		Vector3.new(0.02, -drop * GRIP_DROP, depth * GRIP_BACK),
-		RIGHT_RUN,
-		R15_RIGHT,
+		Vector3.new(0.02, -drop * ViewmodelArms.GripDrop, depth * ViewmodelArms.GripBack),
+		ViewmodelArms.RightRun,
+		ViewmodelArms.RightChain,
 		"Right Arm"
 	)
 
@@ -1442,7 +1230,7 @@ local function buildArms(built: Model, definition: any)
 		One hand for a pistol, and one for melee.
 
 		The support hand is placed against a GUN'S geometry — forward along the
-		model by SUPPORT_FORWARD, where a forestock is. A blade has nothing there,
+		model by ViewmodelArms.SupportForward, where a forestock is. A blade has nothing there,
 		so a two-handed melee put a floating left hand somewhere past the tip.
 		Nobody saw it while the melee pose was off the bottom of the frame; the
 		moment that was fixed it was the first thing on screen.
@@ -1458,7 +1246,7 @@ local function buildArms(built: Model, definition: any)
 	     for a second hand to do. ]]
 	if dual.left and dual.right then
 		buildDualArms(built, character, drop, depth)
-		releaseCharacter(character)
+		ViewmodelArms.release(character)
 		return
 	end
 
@@ -1466,17 +1254,17 @@ local function buildArms(built: Model, definition: any)
 		return
 	end
 
-	buildAvatarArm(
+	ViewmodelArms.build(
 		built,
 		character,
 		origin,
-		Vector3.new(-0.04, -drop * SUPPORT_DROP, -depth * SUPPORT_FORWARD),
-		LEFT_RUN,
-		R15_LEFT,
+		Vector3.new(-0.04, -drop * ViewmodelArms.SupportDrop, -depth * ViewmodelArms.SupportForward),
+		ViewmodelArms.LeftRun,
+		ViewmodelArms.LeftChain,
 		"Left Arm"
 	)
 
-	releaseCharacter(character)
+	ViewmodelArms.release(character)
 end
 
 --[[ Every model gets a Muzzle. When the art did not ship one it is invented at
