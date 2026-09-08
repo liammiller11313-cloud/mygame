@@ -1109,9 +1109,35 @@ function ShopController:start()
 	     without the player touching anything. Redrawn here rather than polled. ]]
 	local passStore = passes()
 	if passStore then
+		--[[ Remembered so a purchase can be CELEBRATED rather than merely
+		     redrawn. A Robux buy has no PurchaseResult to answer it — the money
+		     changes hands at Roblox and PassService pushes the new ownership —
+		     so without watching for the not-owned → owned edge, the only sign
+		     anything happened is a button quietly relabelling itself. The
+		     Dollars path says PURCHASED out loud; this should too. ]]
+		local ownedBefore: { [string]: boolean } = {}
+		for _, pass in PassConfig.Passes do
+			ownedBefore[pass.id] = passStore:owns(pass.id)
+		end
+
 		trove:add(passStore.changed:connect(function()
+			local bought = false
+			for _, pass in PassConfig.Passes do
+				local now = passStore:owns(pass.id)
+				if now and not ownedBefore[pass.id] then
+					bought = true
+				end
+				ownedBefore[pass.id] = now
+			end
+
+			--[[ The edge is tracked even with the shop shut, so the flags cannot
+			     drift while it is closed and fire a stale PURCHASED on reopen. ]]
 			if not state.open then
 				return
+			end
+			if bought then
+				UiSound.play(AudioConfig.UI.WaveCleared)
+				showMessage("PURCHASED", COLOR.Accent)
 			end
 			refreshRows()
 			refreshBuy()

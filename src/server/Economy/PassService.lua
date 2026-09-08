@@ -43,6 +43,7 @@
 
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -53,10 +54,25 @@ local Trove = require(Shared.Util.Trove)
 
 local PassService = {}
 
---[[ How long to wait before asking Roblox again after a call that threw. Long
-     enough that an outage is not hammered, short enough that a player who was
-     unlucky on join does not spend their session locked out. ]]
-local RETRY_AFTER = 8
+--[[
+	Retry, and the sweep that drives it.
+
+	Caching a failure as "unknown rather than no" is only half an answer. The
+	first version of this file stopped there, and the half it was missing is the
+	half that matters: refreshAll ran once, on join, and nothing ever asked
+	again — so a player whose check threw at exactly the wrong moment spent their
+	whole session watching CHECKING… on a pass they could not buy. That is a
+	worse outcome than the false-cache this file's header warns about, arrived at
+	from the opposite direction.
+
+	So the sweep re-asks. Backoff doubles per consecutive failure so a genuine
+	Roblox outage is not hammered by every player on the server at once, and caps
+	so a long outage still recovers within a minute of ending rather than backing
+	off into next week.
+]]
+local RETRY_BASE = 8
+local RETRY_MAX = 60
+local SWEEP_INTERVAL = 2
 
 --[[ And a floor between prompt requests, per player. The prompt itself is
      Roblox's UI and it cannot be spammed into anything harmful, but a client
@@ -69,6 +85,7 @@ local PROMPT_THROTTLE = 1.5
      hold their own record alive. ]]
 local state = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: { [string]: boolean } }
 local retryAt = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: { [string]: number } }
+local retryFor = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: { [string]: number } }
 local lastPrompt = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: number }
 local inFlight = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: { [string]: boolean } }
 
@@ -110,6 +127,13 @@ end
 	stops a client that fires the remote repeatedly from doing the same.
 ]]
 local function refresh(player: Player, pass: PassConfig.Pass): boolean?
+	--[[ Left already. Checked before ownedTable, which would otherwise recreate
+	     the record PlayerRemoving has just cleared — and the sweep runs on a
+	     spawned thread, so a player can leave between its turn and its call. ]]
+	if player.Parent == nil then
+		return nil
+	end
+
 	local owned = ownedTable(player)
 	if owned[pass.id] ~= nil then
 		return owned[pass.id]
@@ -143,13 +167,39 @@ local function refresh(player: Player, pass: PassConfig.Pass): boolean?
 			clocks = {}
 			retryAt[player] = clocks
 		end
-		clocks[pass.id] = os.clock() + RETRY_AFTER
+		local waits = retryFor[player]
+		if not waits then
+			waits = {}
+			retryFor[player] = waits
+		end
+		waits[pass.id] = math.min((waits[pass.id] or RETRY_BASE) * 2, RETRY_MAX)
+		clocks[pass.id] = os.clock() + waits[pass.id]
 		warn(string.format("PassService: ownership check failed for %s (%s)", pass.id, tostring(result)))
 		return nil
 	end
 
+	-- A success clears the backoff, so one bad minute does not slow the next.
+	local waits = retryFor[player]
+	if waits then
+		waits[pass.id] = nil
+	end
 	owned[pass.id] = result == true
 	return owned[pass.id]
+end
+
+--[[ Whether any pass is still unanswered for this player. The sweep's only
+     question, asked without touching the network. ]]
+local function hasUnknown(player: Player): boolean
+	local owned = state[player]
+	if not owned then
+		return false
+	end
+	for _, pass in PassConfig.Passes do
+		if owned[pass.id] == nil then
+			return true
+		end
+	end
+	return false
 end
 
 --[[ The public question. Returns false for "asked, and no" AND for "do not know
@@ -168,12 +218,30 @@ function PassService:isKnown(player: Player, passId: string): boolean
 	return owned ~= nil and owned[passId] ~= nil
 end
 
---[[ Every pass, resolved and published. Called on join and after a purchase. ]]
-function PassService:refreshAll(player: Player)
+--[[ Every pass, resolved and published. Called on join, by the sweep, and after
+     a purchase. Publishes only when an answer actually changed: a sweep that
+     resolves nothing — the common case once everybody is settled — should cost
+     no traffic at all. ]]
+function PassService:refreshAll(player: Player, force: boolean?)
+	local before = {}
+	local owned = state[player]
+	if owned then
+		for _, pass in PassConfig.Passes do
+			before[pass.id] = owned[pass.id]
+		end
+	end
+
+	local changed = false
 	for _, pass in PassConfig.Passes do
 		refresh(player, pass)
+		if state[player] and state[player][pass.id] ~= before[pass.id] then
+			changed = true
+		end
 	end
-	publish(player)
+
+	if changed or force then
+		publish(player)
+	end
 end
 
 local function onJoin(player: Player)
@@ -181,7 +249,10 @@ local function onJoin(player: Player)
 	--[[ Off the join thread. UserOwnsGamePassAsync is a web call per pass, and
 	     a slow one would hold up everything else waiting on PlayerAdded. ]]
 	task.spawn(function()
-		PassService:refreshAll(player)
+		--[[ Forced, because a client that hears nothing keeps its own defaults and
+		     the shop cannot tell "still checking" from "server never answered".
+		     Every later publish is earned by a change. ]]
+		PassService:refreshAll(player, true)
 	end)
 end
 
@@ -194,12 +265,52 @@ function PassService:init()
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		state[player] = nil
 		retryAt[player] = nil
+		retryFor[player] = nil
 		lastPrompt[player] = nil
 		inFlight[player] = nil
 	end)
 end
 
+--[[
+	Re-asks for anybody still unanswered.
+
+	One player per tick rather than all of them: an outage means every player on
+	the server is unknown at once, and asking for all of them in the same frame
+	is the thundering herd that keeps the outage going. Round-robin over the
+	roster spreads it, and each player's own backoff decides whether their turn
+	actually spends a call.
+]]
+local sweepIndex = 1
+local sweepClock = 0
+
+local function sweep(dt: number)
+	sweepClock += dt
+	if sweepClock < SWEEP_INTERVAL then
+		return
+	end
+	sweepClock = 0
+
+	local roster = Players:GetPlayers()
+	if #roster == 0 then
+		sweepIndex = 1
+		return
+	end
+	if sweepIndex > #roster then
+		sweepIndex = 1
+	end
+
+	local player = roster[sweepIndex]
+	sweepIndex += 1
+	if player and hasUnknown(player) then
+		task.spawn(function()
+			PassService:refreshAll(player)
+		end)
+	end
+end
+
 function PassService:start()
+	serviceTrove:connect(RunService.Heartbeat, sweep)
+
 	--[[ The client asks to be shown the prompt rather than calling
 	     PromptGamePassPurchase itself. A client CAN prompt on its own — it is not
 	     a security boundary — but routing it here means one place knows which

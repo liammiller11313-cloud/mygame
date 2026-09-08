@@ -28,6 +28,18 @@
 
 	Roblox already stores this, permanently and authoritatively. PassService asks
 	it once per session and caches the answer in memory. See its header.
+
+	── ⚠ NOTHING READS THIS YET, SO NOTHING IS GRANTED ──────────────────────────
+	The shop can sell Brickbattler's Pack today and buying it changes nothing in
+	the game. `PassService:owns` has no callers: the seven tools live in
+	packs/BrickbattlersPack/ as standalone Roblox Tool scripts and are not wired
+	into this game's weapon pipeline, because whether they become WeaponConfig
+	entries going through BallisticsService or stay classic tools in their own
+	lane is a design decision that has not been made.
+
+	**Do not publish the game pass until it does something.** Selling a hundred
+	Robux for nothing is a refund and a report, not a bug. The plumbing is here
+	and correct; the payload is not.
 ]]
 
 export type Pass = {
