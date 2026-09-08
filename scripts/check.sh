@@ -17,8 +17,13 @@ MODE="${1:-format}"
 # up as a wall of red in Studio at exactly the moment someone is trying to get
 # unblocked. audit.py still only looks at src/ — the cross-references it checks
 # are game modules, and a command-bar script has none of them.
-FILES=$(find src studio-scripts -name '*.lua' -type f 2>/dev/null | sort)
-[ -z "$FILES" ] && { echo "no .lua files under src/ or studio-scripts/"; exit 0; }
+# packs/ is included for the same reason studio-scripts/ is. Those are Tool
+# scripts that live inside a Roblox model rather than in this game's module
+# tree, so audit.py has nothing to cross-reference in them — but a syntax error
+# in one still only surfaces as red text in Studio, at the moment somebody is
+# trying to sell the thing.
+FILES=$(find src studio-scripts packs -name '*.lua' -type f 2>/dev/null | sort)
+[ -z "$FILES" ] && { echo "no .lua files under src/, studio-scripts/ or packs/"; exit 0; }
 
 TOTAL=$(echo "$FILES" | wc -l | tr -d ' ')
 FAILED=0
@@ -66,7 +71,7 @@ echo "all files parse cleanly"
 # instance property.
 if command -v selene >/dev/null 2>&1 && [ -f selene.toml ]; then
   echo
-  selene --config selene.toml --display-style quiet src studio-scripts > /tmp/fl_selene.$$ 2>&1
+  selene --config selene.toml --display-style quiet src studio-scripts packs > /tmp/fl_selene.$$ 2>&1
   # Warnings are informational and printed; only a denied lint fails the build.
   if grep -qE "error\[" /tmp/fl_selene.$$; then
     grep -E "error\[" /tmp/fl_selene.$$ >&2
