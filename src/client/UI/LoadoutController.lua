@@ -503,10 +503,7 @@ local function chooseWeapon(slot: string, weaponId: string)
 	     LoadoutConfig.Slots would send a loadout with no abilities in it — which
 	     sanitise would accept, and which would silently unequip both of them
 	     every time somebody changed a gun. ]]
-	local next_: LoadoutConfig.Loadout = {}
-	for key, value in editing() do
-		next_[key] = value
-	end
+	local next_: LoadoutConfig.Loadout = table.clone(editing())
 	next_[slot] = weaponId
 
 	store:setLoadout(state.editing, next_)

@@ -94,6 +94,27 @@ than a new system.
 
 ## Built since this list was written
 
+### Nobody was ever told who won a Versus match — **fixed**
+
+`_onRoundEnded` computed the match winner at the end of the final half and then
+dropped it on the floor. The local was assigned, compared, and never read: scores
+reset, sides kept, next match began, and no player was told anything. selene had
+been flagging it as an unused variable the whole time, which is what an unused
+variable usually means — not a spare name, a line that was meant to do something.
+
+The per-HALF result was never broken: `_scoreHalf` records it and the payout
+services read it through `wonLastRound`. The hole was only the verdict, which is
+the part players came for.
+
+It is announced per player rather than broadcast, because `SIDE_A` / `SIDE_B` are
+`"A"` and `"B"` — internal names that never reach a client. The only side a player
+knows about is their own, so the message is written from where they were standing:
+**MATCH WON**, **MATCH LOST**, or **MATCH DRAWN**, with the scoreline either way.
+It goes down the existing `Subtitle` channel that RoundService already uses for
+"That's it. We held.", at six seconds rather than a wave callout's 3.2 — the end
+of a two-half match earns more than a wave does.
+
+
 ### The Tongue's drag never had the physics to do it — **fixed**
 
 The Smoker's whole creature is the drag: it grabs somebody out of a group from

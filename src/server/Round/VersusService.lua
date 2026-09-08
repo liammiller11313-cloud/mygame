@@ -95,6 +95,10 @@ local SPAWNING = DirectorConfig.Spawning
 local SIDE_A = "A"
 local SIDE_B = "B"
 
+-- How long the match verdict stays on screen. RoundService says a wave callout
+-- in 3.2s; the end of a two-half match earns more than a wave.
+local MATCH_RESULT_DURATION = 6.0
+
 --[[ Tags and attributes on a ghost model, so an infected client can draw its
      teammates and their intended spawn spots without this service streaming
      positions over a remote every frame. The ghost model is a replicated
@@ -1585,6 +1589,52 @@ function VersusService:_convert(round: any)
 	self:_applyRoles()
 end
 
+--[[
+	Tells everybody how the match finished.
+
+	Two halves of scoring end in a number that decides the whole match, and until
+	this existed that number was computed here and dropped on the floor: scores
+	reset, sides kept, next match began. Nobody was ever told they had won. The
+	per-HALF result was fine — _scoreHalf records it and the payout services read
+	it — so the hole was only ever the verdict, which is the part players came
+	for.
+
+	Addressed per player rather than broadcast, because "A" and "B" are internal
+	names that never reach a client: the only side a player knows about is their
+	own, so the verdict has to be written from where they were standing.
+
+	It goes to the roster — `order` — rather than the whole server, because that
+	is whose match it was. A slot is created and pushed onto `order` in the same
+	breath, so the nil-slot arm below is a guard against a torn roster rather
+	than a case anybody reaches: it prints the scoreline and declines to invent a
+	side for somebody the service cannot place.
+]]
+function VersusService:_announceMatch(final: { [string]: number }, winner: string?)
+	local a, b = final[SIDE_A] or 0, final[SIDE_B] or 0
+	local high, low = math.max(a, b), math.min(a, b)
+
+	for _, player in order do
+		local slot = slots[player]
+		local text
+		if winner == nil then
+			text = string.format("MATCH DRAWN — %d each", a)
+		elseif slot == nil then
+			text = string.format("MATCH OVER — %d to %d", high, low)
+		elseif slot.side == winner then
+			text = string.format("MATCH WON — %d to %d", high, low)
+		else
+			text = string.format("MATCH LOST — %d to %d", low, high)
+		end
+		Remotes.Event.Subtitle:FireClient(player, {
+			speaker = "",
+			text = text,
+			-- Longer than a wave callout on purpose. This is the last thing said
+			-- about a match that took two halves to decide.
+			duration = MATCH_RESULT_DURATION,
+		})
+	end
+end
+
 function VersusService:_onRoundEnded(outcome: string)
 	if not active or half == 0 then
 		return
@@ -1607,6 +1657,8 @@ function VersusService:_onRoundEnded(outcome: string)
 		elseif final[SIDE_B] > final[SIDE_A] then
 			winner = SIDE_B
 		end
+
+		self:_announceMatch(final, winner)
 
 		-- A fresh match on the same server, sides kept, halves and scores reset.
 		half = 0

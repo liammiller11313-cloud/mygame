@@ -1197,7 +1197,7 @@ local function buildPlay()
 	button.Position = UDim2.new(MENU.COLUMN_X, 0, 0.52, 0)
 	button.Size = UDim2.new(MENU.ENTRY_WIDTH, 0, 0, MENU.PLAY_HEIGHT)
 
-	local rule = Widgets.rule(button, "Rule", COLOR.Accent)
+	Widgets.rule(button, "Rule", COLOR.Accent)
 
 	local bar = Widgets.frame(button, "Bar", COLOR.Accent, 0)
 	bar.Position = UDim2.fromOffset(0, LAYOUT.BorderThickness)

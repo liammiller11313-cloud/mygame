@@ -392,18 +392,6 @@ local function setDown(action: string, isDown: boolean)
 	end
 	down[action] = isDown
 
-	--[[ Crouch is a HELD state, not an event, so it rides the down/up edge
-	     rather than forward(). The server owns whether it is granted; this only
-	     reports that the button is down, and reports the release too — including
-	     the release setEnabled() synthesises when a menu opens, which is what
-	     stops a player being stuck crouched behind the scoreboard.
-
-	     In TOGGLE mode only the press says anything, and what it says is the
-	     opposite of what the server currently has. Asking the ATTRIBUTE rather
-	     than remembering our own last request is what makes it self-heal: the
-	     server drops crouch on its own whenever the body stops being upright, so
-	     a client keeping its own flag would come back from a jump believing it
-	     was still crouched and spend the next tap standing up from a stand. ]]
 	--[[ Sprint, on the same down/up edge as crouch. In toggle mode only the press
 	     speaks, and it says the opposite of what we are currently asking for. ]]
 	if action == Action.Sprint then
@@ -416,6 +404,18 @@ local function setDown(action: string, isDown: boolean)
 		end
 	end
 
+	--[[ Crouch is a HELD state, not an event, so it rides the down/up edge
+	     rather than forward(). The server owns whether it is granted; this only
+	     reports that the button is down, and reports the release too — including
+	     the release setEnabled() synthesises when a menu opens, which is what
+	     stops a player being stuck crouched behind the scoreboard.
+
+	     In TOGGLE mode only the press says anything, and what it says is the
+	     opposite of what the server currently has. Asking the ATTRIBUTE rather
+	     than remembering our own last request is what makes it self-heal: the
+	     server drops crouch on its own whenever the body stops being upright, so
+	     a client keeping its own flag would come back from a jump believing it
+	     was still crouched and spend the next tap standing up from a stand. ]]
 	if action == Action.Crouch then
 		if not crouchToggle then
 			Remotes.Event.SetCrouchState:FireServer(isDown)
@@ -427,9 +427,6 @@ local function setDown(action: string, isDown: boolean)
 	local perAction = if isDown then beganSignals[action] else endedSignals[action]
 	if perAction then
 		perAction:fire(action)
-	end
-	if isDown then
-	else
 	end
 end
 

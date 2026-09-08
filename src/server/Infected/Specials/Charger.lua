@@ -494,7 +494,7 @@ local function beginWindUp(
 	state.phaseTime = 0
 end
 
-local function launch(model: Model, brain: any, state: State, root: BasePart)
+local function launch(model: Model, _brain: any, state: State, root: BasePart)
 	-- The heading is taken HERE and never again. Everything about the dodge
 	-- depends on this line being the last decision the Charger makes.
 	local facing = root.CFrame.LookVector

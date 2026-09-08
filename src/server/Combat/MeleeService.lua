@@ -513,7 +513,7 @@ end
 
 --[[ Frees anyone this model has pinned. Only specials pin, so the survivor walk
      is skipped entirely for the commons that make up almost every shove. ]]
-local function releasePinsBy(model: Model, pushDirection: Vector3)
+local function releasePinsBy(model: Model)
 	local kind = model:GetAttribute(Attributes.Infected.Kind)
 	local definition = if typeof(kind) == "string" then InfectedConfig.get(kind) else nil
 	if not definition or not definition.isSpecial then
@@ -869,7 +869,7 @@ function MeleeService:shove(player: Player, origin: Vector3, direction: Vector3)
 		if not firstContact then
 			firstContact = candidate.root.Position
 		end
-		releasePinsBy(candidate.model, push)
+		releasePinsBy(candidate.model)
 	end
 
 	-- One sound for the shove, not one per body: six overlapping thuds from a

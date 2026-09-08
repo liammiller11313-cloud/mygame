@@ -1051,7 +1051,7 @@ end
 ]]
 function RigUtil.jointFrame(
 	parent: BasePart,
-	child: BasePart,
+	_child: BasePart,
 	spec: JointSpec,
 	pivot: Vector3?
 ): (CFrame, boolean)

@@ -406,7 +406,6 @@ local function endReload(finished: boolean)
 	if not state.reload then
 		return
 	end
-	local perShell = state.reload.perShell
 	state.reload = nil
 	local viewmodel = Registry.find("ViewmodelController")
 	if viewmodel then

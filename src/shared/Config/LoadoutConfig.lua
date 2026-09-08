@@ -288,10 +288,7 @@ end
 	actually asked for.
 ]]
 function LoadoutConfig.withAbility(loadout: Loadout?, slot: number, id: string): Loadout
-	local out: Loadout = {}
-	for key, value in (loadout or {}) do
-		out[key] = value
-	end
+	local out: Loadout = table.clone(loadout or {})
 
 	if id ~= LoadoutConfig.NoAbility then
 		for _, key in LoadoutConfig.AbilitySlots do

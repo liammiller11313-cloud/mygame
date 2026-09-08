@@ -400,7 +400,7 @@ local function stepRock(model: Model, state: State, dt: number)
 	end
 end
 
-local function tearRock(model: Model, root: BasePart, state: State)
+local function tearRock(_model: Model, root: BasePart, state: State)
 	local rock = Instance.new("Part")
 	rock.Name = "FL_TankRock"
 	rock.Size = Vector3.one * ROCK_SIZE
@@ -421,7 +421,7 @@ local function tearRock(model: Model, root: BasePart, state: State)
 	Debris:AddItem(rock, ROCK_TEAR_TIME + ROCK_LIFETIME + 1)
 end
 
-local function throwRock(model: Model, root: BasePart, state: State, targetRoot: BasePart)
+local function throwRock(model: Model, _root: BasePart, state: State, targetRoot: BasePart)
 	local rock = state.rock
 	if not rock then
 		return
