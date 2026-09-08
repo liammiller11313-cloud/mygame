@@ -331,6 +331,10 @@ local SIGHT_MAX_OFFSET = 2.5
      called the end of the barrel. ]]
 local MUZZLE_NAMES = ModelFacing.MuzzleNames
 local SIGHT_NAMES = { "Sight", "AimPoint", "AimPart", "Iron" }
+--[[ The attachment PlaceholderFactory stamps on every weapon it prepares, and
+     the one the WORLD model is held by. See pinPivot for why the first-person
+     copy now uses it too. ]]
+local GRIP_NAMES = { "Grip" }
 
 -- Sway. The weapon lags the camera, which is the single cheapest cue that the
 -- thing has mass. Clamped so a flick of the mouse cannot throw it off screen.
@@ -493,6 +497,22 @@ local dual = {
 	     magazine comes out of the right hand, which is the one the player's eye
 	     is already on. ]]
 	nextIsLeft = false,
+	--[[
+		How far right the pair has to move for its MIDDLE to sit where a single
+		gun's would. Zero for everything that is not a pair.
+
+		poseDualHalves leaves the right gun on the pivot and the left one across
+		from it, so the pair's visual centre is half its own spread to the LEFT
+		of where the pose table thinks the weapon is. From the hip that is fine —
+		the gun is off to one side anyway. Aiming is not: the pistol pose pulls x
+		to zero to put the weapon on the centre line, which for a pair centres
+		the RIGHT gun and drags the left one straight across the crosshair.
+
+		Measured rather than typed, because the spread is a multiple of the
+		model's own width and no constant here could be right for two different
+		pairs.
+	]]
+	centreShift = 0,
 }
 local flashPart: BasePart? = nil
 local flashLight: PointLight? = nil
@@ -920,6 +940,46 @@ local function pinPivot(built: Model, host: BasePart, definition: any)
 		then CFrame.Angles(math.rad(-wanted.X), math.rad(-wanted.Y), math.rad(-wanted.Z))
 		else CFrame.identity
 
+	--[[
+		THE GRIP IS THE ANSWER, AND THE WORLD MODEL ALREADY HAD IT.
+
+		Reported from a real game: the tactical shotgun is correct when you look
+		at a teammate holding it and sideways in your own hands. One model, two
+		orientations, which can only mean the two hands are deciding
+		independently — and they were.
+
+		PlaceholderFactory.ensureGrip builds a Grip attachment whose -Z is the
+		barrel it measured and whose up is a roll it derived, both in the
+		handle's own space. CarryVisualService.holdPose then aligns THAT to the
+		hand, so the world model never touches the handle's own rotation and
+		comes out right whatever the artist did with it.
+
+		This function did something else entirely: when it judged a model already
+		forward it returned, leaving the PrimaryPart set — so PivotTo posed the
+		viewmodel by the HANDLE's raw CFrame. A handle rotated relative to the
+		gun body is then a gun rotated on screen, in first person only.
+
+		So take the same answer. Pivoting by the grip makes the two hands agree
+		by construction rather than by both happening to be right, and it is
+		strictly more information than this function was deriving for itself:
+		the grip already encodes the barrel AND the roll, measured once, on the
+		server, by the code that owns the question.
+	]]
+	--[[ A pair has TWO grips, one per gun, and findAttachment would return
+	     whichever half it reached first — which is descendant order, and
+	     therefore not a decision. The right gun wins, for the same reason
+	     adoptDualWeapon makes its handle the model's PrimaryPart: it is the one
+	     every other path in the game treats as the weapon. ]]
+	local rightHalf = built:FindFirstChild("FL_Right")
+	local grip = (rightHalf and findAttachment(rightHalf, GRIP_NAMES)) or findAttachment(built, GRIP_NAMES)
+	if grip and grip.Parent then
+		built.PrimaryPart = nil
+		built.WorldPivot = grip.WorldCFrame * spin
+		return
+	end
+
+	--[[ No grip, which means a grey-box this file built rather than a prepared
+	     weapon. Fall back to measuring, exactly as before. ]]
 	local forward = ModelFacing.forwardOf(built, host, pivot)
 	if ModelFacing.isForward(forward) and spin == CFrame.identity then
 		-- Already pointing the right way and asking for no roll. Old behaviour.
@@ -1318,6 +1378,9 @@ local function poseDualHalves(built: Model): boolean
 	dual.left = left :: Model
 	dual.right = right :: Model
 	dual.nextIsLeft = false
+	-- The right gun sits on the pivot and the left `spread * 2` to its left, so
+	-- the pair's middle is `spread` to the left of it. See dual.centreShift.
+	dual.centreShift = spread
 	return true
 end
 
@@ -1463,6 +1526,7 @@ local function destroyModel()
 	dual.muzzleLeft = nil
 	dual.muzzleRight = nil
 	dual.nextIsLeft = false
+	dual.centreShift = 0
 	flashPart = nil
 	flashLight = nil
 	flashSparks = nil
@@ -2626,6 +2690,12 @@ local function update(deltaTime: number)
 	local sightOffset = current.sightOffset
 	if sightOffset then
 		aimRest -= rotation:VectorToWorldSpace(sightOffset)
+	end
+	--[[ A pair is centred on the pair, not on one of its guns. Applied to the
+	     AIM pose only: from the hip the weapon is deliberately off to one side
+	     and shifting it there would just move the problem. See dual.centreShift. ]]
+	if dual.centreShift ~= 0 then
+		aimRest += rotation:VectorToWorldSpace(Vector3.new(dual.centreShift, 0, 0))
 	end
 
 	local rest = pose.hip:Lerp(aimRest, aimAlpha)
