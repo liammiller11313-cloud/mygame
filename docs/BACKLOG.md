@@ -94,6 +94,79 @@ than a new system.
 
 ## Built since this list was written
 
+### The pack goes through the pipeline, not around it — **decided**
+
+The question was whether Brickbattler's Pack becomes real `WeaponConfig` weapons
+going through `BallisticsService`, or stays classic Roblox tools doing their own
+damage in their own lane.
+
+**It goes through the pipeline, and the second option was never actually
+available.** Not worse — broken. `DamageService` is what feeds `StatsService`,
+which feeds `ProgressionService` and `EconomyService`. A tool calling
+`Humanoid:TakeDamage()` directly means a paying player's kills earn them **no
+XP, no quest progress, no Dollars, and no place on the scoreboard**. They would
+also miss `headshotAlwaysKills` — the rule `WeaponConfig`'s own header calls
+"the game: what makes a horde readable instead of spongy" — so a Common would
+survive a headshot from the pack and die to every other gun in the roster.
+
+Somebody pays a hundred Robux and gets weapons that feel wrong and pay nothing.
+That settles it.
+
+### Four of the seven, and the other three are not weapons
+
+The pack is seven tools; four are weapons in the sense this game means. Forcing
+the rest into a weapon block would be the wrong shape rather than a shortcut:
+
+| | |
+|---|---|
+| **Timebomb** | A throwable. That pipeline exists — ProjectileService, a map family, an inventory slot — and it is where a planted bomb belongs, beside the pipe bomb it is a cousin of. |
+| **Superball** | A thrown bouncing projectile with no barrel and no magazine. Same pipeline, different fuse. |
+| **Trowel** | Builds geometry. Not a weapon in any sense; it wants the barricade system, not the ballistics one. |
+
+`PassConfig.grants` says four, because selling four and describing seven is a
+lie a storefront should not tell.
+
+### Translated, not transplanted, and deliberately sidegrades
+
+The pack's own numbers — 5, 8, 25 — are brickbattle numbers against a
+hundred-health *player*. A Common here has fifty health and `damage` reads as a
+shots-to-kill count, so a literal port makes the paintball gun a ten-shot kill.
+What is preserved is the relationship between them: the paintball sprays and
+barely stings, the slingshot is one flat precise shot, the sword is fast and
+close, the rocket removes a doorway.
+
+Every one is a **sidegrade**, and that is a fairness rule rather than a taste
+one. The paintball gun trades the MP7A1's damage for rate; the slingshot trades
+the Magnum's punch for a dead-flat trajectory and no recoil; the sword trades
+the Machete's reach for speed; the rocket is a smaller RPG-7 that does not
+delete a Tank. A hundred Robux buys **variety**, not a way past the Dollars
+economy — the RPG-7 costs ten won rounds and would be worth nothing the day a
+cheaper one could be bought with money. `placeable = false` on all four.
+
+### Ownership is merged, never stored
+
+`profile.owned` is the Dollars economy's set and `serialise` writes it to a
+DataStore. Merging pass grants into it would put Robux entitlements in a save
+file, where a failed write or a reset key takes away something somebody paid
+for. So `unlockedSet` derives the union at every read — the `ProfileSynced`
+payload and the three `sanitise` call sites — and `serialise` still writes the
+stored set alone. Every screen that asks "do I own this" sees the merged answer
+without learning there are two currencies.
+
+`LoadoutConfig.candidates` needed no change at all: it already appended anything
+in `WeaponConfig` the catalogue does not list, *"so a weapon that is somehow not
+for sale is still equippable."*
+
+### And `audit.py` learned a third way to own a weapon
+
+Check 16 knew two: bought, or `floorOnly`. A pass-gated weapon is neither, and
+the check correctly called all four unreachable. It knows `passOnly` now — and
+does not take the flag on trust. It reads `PassConfig.grantsWeapons` and fails
+in **both** directions: a weapon claiming `passOnly` that no pass grants, and a
+pass granting something the roster does not have. Both were tested by breaking
+them on purpose before the check was trusted.
+
+
 ### Nobody was ever told who won a Versus match — **fixed**
 
 `_onRoundEnded` computed the match winner at the end of the final half and then

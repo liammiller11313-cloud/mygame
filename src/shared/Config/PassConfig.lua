@@ -37,9 +37,25 @@
 	entries going through BallisticsService or stay classic tools in their own
 	lane is a design decision that has not been made.
 
-	**Do not publish the game pass until it does something.** Selling a hundred
-	Robux for nothing is a refund and a report, not a bug. The plumbing is here
-	and correct; the payload is not.
+	── FOUR OF THE SEVEN, AND WHY ───────────────────────────────────────────────
+	The pack is seven tools. Four of them are weapons in the sense WeaponConfig
+	means: a thing held in a slot that damages what it points at. Those are
+	listed below. The other three are not, and forcing them into a weapon block
+	would be the wrong shape rather than a shortcut:
+
+	  * the TIMEBOMB is a throwable. This game already has that pipeline —
+	    ProjectileService, a map family, an inventory slot — and it is where a
+	    planted bomb belongs, beside the pipe bomb it is a cousin of.
+	  * the SUPERBALL is a thrown bouncing projectile with no barrel and no
+	    magazine. Same pipeline as the timebomb, different fuse.
+	  * the TROWEL builds geometry. It is not a weapon in any sense and it wants
+	    the barricade system, not the ballistics one.
+
+	Selling four and describing seven would be a lie, so `grants` says four. The
+	other three arrive when their pipelines do.
+
+	**Do not publish the game pass until the weapons below are in WeaponConfig.**
+	Selling a hundred Robux for nothing is a refund and a report, not a bug.
 ]]
 
 export type Pass = {
@@ -53,6 +69,13 @@ export type Pass = {
 	     Drawn as a list under the image, because a pass with no visible contents
 	     is asking for a hundred Robux on trust. ]]
 	grants: { string },
+	--[[ And the same thing in ids: the WeaponConfig entries owning this pass
+	     unlocks. Kept separate from `grants` on purpose — one is prose for a
+	     storefront and the other is the gate, and collapsing them would make
+	     every wording change a balance change. A weapon here does not need a
+	     shop row: LoadoutConfig.candidates already appends anything in
+	     WeaponConfig the catalogue does not list. ]]
+	grantsWeapons: { string },
 }
 
 local PassConfig = {}
@@ -66,13 +89,16 @@ PassConfig.Passes = table.freeze({
 		image = "rbxassetid://124168366933983",
 		blurb = "Seven classics out of Brickbattle Ultimate, pogo and all.",
 		grants = {
-			"Classic Paintball Gun",
-			"Classic Slingshot — with stacking pogo",
-			"Classic Superball",
 			"Classic Sword",
-			"Classic Timebomb",
-			"Classic Trowel",
-			"Rocket Launcher — with rocket pogo",
+			"Classic Paintball Gun",
+			"Classic Slingshot",
+			"Rocket Launcher",
+		},
+		grantsWeapons = {
+			"ClassicSword",
+			"ClassicPaintballGun",
+			"ClassicSlingshot",
+			"ClassicRocketLauncher",
 		},
 	},
 } :: { Pass })

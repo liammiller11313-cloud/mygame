@@ -117,6 +117,21 @@ local function publish(player: Player)
 		}
 	end
 	Remotes.Event.PassesSynced:FireClient(player, payload)
+
+	--[[ And the profile behind it. Everything that asks "do I own this weapon" —
+	     the loadout picker, the shop row, sanitise — reads the profile's owned
+	     set, not this event, because they were written before there were two
+	     currencies and should not have to learn. ProfileService merges the pass
+	     grants into what it publishes, so a resolved pass only reaches those
+	     screens if the profile is re-sent after it.
+
+	     Guarded rather than required: pass ownership is still correct without
+	     ProfileService, the weapons just do not appear until something else
+	     causes a sync. ]]
+	local profiles: any = Registry.find("ProfileService")
+	if profiles and typeof(profiles.sync) == "function" then
+		profiles:sync(player)
+	end
 end
 
 --[[
@@ -211,6 +226,29 @@ function PassService:owns(player: Player, passId: string): boolean
 		return false
 	end
 	return refresh(player, pass) == true
+end
+
+--[[
+	Every weapon this player's passes unlock, as an ownership set.
+
+	The shape LoadoutConfig.sanitise wants, so ProfileService can merge it with
+	the profile's own set and hand the result to a function that never learns
+	there are two currencies.
+
+	Empty for a player whose checks have not resolved, which is the correct fail:
+	a weapon that briefly does not appear is a redraw away from appearing, and
+	one that briefly DOES is a weapon somebody equips and then loses at spawn.
+]]
+function PassService:unlockedWeapons(player: Player): { [string]: boolean }
+	local unlocked = {}
+	for _, pass in PassConfig.Passes do
+		if self:owns(player, pass.id) then
+			for _, weaponId in pass.grantsWeapons do
+				unlocked[weaponId] = true
+			end
+		end
+	end
+	return unlocked
 end
 
 function PassService:isKnown(player: Player, passId: string): boolean

@@ -466,6 +466,41 @@ end
      deliberately no "profile is ready" attribute alongside it: `isReady` on this
      service is the server's gate and `ProfileSynced` is the client's, and a
      third answer to the same question is a third thing that can disagree. ]]
+--[[
+	What this player may equip: what they bought, plus what their passes unlock.
+
+	Derived on every read and never stored. `profile.owned` is the Dollars
+	economy's set and it is what `serialise` writes to the DataStore — merging
+	into it would put Robux entitlements in a save file, and then a save that
+	fails or a key reset by hand takes away something somebody paid money for.
+	That is the one rule the whole pass system is built around; see PassService.
+
+	A fresh table each call rather than a cached one. It is a handful of string
+	keys on paths that already touch a DataStore or a remote, and a cache here
+	would need invalidating from PassService — which is a second thing to keep in
+	step for a saving nobody can measure.
+
+	Returns `profile.owned` itself when there is nothing to add, which is every
+	player who owns no passes. Callers only ever read it.
+]]
+local function unlockedSet(player: Player, profile: Profile): { [string]: boolean }
+	local passes: any = Registry.find("PassService")
+	if not passes or typeof(passes.unlockedWeapons) ~= "function" then
+		return profile.owned
+	end
+
+	local ok, granted = pcall(passes.unlockedWeapons, passes, player)
+	if not ok or typeof(granted) ~= "table" or next(granted) == nil then
+		return profile.owned
+	end
+
+	local merged = table.clone(profile.owned)
+	for weaponId in granted do
+		merged[weaponId] = true
+	end
+	return merged
+end
+
 local function publish(player: Player, profile: Profile)
 	if not player.Parent then
 		return
@@ -509,7 +544,11 @@ function ProfileService:sync(player: Player)
 	end
 	Remotes.Event.ProfileSynced:FireClient(player, {
 		dollars = profile.dollars,
-		owned = profile.owned,
+		--[[ Merged, not stored. This is the only `owned` any screen ever sees, so
+		     a pass-unlocked weapon un-greys in the loadout picker without any of
+		     them knowing there are two currencies. serialise below still writes
+		     profile.owned and must keep doing so. ]]
+		owned = unlockedSet(player, profile),
 		loadouts = profile.loadouts,
 		loadoutNames = profile.loadoutNames,
 		active = profile.active,
@@ -721,6 +760,12 @@ function ProfileService:isReady(player: Player): boolean
 	return profiles[player] ~= nil
 end
 
+--[[ Did they BUY it. Deliberately the stored set rather than unlockedSet: this
+     answers a question about the Dollars economy — EconomyService asks it to
+     refuse a second purchase — and a pass weapon has no shop row to buy twice.
+     What a player may EQUIP is a different question with a different answer;
+     that one goes through unlockedSet, and every screen sees it because `sync`
+     publishes it. ]]
 function ProfileService:owns(player: Player, itemId: string): boolean
 	local profile = profiles[player]
 	return profile ~= nil and profile.owned[itemId] == true
@@ -1090,7 +1135,7 @@ function ProfileService:setAbilitySlot(player: Player, slot: number, id: string)
 	     the id came off a wire. ]]
 	local index = LoadoutConfig.clampIndex(profile.active)
 	local next_ = LoadoutConfig.withAbility(profile.loadouts[index], slot, id)
-	local cleaned = LoadoutConfig.sanitise(next_, profile.owned, profile.abilities)
+	local cleaned = LoadoutConfig.sanitise(next_, unlockedSet(player, profile), profile.abilities)
 	if LoadoutConfig.equal(profile.loadouts[index], cleaned) then
 		return false
 	end
@@ -1115,7 +1160,11 @@ function ProfileService:activeLoadout(player: Player): LoadoutConfig.Loadout
 	if not profile then
 		return LoadoutConfig.sanitise(nil, nil)
 	end
-	return LoadoutConfig.sanitise(profile.loadouts[profile.active], profile.owned, profile.abilities)
+	return LoadoutConfig.sanitise(
+		profile.loadouts[profile.active],
+		unlockedSet(player, profile),
+		profile.abilities
+	)
 end
 
 function ProfileService:setLoadout(player: Player, index: number, loadout: any): boolean
@@ -1124,7 +1173,7 @@ function ProfileService:setLoadout(player: Player, index: number, loadout: any):
 		return false
 	end
 	local slot = LoadoutConfig.clampIndex(index)
-	local cleaned = LoadoutConfig.sanitise(loadout, profile.owned, profile.abilities)
+	local cleaned = LoadoutConfig.sanitise(loadout, unlockedSet(player, profile), profile.abilities)
 	if LoadoutConfig.equal(profile.loadouts[slot], cleaned) then
 		return false
 	end

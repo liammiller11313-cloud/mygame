@@ -118,6 +118,16 @@ export type WeaponDefinition = {
 	     ten won rounds, and a Director that hands one out free on a shelf has not
 	     made it a bit cheaper, it has made the price meaningless. ]]
 	placeable: boolean?,
+
+	--[[ Unlocked by a Robux game pass rather than bought with Dollars, so it has
+	     no EconomyConfig row and never will. A third way to own a weapon beside
+	     buying one and finding one on the floor, and audit.py check 16 knows all
+	     three — without this flag it correctly reports the weapon as unreachable.
+
+	     It is not an ownership check. ProfileService decides that, by merging
+	     PassService's grants into the set it publishes and sanitises against;
+	     this only says where the weapon is SUPPOSED to come from. ]]
+	passOnly: boolean?,
 	--[[ Whether landing a shot sets the target on fire, through the same
 	     InfectedService:ignite the molotov and the Incendiary requisition use.
 	     Nil on every gun: bullets do not light people, and a flag that defaulted
@@ -2565,6 +2575,280 @@ WeaponConfig.Definitions = {
 		placeable = false,
 		floorOnly = true,
 		price = 0,
+	},
+
+	--[[
+		── BRICKBATTLER'S PACK ──────────────────────────────────────────────────
+		Four of the seven classic tools, translated rather than transplanted.
+
+		Their own numbers are brickbattle numbers — 5, 8, 25 — measured against a
+		hundred-health PLAYER. A Common here has fifty health and `damage` reads
+		directly as a shots-to-kill count, so porting them literally would make
+		the paintball gun a ten-shot kill and the sword a joke. What is preserved
+		is the RELATIONSHIP between them: the paintball sprays and barely stings,
+		the slingshot is one flat precise shot, the sword is fast and close, the
+		rocket removes a doorway.
+
+		── DELIBERATELY SIDEGRADES ──────────────────────────────────────────────
+		Every one of these is payable-for in Robux, which makes their power a
+		fairness question rather than a taste one. So each sits BESIDE something
+		already in the roster rather than above it: the paintball gun trades the
+		MP7A1's damage for rate, the slingshot trades the Magnum's punch for a
+		flat trajectory and no recoil, the sword trades the Machete's reach for
+		speed, and the rocket is a smaller RPG-7 that does not delete a Tank.
+
+		A hundred Robux buys VARIETY. It does not buy past the Dollars economy,
+		and it must not: the RPG-7 costs ten won rounds and would be worth
+		nothing the day a cheaper one could be bought with money.
+
+		placeable = false on all four, for the reason the RPG-7 gives — a Director
+		that leaves a paid weapon on a shelf has not made it cheaper, it has made
+		the price meaningless.
+	]]
+
+	--[[ Fast, short and light. The Machete's damage at nearly twice the swing
+	     rate, and it gives up all of the Machete's reach for it: this is a duel
+	     weapon for a corridor, not a crowd-clearer. ]]
+	[Enums.Weapon.ClassicSword] = {
+		id = Enums.Weapon.ClassicSword,
+		displayName = "Classic Sword",
+		modelName = "ClassicSword",
+		slot = Enums.Slot.Melee,
+		class = "Melee",
+		fireMode = "Melee",
+		passOnly = true,
+		placeable = false,
+
+		damage = 300,
+		rpm = 150,
+		pellets = 1,
+		magSize = 0,
+		reserveMax = 0,
+		penetration = 1,
+		penetrationFalloff = 0.85,
+
+		falloffStart = 9,
+		falloffEnd = 12,
+		falloffMin = 1.0,
+		maxRange = 12,
+
+		spreadHip = 0,
+		spreadAim = 0,
+		spreadMoving = 0,
+		spreadMax = 0,
+		bloomPerShot = 0,
+		bloomRecovery = 0,
+
+		recoilVertical = 0,
+		recoilHorizontal = 0,
+		recoilRecovery = 0,
+		kickback = 0.22,
+
+		reloadTime = 0,
+		reloadPerShell = 0,
+		drawTime = 0.22,
+		aimTime = 0.1,
+
+		walkSpeedScale = 1.1,
+		aimWalkSpeedScale = 1.0,
+		aimFov = 70,
+
+		shakeMagnitude = 0.8,
+		shakeRoughness = 6,
+		tracerWidth = 0,
+		tracerColor = WHITE_HOT,
+		muzzleFlashSize = 0,
+		shellEject = false,
+
+		gibPower = 0.15,
+		dismemberPower = 1.0,
+		knockback = 18,
+	},
+
+	--[[ Sprays, and barely stings. Four body shots on a Common where an SMG
+	     takes three, at a rate no other weapon in the roster matches — the gun
+	     for somebody who would rather hold the trigger than aim. ]]
+	[Enums.Weapon.ClassicPaintballGun] = {
+		id = Enums.Weapon.ClassicPaintballGun,
+		displayName = "Classic Paintball Gun",
+		modelName = "ClassicPaintballGun",
+		slot = Enums.Slot.Primary,
+		class = "SMG",
+		fireMode = "Auto",
+		passOnly = true,
+		placeable = false,
+
+		damage = 13,
+		rpm = 1000,
+		pellets = 1,
+		magSize = 60,
+		reserveMax = 300,
+		penetration = 1,
+		penetrationFalloff = 0.6,
+
+		falloffStart = 40,
+		falloffEnd = 110,
+		falloffMin = 0.45,
+		maxRange = 220,
+
+		spreadHip = 3.2,
+		spreadAim = 1.5,
+		spreadMoving = 1.6,
+		spreadMax = 6.5,
+		bloomPerShot = 0.22,
+		bloomRecovery = 7,
+
+		recoilVertical = 0.24,
+		recoilHorizontal = 0.16,
+		recoilRecovery = 11,
+		kickback = 0.08,
+
+		reloadTime = 2.4,
+		reloadPerShell = 0,
+		drawTime = 0.34,
+		aimTime = 0.19,
+
+		walkSpeedScale = 1.02,
+		aimWalkSpeedScale = 0.85,
+		aimFov = 62,
+
+		shakeMagnitude = 0.35,
+		shakeRoughness = 8,
+		tracerWidth = 0.05,
+		tracerColor = Color3.fromRGB(120, 220, 140),
+		muzzleFlashSize = 0.6,
+		shellEject = false,
+
+		gibPower = 0.1,
+		dismemberPower = 0.2,
+		knockback = 4,
+	},
+
+	--[[ One shot, dead flat, no recoil at all — the pellet cancels its own
+	     gravity, which is the whole trick and the reason this is a precision
+	     weapon rather than a weak one. Two body shots or one head, and then a
+	     long wait: the slowest-firing sidearm in the game by a distance. ]]
+	[Enums.Weapon.ClassicSlingshot] = {
+		id = Enums.Weapon.ClassicSlingshot,
+		displayName = "Classic Slingshot",
+		modelName = "ClassicSlingshot",
+		slot = Enums.Slot.Secondary,
+		class = "Pistol",
+		fireMode = "Semi",
+		passOnly = true,
+		placeable = false,
+
+		damage = 32,
+		rpm = 75,
+		pellets = 1,
+		magSize = 12,
+		reserveMax = -1,
+		penetration = 1,
+		penetrationFalloff = 0.7,
+
+		--[[ No falloff worth the name. A pellet that ignores gravity ignores
+		     distance too, and that is the sidegrade: it trades the Magnum's
+		     stopping power for a shot that lands exactly where it is pointed. ]]
+		falloffStart = 150,
+		falloffEnd = 260,
+		falloffMin = 0.9,
+		maxRange = 300,
+
+		spreadHip = 1.1,
+		spreadAim = 0,
+		spreadMoving = 0.9,
+		spreadMax = 2.2,
+		bloomPerShot = 0.1,
+		bloomRecovery = 9,
+
+		recoilVertical = 0,
+		recoilHorizontal = 0,
+		recoilRecovery = 14,
+		kickback = 0.04,
+
+		reloadTime = 1.6,
+		reloadPerShell = 0,
+		drawTime = 0.28,
+		aimTime = 0.16,
+
+		walkSpeedScale = 1.05,
+		aimWalkSpeedScale = 0.9,
+		aimFov = 55,
+
+		shakeMagnitude = 0.2,
+		shakeRoughness = 5,
+		tracerWidth = 0.04,
+		tracerColor = Color3.fromRGB(60, 60, 60),
+		muzzleFlashSize = 0,
+		shellEject = false,
+
+		gibPower = 0.15,
+		dismemberPower = 0.3,
+		knockback = 6,
+	},
+
+	--[[ A smaller RPG-7, and smaller on purpose. That one costs ten won rounds
+	     and deletes a Tank; this one clears a doorway and leaves the Tank angry.
+	     Two rockets, no resupply beyond a crate's share, and a blast that will
+	     take the user with it at close range — which is the classic rocket's own
+	     oldest lesson and worth keeping. ]]
+	[Enums.Weapon.ClassicRocketLauncher] = {
+		id = Enums.Weapon.ClassicRocketLauncher,
+		displayName = "Classic Rocket Launcher",
+		modelName = "ClassicRocketLauncher",
+		slot = Enums.Slot.Secondary,
+		class = "Launcher",
+		fireMode = "Semi",
+		passOnly = true,
+		placeable = false,
+
+		blastRadius = 16,
+		blastDamage = 170,
+
+		damage = 90,
+		rpm = 30,
+		pellets = 1,
+		magSize = 1,
+		reserveMax = 2,
+		penetration = 1,
+		penetrationFalloff = 1.0,
+
+		falloffStart = 200,
+		falloffEnd = 320,
+		falloffMin = 1.0,
+		maxRange = 360,
+
+		spreadHip = 1.4,
+		spreadAim = 0,
+		spreadMoving = 1.2,
+		spreadMax = 2.6,
+		bloomPerShot = 0,
+		bloomRecovery = 6,
+
+		recoilVertical = 2.4,
+		recoilHorizontal = 0.5,
+		recoilRecovery = 5,
+		kickback = 1.1,
+
+		reloadTime = 3.4,
+		reloadPerShell = 0,
+		drawTime = 0.62,
+		aimTime = 0.38,
+
+		walkSpeedScale = 0.9,
+		aimWalkSpeedScale = 0.68,
+		aimFov = 60,
+
+		shakeMagnitude = 3.4,
+		shakeRoughness = 9,
+		tracerWidth = 0.12,
+		tracerColor = Color3.fromRGB(255, 170, 90),
+		muzzleFlashSize = 2.4,
+		shellEject = false,
+
+		gibPower = 1.0,
+		dismemberPower = 1.0,
+		knockback = 70,
 	},
 } :: { [string]: WeaponDefinition }
 

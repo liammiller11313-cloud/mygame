@@ -286,6 +286,19 @@ AudioConfig.WeaponFire = {
 		AudioConfig.MeleeImpact below.
 	]]
 	[Enums.Weapon.Machete] = sound(ID.MacheteSwing, 0.55, 0.95, 1.06, 70, 3),
+
+	--[[ Brickbattler's Pack. Every one is an existing sample re-pitched rather
+	     than a dedicated upload, and named honestly for it — when real classic
+	     audio exists, only the ids below change.
+
+	     The slingshot is pitched high and quiet because it fires a pebble; the
+	     paintball gun is quieter still and carries barely at all, which is the
+	     other half of its trade — a weapon that sprays a thousand rounds a
+	     minute must not also be the loudest thing on the street. ]]
+	[Enums.Weapon.ClassicSword] = sound(ID.MacheteSwing, 0.6, 1.18, 1.3, 70, 3),
+	[Enums.Weapon.ClassicPaintballGun] = sound(ID.SmgFire, 0.4, 1.35, 1.5, 130, 3),
+	[Enums.Weapon.ClassicSlingshot] = sound(ID.PistolShot, 0.45, 1.55, 1.7, 150, 3),
+	[Enums.Weapon.ClassicRocketLauncher] = sound(ID.ShotgunBlast, 0.95, 0.82, 0.9, 700, 6),
 	[Enums.Weapon.FireAxe] = sound(ID.AxeSwing, 0.72, 0.94, 1.04, 80, 3),
 	[Enums.Weapon.LeadPipe] = sound(ID.PipeSwing, 0.66, 0.94, 1.06, 75, 3),
 	[Enums.Weapon.BaseballBat] = sound(ID.BatSwing, 0.6, 0.95, 1.07, 75, 3),

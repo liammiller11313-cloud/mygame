@@ -322,6 +322,16 @@ AmmoConfig.Weapons = {
 	     who can now tell "has none" from "was forgotten". audit.py check 16
 	     enforces exactly that. ]]
 	[Enums.Weapon.Machete] = { casing = "", magazine = "" },
+
+	--[[ Brickbattler's Pack. None of them ejects anything: a sword and a
+	     slingshot have no casing to throw, the paintball gun's ammunition is the
+	     projectile, and the rocket leaves the tube whole. Written out rather
+	     than left absent, so "has none" stays distinguishable from "forgotten" —
+	     which is the entire reason this table refuses to have holes. ]]
+	[Enums.Weapon.ClassicSword] = { casing = "", magazine = "" },
+	[Enums.Weapon.ClassicPaintballGun] = { casing = "", magazine = "" },
+	[Enums.Weapon.ClassicSlingshot] = { casing = "", magazine = "" },
+	[Enums.Weapon.ClassicRocketLauncher] = { casing = "", magazine = "" },
 	[Enums.Weapon.FireAxe] = { casing = "", magazine = "" },
 	[Enums.Weapon.BaseballBat] = { casing = "", magazine = "" },
 	[Enums.Weapon.LeadPipe] = { casing = "", magazine = "" },

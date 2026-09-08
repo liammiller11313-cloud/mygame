@@ -1285,10 +1285,37 @@ if _weapons:
     # Weapons that declare themselves found-not-bought. Parsed off the same text
     # the class map came from, so a flag added to a definition is seen here
     # without a second list to keep in step.
+    _pass_claimed = set()
     _floor_only = set()
     for _m in re.finditer(r"\[Enums\.Weapon\.(\w+)\]\s*=\s*\{(.*?)\n\t\},", _wc, re.S):
         if re.search(r"^\s*floorOnly\s*=\s*true", _m.group(2), re.M):
             _floor_only.add(_m.group(1))
+        if re.search(r"^\s*passOnly\s*=\s*true", _m.group(2), re.M):
+            _pass_claimed.add(_m.group(1))
+
+    # What the passes ACTUALLY grant, read from PassConfig rather than believed
+    # from the weapon's own flag. Two files that have to agree, so the build
+    # checks that they do instead of hoping.
+    _pc = read(SRC / "shared/Config/PassConfig.lua")
+    _pass_only = set()
+    for _m in re.finditer(r"grantsWeapons\s*=\s*\{(.*?)\}", _pc, re.S):
+        _pass_only.update(re.findall(r'"(\w+)"', _m.group(1)))
+
+    for _id in sorted(_pass_claimed - _pass_only):
+        problems.append(
+            f"{_id} says passOnly = true but no PassConfig pass lists it in grantsWeapons — "
+            f"nothing unlocks it, so it is in the game and unreachable"
+        )
+    for _id in sorted(_pass_only - _pass_claimed):
+        problems.append(
+            f"a PassConfig pass grants {_id!r}, which is not a WeaponConfig weapon marked "
+            f"passOnly = true — the storefront promises something the roster does not have"
+        )
+    for _id in sorted(_pass_only & _floor_only):
+        problems.append(
+            f"{_id} is both passOnly and floorOnly — a paid weapon the Director also leaves "
+            f"on a shelf has not been made cheaper, it has been made free"
+        )
 
     for _id, _class in sorted(_weapons.items()):
         if _id not in _fire:
@@ -1309,11 +1336,16 @@ if _weapons:
         # works with no shop row; the loadout path does not, which is the point.
         # `floorOnly = true` is the only way to say that — everything else that
         # is missing from the catalogue is a mistake, and far more often.
-        if _id not in _shop and _id not in _floor_only:
+        # passOnly is the third way to own a weapon, beside bought and found:
+        # unlocked by a Robux game pass, with no shop row and never one.
+        # ProfileService merges PassService's grants into the set it sanitises
+        # against, and LoadoutConfig.candidates already appends anything in
+        # WeaponConfig the catalogue does not list, so the loadout path works.
+        if _id not in _shop and _id not in _floor_only and _id not in _pass_only:
             problems.append(
                 f"{_id} is in WeaponConfig but not in EconomyConfig.Catalogue — there is no way "
                 f"to buy it or put it in a loadout. If it is meant to be found on the floor "
-                f"instead, say so with floorOnly = true"
+                f"instead, say so with floorOnly = true, or passOnly = true if a game pass unlocks it"
             )
         if _id in _shop and _id in _floor_only:
             problems.append(

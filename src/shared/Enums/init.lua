@@ -47,6 +47,15 @@ Enums.Weapon = table.freeze({
 	LeadPipe = "LeadPipe",
 	Knife = "Knife",
 
+	--[[ Brickbattler's Pack. Unlocked by a Robux game pass rather than bought
+	     with Dollars, so none of them has a shop row — see PassConfig, and the
+	     `passOnly` flag in WeaponConfig that tells audit.py this is a third way
+	     to own a weapon alongside buying one and finding one. ]]
+	ClassicSword = "ClassicSword",
+	ClassicPaintballGun = "ClassicPaintballGun",
+	ClassicSlingshot = "ClassicSlingshot",
+	ClassicRocketLauncher = "ClassicRocketLauncher",
+
 	--[[ Primary: shotguns. Four now, and they differ by how they FEED rather
 	     than by damage: two pumps, a semi-auto, and a drum. ]]
 	Shotgun = "Shotgun",
