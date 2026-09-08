@@ -94,6 +94,65 @@ than a new system.
 
 ## Built since this list was written
 
+### The pogo, on this game's terms — **built**
+
+The pack's own movement tech, and the only reason it is not a re-upload of
+Roblox's classics. Shooting a surface throws you off it: the slingshot stomps
+down and goes up, the rocket shoves you away from wherever it landed.
+
+**It needed no remote at all**, and that is the whole design. The standalone
+pack needs one because a classic Tool has no server-side shot to hang off — the
+client says "I aimed there" and the server can only re-cast the ray and hope
+they agree; half of `packs/BrickbattlersPack/PogoServer.lua` is that defence.
+None of it applies here. `BallisticsService` has already validated the shooter,
+checked the claimed origin against their real head, generated the cone from a
+shared seed, and cast the pellets itself. The launch point is not a claim, it is
+where the **server's own raycast landed**. An exploiter cannot pogo without
+firing, and the rate limit is the weapon's rate of fire and the rounds in it.
+
+The hook sits **outside** the pellet loop, unlike the blast hook beside it. A
+blast per pellet is a hypothetical multi-pellet launcher exploding once per
+pellet, which is arguably right; a launch per pellet is a shotgun-shaped pogo
+weapon throwing its user into orbit for one trigger pull, which is not.
+
+### The cap is the point, and it is nine jumps high
+
+`maxUpSpeed` exists in `PogoCore` for the standalone pack and is off there —
+1600 studs a second at twelve stacks IS brickbattle. Here it is 160, and the
+reason is specific: `SpawnPlacement` puts hordes ahead of the team using a flow
+window, and `LevelService:getFlowDistance` answers it by projecting a position
+onto a polyline. A survivor two hundred studs above the map projects somewhere
+meaningless, so the Director stops aiming at them and starts aiming at nothing.
+Unbounded flight does not just let one player leave a level — it quietly stops
+the round working for everyone else on the server.
+
+160 is about 65 studs of height against a survivor's own 7.2-stud jump. Nine
+jumps. A rooftop.
+
+The stacking is also tamer than the pack's, and honestly so: hanging the pogo
+off a real weapon's rate of fire means the slingshot's 75rpm leaves eight tenths
+of a second between shots, so you are already falling when the next lands and
+the pack's compounding never gets going. The stack became a bonus for a quick
+follow-up rather than a ladder. That is the right shape for this game.
+
+### Two things caught while writing it
+
+**A guard that waved everyone through.** The pin check was written as
+`typeof(survivors.isUpright) == "function" and not survivors:isUpright(player)`
+— and there is no `isUpright` method. A missing method makes the whole condition
+false, so the guard did not merely fail to protect: it let *every* pinned player
+pogo, silently, in the exact shape that looks careful. It asks `getState` now.
+
+**And the ownership problem again.** The server writes velocity to a root the
+player's own client owns — the same thing the Tongue's drag got wrong. An
+impulse survives that better than per-frame position writes did, which is
+exactly why it was tempting to skip; it is still a coin flip under latency, and
+a pogo that silently does nothing one time in five is worse than half a second
+of server simulation every time. Taken and handed back like `Support.launch`
+does for a boss throw, tokened so chaining does not hand the root back
+mid-flight.
+
+
 ### The pack goes through the pipeline, not around it — **decided**
 
 The question was whether Brickbattler's Pack becomes real `WeaponConfig` weapons

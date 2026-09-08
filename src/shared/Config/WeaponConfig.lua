@@ -49,6 +49,51 @@ local Enums = require(script.Parent.Parent.Enums)
 export type FireMode = "Semi" | "Auto" | "Pump" | "Melee"
 export type WeaponClass = "Pistol" | "SMG" | "Rifle" | "LMG" | "Marksman" | "Shotgun" | "Melee" | "Launcher"
 
+--[[
+	Pogo — Brickbattler's Pack's own movement tech, and the only reason the pack
+	is not a re-upload of Roblox's classics.
+
+	Shooting a surface throws you off it. The slingshot stomps straight down and
+	goes straight up; the rocket shoves you away from wherever it landed, which
+	is what makes shooting the wall behind you a move.
+
+	── maxUpSpeed IS NOT OPTIONAL HERE ──────────────────────────────────────────
+	The standalone pack leaves it off, and it is right to: a full twelve-stack
+	chain throwing you most of a kilometre into the air IS brickbattle.
+
+	This game cannot have that, and the reason is specific rather than squeamish.
+	SpawnPlacement puts hordes ahead of the team using a flow window, and
+	LevelService:getFlowDistance answers it by projecting a position onto a
+	polyline. A survivor two hundred studs above the map projects somewhere
+	meaningless, so the Director stops aiming at them and starts aiming at
+	nothing — the horde does not arrive, and the round quietly stops working for
+	everybody else on the server.
+
+	So every profile here caps, and the cap is written in the units that decide
+	it: with Roblox's gravity a launch of `v` reaches v²/2g studs, so 160 is
+	about sixty-five studs of height. A survivor's own jump is 50, which is 7.2
+	studs — SurvivorService.baseJumpPower — so a fully stacked slingshot pogo
+	goes about nine times as high as jumping, and a rocket jump about six.
+
+	A rooftop, in other words, and a good one. Not a way out of a level.
+]]
+export type PogoProfile = {
+	power: number, -- the first launch of a chain
+	stack: number, -- added per launch after the first
+	maxStacks: number,
+	window: number, -- a chain quieter than this starts again at one
+	maxUpSpeed: number, -- the ceiling. See above; never 0 in this game.
+	--[[ Away from what was hit, rather than straight up. The rocket's whole
+	     character; the slingshot ignores it and stomps. ]]
+	directional: boolean,
+	--[[ How far BELOW the shooter the shot has to land. The slingshot demands a
+	     downward hit because it is a stomp; the rocket asks for nothing. ]]
+	minDrop: number,
+	--[[ And how far away it may land. A launch off a wall on the far side of a
+	     street is a grappling hook, not a pogo. ]]
+	maxRange: number,
+}
+
 export type WeaponDefinition = {
 	id: string,
 	displayName: string,
@@ -128,6 +173,11 @@ export type WeaponDefinition = {
 	     PassService's grants into the set it publishes and sanitises against;
 	     this only says where the weapon is SUPPOSED to come from. ]]
 	passOnly: boolean?,
+
+	--[[ Present only on the pack's two pogo weapons. Absent means an ordinary
+	     gun that does not throw its user anywhere, which is all thirty-five of
+	     the others. See PogoProfile above, and PogoService for what reads it. ]]
+	pogo: PogoProfile?,
 	--[[ Whether landing a shot sets the target on fire, through the same
 	     InfectedService:ignite the molotov and the Incendiary requisition use.
 	     Nil on every gun: bullets do not light people, and a flag that defaulted
@@ -2738,6 +2788,26 @@ WeaponConfig.Definitions = {
 		passOnly = true,
 		placeable = false,
 
+		--[[ Shoot the floor, go up. Tamer than the pack's because this weapon
+		     fires at 75rpm rather than on a 0.12s cooldown — eight tenths of a
+		     second between shots means you are already falling when the next one
+		     lands, so the pack's compounding never gets going and the stack is a
+		     bonus for a quick follow-up rather than a ladder to orbit.
+
+		     That is the honest consequence of hanging it off a real weapon's
+		     rate of fire, and it is the right shape for this game: a mobility
+		     tool that clears a fence or reaches a rooftop, not flight. ]]
+		pogo = {
+			power = 90,
+			stack = 25,
+			maxStacks = 4,
+			window = 2.0,
+			maxUpSpeed = 160,
+			directional = false,
+			minDrop = 1.5,
+			maxRange = 45,
+		},
+
 		damage = 32,
 		rpm = 75,
 		pellets = 1,
@@ -2804,6 +2874,24 @@ WeaponConfig.Definitions = {
 
 		blastRadius = 16,
 		blastDamage = 170,
+
+		--[[ Away from the blast, not up from the floor — shooting the wall
+		     behind you is the move, and shooting your own feet costs you health
+		     from your own explosion, which is the classic rocket jump's oldest
+		     bargain and worth keeping intact.
+
+		     No stacking: one rocket, one shove, and a reload long enough that
+		     chaining is not on offer. ]]
+		pogo = {
+			power = 130,
+			stack = 0,
+			maxStacks = 1,
+			window = 0,
+			maxUpSpeed = 160,
+			directional = true,
+			minDrop = 0,
+			maxRange = 30,
+		},
 
 		damage = 90,
 		rpm = 30,

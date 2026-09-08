@@ -191,6 +191,9 @@ local MODULES = {
 	"Combat/GoreService",
 	"Combat/DamageService",
 	"Combat/BallisticsService",
+	--[[ Read by BallisticsService when a pogo weapon's shot lands. Guarded there,
+	     so a missing PogoService costs the launch and never the shot. ]]
+	"Combat/PogoService",
 	"Combat/MeleeService",
 	"Combat/ProjectileService",
 	"Infected/InfectedService",

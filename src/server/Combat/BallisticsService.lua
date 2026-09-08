@@ -564,6 +564,11 @@ function BallisticsService:resolveShot(
 	local tracersSent = 0
 	local impactsSent = 0
 
+	--[[ Where the shot landed, for the pogo below. Taken from the first pellet
+	     only: a volley is one trigger pull and must be one launch. ]]
+	local pogoAt: Vector3? = nil
+	local pogoHit = false
+
 	for _, pelletDirection in directions do
 		local hits = RaycastUtil.pierce(
 			origin,
@@ -577,6 +582,15 @@ function BallisticsService:resolveShot(
 		local last = hits[#hits]
 		local endPosition = if last then last.position else origin + pelletDirection * maxDistance
 		local piercedBodies = 0
+
+		if pogoAt == nil then
+			pogoAt = endPosition
+			--[[ Whether anything was actually struck, kept apart from where the
+			     ray ended. They differ on a miss, where endPosition is simply the
+			     far end of the ray — and a pogo off thin air is the exact bug the
+			     standalone pack shipped. See PogoService. ]]
+			pogoHit = last ~= nil
+		end
 
 		for _, hit in hits do
 			local model, targetHumanoid = RigUtil.getCharacterFromPart(hit.instance)
@@ -676,6 +690,25 @@ function BallisticsService:resolveShot(
 					weaponId
 				)
 			end
+		end
+	end
+
+	--[[
+		And the pogo, for the two weapons that have one.
+
+		OUTSIDE the pellet loop, unlike the blast above it, and the difference is
+		deliberate: a blast per pellet is a hypothetical multi-pellet launcher
+		exploding once per pellet, which is arguably right. A launch per pellet
+		is a shotgun-shaped pogo weapon throwing its user into orbit for one
+		trigger pull, which is not.
+
+		Guarded like the blast is. Absent, the shot is simply a bullet — this must
+		never be the reason a round fails to fire.
+	]]
+	if definition.pogo and pogoAt then
+		local pogo = Registry.find("PogoService")
+		if pogo and typeof(pogo.launch) == "function" then
+			pogo:launch(shooter, definition.pogo, pogoAt, pogoHit)
 		end
 	end
 
