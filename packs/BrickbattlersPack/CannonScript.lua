@@ -31,6 +31,30 @@ local MAX_TARGET_RANGE = 1000
 
 local ballScript = tool:FindFirstChild("CannonBall")
 
+--[[ CannonBall calls `Ball.Boing:Play()` on every bounce, so a ball built from
+     a bare Instance.new("Part") errors on its first touch and stops dealing
+     damage entirely. The original never hit this because it cloned a prepared
+     template; this one builds the part, so it has to carry the sound across
+     itself. Looked for on the tool and then in the Handle, which is where the
+     classic keeps it.
+
+     The empty fallback is deliberate. A Sound with no SoundId plays nothing and
+     raises nothing, which is a silent bounce — where a missing child is a
+     projectile that does no damage at all. ]]
+local function findBoing(): Sound?
+	local handle = tool:FindFirstChild("Handle")
+	for _, source in { tool, handle } do
+		if source then
+			local found = source:FindFirstChild("Boing")
+			if found and found:IsA("Sound") then
+				return found
+			end
+		end
+	end
+	return nil
+end
+local boingTemplate = findBoing()
+
 local shoot = tool:FindFirstChild("Shoot")
 if not shoot or not shoot:IsA("RemoteEvent") then
 	shoot = Instance.new("RemoteEvent")
@@ -64,6 +88,10 @@ local function throw(player: Player, handle: BasePart, direction: Vector3)
 	ball.Friction = 0.1
 	ball.Locked = true
 	ball.CFrame = CFrame.new(handle.Position + direction * SPAWN_AHEAD)
+
+	local boing = if boingTemplate then boingTemplate:Clone() else Instance.new("Sound")
+	boing.Name = "Boing"
+	boing.Parent = ball
 
 	local creator = Instance.new("ObjectValue")
 	creator.Name = "creator"

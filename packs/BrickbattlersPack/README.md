@@ -22,6 +22,11 @@ because they reference no game module.
 | `SlingshotClient.lua` | LocalScript | `ClassicSlingshot` — replaces `Client` |
 | `CannonScript.lua` | Script | `ClassicSuperball` — replaces `CannonScript` |
 | `SuperballClient.lua` | LocalScript | `ClassicSuperball` — replaces `Client` |
+| `PelletScript.lua` | Script (Disabled) | `ClassicSlingshot` — replaces `PelletScript` |
+| `CannonBall.lua` | Script (Disabled) | `ClassicSuperball` — replaces `CannonBall` |
+
+The last two stay **Disabled** in the tool. They are templates cloned into each
+projectile and enabled there, which is why they are greyed out in Explorer.
 
 Set a **`PogoProfile`** string attribute on each pogo tool: `Slingshot` on
 `ClassicSlingshot`, `Rocket` on `RocketLauncher`. Unset falls back to `Rocket`.
@@ -92,6 +97,43 @@ Also: unvalidated `Vector3` arguments reaching `.Unit` (a NaN or zero vector put
 a part at an undefined CFrame), the debug `print`s in `SlingshotPogo`, and an
 unbounded build loop that advanced `x` from the size of the brick it had just
 made.
+
+## Verified against the real projectile scripts
+
+`BrickCleanup` turned out to be a plain `Debris:AddItem(script.Parent, 24)`, so
+anchoring the wall bricks is safe — nothing in it depends on physics.
+
+`PelletScript` reads nothing off the pellet but `Touched` and the `creator`
+child, so the rewritten `Slingshot` is compatible with it. 8 damage, two second
+life, half the bite per surface hit.
+
+`CannonBall` was **not** compatible, and the break was mine: it calls
+`Ball.Boing:Play()` on every bounce, and a ball built from a bare
+`Instance.new("Part")` has no such child, so it errored on first touch and dealt
+no damage at all. `CannonScript` now carries a `Boing` across into each ball,
+found on the tool or in the Handle, with a silent empty Sound as the fallback —
+a bounce nobody hears beats a projectile that does nothing.
+
+### And a bug in `CannonBall` that predates all of this
+
+```lua
+while (humanoid:FindFirstChild("creator")) do
+    humanoid:FindFirstChild("creator").Parent:Destroy()
+end
+```
+
+`FindFirstChild("creator")` is the tag; its `.Parent` is the **humanoid**. That
+line destroyed the Humanoid of anyone who already carried a creator tag — and
+tags live one second, so that means anyone damaged by anybody in the last
+second, which in a brickbattle is most of the time two people shoot the same
+target.
+
+Destroying a Humanoid is worse than killing the character: Roblox drives respawn
+off `Humanoid.Died`, and a destroyed Humanoid never fires it. The `TakeDamage`
+on the following line then runs against a destroyed instance.
+
+`PelletScript` has the same loop written correctly — it clears the TAG — which
+is how the difference shows up. `CannonBall.lua` here destroys the tag.
 
 ## What is deliberately NOT capped
 
