@@ -173,6 +173,8 @@ local MODULES = {
 	--[[ After ProfileService but beholden to none of it: pass ownership is asked
 	     of Roblox and cached in memory, never written to a profile. ]]
 	"Economy/PassService",
+	--[[ After ProfileService, whose redeemed set is what makes a code exclusive. ]]
+	"Economy/CodeService",
 	--[[ After ProfileService, whose ability set and slot list it reads and writes,
 	     and after ProgressionService for tidiness rather than need. Abilities are
 	     bought with Dollars through ProfileService's own spend, so this does not

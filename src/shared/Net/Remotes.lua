@@ -127,6 +127,12 @@ local EVENTS: { string } = {
 	     they already own. See PassService. ]]
 	"RequestPassPurchase", -- C->S (passId: string)
 	"PassesSynced", -- {[passId]: {owns: boolean, known: boolean}}
+	--[[ Redeemable codes. The client sends a string and draws an answer; every
+	     decision — is it live, was it used, what does it pay — is CodeService's,
+	     because the window and the one-per-account rule are the only things a
+	     code has going for it and neither survives on a client. ]]
+	"RedeemCode", -- C->S (code: string)
+	"CodeResult", -- {ok: boolean, reason: string, granted: string}
 	--[[ The whole profile, once, when it has finished loading, and again after
 	     anything changes it. One event rather than four because the shop and the
 	     loadout screen both need all of it and a partial profile is a screen

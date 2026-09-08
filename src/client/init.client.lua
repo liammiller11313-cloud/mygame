@@ -110,6 +110,9 @@ local CONTROLLERS = {
 	--[[ Before ShopController, which reads it to draw the PASSES tab. Holds no
 	     profile state: Robux ownership is Roblox's record, not ours. ]]
 	"UI/PassController",
+	--[[ Its own panel off the menu's nav row. Decides nothing — CodeService owns
+	     the window and the one-per-account rule. ]]
+	"UI/CodesController",
 	-- Beside ProfileController and for the same reason: a mirror of server state
 	-- that several screens read, loaded before any of them.
 	"UI/ProgressionController",

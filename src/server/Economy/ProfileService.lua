@@ -78,6 +78,8 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
+local CodeConfig = require(Shared.Config.CodeConfig)
+local PassConfig = require(Shared.Config.PassConfig)
 local AbilityConfig = require(Shared.Config.AbilityConfig)
 local LoadoutConfig = require(Shared.Config.LoadoutConfig)
 local ProgressionConfig = require(Shared.Config.ProgressionConfig)
@@ -159,6 +161,11 @@ export type Profile = {
 	quests: { [string]: number },
 	questDay: number,
 	passTier: number,
+	--[[ Codes this account has already redeemed, and what redeeming them handed
+	     over. Both persist — see unlockedSet for why passGrants is the one thing
+	     about a pass this game may write down. ]]
+	redeemed: { [string]: boolean },
+	passGrants: { [string]: boolean },
 	callsign: string,
 	accent: string,
 	--[[ Not persisted. True when this profile could not be read and must never
@@ -219,6 +226,12 @@ local function blankProfile(): Profile
 		quests = {},
 		questDay = 0,
 		passTier = 0,
+		--[[ Codes already redeemed, so one cannot be claimed twice, and the
+		     entitlements a code handed over. Both persist; see unlockedSet for
+		     why passGrants is the one thing about a pass that this game is
+		     allowed to write down. ]]
+		redeemed = {},
+		passGrants = {},
 		callsign = "",
 		accent = "",
 		degraded = false,
@@ -354,6 +367,26 @@ local function migrate(stored: any): Profile
 	profile.scrip = storedNumber(stored.scrip, ProgressionConfig.MaxScrip)
 	profile.passTier = storedNumber(stored.passTier, #ProgressionConfig.PassTrack)
 
+	--[[ Both filtered against what still exists rather than trusted wholesale,
+	     the same way abilities are above: a code retired from CodeConfig or a
+	     pass renamed should not leave a key in every profile that read it, and
+	     an unknown key here is either an old version of this game or a value
+	     JSON gave back in a shape nobody wrote. ]]
+	if typeof(stored.redeemed) == "table" then
+		for code, value in stored.redeemed do
+			if value == true and typeof(code) == "string" and CodeConfig.get(code) then
+				profile.redeemed[CodeConfig.normalise(code)] = true
+			end
+		end
+	end
+	if typeof(stored.passGrants) == "table" then
+		for passId, value in stored.passGrants do
+			if value == true and typeof(passId) == "string" and PassConfig.get(passId) then
+				profile.passGrants[passId] = true
+			end
+		end
+	end
+
 	--[[ Quest ids are dropped if the pool no longer carries them, for the same
 	     reason an unknown weapon id is dropped from `owned`: the alternative is
 	     a table that grows by three keys a day forever and is parsed on every
@@ -407,6 +440,8 @@ local function serialise(profile: Profile, lock: any): any
 		quests = profile.quests,
 		questDay = profile.questDay,
 		passTier = profile.passTier,
+		redeemed = profile.redeemed,
+		passGrants = profile.passGrants,
 		callsign = profile.callsign,
 		accent = profile.accent,
 		lock = lock,
@@ -484,21 +519,59 @@ end
 	player who owns no passes. Callers only ever read it.
 ]]
 local function unlockedSet(player: Player, profile: Profile): { [string]: boolean }
+	--[[ Built lazily and returned by reference when empty. Most players own no
+	     passes at all, and cloning the owned set on every sanitise for them
+	     would be a copy nothing ever reads. ]]
+	local merged: { [string]: boolean }? = nil
+	local function add(weaponId: string)
+		local into = merged
+		if not into then
+			into = table.clone(profile.owned)
+			merged = into
+		end
+		into[weaponId] = true
+	end
+
+	--[[ Bought from Roblox. Asked of Roblox every session and never written down
+	     — that record is theirs and a DataStore of ours must not be able to lose
+	     it. See PassService. ]]
 	local passes: any = Registry.find("PassService")
-	if not passes or typeof(passes.unlockedWeapons) ~= "function" then
-		return profile.owned
+	if passes and typeof(passes.unlockedWeapons) == "function" then
+		local ok, granted = pcall(passes.unlockedWeapons, passes, player)
+		if ok and typeof(granted) == "table" then
+			for weaponId in granted do
+				add(weaponId)
+			end
+		end
 	end
 
-	local ok, granted = pcall(passes.unlockedWeapons, passes, player)
-	if not ok or typeof(granted) ~= "table" or next(granted) == nil then
-		return profile.owned
+	--[[
+		Handed over by a code, and THIS one is stored — the rule inverts, on
+		purpose.
+
+		Roblox owns the record of a purchase, so writing it down would be keeping
+		a second copy that can go stale or go missing. Nobody owns the record of
+		a redemption except this profile: there is no authority to ask, so if it
+		is not written here it did not happen. A code grant that lived only in
+		memory would evaporate on rejoin, which for a two-hour launch window
+		means it evaporates for everybody, permanently.
+
+		Stored as PASS ids rather than weapon ids so a redeemer owns whatever the
+		pack contains, the same as somebody who paid — if the pack grows a fifth
+		weapon, both of them get it and neither list has to be found and edited.
+	]]
+	for passId, granted in profile.passGrants do
+		if granted == true then
+			local pass = PassConfig.get(passId)
+			if pass then
+				for _, weaponId in pass.grantsWeapons do
+					add(weaponId)
+				end
+			end
+		end
 	end
 
-	local merged = table.clone(profile.owned)
-	for weaponId in granted do
-		merged[weaponId] = true
-	end
-	return merged
+	return merged or profile.owned
 end
 
 local function publish(player: Player, profile: Profile)
@@ -1069,6 +1142,52 @@ function ProfileService:grant(player: Player, itemId: string): boolean
 		return false
 	end
 	profile.owned[itemId] = true
+	markChanged(player, profile, true)
+	return true
+end
+
+-- ── codes ───────────────────────────────────────────────────────────────────
+
+--[[ Whether this account has already used a code. Normalised on the way in, so
+     a stored key written before normalise existed still matches. ]]
+function ProfileService:hasRedeemed(player: Player, code: string): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+	return profile.redeemed[CodeConfig.normalise(code)] == true
+end
+
+--[[
+	Records a redemption. False when the profile is missing or the code was
+	already used — and that answer is load-bearing rather than informational:
+	CodeService takes it as permission to hand over the reward, so a second
+	caller racing the first is refused here rather than paying twice.
+
+	Marked structural so it reaches the DataStore. A redemption that lived only
+	in memory would evaporate on rejoin, and for a two-hour window that means it
+	evaporates for everybody who used it.
+]]
+function ProfileService:markRedeemed(player: Player, code: string): boolean
+	local profile = profiles[player]
+	local key = CodeConfig.normalise(code)
+	if not profile or key == "" or profile.redeemed[key] then
+		return false
+	end
+	profile.redeemed[key] = true
+	markChanged(player, profile, true)
+	return true
+end
+
+--[[ Hands over a pass without Roblox having sold it. The one path by which pass
+     entitlement is written to a profile, and it exists because a code grant has
+     no other home — see unlockedSet. ]]
+function ProfileService:grantPass(player: Player, passId: string): boolean
+	local profile = profiles[player]
+	if not profile or not PassConfig.get(passId) or profile.passGrants[passId] then
+		return false
+	end
+	profile.passGrants[passId] = true
 	markChanged(player, profile, true)
 	return true
 end

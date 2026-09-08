@@ -1502,7 +1502,10 @@ end
 	the screen explaining it rather than in a fifth corner of the menu.
 ]]
 local NAV_ENTRIES = {
-	{ id = "Shop", title = "SHOP", line = "GUNS  MELEE  SPECIALS", controller = "ShopController" },
+	--[[ The line said SPECIALS until that tab became PASSES. A nav row that
+	     advertises a tab which no longer exists is the cheapest kind of lie an
+	     interface tells, and the hardest to notice from inside. ]]
+	{ id = "Shop", title = "SHOP", line = "GUNS  MELEE  PASSES", controller = "ShopController" },
 	{
 		id = "Loadouts",
 		title = "LOADOUTS",
@@ -1516,6 +1519,7 @@ local NAV_ENTRIES = {
 		controller = "AbilityPanelController",
 	},
 	{ id = "Career", title = "CAREER", line = "LEVEL  QUESTS  PASS", controller = "CareerController" },
+	{ id = "Codes", title = "CODES", line = "REDEEM  WHILE  THEY  LAST", controller = "CodesController" },
 	{
 		id = "Settings",
 		title = "SETTINGS",

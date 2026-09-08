@@ -94,6 +94,59 @@ than a new system.
 
 ## Built since this list was written
 
+### Redeemable codes — **built**
+
+A CODES panel off the menu's nav row: a box, a button, and one line that says
+what the server said. `OG-BRICKBATTLE` grants Brickbattler's Pack and $250,
+live for two hours from **16:00 US Central on 10 September 2026** — stored as
+`1789074000` to `1789081200`, which are UTC epoch seconds, because a window
+expressed in local time is a different window for every player in the server
+and a client's clock is a thing the player can set.
+
+`CodeService` prints the window in words at boot, in UTC, for the reason the
+two integers exist at all: they are unreadable, they will be wrong one day, and
+the failure mode is nobody noticing until the event is over.
+
+### The pass rule inverts here, deliberately
+
+`PassService` never writes gamepass ownership to a profile — Roblox owns that
+record and a DataStore of ours must not be able to lose it. A **code** grant is
+the opposite: nobody owns that record except the profile, so if it is not
+written down it did not happen. A grant living only in memory would evaporate on
+rejoin, and for a two-hour window that means it evaporates for everybody who
+used it, permanently.
+
+So `profile.passGrants` persists, and `unlockedSet` now merges both halves —
+what Roblox says you bought, and what a code handed you. Stored as **pass ids
+rather than weapon ids**, so a redeemer owns whatever the pack contains, the
+same as somebody who paid; if the pack grows a fifth weapon neither list has to
+be found and edited.
+
+### Mark before paying
+
+`markRedeemed` is what makes a redemption exclusive, so it is called **before**
+any reward changes hands and its answer is taken as the permission. Two requests
+racing the same code — a double-click, a reconnect mid-redeem — both reach the
+check, only one gets `true`, and the loser pays nothing. The other order pays
+twice and finds out afterwards.
+
+### And a code box is a brute-force target
+
+Not a serious one, because the strings are in a shared config and readable from
+the client — that is how every game with codes works, and the value was never in
+the string being unguessable. It is in the window and the one-per-account rule,
+both of which are the server's. But the shape is worth getting right for the day
+a private code goes to a creator: a floor between attempts, a lockout after a
+run of misses, and both silent, because telling somebody they are rate limited
+tells them their guessing is worth continuing more carefully.
+
+### Also: the SHOP nav line was lying
+
+It read `GUNS MELEE SPECIALS` and there has been no SPECIALS tab since it became
+PASSES. The cheapest kind of lie an interface tells, and the hardest to notice
+from inside.
+
+
 ### The pogo, on this game's terms — **built**
 
 The pack's own movement tech, and the only reason it is not a re-upload of
