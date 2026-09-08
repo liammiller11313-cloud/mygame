@@ -18,6 +18,10 @@ because they reference no game module.
 | `LocalLauncher.lua` | LocalScript | inside `RocketLauncher` |
 | `WallMaker.lua` | Script | inside `ClassicTrowel` |
 | `WallMakerClient.lua` | LocalScript | inside `ClassicTrowel` |
+| `Slingshot.lua` | Script | `ClassicSlingshot` — replaces `Slingshot` |
+| `SlingshotClient.lua` | LocalScript | `ClassicSlingshot` — replaces `Client` |
+| `CannonScript.lua` | Script | `ClassicSuperball` — replaces `CannonScript` |
+| `SuperballClient.lua` | LocalScript | `ClassicSuperball` — replaces `Client` |
 
 Set a **`PogoProfile`** string attribute on each pogo tool: `Slingshot` on
 `ClassicSlingshot`, `Rocket` on `RocketLauncher`. Unset falls back to `Rocket`.
@@ -31,7 +35,14 @@ The remotes (`PogoRequest`, `PogoVerdict`, `RocketFire`, `PlaceWall`) are
 created by the server scripts if missing. Do not add them by hand.
 
 **Delete afterwards:** `SlingshotPogo` (replaced by `PogoClient`), and the
-`MouseLoc` RemoteFunction in `ClassicTrowel`.
+`MouseLoc` RemoteFunction in all three of `ClassicTrowel`, `ClassicSlingshot`
+and `ClassicSuperball`.
+
+The slingshot and superball scripts are written against the **classic
+free-model** versions, which is what those tools ship with — I have not seen
+Brickbattle Ultimate's copies. The structural fix is the same either way; if the
+weapons were retuned, the speed, size, colour and reload values are the labelled
+constants at the top of each file and nothing else depends on them.
 
 ## What was wrong
 
@@ -63,8 +74,16 @@ flight needing no map. A miss is now simply nothing.
 
 **`MouseLoc:InvokeClient(player)`** yields the server thread until that client
 answers, and a client need not. The trowel, the slingshot and the superball all
-ship one. The trowel's is replaced by a client→server RemoteEvent; the other two
-still have theirs.
+shipped one. All three are now client→server RemoteEvents.
+
+That fix opens a door in the same motion, and it has to be closed at the same
+time. The slingshot and superball were safe from the launcher's problem *by
+accident*: they hung off `Tool.Activated`, which the engine only raises for the
+character actually holding the tool, so there was no packet for anyone else to
+send. Replacing that with a RemoteEvent creates exactly that hole. Both now
+check that the sender is holding the tool and both keep the cooldown on the
+server — `Tool.Enabled` is still set, because it greys the tool out and stops
+the client sending, but a limit only the client enforces is not a limit.
 
 **`brick:MakeJoints()`** welds each brick to whatever it touches — including a
 character standing where the wall goes. The bricks are anchored instead.
