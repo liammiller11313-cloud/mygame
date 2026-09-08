@@ -88,6 +88,11 @@ local RELEASE_RECOVERY = 0.9 -- after being shoved off, before trying again
 
 local SCAN_INTERVAL = 0.3 -- target re-selection; never per frame
 local GROWL_INTERVAL = 4.5 -- the approach vocalisation, on its own clock
+--[[ And the same clock, faster, once it is on somebody. A pinned survivor cannot
+     free themselves — that is the whole design — so the growl is not flavour, it
+     is the only thing that tells a teammate which way to turn, and it has to
+     keep saying so for as long as the clawing lasts. ]]
+local PIN_GROWL_INTERVAL = 1.4
 
 -- How far a survivor has to be from their nearest teammate to count as fully
 -- isolated, and how much that discounts their distance when the Hunter chooses.
@@ -388,7 +393,11 @@ local function land(model: Model, brain: any, state: State, root: BasePart, play
 	state.phase = PHASE.Pin
 	state.phaseTime = 0
 	state.victim = player
-	state.nextClaw = os.clock() + ATTACK.cooldown
+	local now = os.clock()
+	state.nextClaw = now + ATTACK.cooldown
+	-- The pounce shriek counts as the first one; reusing the approach clock keeps
+	-- one Hunter to one voice, since it can never be stalking and pinning at once.
+	state.nextGrowl = now + PIN_GROWL_INTERVAL
 end
 
 local function stepStalk(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
@@ -518,6 +527,11 @@ local function stepPin(model: Model, brain: any, state: State, root: BasePart, n
 		victimRoot.Position - Vector3.new(0, 1, 0)
 	)
 	root.AssemblyLinearVelocity = Vector3.zero
+
+	if now >= state.nextGrowl then
+		state.nextGrowl = now + PIN_GROWL_INTERVAL
+		Support.playSound("HunterClaw", root)
+	end
 
 	if now >= state.nextClaw then
 		state.nextClaw = now + ATTACK.cooldown

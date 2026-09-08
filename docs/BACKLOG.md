@@ -94,6 +94,73 @@ than a new system.
 
 ## Built since this list was written
 
+### The Tongue's drag never had the physics to do it — **fixed**
+
+The Smoker's whole creature is the drag: it grabs somebody out of a group from
+a hundred and sixty studs and hauls them out of the fight. `stepReel` performed
+that as a per-frame `victimRoot.CFrame` write — **on a root the victim's own
+client owns**. The Charger already knew what that costs and says so in its own
+words at `takeOwnership`: *"Nothing the server does to a character's velocity or
+CFrame survives otherwise."* The Charger takes network ownership before its
+carry. The Tongue never did. Its victim kept simulating from their own state and
+replicated back over the top, so the reel was a tug-of-war it does not win, and
+the likely end of every grab was `REEL_TIMEOUT` — six seconds, then let go.
+
+The reel now seizes the root at `beginReel` and hands it back in `release`, the
+one exit every phase already went through. Two details that are not tidiness:
+
+- **Ownership is held for the whole pin, not just the drag.** Handing it back
+  when the reel arrives is the tidier shape and it is the riskier one — the
+  victim's client has spent seconds receiving positions it did not simulate, and
+  its own last-owned state is from before the grab, so giving it authority back
+  mid-pin invites a yank to where they were standing when the tongue landed.
+  Nothing in the hold moves them, so there is nothing to buy.
+- **The velocity kill is horizontal, with the Y clamped at zero.** Zeroing all
+  three is the obvious way to write "drop the sprint they were carrying" and it
+  is wrong: the reel only ever moves them in XZ, so a victim with no downward
+  velocity *floats* across the gap they were dragged over. Gravity keeps what it
+  earns; the clamp is what stops a jump being a counter this creature was never
+  meant to have.
+
+`SurvivorService:_clearPinFields` also hands the root back now, unconditionally,
+because neither special's own release path covers the case where the special is
+**despawned rather than killed** — `InfectedService:despawn` does not run
+`onDeath`. The pin itself was already safe there (the heartbeat drops a pin whose
+owner has gone); the ownership was not, and a survivor left server-simulated for
+the rest of a round has no symptom except feeling bad. Same argument
+`releaseLedge` makes ten lines up: one place that lets the body go without
+something having to remember to.
+
+### The line you were supposed to break was invisible — **fixed**
+
+`Tongue.lua`'s header promises two counters, and `lineHolds` genuinely enforces
+both on every frame of the reel and the hold: break line of sight, *or* put your
+own body between the tongue and your friend. Nothing drew the line. A survivor
+was dragged across a street by nothing at all, and the play the header describes
+was one no player could see to make.
+
+There is a beam now, from the creature's mouth to the victim's root, alive for
+exactly as long as the pin. It is **dead straight on purpose** — `lineHolds`
+tests a straight raycast, so a beam that sagged prettily would draw a line nobody
+is playing against: a teammate steps into the curve, breaks nothing, and
+reasonably concludes the counter is broken. What is drawn is the ray.
+
+### Three of the four pins killed you in silence — **fixed**
+
+A pinned survivor cannot free themselves. That is the design, and it makes the
+rescue somebody else's job — which means the pin has to be findable by ear.
+
+The Jockey already knew this: `stepRide` has a `RIDE_CACKLE_INTERVAL` and
+vocalises the whole way. `Hunter.stepPin`, `Charger.stepPummel` and
+`Tongue.stepHold` dealt exactly the same repeating damage and made no sound at
+all, so a teammate two rooms away had a HUD marker and nothing to turn toward.
+All three now carry the Jockey's pattern on their own existing vocal clock — a
+Hunter cannot be stalking and pinning at once, so it is one creature to one voice
+rather than a second timer each. `HunterClaw`, `ChargerPummel` and `TongueDrag`
+are priority 8 in `AudioConfig`, above every idle: a call for help must not be
+the sound the voice budget drops mid-horde.
+
+
 ### Mobile has no button for interacting — **fixed**
 
 There was a USE button, contextual, in the bottom-right corner. It worked and

@@ -474,6 +474,26 @@ AudioConfig.Infected = {
 	ChargerIdle = sound(ID.MonsterBellow, 0.6, 1.08, 1.16, 280, 5),
 	ChargerCharge = sound(ID.MonsterBellow, 1.0, 0.94, 1.0, 400, 8),
 
+	--[[
+		The pins, while they are killing somebody.
+
+		A pinned survivor cannot free themselves — that is the entire design, and
+		it makes the rescue somebody else's job. Four specials hold a survivor
+		down, and JockeyRide above was the only one of the four that could be
+		heard doing it: the Hunter clawed, the Charger pummelled and the Tongue
+		constricted in silence, so a teammate two rooms away had a HUD marker and
+		nothing to turn toward. These are the missing three.
+
+		Deliberately louder and further-carrying than each creature's own idle,
+		and priority 8: this is a call for help, and it is the last sound that
+		should be dropped when the voice budget runs out mid-horde. Pitched off
+		the same samples the creature already uses, so a Hunter on your friend
+		still reads as a Hunter.
+	]]
+	HunterClaw = sound(ID.CreatureGrowl, 0.95, 1.3, 1.42, 380, 8),
+	ChargerPummel = sound(ID.MonsterBellow, 0.95, 1.2, 1.3, 380, 8),
+	TongueDrag = sound(ID.CreatureGrowl, 0.9, 0.66, 0.74, 400, 8),
+
 	--[[ The three "you are standing in the wrong place" specials. Every one of
 	     them is a warning first and a threat second, so the idle carries further
 	     than the creature can act: a Tongue you cannot hear is a Tongue nobody

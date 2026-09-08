@@ -1764,12 +1764,38 @@ function SurvivorService:setPinned(player: Player, by: Model?, kind: string?)
 	return true
 end
 
---[[ Forgets the pin without touching state. Used by the paths that are about to
-     set a state of their own, so the client never sees a one-frame flash of
-     "standing" between being pinned and going down. ]]
+--[[
+	Forgets the pin without touching state. Used by the paths that are about to
+	set a state of their own, so the client never sees a one-frame flash of
+	"standing" between being pinned and going down.
+
+	Also the one place a pinned body is guaranteed to get its own physics back.
+	Two specials take network ownership of their victim's root to move them — a
+	Charger to carry, a Tongue to reel — and each hands it back on its own way
+	out. That is correct and it is not enough: a special DESPAWNED rather than
+	killed never runs onDeath, so its hand-back never happens, and the survivor
+	spends the rest of the round server-simulated and laggy for no visible
+	reason. Every pin ends here, including that one (the heartbeat drops a pin
+	whose owner has gone), so this is the same argument releaseLedge makes above
+	— one place that can let the body go without something having to remember to.
+
+	Idempotent: handing an already-auto root back to auto costs nothing, so the
+	specials keep their own release paths and this is only ever the backstop. The
+	pcall is load-bearing rather than superstition — killing a survivor who is
+	ledge-hanging reaches here while their root is still anchored, and Roblox
+	refuses auto ownership on an anchored part. releaseLedge unanchors and hands
+	it back a moment later, so the refusal is the correct outcome, not a failure.
+]]
 function SurvivorService:_clearPinFields(record)
 	record.pinnedBy = nil
 	record.pinnedKind = ""
+
+	local root = record.root
+	if root and root.Parent then
+		pcall(function()
+			root:SetNetworkOwnershipAuto()
+		end)
+	end
 end
 
 function SurvivorService:clearPinned(player: Player)

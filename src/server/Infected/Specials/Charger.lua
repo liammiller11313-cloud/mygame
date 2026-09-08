@@ -121,6 +121,11 @@ local SPAWN_SETTLE = 1.2 -- never charge out of the spawn frame
 
 local SCAN_INTERVAL = 0.3 -- target re-selection; never per frame
 local BELLOW_INTERVAL = 5.0 -- the approach vocalisation, on its own clock
+--[[ And the same clock, faster, while it is pummelling somebody into the floor.
+     A pinned survivor cannot free themselves — that is the whole design — so the
+     bellow is not flavour, it is the only thing that tells a teammate which way
+     to run, and it has to keep saying so until the pummel stops. ]]
+local PUMMEL_BELLOW_INTERVAL = 1.5
 
 local IMPACT_CAMERA_IMPULSE = table.freeze({
 	position = Vector3.new(0, -0.5, 1.4),
@@ -627,7 +632,11 @@ local function slam(model: Model, brain: any, state: State, root: BasePart)
 	state.carrying = false
 	state.phase = PHASE.Pummel
 	state.phaseTime = 0
-	state.nextPummel = os.clock() + ATTACK.cooldown
+	local now = os.clock()
+	state.nextPummel = now + ATTACK.cooldown
+	-- The slam counts as the first one; reusing the approach clock keeps one
+	-- Charger to one voice, since it can never be stalking and pummelling at once.
+	state.nextBellow = now + PUMMEL_BELLOW_INTERVAL
 end
 
 -- ─── phases ──────────────────────────────────────────────────────────────────
@@ -780,6 +789,11 @@ local function stepPummel(model: Model, brain: any, state: State, root: BasePart
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.WalkSpeed ~= 0 then
 		humanoid.WalkSpeed = 0
+	end
+
+	if now >= state.nextBellow then
+		state.nextBellow = now + PUMMEL_BELLOW_INTERVAL
+		Support.playSound("ChargerPummel", root)
 	end
 
 	if now >= state.nextPummel then

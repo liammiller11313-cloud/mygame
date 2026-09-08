@@ -71,6 +71,17 @@ local MISS_RECOVERY = 2.2
 local SCAN_INTERVAL = 0.25
 local RASP_INTERVAL = 3.5
 
+--[[ How often the Tongue is heard while it already has somebody. The victim
+     cannot free themselves, so this is not flavour: it is the only thing that
+     tells a teammate which way to turn, and 1.6s is close enough together to
+     track a Tongue that is walking backwards with its meal. ]]
+local RATTLE_INTERVAL = 1.6
+
+-- The tongue itself. Wet red, thick enough to read across a street.
+local LINE_COLOR = Color3.fromRGB(150, 41, 44)
+local LINE_WIDTH = 0.45
+local LINE_TRANSPARENCY = 0.1
+
 type State = {
 	phase: string,
 	phaseTime: number,
@@ -79,6 +90,9 @@ type State = {
 	scanClock: number,
 	victim: Player?,
 	nextHitAt: number,
+	nextRattle: number,
+	owned: BasePart?,
+	line: { Instance }?, -- the beam and its two attachments, destroyed together
 	ignore: { Instance },
 }
 
@@ -96,6 +110,9 @@ local function ensure(model: Model): State
 			scanClock = 0,
 			victim = nil,
 			nextHitAt = 0,
+			nextRattle = 0,
+			owned = nil,
+			line = nil,
 			ignore = { model },
 		}
 		states[model] = state
@@ -189,10 +206,117 @@ local function setSpeed(model: Model, speed: number)
 	end
 end
 
+--[[
+	Takes the victim's physics off their own machine for the length of the drag.
+
+	The reel is a per-frame CFrame write, and a CFrame written by the server to a
+	part the victim's client owns does not survive: their simulation keeps going
+	from its own state and replicates back over the top, so the drag turns into a
+	rubber band that never arrives and the whole grab times out at REEL_TIMEOUT.
+	The Charger's carry hit this first and says so in its own words; this is the
+	same take and the same hand-back, kept local rather than shared for the same
+	reason the Charger's is — the state it hangs off is the creature's own.
+
+	Held for the whole pin, not just the drag. Handing back the moment the reel
+	arrives would be tidier, but the victim's client has been receiving positions
+	it did not simulate for several seconds, and its own last-owned state is from
+	before the grab: give it authority back mid-pin and it can yank them to where
+	they were standing when the tongue landed. Nothing in the hold moves them
+	anyway, so there is nothing to buy by taking that risk.
+
+	Every exit path goes through release(), so there is exactly one place that
+	can forget to give a player their own legs back.
+]]
+local function seize(state: State, root: BasePart)
+	state.owned = root
+	pcall(function()
+		root:SetNetworkOwner(nil)
+	end)
+end
+
+local function handBack(state: State)
+	local root = state.owned
+	state.owned = nil
+	if not root or not root.Parent then
+		return
+	end
+	--[[ Auto rather than back to the player by name: the survivor may have died,
+	     respawned or left between the grab and here, and SetNetworkOwnershipAuto
+	     lets Roblox answer that question rather than this module guessing. ]]
+	pcall(function()
+		root:SetNetworkOwnershipAuto()
+	end)
+end
+
+--[[
+	Draws the tongue.
+
+	The header promises two counters and the code enforces both — lineHolds is
+	checked every frame of the reel and the hold, and a teammate's body breaks it
+	as surely as a wall does. Neither is playable if nobody can see where the
+	line runs, and until this existed the victim was dragged across the street by
+	nothing at all. So the beam is not decoration: it is the geometry the counter
+	is played against, and it lives for exactly as long as the pin does.
+
+	Built on the server so it replicates to everybody, including the victim —
+	who, facing the wrong way, may be looking straight down it.
+]]
+local function drawLine(state: State, root: BasePart, victimRoot: BasePart)
+	-- Up and forward off the root, so it leaves the creature at about mouth
+	-- height rather than out of its stomach.
+	local from = Instance.new("Attachment")
+	from.Name = "FL_TongueFrom"
+	from.Position = Vector3.new(0, 1.2, -0.6)
+	from.Parent = root
+
+	local to = Instance.new("Attachment")
+	to.Name = "FL_TongueTo"
+	to.Parent = victimRoot
+
+	local beam = Instance.new("Beam")
+	beam.Name = "FL_Tongue"
+	beam.Attachment0 = from
+	beam.Attachment1 = to
+	beam.Color = ColorSequence.new(LINE_COLOR)
+	beam.Width0 = LINE_WIDTH
+	beam.Width1 = LINE_WIDTH
+	--[[ Dead straight, and that is the point rather than a saving. lineHolds
+	     tests a straight raycast between these two bodies, so a beam that sagged
+	     prettily would be drawing a line nobody is actually playing against: a
+	     teammate would step into the curve, break nothing, and reasonably
+	     conclude the counter is broken. What is drawn is the ray. ]]
+	beam.CurveSize0 = 0
+	beam.CurveSize1 = 0
+	beam.Segments = 1
+	beam.FaceCamera = true
+	beam.LightEmission = 0.1
+	beam.Transparency = NumberSequence.new(LINE_TRANSPARENCY)
+	beam.Parent = from
+
+	state.line = { beam, from, to }
+end
+
+local function clearLine(state: State)
+	local line = state.line
+	state.line = nil
+	if not line then
+		return
+	end
+	for _, part in line do
+		part:Destroy()
+	end
+end
+
 --[[ Lets go of whoever is held and stands still for a moment. Every exit from
      every phase goes through here, which is what guarantees a Tongue can never
      be left holding a pin it has stopped thinking about. ]]
 local function release(model: Model, brain: any, state: State, now: number, recovery: number)
+	-- Both of these are unconditional and both come first. A tongue left drawn
+	-- points at a pin that no longer exists, and a root left server-owned is a
+	-- player who has been quietly made to feel laggy for the rest of the round.
+	clearLine(state)
+	handBack(state)
+
 	local victim = state.victim
 	if victim then
 		local survivors: any = Registry.find("SurvivorService")
@@ -221,15 +345,34 @@ local function beginAim(model: Model, brain: any, state: State, root: BasePart, 
 	Support.playSound("TongueGrab", root)
 end
 
-local function beginReel(model: Model, state: State, root: BasePart, victim: Player)
+--[[ The tongue connects. Returns false when the pin would not take — somebody
+     who went down during the tell is not grabbable, and entering the drag anyway
+     means seizing a root and drawing a line for the one frame it takes stepReel
+     to notice. ]]
+local function beginReel(model: Model, state: State, root: BasePart, victim: Player): boolean
+	local survivors: any = Registry.find("SurvivorService")
+	if not survivors or typeof(survivors.setPinned) ~= "function" then
+		return false
+	end
+	local ok, pinned = pcall(survivors.setPinned, survivors, victim, model, Enums.Infected.Tongue)
+	if not ok or pinned ~= true then
+		return false
+	end
+
+	local _, victimRoot = Support.rootOf(victim)
+	if not victimRoot then
+		pcall(survivors.setPinned, survivors, victim, nil, nil)
+		return false
+	end
+
 	state.phase = PHASE.Reel
 	state.phaseTime = 0
+	state.nextRattle = os.clock() + RATTLE_INTERVAL
 
-	local survivors: any = Registry.find("SurvivorService")
-	if survivors and typeof(survivors.setPinned) == "function" then
-		pcall(survivors.setPinned, survivors, victim, model, Enums.Infected.Tongue)
-	end
+	seize(state, victimRoot)
+	drawLine(state, root, victimRoot)
 	Support.playSound("TongueGrab", root)
+	return true
 end
 
 local function stepAim(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
@@ -252,8 +395,8 @@ local function stepAim(model: Model, brain: any, state: State, root: BasePart, d
 		Support.faceTowards(brain, root, victimRoot.Position, dt)
 	end
 
-	if state.phaseTime >= AIM_TIME then
-		beginReel(model, state, root, victim)
+	if state.phaseTime >= AIM_TIME and not beginReel(model, state, root, victim) then
+		release(model, brain, state, now, MISS_RECOVERY)
 	end
 end
 
@@ -288,6 +431,18 @@ local function stepReel(model: Model, brain: any, state: State, root: BasePart, 
 		release(model, brain, state, now, MISS_RECOVERY)
 		return
 	end
+	if victimRoot ~= state.owned then
+		--[[ They respawned mid-drag. The root being written to is not the root
+		     that was seized and not the one the beam is tied to, so the drag has
+		     lost its subject: let go rather than haul a stranger's body around. ]]
+		release(model, brain, state, now, MISS_RECOVERY)
+		return
+	end
+
+	if now >= state.nextRattle then
+		state.nextRattle = now + RATTLE_INTERVAL
+		Support.playSound("TongueDrag", root)
+	end
 
 	local delta = root.Position - victimRoot.Position
 	local flat = Vector3.new(delta.X, 0, delta.Z)
@@ -305,6 +460,21 @@ local function stepReel(model: Model, brain: any, state: State, root: BasePart, 
 	     without ever looking like it was supposed to. ]]
 	local step = math.min(REEL_SPEED * dt, distance - REEL_ARRIVE)
 	victimRoot.CFrame = victimRoot.CFrame + flat.Unit * step
+	--[[
+		Horizontal only, and the Y clamp is not tidiness.
+
+		Now that the server owns this root, whatever they were sprinting at when
+		the tongue landed is still on it and would carry them past the position
+		written above, so the flat component has to go. Zeroing all three would
+		be the obvious way to write that and it is wrong: the reel moves them in
+		XZ and never touches Y, so a survivor with no downward velocity is a
+		survivor who FLOATS across the gap they were dragged over. Gravity keeps
+		whatever it has earned. The clamp at zero is the other half — a jump is
+		the one bit of upward momentum a dragged survivor could still buy, and
+		hopping out of a tongue is not a counter this creature is meant to have.
+	]]
+	local velocity = victimRoot.AssemblyLinearVelocity
+	victimRoot.AssemblyLinearVelocity = Vector3.new(0, math.min(velocity.Y, 0), 0)
 end
 
 local function stepHold(model: Model, brain: any, state: State, root: BasePart, dt: number, now: number)
@@ -328,6 +498,11 @@ local function stepHold(model: Model, brain: any, state: State, root: BasePart, 
 
 	state.phaseTime += dt
 	Support.faceTowards(brain, root, victimRoot.Position, dt)
+
+	if now >= state.nextRattle then
+		state.nextRattle = now + RATTLE_INTERVAL
+		Support.playSound("TongueDrag", root)
+	end
 
 	if now >= state.nextHitAt then
 		state.nextHitAt = now + ATTACK.cooldown
