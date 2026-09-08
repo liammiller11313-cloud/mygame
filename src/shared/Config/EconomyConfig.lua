@@ -228,7 +228,14 @@ EconomyConfig.MaxPerRound = 8_000
 	occupy: what is in it is a plan, not a slot, and burying two coming-soon rows
 	among real primaries would read as two primaries that are broken.
 ]]
-EconomyConfig.Categories = table.freeze({ "PRIMARY", "SECONDARY", "MELEE", "SPECIALS" })
+--[[ The shop's tabs, in order.
+
+     PASSES is the odd one and is named here anyway, because this list is what
+     the shop draws rather than what EconomyConfig sells. Its rows come from
+     PassConfig and cost Robux; `inCategory("PASSES")` is correctly empty, and
+     ShopController branches on the name. Two currencies, two catalogues, one
+     row of tabs. ]]
+EconomyConfig.Categories = table.freeze({ "PRIMARY", "SECONDARY", "MELEE", "PASSES" })
 
 --[[
 	Every purchasable thing, and every thing that will be.
@@ -388,25 +395,16 @@ EconomyConfig.Catalogue = table.freeze({
 	{ id = Enums.Weapon.Machete, category = "MELEE", price = 2400 },
 	{ id = Enums.Weapon.FireAxe, category = "MELEE", price = 3200 },
 
-	-- ── specials ────────────────────────────────────────────────────────────
-	-- None of these exist yet: no model, no WeaponConfig row, no behaviour.
-	-- They are here so the category reads as a plan rather than as an empty tab.
-	{
-		id = "Flamethrower",
-		category = "SPECIALS",
-		price = 0,
-		soon = true,
-		displayName = "FLAMETHROWER",
-		blurb = "Holds a corridor. Holds it for a while.",
-	},
-	{
-		id = "MolotovPack",
-		category = "SPECIALS",
-		price = 0,
-		soon = true,
-		displayName = "MOLOTOV PACK",
-		blurb = "Spawn with a bottle instead of finding one.",
-	},
+	--[[ ── the specials tab is gone ─────────────────────────────────────────
+	     It held two entries, both `soon`: a Flamethrower and a Molotov Pack with
+	     no model, no WeaponConfig row and no behaviour, drawn greyed so the tab
+	     read as a plan rather than as an empty box. The tab is PASSES now and
+	     those two placeholders went with it.
+
+	     Nothing was lost that existed. If either is ever built it belongs in
+	     PRIMARY or SECONDARY beside the weapons it competes with, which is where
+	     a real flamethrower would always have gone — the specials tab was a
+	     holding pen, not a class. ]]
 } :: { ShopEntry })
 
 -- ── lookups ─────────────────────────────────────────────────────────────────

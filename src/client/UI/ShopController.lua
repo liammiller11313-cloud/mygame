@@ -62,12 +62,14 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AudioConfig = require(Shared.Config.AudioConfig)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
+local PassConfig = require(Shared.Config.PassConfig)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
 local UITheme = require(Shared.Config.UITheme)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local GamepadFocus = require(script.Parent.GamepadFocus)
+local ImageCheck = require(script.Parent.ImageCheck)
 local ScaleLayer = require(script.Parent.ScaleLayer)
 local UiSound = require(script.Parent.UiSound)
 local WeaponPreview = require(script.Parent.WeaponPreview)
@@ -199,6 +201,11 @@ local list: ScrollingFrame
 local detail: Frame
 local preview: WeaponPreview.Preview
 local previewMissing: TextLabel
+--[[ A pass has no model to rotate, so it borrows the preview's slot for its
+     512x512 art and its contents list borrows the stat rows'. Only one of the
+     two families is ever visible; see showPass. ]]
+local passImage: ImageLabel
+local grantsLabel: TextLabel
 local nameLabel: TextLabel
 local classLabel: TextLabel
 local blurbLabel: TextLabel
@@ -220,6 +227,10 @@ local state = {
 	--[[ How many stat rows the column is tall enough for. Set by layoutDetail,
 	     read by refreshStats — see both. ]]
 	visibleStats = STAT_ROWS,
+	--[[ Whether the column is tall enough to draw a picture at all. Same shape
+	     and the same reason: layoutDetail decides it, and showPass needs it to
+	     put the preview back when a weapon is selected after a pass. ]]
+	previewRoom = true,
 }
 
 -- ── the roster's extremes, computed once ────────────────────────────────────
@@ -294,6 +305,45 @@ local function profile(): any
 	return Registry.find("ProfileController")
 end
 
+--[[ Which tab draws from PassConfig instead of the Dollars catalogue. Named
+     rather than compared inline, so the tab can be renamed in EconomyConfig
+     without the shop quietly falling back to an empty list. ]]
+local PASS_CATEGORY = "PASSES"
+
+local function passes(): any
+	return Registry.find("PassController")
+end
+
+--[[ The PassConfig entry `state.selected` names, or nil for a weapon. One
+     lookup, so nothing else in the file has to know that the two catalogues
+     share an id space by not overlapping. ]]
+local function selectedPass(): any
+	return PassConfig.get(state.selected)
+end
+
+--[[
+	What a pass row or button says, and why.
+
+	Three states, not two. PassService's ownership check is a web call that can
+	throw, and until it has answered the honest word is not a price — offering to
+	sell somebody a pass they already own is the one outcome worth going out of
+	the way to avoid. So an unknown answer draws CHECKING… and refuses the sale
+	until it resolves.
+]]
+local function passStatus(pass: any): (string, Color3, boolean)
+	local store = passes()
+	if not store then
+		return "CHECKING…", COLOR.TextDim, false
+	end
+	if store:owns(pass.id) then
+		return "OWNED", COLOR.TextSecondary, false
+	end
+	if not store:isKnown(pass.id) then
+		return "CHECKING…", COLOR.TextDim, false
+	end
+	return PassConfig.format(pass.robux), COLOR.Accent, true
+end
+
 local function isTouch(): boolean
 	local input = Registry.find("InputController")
 	if not input or typeof(input.isTouchScheme) ~= "function" then
@@ -318,9 +368,51 @@ local function displayNameOf(entry: any): string
 	return entry.displayName or string.upper(entry.id)
 end
 
+--[[ Swaps the detail column between the two families. Everything a weapon draws
+     is hidden for a pass and the other way round, in one place, so no state can
+     leave half of one showing over the other. ]]
+local function showPass(pass: any?)
+	local isPass = pass ~= nil
+
+	--[[ state.previewRoom, not the frame's own Visible. Reading the current
+	     value back and AND-ing it is how this was first written and it was a
+	     one-way door: a pass set the preview false, and coming back to a weapon
+	     computed `true and false` and left it hidden until something else
+	     resized the panel. Whether the picture FITS is layoutDetail's answer and
+	     it is kept in state so both directions can ask for it. ]]
+	preview.frame.Visible = not isPass and state.previewRoom
+	passImage.Visible = isPass and state.previewRoom
+	grantsLabel.Visible = isPass
+
+	if isPass then
+		previewMissing.Visible = false
+		passImage.Image = pass.image
+		--[[ A pass whose art does not load is a blank rectangle above a real
+		     name, a real price and a working buy button — which looks deliberate
+		     enough that nobody would ever report it, on the one screen in the
+		     game that asks for money. ImageCheck says so in the output once per
+		     id. Same reason the map cards call it. ]]
+		ImageCheck.verify(pass.image, string.format("the %s pass image", pass.displayName))
+		grantsLabel.Text = "INCLUDES\n• " .. table.concat(pass.grants, "\n• ")
+		--[[ The bars belong to a weapon. refreshStats hides them for a nil
+		     definition too, but it only runs on a relayout, and a tab switch is
+		     not one. ]]
+		for _, row in statRows do
+			row.holder.Visible = false
+		end
+	end
+end
+
 --[[ What a row says on its right-hand side: OWNED, a price, or SOON. This is
      the only thing on the row that changes after it is built. ]]
 local function rowStatus(entry: any): (string, Color3)
+	--[[ A pass row asks a different question of a different currency, and its
+	     answer has a third state the Dollars rows do not. ]]
+	local pass = PassConfig.get(entry.id)
+	if pass then
+		local text, color = passStatus(pass)
+		return text, color
+	end
 	if entry.soon then
 		return "SOON", COLOR.TextDim
 	end
@@ -384,6 +476,20 @@ end
      selected. Kept in one function so they cannot drift: every path sets both
      the text and whether it is pressable. ]]
 local function refreshBuy()
+	local pass = selectedPass()
+	if pass then
+		--[[ Robux, so nothing here consults the Dollars balance: Roblox decides
+		     whether they can afford it, on its own prompt, with its own money. ]]
+		buyButton.Visible = true
+		local text, color, pressable = passStatus(pass)
+		buyLabel.Text = if pressable then "BUY  " .. text else text
+		buyLabel.TextColor3 = if pressable then COLOR.AccentBright else color
+		buyButton.Selectable = pressable
+		buyButton.BackgroundTransparency = if pressable then 0.15 else 0.6
+		buyButton.Active = pressable
+		return
+	end
+
 	local entry = EconomyConfig.get(state.selected)
 	local store = profile()
 	if not entry or not store then
@@ -439,11 +545,25 @@ local function refreshStats(definition: any)
 end
 
 local function select(itemId: string)
+	local pass = PassConfig.get(itemId)
+	if pass then
+		state.selected = itemId
+		showPass(pass)
+		nameLabel.Text = pass.displayName
+		classLabel.Text = "GAME PASS · PERMANENT"
+		blurbLabel.Text = pass.blurb
+		priceLabel.Text = PassConfig.format(pass.robux)
+		refreshRows()
+		refreshBuy()
+		return
+	end
+
 	local entry = EconomyConfig.get(itemId)
 	if not entry then
 		return
 	end
 	state.selected = itemId
+	showPass(nil)
 
 	local definition = WeaponConfig.get(itemId)
 	nameLabel.Text = displayNameOf(entry)
@@ -521,7 +641,13 @@ local function renderCategory(category: string)
 	state.category = category
 	releaseRows()
 
-	local entries = EconomyConfig.inCategory(category)
+	--[[ The one place the two catalogues meet. buildRow needs an `id` and a
+	     `displayName` and a PassConfig entry has both, so a pass row is built by
+	     the same function as a rifle's — only where the list comes from differs,
+	     and rowStatus already knows how to price each. ]]
+	local entries = if category == PASS_CATEGORY
+		then PassConfig.Passes
+		else EconomyConfig.inCategory(category)
 	for index, entry in entries do
 		buildRow(entry, index)
 	end
@@ -556,6 +682,20 @@ local function showMessage(text: string, color: Color3)
 end
 
 local function attemptBuy()
+	local pass = selectedPass()
+	if pass then
+		local passStore = passes()
+		--[[ Asks the server for the prompt rather than calling
+		     PromptGamePassPurchase here. Not a security boundary — a client can
+		     prompt itself — but it keeps one place that knows which passes exist,
+		     so a stale id is refused instead of opening Roblox's "item
+		     unavailable" dialog. See PassService. ]]
+		if passStore and passStore:promptPurchase(pass.id) then
+			UiSound.play(AudioConfig.UI.MenuConfirm)
+		end
+		return
+	end
+
 	local store = profile()
 	local entry = EconomyConfig.get(state.selected)
 	if not store or not entry or entry.soon or store:owns(entry.id) then
@@ -621,6 +761,22 @@ local function buildDetail(parent: Frame)
 
 	preview = WeaponPreview.new(detail, "Preview")
 	preview.frame.Size = UDim2.new(1, 0, PREVIEW_HEIGHT, 0)
+
+	--[[ 512x512 art, fitted rather than stretched: the pass image is square and
+	     the preview slot is not, and a stretched storefront image is the first
+	     thing that reads as unfinished on a screen asking for money. ]]
+	passImage = Instance.new("ImageLabel")
+	passImage.Name = "PassImage"
+	passImage.BackgroundTransparency = 1
+	passImage.ScaleType = Enum.ScaleType.Fit
+	passImage.Size = UDim2.new(1, 0, PREVIEW_HEIGHT, 0)
+	passImage.Visible = false
+	passImage.Parent = detail
+
+	grantsLabel = Widgets.label(detail, "Grants", FONT.Body, TEXT.Small, COLOR.TextSecondary)
+	grantsLabel.TextYAlignment = Enum.TextYAlignment.Top
+	grantsLabel.TextWrapped = true
+	grantsLabel.Visible = false
 
 	previewMissing = Widgets.label(detail, "NoModel", FONT.Body, TEXT.Small, COLOR.TextDim)
 	previewMissing.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -813,10 +969,16 @@ local function layoutDetail()
 	local top = previewHeight + LAYOUT.ElementGap
 
 	local hasRoom = previewHeight >= PREVIEW_HIDE
-	preview.frame.Visible = hasRoom
+	state.previewRoom = hasRoom
+	local pass = selectedPass()
+	preview.frame.Visible = hasRoom and pass == nil
 	preview.frame.Size = UDim2.new(1, 0, 0, previewHeight)
 	previewMissing.Position = UDim2.new(0.5, 0, 0, previewHeight * 0.5)
-	previewMissing.Visible = previewMissing.Visible and hasRoom
+	previewMissing.Visible = previewMissing.Visible and hasRoom and pass == nil
+
+	-- The pass art takes the picture's slot, and its contents take the bars'.
+	passImage.Size = UDim2.new(1, 0, 0, previewHeight)
+	passImage.Visible = hasRoom and pass ~= nil
 
 	nameLabel.Position = UDim2.fromOffset(0, top)
 	priceLabel.Position = UDim2.new(1, 0, 0, top + 2)
@@ -829,9 +991,16 @@ local function layoutDetail()
 		row.holder.Position = UDim2.fromOffset(0, statTop + (index - 1) * statHeight)
 		row.holder.Size = UDim2.new(1, 0, 0, statHeight)
 	end
+
+	grantsLabel.Position = UDim2.fromOffset(0, statTop)
+	grantsLabel.Size = UDim2.new(1, 0, 0, statBlock)
 	--[[ Which rows exist is this function's answer; whether a given weapon HAS
 	     that number is refreshStats'. Re-run so the two agree without either
-	     needing to know the other's rule. ]]
+	     needing to know the other's rule.
+
+	     A pass resolves to nil here and refreshStats hides every bar for a nil
+	     definition, which is the right answer for it as well — no third branch
+	     needed. ]]
 	refreshStats(WeaponConfig.get(state.selected))
 
 	buyButton.Size = UDim2.fromOffset(if compact then 170 else 220, buyHeight)
@@ -932,6 +1101,22 @@ end
 
 function ShopController:start()
 	WeaponPreview.awaitAssets()
+
+	--[[ Robux ownership arrives on its own schedule and not with the profile.
+	     PassService answers on join, retries a failed check, and writes straight
+	     into its cache the moment PromptGamePassPurchaseFinished fires — so the
+	     row that said CHECKING… becomes a price, and the price becomes OWNED,
+	     without the player touching anything. Redrawn here rather than polled. ]]
+	local passStore = passes()
+	if passStore then
+		trove:add(passStore.changed:connect(function()
+			if not state.open then
+				return
+			end
+			refreshRows()
+			refreshBuy()
+		end))
+	end
 
 	local store = profile()
 	if store then

@@ -119,6 +119,14 @@ local EVENTS: { string } = {
 	     you own, what you tried to buy, and what happened. ]]
 	"PurchaseItem", -- C->S (itemId: string)
 	"PurchaseResult", -- {itemId, ok: boolean, reason: string, price: number?}
+	--[[ The OTHER currency. Robux passes never touch the profile — Roblox owns
+	     that record and PassService asks it once a session — so these two carry
+	     what the profile cannot. `known` is the field that matters: it separates
+	     "asked, and no" from "have not managed to ask yet", and the shop draws
+	     CHECKING… on the difference rather than offering to sell somebody a pass
+	     they already own. See PassService. ]]
+	"RequestPassPurchase", -- C->S (passId: string)
+	"PassesSynced", -- {[passId]: {owns: boolean, known: boolean}}
 	--[[ The whole profile, once, when it has finished loading, and again after
 	     anything changes it. One event rather than four because the shop and the
 	     loadout screen both need all of it and a partial profile is a screen

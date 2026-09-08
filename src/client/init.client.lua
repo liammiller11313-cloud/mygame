@@ -107,6 +107,9 @@ local CONTROLLERS = {
 	     two read; both of them look it up at start(), so it has to have connected
 	     its remotes first or the first sync lands in nothing. ]]
 	"UI/ProfileController",
+	--[[ Before ShopController, which reads it to draw the PASSES tab. Holds no
+	     profile state: Robux ownership is Roblox's record, not ours. ]]
+	"UI/PassController",
 	-- Beside ProfileController and for the same reason: a mirror of server state
 	-- that several screens read, loaded before any of them.
 	"UI/ProgressionController",
