@@ -104,6 +104,8 @@ local FreeCursor = require(script.Parent.FreeCursor)
 local LobbyClock = require(script.Parent.LobbyClock)
 local Confetti = require(script.Parent.Confetti)
 local TitleFlicker = require(script.Parent.TitleFlicker)
+local MainMenuStats = require(script.Parent.MainMenuStats)
+local MENU = require(script.Parent.MainMenuLayout)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
@@ -115,7 +117,6 @@ local GA = Attributes.Game
 local PA = Attributes.Player
 local MODES = GameModeConfig.Modes
 local ROUND = Enums.RoundState
-local STATE = Enums.SurvivorState
 
 --[[ The menu covers everything the game draws — including OverlayController's
      end-of-round card at Overlay — and is in turn covered by the map vote and
@@ -132,18 +133,12 @@ local MENU_ORDER = UITheme.DisplayOrder.Menu
 --[[ Not fully opaque: the blurred world stays faintly visible behind the black,
      which is the difference between a menu that sits in front of the game and a
      menu that replaced it. ]]
-local MENU_SCRIM = 0.04
-local RESULTS_SCRIM = 0.02
 
-local BLUR_SIZE = 26
 -- UITheme's durations, expressed as the chase rates the frame loop wants.
 local BLUR_SPEED = 1 / MOTION.Normal
-local BLUR_EPSILON = 0.05
 
 -- The left margin every headline, rule and mode entry lines up against.
-local COLUMN_X = 0.09
 local TITLE_LINE = TEXT.Title + 6
-local TITLE_RULE_WIDTH = 300
 
 --[[
 	PLAY, and the page behind it.
@@ -158,42 +153,20 @@ local TITLE_RULE_WIDTH = 300
 	and the server still decides which server or round you land in. This only
 	moved WHEN the question is asked.
 ]]
-local PLAY_HEIGHT = 110
-local PLAY_HEIGHT_COMPACT = 64
 --[[ Under LAYOUT.ScreenMargin, because that gap is where it lives — see where it
      is positioned. Wide to stay tappable at the height that leaves it. ]]
-local BACK_HEIGHT = 18
-local BACK_WIDTH = 0.26
-
-local ENTRY_HEIGHT = 88
-local ENTRY_GAP = 20
-local ENTRY_WIDTH = 0.44
-local ENTRY_BAR_WIDTH = 3
-local ENTRY_TEXT_INSET = 20
 
 local HOVER_SPEED = 1 / MOTION.FastOut
-local HOVER_EPSILON = 0.004
 
 --[[ How long the menu waits for the server to answer a mode request before it
      stops saying SEARCHING. The only slow path is a MemoryStore browse plus a
      teleport attempt; past this something went wrong and silence is the worst
      possible answer. ]]
-local PENDING_TIMEOUT = 14
-local MESSAGE_LIFETIME = 9
 
 -- The countdown turns orange here. The last ten seconds are the only ones
 -- anybody actually counts, and that is when the number should start shouting.
-local COUNTDOWN_URGENT = 10
 
-local NO_DATA = "—"
-local RESULT_ROW_HEIGHT = 30
 local MAX_ROWS = math.max(GameModeConfig.Classic.MaxPlayers, GameModeConfig.Versus.MaxPlayers)
-
---[[ A revive is credited when the local player's hold bar was most of the way
-     full and then released, AND a teammate stood up right afterwards. See
-     `noteHelpProgress` for why it cannot simply watch for progress hitting 1. ]]
-local HELP_NEAR_COMPLETE = 0.5
-local HELP_WINDOW = 0.75
 
 local MainMenuController = {}
 
@@ -227,9 +200,7 @@ local STAT_COLUMNS = {
 	{ key = "revives", title = "REVIVES" },
 }
 
-local NAME_WIDTH = 0.30
-local STATUS_WIDTH = 0.14
-local COLUMN_WIDTH = (1 - NAME_WIDTH - STATUS_WIDTH) / #STAT_COLUMNS
+local COLUMN_WIDTH = (1 - MENU.NAME_WIDTH - MENU.STATUS_WIDTH) / #STAT_COLUMNS
 
 -- ── instances ───────────────────────────────────────────────────────────────
 
@@ -343,23 +314,6 @@ local lobby = {
 }
 
 local flicker = TitleFlicker.new()
-
---[[ What this client can honestly say about itself. Reset when a round starts so
-     a second round never inherits the first one's tally. ]]
-local localStats = {
-	kills = 0,
-	headshots = 0,
-	damageTaken = 0,
-	revives = 0,
-}
-
--- Anything the server chooses to tell us, keyed by player name. Always wins.
-local serverStats: { [string]: any } = {}
-
-local help = {
-	progress = 0,
-	finishedAt = 0,
-}
 
 local restore = {
 	--[[ Owned here, written by FreeCursor — these screens nest, so a shared slot
@@ -518,7 +472,7 @@ local function setSuppressed(value: boolean)
 		game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, not value)
 	end)
 
-	state.blurTarget = if value then BLUR_SIZE else 0
+	state.blurTarget = if value then MENU.BLUR_SIZE else 0
 
 	if value then
 		FreeCursor.take(restore)
@@ -617,7 +571,7 @@ end
 
 local function setMessage(text: string)
 	state.message = text
-	state.messageUntil = if text == "" then 0 else os.clock() + MESSAGE_LIFETIME
+	state.messageUntil = if text == "" then 0 else os.clock() + MENU.MESSAGE_LIFETIME
 	lobbyMessage.Text = string.upper(text)
 end
 
@@ -744,118 +698,8 @@ local function onLobbyState(payload: any)
 end
 
 -- ── stats ───────────────────────────────────────────────────────────────────
-
-local function resetStats()
-	localStats.kills = 0
-	localStats.headshots = 0
-	localStats.damageTaken = 0
-	localStats.revives = 0
-	table.clear(serverStats)
-	help.progress = 0
-	help.finishedAt = 0
-end
-
-local STAT_KEYS = { "kills", "headshots", "damageTaken", "revives" }
-
---[[ Merges anything stat-shaped out of a payload. Both `StatsUpdated` and the
-     `scores` table on `RoundEnded` are accepted, so whichever service grows a
-     tally first lands on this screen with no change here. ]]
-local function mergeStats(name: string, source: any)
-	if typeof(source) ~= "table" then
-		return
-	end
-	local record = serverStats[name]
-	for _, key in STAT_KEYS do
-		local value = tonumber(source[key])
-		if value then
-			record = record or {}
-			record[key] = value
-		end
-	end
-	if record then
-		serverStats[name] = record
-	end
-end
-
---[[
-	Credit for a revive, inferred.
-
-	The server publishes FL_ReviveProgress on the rescuer as well as on the
-	person on the floor, but it writes 1.00 and then 0.00 inside the same server
-	frame, so the client never observes the completion — attribute writes are
-	coalesced before they replicate. What it does observe is a hold bar that was
-	most of the way full and then vanished.
-
-	That alone is also true of a revive the player let go of, so it is only half
-	the signal: the other half is a teammate actually standing up within a beat
-	of it. Both together is a revive. Neither this nor the kill counters are the
-	right long-term answer — a server-side tally through StatsUpdated is — but a
-	scoreboard that only ever prints dashes is not worth shipping either.
-]]
-local function noteHelpProgress()
-	local progress = Attributes.get(player, PA.ReviveProgress, 0)
-	local previous = help.progress
-	help.progress = progress
-
-	if progress > 0 or previous < HELP_NEAR_COMPLETE then
-		return
-	end
-	-- Only the person doing the reviving is on their feet.
-	local mine = Attributes.get(player, PA.State, STATE.Spectating)
-	if mine == STATE.Healthy or mine == STATE.Hurt then
-		help.finishedAt = os.clock()
-	end
-end
-
-local DOWNED_STATES = {
-	[STATE.Incapacitated] = true,
-	[STATE.LedgeHanging] = true,
-	[STATE.Dead] = true,
-}
-
-local function onSurvivorStateChanged(payload: any)
-	if typeof(payload) ~= "table" or payload.player == player then
-		return
-	end
-	if not DOWNED_STATES[payload.previousState] or DOWNED_STATES[payload.state] then
-		return
-	end
-	if help.finishedAt > 0 and os.clock() - help.finishedAt <= HELP_WINDOW then
-		help.finishedAt = 0
-		localStats.revives += 1
-	end
-end
-
-local function onHitConfirmed(payload: any)
-	if typeof(payload) ~= "table" or payload.killed ~= true then
-		return
-	end
-	localStats.kills += 1
-	if payload.isHeadshot == true then
-		-- Headshot KILLS, not headshot hits: on a Common the two are the same
-		-- thing by design, and on a Tank a graze is not worth a line on a board.
-		localStats.headshots += 1
-	end
-end
-
-local function onDamageTaken(payload: any)
-	if typeof(payload) ~= "table" then
-		return
-	end
-	localStats.damageTaken += math.max(tonumber(payload.amount) or 0, 0)
-end
-
-local function statText(name: string, key: string): string
-	local record = serverStats[name]
-	local value = record and record[key]
-	if value == nil and name == player.Name then
-		value = localStats[key]
-	end
-	if typeof(value) ~= "number" then
-		return NO_DATA
-	end
-	return string.format("%d", math.floor(value + 0.5))
-end
+--[[ Counted in UI/MainMenuStats. The result screen below reads the numbers and
+     does not produce them, which is the line that split follows. ]]
 
 -- ── result screen ───────────────────────────────────────────────────────────
 
@@ -874,11 +718,11 @@ local function fillRows(scores: any)
 	local order = {}
 	for name, record in scores do
 		if typeof(name) == "string" then
-			mergeStats(name, record)
+			MainMenuStats.merge(name, record)
 			table.insert(order, {
 				name = name,
 				alive = typeof(record) == "table" and record.alive == true,
-				kills = tonumber(statText(name, "kills")) or -1,
+				kills = tonumber(MainMenuStats.text(name, "kills")) or -1,
 			})
 		end
 	end
@@ -946,7 +790,7 @@ local function fillRows(scores: any)
 		row.status.Text = if entry.alive then "STANDING" else "DIED"
 		row.status.TextColor3 = if entry.alive then COLOR.TextSecondary else COLOR.Danger
 		for _, cell in row.cells do
-			cell.label.Text = statText(entry.name, cell.key)
+			cell.label.Text = MainMenuStats.text(entry.name, cell.key)
 			cell.label.TextColor3 = if isLocal then COLOR.TextPrimary else COLOR.TextSecondary
 		end
 	end
@@ -1140,7 +984,7 @@ local function requestMode(mode: string)
 		return
 	end
 	state.pending = mode
-	state.pendingUntil = os.clock() + PENDING_TIMEOUT
+	state.pendingUntil = os.clock() + MENU.PENDING_TIMEOUT
 	setMessage("")
 	refreshEntries()
 	Remotes.Event.RequestMode:FireServer(mode)
@@ -1155,7 +999,7 @@ local function onRoundState(newState: string)
 	state.roundState = newState
 
 	if newState == ROUND.Starting or newState == ROUND.InProgress then
-		resetStats()
+		MainMenuStats.reset()
 		MainMenuController:close()
 	elseif newState == ROUND.Lobby then
 		state.committed = false
@@ -1199,20 +1043,20 @@ local function updateCountdown()
 	if whole ~= state.countdownShown then
 		state.countdownShown = whole
 		lobbyBig.Text = string.format("%d", whole)
-		lobbyBig.TextColor3 = if whole <= COUNTDOWN_URGENT then COLOR.AccentBright else COLOR.TextPrimary
+		lobbyBig.TextColor3 = if whole <= MENU.COUNTDOWN_URGENT then COLOR.AccentBright else COLOR.TextPrimary
 	end
 end
 
 local function update(dt: number)
 	if state.blur ~= state.blurTarget then
 		local delta = state.blurTarget - state.blur
-		if math.abs(delta) <= BLUR_EPSILON then
+		if math.abs(delta) <= MENU.BLUR_EPSILON then
 			state.blur = state.blurTarget
 		else
 			state.blur += delta * math.min(dt * BLUR_SPEED, 1)
 		end
 		blur.Size = state.blur
-		blur.Enabled = state.blur > BLUR_EPSILON
+		blur.Enabled = state.blur > MENU.BLUR_EPSILON
 	end
 
 	if not (state.open or state.results) then
@@ -1225,7 +1069,7 @@ local function update(dt: number)
 		local target = if entry.hovered then 1 else 0
 		if entry.alpha ~= target then
 			local delta = target - entry.alpha
-			if math.abs(delta) <= HOVER_EPSILON then
+			if math.abs(delta) <= MENU.HOVER_EPSILON then
 				entry.alpha = target
 			else
 				entry.alpha += delta * math.min(dt * HOVER_SPEED, 1)
@@ -1271,18 +1115,18 @@ end
 local function buildTitle()
 	titleKicker = Widgets.label(menuLayer, "Kicker", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	local kicker = titleKicker
-	kicker.Position = UDim2.new(COLUMN_X, 0, 0.13, 0)
+	kicker.Position = UDim2.new(MENU.COLUMN_X, 0, 0.13, 0)
 	kicker.Size = UDim2.new(0.5, 0, 0, TEXT.Body)
 	kicker.Text = tracked("A CO-OP SURVIVAL SHOOTER")
 
 	titleFading = Widgets.label(menuLayer, "Fading", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
 	local fading = titleFading
-	fading.Position = UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap)
+	fading.Position = UDim2.new(MENU.COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap)
 	fading.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	fading.Text = "FADING"
 
 	titleLight = Widgets.label(menuLayer, "Light", FONT.Stencil, TEXT.Title, COLOR.Accent)
-	titleLight.Position = UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE)
+	titleLight.Position = UDim2.new(MENU.COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE)
 	titleLight.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	titleLight.Text = "LIGHT"
 
@@ -1295,7 +1139,7 @@ local function buildTitle()
 		left-aligned version label lands in a six-pixel band under that rule and
 		reads as something that fell off it.
 
-		Right-aligned to 1 - COLUMN_X rather than to the screen edge, so it lines
+		Right-aligned to 1 - MENU.COLUMN_X rather than to the screen edge, so it lines
 		up with the end of the nav row instead of hanging past the content column
 		into the margin.
 
@@ -1305,15 +1149,19 @@ local function buildTitle()
 	]]
 	local version = Widgets.label(menuLayer, "Version", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	version.AnchorPoint = Vector2.new(1, 1)
-	version.Position = UDim2.new(1 - COLUMN_X, 0, 1, -LAYOUT.ScreenMargin)
+	version.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 1, -LAYOUT.ScreenMargin)
 	version.Size = UDim2.new(0.5, 0, 0, TEXT.Body)
 	version.TextXAlignment = Enum.TextXAlignment.Right
 	version.Text = GameConfig.Version
 
 	titleRule = Widgets.rule(menuLayer, "TitleRule", COLOR.Accent)
-	titleRule.Position =
-		UDim2.new(COLUMN_X, 0, 0.13, TEXT.Body + LAYOUT.ElementGap + TITLE_LINE * 2 + LAYOUT.PanelPadding)
-	titleRule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
+	titleRule.Position = UDim2.new(
+		MENU.COLUMN_X,
+		0,
+		0.13,
+		TEXT.Body + LAYOUT.ElementGap + TITLE_LINE * 2 + LAYOUT.PanelPadding
+	)
+	titleRule.Size = UDim2.new(0, MENU.TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 end
 
 --[[
@@ -1346,25 +1194,25 @@ local function buildPlay()
 		exactly these two lines for exactly this reason; buildPlay was written
 		without them.
 	]]
-	button.Position = UDim2.new(COLUMN_X, 0, 0.52, 0)
-	button.Size = UDim2.new(ENTRY_WIDTH, 0, 0, PLAY_HEIGHT)
+	button.Position = UDim2.new(MENU.COLUMN_X, 0, 0.52, 0)
+	button.Size = UDim2.new(MENU.ENTRY_WIDTH, 0, 0, MENU.PLAY_HEIGHT)
 
 	local rule = Widgets.rule(button, "Rule", COLOR.Accent)
 
 	local bar = Widgets.frame(button, "Bar", COLOR.Accent, 0)
 	bar.Position = UDim2.fromOffset(0, LAYOUT.BorderThickness)
-	bar.Size = UDim2.new(0, ENTRY_BAR_WIDTH, 1, -LAYOUT.BorderThickness)
+	bar.Size = UDim2.new(0, MENU.ENTRY_BAR_WIDTH, 1, -LAYOUT.BorderThickness)
 
 	--[[ Braced corners. PLAY is the largest single element in the game and it was
 	     a rule, a bar and a word — the same shape as a row in a list. ]]
 	Widgets.brackets(button, COLOR.Accent)
 
 	local label = Widgets.label(button, "Label", FONT.Display, TEXT.Title, COLOR.TextPrimary)
-	label.Position = UDim2.fromOffset(ENTRY_TEXT_INSET, LAYOUT.PanelPadding)
+	label.Position = UDim2.fromOffset(MENU.ENTRY_TEXT_INSET, LAYOUT.PanelPadding)
 	label.Text = "PLAY"
 
 	playLine = Widgets.label(button, "Line", FONT.Body, TEXT.Body, COLOR.TextSecondary)
-	playLine.Position = UDim2.fromOffset(ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding)
+	playLine.Position = UDim2.fromOffset(MENU.ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding)
 	playLine.Text = "CHOOSE A MODE AND FIND A ROUND"
 	playLine.TextTransparency = 0.35
 
@@ -1387,8 +1235,8 @@ local function buildPlay()
 
 	backButton = Widgets.button(menuLayer, "Back")
 	-- Same fallback, same reason.
-	backButton.Position = UDim2.new(COLUMN_X, 0, 0.46, 0)
-	backButton.Size = UDim2.new(BACK_WIDTH, 0, 0, BACK_HEIGHT)
+	backButton.Position = UDim2.new(MENU.COLUMN_X, 0, 0.46, 0)
+	backButton.Size = UDim2.new(MENU.BACK_WIDTH, 0, 0, MENU.BACK_HEIGHT)
 	local backLabel = Widgets.label(backButton, "Label", FONT.Heading, TEXT.Body, COLOR.TextDim)
 	backLabel.Size = UDim2.fromScale(1, 1)
 	backLabel.Text = "‹  BACK"
@@ -1403,8 +1251,9 @@ end
 local function buildModes()
 	for index, definition in MODE_ENTRIES do
 		local button = Widgets.button(menuLayer, definition.id)
-		button.Position = UDim2.new(COLUMN_X, 0, 0.52, (index - 1) * (ENTRY_HEIGHT + ENTRY_GAP))
-		button.Size = UDim2.new(ENTRY_WIDTH, 0, 0, ENTRY_HEIGHT)
+		button.Position =
+			UDim2.new(MENU.COLUMN_X, 0, 0.52, (index - 1) * (MENU.ENTRY_HEIGHT + MENU.ENTRY_GAP))
+		button.Size = UDim2.new(MENU.ENTRY_WIDTH, 0, 0, MENU.ENTRY_HEIGHT)
 		if index == 1 then
 			firstModeButton = button
 		end
@@ -1413,16 +1262,16 @@ local function buildModes()
 
 		local bar = Widgets.frame(button, "Bar", COLOR.Accent, 1)
 		bar.Position = UDim2.fromOffset(0, LAYOUT.BorderThickness)
-		bar.Size = UDim2.new(0, ENTRY_BAR_WIDTH, 1, -LAYOUT.BorderThickness)
+		bar.Size = UDim2.new(0, MENU.ENTRY_BAR_WIDTH, 1, -LAYOUT.BorderThickness)
 
 		local title = Widgets.label(button, "Title", FONT.Display, TEXT.Display, COLOR.TextPrimary)
-		title.Position = UDim2.fromOffset(ENTRY_TEXT_INSET, LAYOUT.PanelPadding)
-		title.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, TEXT.Display + 6)
+		title.Position = UDim2.fromOffset(MENU.ENTRY_TEXT_INSET, LAYOUT.PanelPadding)
+		title.Size = UDim2.new(1, -MENU.ENTRY_TEXT_INSET, 0, TEXT.Display + 6)
 		title.Text = definition.title
 
 		local line = Widgets.label(button, "Line", FONT.Body, TEXT.Body, COLOR.TextSecondary)
-		line.Position = UDim2.fromOffset(ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding + TEXT.Display + 8)
-		line.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, TEXT.Body + 4)
+		line.Position = UDim2.fromOffset(MENU.ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding + TEXT.Display + 8)
+		line.Size = UDim2.new(1, -MENU.ENTRY_TEXT_INSET, 0, TEXT.Body + 4)
 		line.Text = definition.line
 		line.TextTransparency = 0.35
 
@@ -1523,7 +1372,7 @@ local function buildBriefing()
 	briefingColumn = Widgets.frame(menuLayer, "Briefing", COLOR.Background, 1)
 	local column = briefingColumn
 	column.AnchorPoint = Vector2.new(1, 0.5)
-	column.Position = UDim2.new(1 - COLUMN_X, 0, 0.52, 0)
+	column.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 0.52, 0)
 	--[[ Sized to what is in it rather than to a number. The column lost its
 	     keybind half and 420 pixels of frame around 150 of content is a hole in
 	     the layout that only shows up as the rules floating in the middle of
@@ -1551,7 +1400,7 @@ end
 local function buildLobby()
 	local panel = Widgets.frame(menuLayer, "Lobby", COLOR.Background, 1)
 	panel.AnchorPoint = Vector2.new(1, 0)
-	panel.Position = UDim2.new(1 - COLUMN_X, 0, 0.15, 0)
+	panel.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 0.15, 0)
 	panel.Size = UDim2.new(0.3, 0, 0, 260)
 
 	--[[
@@ -1681,29 +1530,27 @@ local NAV_ENTRIES = {
      get anywhere were all under it. Unconditional rather than input-dependent:
      ten pixels is invisible on a desktop and the row would otherwise have to be
      re-laid-out every time somebody picked up a controller. ]]
-local NAV_HEIGHT = 56
-local NAV_GAP = 0.015
 --[[ Derived from the entry count rather than fixed, and it had to be: four
      entries at a flat 0.21 sat inside the row with a tenth of it spare, and a
      fifth would have run 11% off the end of it. Solved for instead, so the row
      always fills exactly and adding a sixth is one line above rather than two
      numbers here that have to be re-tuned together. ]]
-local NAV_WIDTH = (1 - NAV_GAP * (#NAV_ENTRIES - 1)) / #NAV_ENTRIES
+local NAV_WIDTH = (1 - MENU.NAV_GAP * (#NAV_ENTRIES - 1)) / #NAV_ENTRIES
 
 local function buildNav()
 	navRow = Widgets.frame(menuLayer, "Nav", COLOR.Background, 1)
 	local row = navRow
 	row.AnchorPoint = Vector2.new(0, 1)
-	row.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
-	row.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, NAV_HEIGHT)
+	row.Position = UDim2.new(MENU.COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
+	row.Size = UDim2.new(1 - MENU.COLUMN_X * 2, 0, 0, MENU.NAV_HEIGHT)
 
 	local rule = Widgets.rule(row, "Rule", COLOR.Border)
 	rule.Position = UDim2.fromOffset(0, -LAYOUT.PanelPadding)
-	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
+	rule.Size = UDim2.new(0, MENU.TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 
 	for index, definition in NAV_ENTRIES do
 		local holder = Widgets.button(row, definition.id)
-		holder.Position = UDim2.new((index - 1) * (NAV_WIDTH + NAV_GAP), 0, 0, 0)
+		holder.Position = UDim2.new((index - 1) * (NAV_WIDTH + MENU.NAV_GAP), 0, 0, 0)
 		holder.Size = UDim2.new(NAV_WIDTH, 0, 1, 0)
 
 		local label = Widgets.label(holder, "Label", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
@@ -1749,14 +1596,14 @@ end
 local function buildBalance()
 	balanceLabel = Widgets.label(menuLayer, "Balance", FONT.Numeric, TEXT.Heading, COLOR.Accent)
 	balanceLabel.AnchorPoint = Vector2.new(1, 0)
-	balanceLabel.Position = UDim2.new(1 - COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2)
+	balanceLabel.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2)
 	balanceLabel.Size = UDim2.fromOffset(240, TEXT.Heading + 4)
 	balanceLabel.TextXAlignment = Enum.TextXAlignment.Right
 	balanceLabel.Text = ""
 
 	local caption = Widgets.label(menuLayer, "BalanceCaption", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 	caption.AnchorPoint = Vector2.new(1, 0)
-	caption.Position = UDim2.new(1 - COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2 + TEXT.Heading + 2)
+	caption.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 0, LAYOUT.ScreenMargin * 2 + TEXT.Heading + 2)
 	caption.Size = UDim2.fromOffset(240, TEXT.Body)
 	caption.TextXAlignment = Enum.TextXAlignment.Right
 	caption.Text = tracked("DOLLARS")
@@ -1816,7 +1663,7 @@ local function buildTeleport()
 	local rule = Widgets.rule(teleportLayer, "Rule", COLOR.Accent)
 	rule.AnchorPoint = Vector2.new(0.5, 0)
 	rule.Position = UDim2.new(0.5, 0, 0.5, LAYOUT.PanelPadding)
-	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
+	rule.Size = UDim2.new(0, MENU.TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 	rule.ZIndex = 4
 
 	local line = Widgets.label(teleportLayer, "Line", FONT.Body, TEXT.Large, COLOR.TextSecondary)
@@ -1830,12 +1677,12 @@ end
 
 local function buildResultRow(index: number): any
 	local frame = Widgets.frame(resultsLayer, "Row" .. index, COLOR.Background, 1)
-	frame.Position = UDim2.new(COLUMN_X, 0, 0.5, (index - 1) * RESULT_ROW_HEIGHT)
-	frame.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, RESULT_ROW_HEIGHT)
+	frame.Position = UDim2.new(MENU.COLUMN_X, 0, 0.5, (index - 1) * MENU.RESULT_ROW_HEIGHT)
+	frame.Size = UDim2.new(1 - MENU.COLUMN_X * 2, 0, 0, MENU.RESULT_ROW_HEIGHT)
 	frame.Visible = false
 
 	local name = Widgets.label(frame, "Name", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
-	name.Size = UDim2.new(NAME_WIDTH, 0, 1, 0)
+	name.Size = UDim2.new(MENU.NAME_WIDTH, 0, 1, 0)
 	--[[ So a callsign can be set smaller and dimmer on the same line as the name,
 	     in one label. A second label would have to be positioned after text whose
 	     width Roblox will not tell you until it has drawn it. Safe here because
@@ -1846,15 +1693,15 @@ local function buildResultRow(index: number): any
 	local cells = {}
 	for column, definition in STAT_COLUMNS do
 		local label = Widgets.label(frame, definition.key, FONT.Numeric, TEXT.Body, COLOR.TextSecondary)
-		label.Position = UDim2.fromScale(NAME_WIDTH + COLUMN_WIDTH * (column - 1), 0)
+		label.Position = UDim2.fromScale(MENU.NAME_WIDTH + COLUMN_WIDTH * (column - 1), 0)
 		label.Size = UDim2.new(COLUMN_WIDTH, 0, 1, 0)
 		label.TextXAlignment = Enum.TextXAlignment.Right
 		table.insert(cells, { key = definition.key, label = label })
 	end
 
 	local status = Widgets.label(frame, "Status", FONT.Body, TEXT.Small, COLOR.TextSecondary)
-	status.Position = UDim2.fromScale(1 - STATUS_WIDTH, 0)
-	status.Size = UDim2.new(STATUS_WIDTH, 0, 1, 0)
+	status.Position = UDim2.fromScale(1 - MENU.STATUS_WIDTH, 0)
+	status.Size = UDim2.new(MENU.STATUS_WIDTH, 0, 1, 0)
 	status.TextXAlignment = Enum.TextXAlignment.Right
 
 	local rule = Widgets.rule(frame, "Rule", COLOR.Border)
@@ -1865,7 +1712,7 @@ local function buildResultRow(index: number): any
 end
 
 local function buildResults()
-	resultsRoot = Widgets.frame(gui, "Results", COLOR.Background, RESULTS_SCRIM)
+	resultsRoot = Widgets.frame(gui, "Results", COLOR.Background, MENU.RESULTS_SCRIM)
 	resultsRoot.Size = UDim2.fromScale(1, 1)
 	resultsRoot.ZIndex = 2
 	resultsRoot.Visible = false
@@ -1877,27 +1724,27 @@ local function buildResults()
 	confetti = Confetti.new(resultsRoot)
 
 	resultOutcome = Widgets.label(resultsLayer, "Outcome", FONT.Stencil, TEXT.Title, COLOR.TextPrimary)
-	resultOutcome.Position = UDim2.new(COLUMN_X, 0, 0.14, 0)
+	resultOutcome.Position = UDim2.new(MENU.COLUMN_X, 0, 0.14, 0)
 	resultOutcome.Size = UDim2.new(0.8, 0, 0, TITLE_LINE)
 	resultOutcome.ZIndex = 2
 
 	resultVerdict = Widgets.label(resultsLayer, "Verdict", FONT.Body, TEXT.Large, COLOR.TextSecondary)
-	resultVerdict.Position = UDim2.new(COLUMN_X, 0, 0.14, TITLE_LINE)
+	resultVerdict.Position = UDim2.new(MENU.COLUMN_X, 0, 0.14, TITLE_LINE)
 	resultVerdict.Size = UDim2.new(0.8, 0, 0, TEXT.Large + 6)
 	resultVerdict.ZIndex = 2
 
 	local rule = Widgets.rule(resultsLayer, "Rule", COLOR.Accent)
-	rule.Position = UDim2.new(COLUMN_X, 0, 0.14, TITLE_LINE + TEXT.Large + LAYOUT.PanelPadding * 2)
-	rule.Size = UDim2.new(0, TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
+	rule.Position = UDim2.new(MENU.COLUMN_X, 0, 0.14, TITLE_LINE + TEXT.Large + LAYOUT.PanelPadding * 2)
+	rule.Size = UDim2.new(0, MENU.TITLE_RULE_WIDTH, 0, LAYOUT.BorderThickness)
 	rule.ZIndex = 2
 
 	resultWave = Widgets.label(resultsLayer, "Wave", FONT.Heading, TEXT.Heading, COLOR.TextPrimary)
-	resultWave.Position = UDim2.new(COLUMN_X, 0, 0.32, 0)
+	resultWave.Position = UDim2.new(MENU.COLUMN_X, 0, 0.32, 0)
 	resultWave.Size = UDim2.new(0.8, 0, 0, TEXT.Heading + 6)
 	resultWave.ZIndex = 2
 
 	resultTime = Widgets.label(resultsLayer, "Time", FONT.Heading, TEXT.Heading, COLOR.TextPrimary)
-	resultTime.Position = UDim2.new(COLUMN_X, 0, 0.32, TEXT.Heading + LAYOUT.ElementGap)
+	resultTime.Position = UDim2.new(MENU.COLUMN_X, 0, 0.32, TEXT.Heading + LAYOUT.ElementGap)
 	resultTime.Size = UDim2.new(0.8, 0, 0, TEXT.Heading + 6)
 	resultTime.ZIndex = 2
 
@@ -1910,7 +1757,7 @@ local function buildResults()
 	     outcome rather than a footnote under it. ]]
 	resultPayout = Widgets.label(resultsLayer, "Payout", FONT.Numeric, TEXT.Display, COLOR.Accent)
 	resultPayout.AnchorPoint = Vector2.new(1, 0)
-	resultPayout.Position = UDim2.new(1 - COLUMN_X, 0, 0.3, 0)
+	resultPayout.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 0.3, 0)
 	resultPayout.Size = UDim2.new(0.5, 0, 0, TEXT.Display + 6)
 	resultPayout.TextXAlignment = Enum.TextXAlignment.Right
 	resultPayout.ZIndex = 2
@@ -1918,7 +1765,7 @@ local function buildResults()
 
 	resultPayoutLine = Widgets.label(resultsLayer, "PayoutLine", FONT.Body, TEXT.Small, COLOR.TextDim)
 	resultPayoutLine.AnchorPoint = Vector2.new(1, 0)
-	resultPayoutLine.Position = UDim2.new(1 - COLUMN_X, 0, 0.3, TEXT.Display + 4)
+	resultPayoutLine.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 0.3, TEXT.Display + 4)
 	resultPayoutLine.Size = UDim2.new(0.6, 0, 0, TEXT.Body * 2)
 	resultPayoutLine.TextXAlignment = Enum.TextXAlignment.Right
 	resultPayoutLine.TextYAlignment = Enum.TextYAlignment.Top
@@ -1927,17 +1774,17 @@ local function buildResults()
 
 	-- Column headings, one row above the first player.
 	local header = Widgets.frame(resultsLayer, "Header", COLOR.Background, 1)
-	header.Position = UDim2.new(COLUMN_X, 0, 0.5, -RESULT_ROW_HEIGHT)
-	header.Size = UDim2.new(1 - COLUMN_X * 2, 0, 0, RESULT_ROW_HEIGHT)
+	header.Position = UDim2.new(MENU.COLUMN_X, 0, 0.5, -MENU.RESULT_ROW_HEIGHT)
+	header.Size = UDim2.new(1 - MENU.COLUMN_X * 2, 0, 0, MENU.RESULT_ROW_HEIGHT)
 	header.ZIndex = 2
 
 	local headerName = Widgets.label(header, "Name", FONT.Body, TEXT.Tiny, COLOR.TextDim)
-	headerName.Size = UDim2.new(NAME_WIDTH, 0, 1, 0)
+	headerName.Size = UDim2.new(MENU.NAME_WIDTH, 0, 1, 0)
 	headerName.Text = tracked("SURVIVORS")
 
 	for column, definition in STAT_COLUMNS do
 		local label = Widgets.label(header, definition.key, FONT.Body, TEXT.Tiny, COLOR.TextDim)
-		label.Position = UDim2.fromScale(NAME_WIDTH + COLUMN_WIDTH * (column - 1), 0)
+		label.Position = UDim2.fromScale(MENU.NAME_WIDTH + COLUMN_WIDTH * (column - 1), 0)
 		label.Size = UDim2.new(COLUMN_WIDTH, 0, 1, 0)
 		label.TextXAlignment = Enum.TextXAlignment.Right
 		label.Text = definition.title
@@ -1950,7 +1797,7 @@ local function buildResults()
 	local continue = Widgets.button(resultsLayer, "Continue")
 	resultContinueButton = continue
 	continue.AnchorPoint = Vector2.new(0, 1)
-	continue.Position = UDim2.new(COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
+	continue.Position = UDim2.new(MENU.COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
 	continue.Size = UDim2.new(0.3, 0, 0, TEXT.Display + LAYOUT.PanelPadding)
 	continue.ZIndex = 2
 
@@ -1976,7 +1823,7 @@ local function buildResults()
 
 	resultReturn = Widgets.label(resultsLayer, "Return", FONT.Body, TEXT.Small, COLOR.TextDim)
 	resultReturn.AnchorPoint = Vector2.new(1, 1)
-	resultReturn.Position = UDim2.new(1 - COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
+	resultReturn.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
 	resultReturn.Size = UDim2.new(0.4, 0, 0, TEXT.Body)
 	resultReturn.TextXAlignment = Enum.TextXAlignment.Right
 	resultReturn.ZIndex = 2
@@ -1998,7 +1845,7 @@ end
 	the bottom started at 400. All three overlapped. It was invisible on every
 	desktop and on every tablet, which is exactly the shape of bug that ships.
 
-	So below COMPACT_HEIGHT the poster becomes a phone menu:
+	So below MENU.COMPACT_HEIGHT the poster becomes a phone menu:
 	  * the title drops from TEXT.Title to TEXT.Display — 84 to 54, which is the
 	    difference between two lines taking 180 pixels and taking 120;
 	  * the mode entries lose their sub-line and shorten to fit what is left;
@@ -2009,42 +1856,44 @@ end
 	title's real bottom down to the nav row's real top, so the three blocks
 	cannot overlap at any height.
 ]]
-local COMPACT_HEIGHT = 620
 --[[ The shortest a mode entry is allowed to get. Its title is TEXT.Heading in
      compact, so this has to clear 30 plus its padding — and a 640x360 phone,
      which is 480 reference pixels, needs every one of the studs between. ]]
-local ENTRY_HEIGHT_COMPACT = 48
 local TITLE_LINE_COMPACT = TEXT.Display + 6
 
 local function layoutColumns(referenceHeight: number)
 	if not titleKicker or not navRow then
 		return
 	end
-	local compact = referenceHeight < COMPACT_HEIGHT
+	local compact = referenceHeight < MENU.COMPACT_HEIGHT
 	local titleSize = if compact then TEXT.Display else TEXT.Title
 	local titleLine = if compact then TITLE_LINE_COMPACT else TITLE_LINE
 	local top = referenceHeight * 0.13
 
-	titleKicker.Position = UDim2.new(COLUMN_X, 0, 0, top)
+	titleKicker.Position = UDim2.new(MENU.COLUMN_X, 0, 0, top)
 	titleFading.TextSize = titleSize
-	titleFading.Position = UDim2.new(COLUMN_X, 0, 0, top + TEXT.Body + LAYOUT.ElementGap)
+	titleFading.Position = UDim2.new(MENU.COLUMN_X, 0, 0, top + TEXT.Body + LAYOUT.ElementGap)
 	titleFading.Size = UDim2.new(0.8, 0, 0, titleLine)
 	titleLight.TextSize = titleSize
-	titleLight.Position = UDim2.new(COLUMN_X, 0, 0, top + TEXT.Body + LAYOUT.ElementGap + titleLine)
+	titleLight.Position = UDim2.new(MENU.COLUMN_X, 0, 0, top + TEXT.Body + LAYOUT.ElementGap + titleLine)
 	titleLight.Size = UDim2.new(0.8, 0, 0, titleLine)
 
 	local titleBottom = top + TEXT.Body + LAYOUT.ElementGap + titleLine * 2 + LAYOUT.PanelPadding
-	titleRule.Position = UDim2.new(COLUMN_X, 0, 0, titleBottom)
+	titleRule.Position = UDim2.new(MENU.COLUMN_X, 0, 0, titleBottom)
 
 	--[[ The nav row is anchored to the bottom and does not move; the mode stack
 	     is fitted into whatever is left between the title and it. ]]
-	local navTop = referenceHeight - LAYOUT.ScreenMargin * 2 - NAV_HEIGHT - LAYOUT.PanelPadding * 2
+	local navTop = referenceHeight - LAYOUT.ScreenMargin * 2 - MENU.NAV_HEIGHT - LAYOUT.PanelPadding * 2
 	local count = math.max(#modeEntries, 1)
 	--[[ One gap short of the real room, so the bottom entry never lands exactly
 	     on the nav row's top edge. Two blocks touching reads as one block. ]]
 	local room = navTop - (titleBottom + LAYOUT.ScreenMargin) - LAYOUT.ElementGap
-	local height = math.clamp((room - (count - 1) * ENTRY_GAP) / count, ENTRY_HEIGHT_COMPACT, ENTRY_HEIGHT)
-	local stack = count * height + (count - 1) * ENTRY_GAP
+	local height = math.clamp(
+		(room - (count - 1) * MENU.ENTRY_GAP) / count,
+		MENU.ENTRY_HEIGHT_COMPACT,
+		MENU.ENTRY_HEIGHT
+	)
+	local stack = count * height + (count - 1) * MENU.ENTRY_GAP
 	--[[ Centred in the room rather than pinned to the top of it, so a desktop
 	     keeps the deliberate gap under the title that the 0.52 anchor gave it. ]]
 	local bandTop = titleBottom + LAYOUT.ScreenMargin
@@ -2054,13 +1903,13 @@ local function layoutColumns(referenceHeight: number)
 	     is a change of content rather than a change of layout. A button that
 	     jumps when you press it reads as two different screens. ]]
 	if playButton then
-		local playHeight = if compact then PLAY_HEIGHT_COMPACT else PLAY_HEIGHT
-		playButton.Position = UDim2.new(COLUMN_X, 0, 0, bandTop + math.max((room - playHeight) * 0.5, 0))
-		playButton.Size = UDim2.new(ENTRY_WIDTH, 0, 0, playHeight)
+		local playHeight = if compact then MENU.PLAY_HEIGHT_COMPACT else MENU.PLAY_HEIGHT
+		playButton.Position = UDim2.new(MENU.COLUMN_X, 0, 0, bandTop + math.max((room - playHeight) * 0.5, 0))
+		playButton.Size = UDim2.new(MENU.ENTRY_WIDTH, 0, 0, playHeight)
 		local label = playButton:FindFirstChild("Label") :: TextLabel?
 		if label then
 			label.TextSize = if compact then TEXT.Display else TEXT.Title
-			label.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, label.TextSize + 6)
+			label.Size = UDim2.new(1, -MENU.ENTRY_TEXT_INSET, 0, label.TextSize + 6)
 		end
 		if playLine then
 			--[[ The strapline goes on a phone for the same reason a mode entry's
@@ -2068,10 +1917,10 @@ local function layoutColumns(referenceHeight: number)
 			     the first. ]]
 			playLine.Visible = not compact
 			playLine.Position = UDim2.fromOffset(
-				ENTRY_TEXT_INSET + 2,
+				MENU.ENTRY_TEXT_INSET + 2,
 				LAYOUT.PanelPadding + (if label then label.TextSize else TEXT.Title) + 8
 			)
-			playLine.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, TEXT.Body + 4)
+			playLine.Size = UDim2.new(1, -MENU.ENTRY_TEXT_INSET, 0, TEXT.Body + 4)
 		end
 	end
 
@@ -2082,36 +1931,37 @@ local function layoutColumns(referenceHeight: number)
 		It wanted a row of its own and it cannot have one. On the smallest phone
 		this game supports — 480 reference pixels tall — the whole band between
 		the title and the nav row is about 109 pixels, and two mode entries with
-		30-pixel titles already need every one of them. Taking BACK_HEIGHT plus a
+		30-pixel titles already need every one of them. Taking MENU.BACK_HEIGHT plus a
 		gap out of that pushed the second entry straight through the nav row, which
 		is what verify_menu caught.
 
-		The margin gap is exactly ScreenMargin on every viewport, so a BACK_HEIGHT
+		The margin gap is exactly ScreenMargin on every viewport, so a MENU.BACK_HEIGHT
 		under that always fits with room either side. It is wide rather than tall
 		to stay tappable, and Escape and B do the same job for the two schemes
 		that have them.
 	]]
 	if backButton then
 		backButton.Position =
-			UDim2.new(COLUMN_X, 0, 0, titleBottom + (LAYOUT.ScreenMargin - BACK_HEIGHT) * 0.5)
-		backButton.Size = UDim2.new(BACK_WIDTH, 0, 0, BACK_HEIGHT)
+			UDim2.new(MENU.COLUMN_X, 0, 0, titleBottom + (LAYOUT.ScreenMargin - MENU.BACK_HEIGHT) * 0.5)
+		backButton.Size = UDim2.new(MENU.BACK_WIDTH, 0, 0, MENU.BACK_HEIGHT)
 	end
 
 	for index, entry in modeEntries do
-		entry.button.Position = UDim2.new(COLUMN_X, 0, 0, entryTop + (index - 1) * (height + ENTRY_GAP))
-		entry.button.Size = UDim2.new(ENTRY_WIDTH, 0, 0, height)
+		entry.button.Position =
+			UDim2.new(MENU.COLUMN_X, 0, 0, entryTop + (index - 1) * (height + MENU.ENTRY_GAP))
+		entry.button.Size = UDim2.new(MENU.ENTRY_WIDTH, 0, 0, height)
 		entry.title.TextSize = if compact then TEXT.Heading else TEXT.Display
-		entry.title.Size = UDim2.new(1, -ENTRY_TEXT_INSET, 0, entry.title.TextSize + 6)
+		entry.title.Size = UDim2.new(1, -MENU.ENTRY_TEXT_INSET, 0, entry.title.TextSize + 6)
 		--[[ The pitch line is the first thing to go: it is flavour, and on a
 		     phone it is flavour sitting on top of the next entry's title. ]]
 		entry.line.Visible = not compact
 		entry.line.Position =
-			UDim2.fromOffset(ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding + entry.title.TextSize + 8)
+			UDim2.fromOffset(MENU.ENTRY_TEXT_INSET + 2, LAYOUT.PanelPadding + entry.title.TextSize + 8)
 	end
 
 	if briefingColumn then
 		briefingColumn.Visible = not compact
-		briefingColumn.Position = UDim2.new(1 - COLUMN_X, 0, 0, entryTop + stack * 0.5)
+		briefingColumn.Position = UDim2.new(1 - MENU.COLUMN_X, 0, 0, entryTop + stack * 0.5)
 	end
 
 	--[[ The nav row narrows with the screen — four entries across 82% of a phone
@@ -2188,7 +2038,7 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
-	menuRoot = Widgets.frame(gui, "Menu", COLOR.Background, MENU_SCRIM)
+	menuRoot = Widgets.frame(gui, "Menu", COLOR.Background, MENU.MENU_SCRIM)
 	menuRoot.Size = UDim2.fromScale(1, 1)
 	menuRoot.Visible = false
 	--[[ Between the root and the content layer, and that ordering is the whole
@@ -2374,7 +2224,7 @@ function MainMenuController:start()
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.CurrentMap), refreshMapLine)
 	trove:connect(Remotes.Event.MapLoading.OnClientEvent, refreshMapLine)
 	refreshMapLine()
-	trove:connect(Remotes.Event.HitConfirmed.OnClientEvent, onHitConfirmed)
+	trove:connect(Remotes.Event.HitConfirmed.OnClientEvent, MainMenuStats.onHitConfirmed)
 
 	--[[
 		The way back off the mode page without a mouse.
@@ -2397,8 +2247,8 @@ function MainMenuController:start()
 			setPage("Root")
 		end
 	end)
-	trove:connect(Remotes.Event.DamageTaken.OnClientEvent, onDamageTaken)
-	trove:connect(Remotes.Event.SurvivorStateChanged.OnClientEvent, onSurvivorStateChanged)
+	trove:connect(Remotes.Event.DamageTaken.OnClientEvent, MainMenuStats.onDamageTaken)
+	trove:connect(Remotes.Event.SurvivorStateChanged.OnClientEvent, MainMenuStats.onSurvivorStateChanged)
 
 	trove:connect(Remotes.Event.StatsUpdated.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" then
@@ -2408,7 +2258,7 @@ function MainMenuController:start()
 		local name = if typeof(subject) == "Instance" and subject:IsA("Player")
 			then subject.Name
 			else tostring(subject)
-		mergeStats(name, payload.stats or payload)
+		MainMenuStats.merge(name, payload.stats or payload)
 	end)
 
 	--[[ Both the remote and the Workspace attribute report the same transition;
@@ -2422,7 +2272,7 @@ function MainMenuController:start()
 		onRoundState(Attributes.get(Workspace, GA.RoundState, ROUND.Lobby))
 	end)
 
-	trove:connect(player:GetAttributeChangedSignal(PA.ReviveProgress), noteHelpProgress)
+	trove:connect(player:GetAttributeChangedSignal(PA.ReviveProgress), MainMenuStats.noteHelpProgress)
 	trove:connect(player:GetAttributeChangedSignal(PA.State), reassertFreeCursor)
 
 	--[[ MatchmakingService teleports a player to another server without sending
