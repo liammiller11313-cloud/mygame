@@ -17,7 +17,7 @@ because they reference no game module.
 | `ServerLauncher.lua` | Script | inside `RocketLauncher` |
 | `LocalLauncher.lua` | LocalScript | inside `RocketLauncher` |
 | `WallMaker.lua` | Script | inside `ClassicTrowel` |
-| `WallMakerClient.lua` | LocalScript | inside `ClassicTrowel` |
+| `WallMakerClient.lua` | LocalScript | `ClassicTrowel` — replaces `Client` |
 | `Slingshot.lua` | Script | `ClassicSlingshot` — replaces `Slingshot` |
 | `SlingshotClient.lua` | LocalScript | `ClassicSlingshot` — replaces `Client` |
 | `CannonScript.lua` | Script | `ClassicSuperball` — replaces `CannonScript` |
@@ -83,7 +83,11 @@ flight needing no map. A miss is now simply nothing.
 
 **`MouseLoc:InvokeClient(player)`** yields the server thread until that client
 answers, and a client need not. The trowel, the slingshot and the superball all
-shipped one. All three are now client→server RemoteEvents.
+shipped one, and all three shipped a `Client` LocalScript whose only job was
+answering it. All three pairs are now client→server RemoteEvents, and in every
+one of the three the new client script **replaces** that `Client` rather than
+joining it — an `OnClientInvoke` handler for a RemoteFunction nobody invokes any
+more is dead code that still looks live.
 
 That fix opens a door in the same motion, and it has to be closed at the same
 time. The slingshot and superball were safe from the launcher's problem *by

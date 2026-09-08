@@ -2,12 +2,20 @@
 --[[
 	WallMakerClient — LocalScript, inside ClassicTrowel. Says where to build.
 
-	This is the half that did not exist. The server used to ask the client for a
-	position with MouseLoc:InvokeClient and yield until it answered; now the
-	client volunteers one and the server checks it. Same information, no thread
-	parked waiting on somebody else's machine.
+	Replaces the tool's `Client`, which existed only to answer MouseLoc:
 
-	The old MouseLoc RemoteFunction can be deleted from the tool once this is in.
+	    MouseLoc.OnClientInvoke = function()
+	        return game.Players.LocalPlayer:GetMouse().Hit.p
+	    end
+
+	The server used to ask for a position with MouseLoc:InvokeClient and yield
+	until that answer came back; now the client volunteers one and the server
+	checks it. Same information, no thread parked waiting on somebody else's
+	machine.
+
+	Delete both the old `Client` and the `MouseLoc` RemoteFunction once this is
+	in. Neither does anything afterwards, and a RemoteFunction still sitting in
+	the tool is a hang still available to whatever calls it next.
 ]]
 
 local Players = game:GetService("Players")
