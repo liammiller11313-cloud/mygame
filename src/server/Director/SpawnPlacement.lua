@@ -110,6 +110,25 @@ local MIN_GROUND_NORMAL_Y = 0.5
 ]]
 local COVER_HEIGHT = 60
 
+--[[
+	How far ABOVE the team an uncovered candidate has to be before cover means
+	anything.
+
+	Without this the rule has a false positive that matters more than the bug it
+	was written for. "The team is indoors and this candidate is not" is true of a
+	roof AND of the street outside the shop the team just walked into — and a
+	zombie coming in off that street through the door is the single most ordinary
+	thing this game does. On a map like Clinton the team goes indoors constantly,
+	and a rule that switched the street off every time would starve spawning for
+	most of a round.
+
+	Height alone cannot tell a mezzanine from a roof. Cover alone cannot tell a
+	roof from a street. Together they can: a roof is uncovered AND above you, a
+	street is uncovered and beside you. Four studs is a step and a kerb — enough
+	that a pavement slightly higher than a shop floor is still a pavement.
+]]
+local COVER_RISE = 4
+
 --[[ Spawn nodes are static level geometry, so the tag query is cached. The TTL
      is short enough that a map streamed in mid-round is picked up anyway. ]]
 local NODE_CACHE_TIME = 2
@@ -593,10 +612,18 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	local root = mapRoot()
 
 	local teamCovered = false
+	--[[ The HIGHEST survivor, which is what "above the team" is measured from.
+	     Highest rather than nearest: a team spread over a staircase has somebody
+	     at the top of it, and a candidate below THEM is still inside the building
+	     rather than on top of it. ]]
+	local highestSurvivorY = -math.huge
 	for index = 1, surveyCount do
-		if isCovered(survey[index].position) then
+		local entry = survey[index]
+		if entry.position.Y > highestSurvivorY then
+			highestSurvivorY = entry.position.Y
+		end
+		if not teamCovered and isCovered(entry.position) then
 			teamCovered = true
-			break
 		end
 	end
 
@@ -620,10 +647,10 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	--[[ Candidates whose ground sat too far above or below the team — a roof, a
 	     gantry, the bottom of a shaft. See where this is counted. ]]
 	local tooHigh = 0
-	--[[ Candidates out under open sky while the team is indoors. See OVERHEAD
-	     COVER — this is the counter that says "your map has a reachable roof",
-	     which is a different sentence from "too far above the team" and was the
-	     one nobody could read before. ]]
+	--[[ Candidates above the team and out under open sky. See OVERHEAD COVER —
+	     this is the counter that says "your map has a reachable roof", which is a
+	     different sentence from "too far above the team" and was the one nobody
+	     could read before. ]]
 	local uncovered = 0
 	--[[ Candidates whose floor was not part of the level. See belongsToMap. ]]
 	local offMap = 0
@@ -920,18 +947,21 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			end
 
 			--[[
-				── UNDER THE SAME ROOF ─────────────────────────────────────────────
+				── UNDER THE SAME ROOF, AND ABOVE IT ───────────────────────────────
 				The height rule above cannot tell a mezzanine from a roof, because
-				they are at the same height. This can: the team is indoors and this
-				candidate is not, so it is on top of the building rather than in it.
+				they are at the same height. Cover alone cannot tell a roof from the
+				street outside the shop the team walked into. Both together can: a
+				roof is uncovered AND above you; a street is uncovered and beside
+				you, and a zombie coming in off it through the door is the most
+				ordinary thing in this game.
 
-				Only ever applied when the team itself is covered, so an outdoor map
-				never reaches this line. The reverse is deliberately NOT tested — a
-				covered candidate while the team is outside is a doorway, a porch or
-				an underpass, which is a perfectly good place for a zombie to come
-				from and the single most atmospheric one.
+				Applied only when the team itself is covered, so an outdoor map
+				never reaches this line at all. The reverse is deliberately NOT
+				tested — a covered candidate while the team is outside is a doorway,
+				a porch or an underpass, which is a perfectly good place for a
+				zombie to come from and the single most atmospheric one.
 			]]
-			if teamCovered and not isCovered(ground) then
+			if teamCovered and ground.Y > highestSurvivorY + COVER_RISE and not isCovered(ground) then
 				uncovered += 1
 				continue
 			end
@@ -1019,7 +1049,7 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		table.insert(parts, string.format("%d standing on something that is not the map", offMap))
 	end
 	if uncovered > 0 then
-		table.insert(parts, string.format("%d out under open sky while the team is indoors", uncovered))
+		table.insert(parts, string.format("%d above the team and out under open sky — a roof", uncovered))
 	end
 	if tooHigh > 0 then
 		table.insert(parts, string.format("%d too far above or below the team", tooHigh))

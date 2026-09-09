@@ -64,6 +64,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
+local GameModeConfig = require(Shared.Config.GameModeConfig)
 local LeaderboardConfig = require(Shared.Config.LeaderboardConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -186,9 +187,45 @@ end
      Runs in its own task per player: a SetAsync yields, and three of them for
      four players inside the round-ended handler would hold up everything else
      listening to that signal. ]]
+--[[
+	Whether THIS player won, which in Versus is not what the outcome says.
+
+	`outcome` describes the survivor half. Half the players in a Versus round are
+	the zombies, so taking it at face value credits them with the survivors'
+	victory and denies the survivors their own. ProgressionService already solved
+	this for XP and this asks it the same way — a board is public and permanent,
+	so being wrong here is worse than being wrong about a level.
+]]
+local function wonFor(player: Player, victory: boolean): boolean
+	local versus: any = Registry.find("VersusService")
+	if not versus or typeof(versus.wonLastRound) ~= "function" then
+		return victory
+	end
+	local ok, won = pcall(versus.wonLastRound, versus, player)
+	if ok and typeof(won) == "boolean" then
+		return won
+	end
+	return victory
+end
+
 local function onRoundEnded(outcome: string)
 	local victory = outcome == Enums.RoundState.Victory
 	local waveReached = math.max(math.floor(tonumber(Attributes.get(Workspace, GA.WaveIndex, 0)) or 0), 0)
+
+	--[[
+		FURTHEST IS A CLASSIC-MODE STATISTIC AND VERSUS MUST NOT TOUCH IT.
+
+		The board asks how far a team got before it died. In Versus the teams SWAP
+		at half time, so everybody is a survivor for half a round and a zombie for
+		the other half, and "the wave this round reached" is not an answer to that
+		question for anyone in it. Publishing it would let the mode with the
+		easiest waves set the record on the board about the hardest ones.
+
+		Kills keep counting in both, because killing an infected is the same act
+		whichever mode you did it in, and victories go through wonFor above.
+	]]
+	local classic = Attributes.get(Workspace, GA.Mode, GameModeConfig.DefaultMode)
+		== GameModeConfig.Modes.Classic
 
 	local profiles = Registry.find("ProfileService")
 	local stats = Registry.find("StatsService")
@@ -221,8 +258,8 @@ local function onRoundEnded(outcome: string)
 		local row = rows[player.Name]
 		local contribution = {
 			rounds = 1,
-			victories = if victory then 1 else 0,
-			bestWave = waveReached,
+			victories = if wonFor(player, victory) then 1 else 0,
+			bestWave = if classic then waveReached else 0,
 			kills = if typeof(row) == "table" then row.kills else 0,
 			specialKills = if typeof(row) == "table" then row.specialKills else 0,
 			bossKills = if typeof(row) == "table" then row.bossKills else 0,

@@ -187,6 +187,39 @@ don't stand in front of it — is now the behaviour that kills it faster.
 
 ---
 
+## Where a boss is allowed to arrive
+
+A Tank arrived on top of the Backrooms, and everything meant to prevent that did
+its job and none of it applied.
+
+`MaxHeightFromSurvivor` is the rule written to keep bodies off roofs and it is
+**25 studs** — chosen against a city map, where a roof is far enough up that 25
+excludes it. An interior ceiling is about twelve studs over your head, so the
+roof of the building the team is standing *inside* sits well within the band. The
+ground test did not object either: a roof is a flat surface with an upward
+normal, which is the entire definition of a floor.
+
+Height cannot fix it, because a mezzanine and a roof are at the same height. So
+`SpawnPlacement` has two rules that can:
+
+| Rule | Asks | Costs |
+|---|---|---|
+| **Overhead cover** | is the team under something, is this candidate under it, and is the candidate *above* them | one ray, only on maps where the team is covered |
+| **belongsToMap** | is this floor part of the loaded map, or Terrain | nothing — the raycast that found the floor already knew |
+
+Both halves of the cover rule are load-bearing. Cover alone would reject the
+street outside a shop the team walked into, which is where the most ordinary
+zombie in the game comes from. Height alone was the rule that already failed.
+Together: *a roof is uncovered **and** above you; a street is uncovered and
+beside you.*
+
+Neither joins the relaxation ladder — widening a radius does not make a roof
+reachable, it finds more roof. A search that rejects everything says so in the
+log: `N above the team and out under open sky — a roof`, or `N standing on
+something that is not the map`.
+
+---
+
 ## How many people turned up
 
 Every boss health figure on this page is the **four-player** one. It is the only

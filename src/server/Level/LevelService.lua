@@ -849,6 +849,20 @@ end
 	the level is now reading one line at boot rather than playing a round.
 ]]
 local function survivorSpawnSummary(): string
+	--[[ Before anything else, because at BOOT there is usually no map: they are
+	     loaded per round, and this line runs from start() as well as from
+	     rebuild(). Without this the banner reads "NONE anywhere — falling back to
+	     the flow spline", which is an alarm about a situation that has not
+	     happened yet, on every server, every time. A line that cries wolf at boot
+	     is a line nobody reads at the one moment it is telling the truth. ]]
+	local mapService = Registry.find("MapService")
+	local loaded = mapService
+		and typeof(mapService.getCurrentRoot) == "function"
+		and mapService:getCurrentRoot()
+	if typeof(loaded) ~= "Instance" then
+		return "no map loaded yet"
+	end
+
 	if survivorSpawnDirty then
 		rebuildSurvivorSpawns()
 	end
