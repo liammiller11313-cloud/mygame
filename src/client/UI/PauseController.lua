@@ -101,7 +101,12 @@ local BAR_GAP = 6
      like the way out of the game. What it does share is the scrim: a modal in
      this game dims the world by exactly one amount. ]]
 local PANEL_WIDTH = 340
-local ENTRY_HEIGHT = 54
+--[[ 56 rather than 54, which is not a taste change: the interface is drawn at
+     ScaleLayer's 0.75 floor on a phone, so 54 is 40.5 REAL pixels against this
+     project's 42-pixel touch standard. Two pixels nobody can see on a desktop,
+     and the difference between a target that meets the standard and one that
+     misses it on the screen a player pauses from most. ]]
+local ENTRY_HEIGHT = PANEL.RowHeightTouch
 local ENTRY_GAP = 8
 
 local ENTRIES = {
@@ -133,6 +138,7 @@ local trove = Trove.new()
 
 local gui: ScreenGui
 local panel: Frame
+local title: TextLabel
 local subtitle: TextLabel
 local entries: { any } = {}
 
@@ -419,38 +425,77 @@ local function build()
 	panel.Size = UDim2.fromOffset(PANEL_WIDTH, #ENTRIES * (ENTRY_HEIGHT + ENTRY_GAP) - ENTRY_GAP)
 
 	--[[
-		Above the panel, and CLAMPED so it cannot climb off the top.
+		Above the panel, stacked, and measured in the units this layer is drawn in.
 
-		The offset is half the panel's height, so the title rises by half of
-		however tall the entry stack grows — and the stack has grown from the
-		three entries this file's header used to describe to six. On a phone, six
-		rows put the title's top edge above y = 0 and the word PAUSED was drawn
-		off the screen entirely: the one label on the one screen that exists so a
-		player on a phone can always get out.
+		── THE BUG THIS REPLACES ───────────────────────────────────────────────
+		The title's Y was computed from `camera.ViewportSize.Y` — REAL pixels —
+		while every other number in a ScaleLayer is a REFERENCE pixel. The two
+		agree at exactly one scale, 1.0, which is a 900-tall window: the size the
+		layout was authored against and the size it was checked at.
 
-		Clamped against the screen margin rather than re-laid-out, because the
-		anchored-above-the-panel position is right on every screen tall enough for
-		it and only needs a floor. UDim2 cannot express "the higher of these", so
-		it is resolved here against the viewport at build time.
+		Everywhere else they diverge. On a 1080p desktop the scale is 1.2, so the
+		reference viewport is 900 and the code used 1080 — putting the title's
+		bottom edge at 338 when the panel's top edge is at 268. The word PAUSED
+		was drawn seventy pixels INSIDE the panel, over the RESUME row.
+
+		Dividing by the scale is the whole fix: `ScaleLayer.getFactor()` is the
+		number that converts one to the other, and it is the same call the panels
+		already use to size themselves against a viewport.
+
+		── AND THEY ARE STACKED RATHER THAN BOTH ANCHORED TO THE PANEL ─────────
+		The subtitle was anchored by its TOP, one margin above the panel — which
+		put a seventeen-pixel line of text seven pixels inside it. Both are
+		anchored by their bottom edge now and each sits above the one below it, so
+		the gap between them is a gap rather than an accident of two independent
+		sums.
+
+		── RE-RUN ON RESIZE ────────────────────────────────────────────────────
+		It used to be resolved once, at build. A window that changed size — or a
+		phone that rotated — kept a position computed for the old one, which on
+		the one screen whose entire job is to be reachable is the wrong thing to
+		get lazy about.
 	]]
-	local title = Widgets.label(layer, "Title", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
+	local function layoutTitles()
+		local camera = Workspace.CurrentCamera
+		local factor = ScaleLayer.getFactor()
+		local referenceY = if camera and factor > 0 then camera.ViewportSize.Y / factor else 0
+		local half = panel.Size.Y.Offset * 0.5
+
+		local subtitleBottom = referenceY * 0.5 - (half + LAYOUT.ScreenMargin)
+		local titleBottom = subtitleBottom - (TEXT.Body + LAYOUT.ElementGap)
+
+		--[[ The floors are each label's own height plus the screen margin: the
+		     anchor is the BOTTOM edge, so a label at the margin would still have
+		     its text above the top of the screen. Clamped rather than re-laid
+		     out, because the stacked position is right on every screen tall
+		     enough for it and only needs somewhere to stop. ]]
+		subtitle.Position = UDim2.new(
+			0.5,
+			0,
+			0,
+			math.max(subtitleBottom, LAYOUT.ScreenMargin + TEXT.Body + TEXT.Display + LAYOUT.ElementGap)
+		)
+		title.Position = UDim2.new(0.5, 0, 0, math.max(titleBottom, LAYOUT.ScreenMargin + TEXT.Display + 6))
+	end
+
+	title = Widgets.label(layer, "Title", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
 	title.AnchorPoint = Vector2.new(0.5, 1)
-	local camera = Workspace.CurrentCamera
-	local viewportY = if camera then camera.ViewportSize.Y else 0
-	local wanted = viewportY * 0.5 - (panel.Size.Y.Offset * 0.5 + LAYOUT.ScreenMargin * 2)
-	-- The anchor is the label's BOTTOM edge, so the floor has to clear its own
-	-- height as well as the margin — the same +6 the Size below uses.
-	local floor = LAYOUT.ScreenMargin + TEXT.Display + 6
-	title.Position = UDim2.new(0.5, 0, 0, math.max(wanted, floor))
 	title.Size = UDim2.new(0.8, 0, 0, TEXT.Display + 6)
 	title.TextXAlignment = Enum.TextXAlignment.Center
 	title.Text = "PAUSED"
 
 	subtitle = Widgets.label(layer, "Subtitle", FONT.Body, TEXT.Small, COLOR.TextDim)
-	subtitle.AnchorPoint = Vector2.new(0.5, 0)
-	subtitle.Position = UDim2.new(0.5, 0, 0.5, -(panel.Size.Y.Offset * 0.5 + LAYOUT.ScreenMargin))
+	subtitle.AnchorPoint = Vector2.new(0.5, 1)
 	subtitle.Size = UDim2.new(0.8, 0, 0, TEXT.Body)
 	subtitle.TextXAlignment = Enum.TextXAlignment.Center
+
+	layoutTitles()
+	--[[ A window is resized about as often as it is created, so this is a signal
+	     rather than a frame loop. ]]
+	local camera = Workspace.CurrentCamera
+	if camera then
+		trove:connect(camera:GetPropertyChangedSignal("ViewportSize"), layoutTitles)
+	end
 
 	for index, definition in ENTRIES do
 		buildEntry(index, definition)

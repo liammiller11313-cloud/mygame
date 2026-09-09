@@ -37,6 +37,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AudioConfig = require(Shared.Config.AudioConfig)
+local GameConfig = require(Shared.Config.GameConfig)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -123,10 +124,10 @@ local ACTIONS = {
 	},
 	{
 		id = "Create",
-		title = "CREATE LOBBY",
-		line = "A private server, and a code to hand out.",
-		detail = "Reserves a server nobody reaches by accident and gives you a six-character code. Read it out, and whoever types it lands in your round.\n\nThe code lasts two hours.",
-		verb = "CREATE",
+		title = "PARTY",
+		line = "Gather people here, then go together.",
+		detail = "Open a party and invite anyone in this server. Nobody moves until you press START — then the whole party lands in a private round at once.\n\nYou get a code on the way out, for anybody who is somewhere else.",
+		verb = "OPEN A PARTY",
 	},
 	{
 		id = "Join",
@@ -152,6 +153,11 @@ local REASONS: { [string]: string } = {
 	badcode = "THAT IS NOT A CODE. SIX CHARACTERS, LETTERS AND DIGITS.",
 	notfound = "NO LOBBY WITH THAT CODE. IT MAY HAVE EXPIRED.",
 	teleport = "COULD NOT REACH THAT SERVER.",
+	nothost = "ONLY THE PERSON WHO OPENED THE PARTY CAN DO THAT.",
+	inparty = "YOU ARE ALREADY IN SOMEBODY ELSE'S PARTY.",
+	busy = "THEY ARE ALREADY IN A PARTY.",
+	pending = "THEY HAVE AN INVITE WAITING ALREADY.",
+	full = "THE PARTY IS FULL.",
 }
 
 local PlayController = {}
@@ -164,6 +170,16 @@ local panel: Frame
 local detailTitle: TextLabel
 local detailBody: TextLabel
 local codeLabel: TextLabel
+--[[ The party as the server last described it. Never written by anything but
+     the PartyState handler — every button here asks and redraws when the answer
+     comes back, exactly as the rest of this panel already does. ]]
+local party = {
+	inParty = false,
+	host = "",
+	members = {} :: { string },
+	mode = "",
+	invitedBy = "",
+}
 local codeBox: TextBox
 local modeRow: Frame
 local serverList: ScrollingFrame
@@ -318,6 +334,127 @@ local function applyTouchSizing()
 	end
 end
 
+--[[
+	The party, drawn into the SAME scroller the server browser uses.
+
+	One list region, two contents, because they are never both wanted: FIND is a
+	list of servers and PARTY is a list of people, and a panel that reserved room
+	for both would be a panel with an empty half whichever page you are on.
+
+	Three sections in one pass, in the order somebody reads them:
+	  * an invitation, if one is waiting — first, because it is the only row here
+	    that expires;
+	  * who is in the party;
+	  * who else is in this server, if you are the host and can invite them.
+]]
+local function refreshParty()
+	rowTrove:clean()
+	for _, child in serverList:GetChildren() do
+		if child:IsA("GuiButton") or child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+
+	local order = 0
+	local function nextOrder(): number
+		order += 1
+		return order
+	end
+
+	local function caption(text: string)
+		local label = Widgets.label(serverList, "Caption" .. order, FONT.Heading, TEXT.Tiny, COLOR.TextDim)
+		label.LayoutOrder = nextOrder()
+		label.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, 18)
+		label.Text = text
+	end
+
+	local function row(name: string, note: string, accent: Color3?): TextButton
+		local button = Widgets.button(serverList, "Row" .. order)
+		button.LayoutOrder = nextOrder()
+		button.Size =
+			UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, if isTouch() then TOUCH_HEIGHT else SERVER_ROW_HEIGHT)
+		button.BackgroundColor3 = COLOR.PanelRaised
+		button.BackgroundTransparency = PANEL.RaisedFill
+
+		local label = Widgets.label(button, "Name", FONT.Heading, TEXT.Body, accent or COLOR.TextPrimary)
+		label.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 0)
+		label.Size = UDim2.new(0.6, 0, 1, 0)
+		label.TextTruncate = Enum.TextTruncate.AtEnd
+		label.Text = name
+
+		local right = Widgets.label(button, "Note", FONT.Body, TEXT.Small, COLOR.TextSecondary)
+		right.AnchorPoint = Vector2.new(1, 0)
+		right.Position = UDim2.new(1, -LAYOUT.PanelPadding, 0, 0)
+		right.Size = UDim2.new(0.38, 0, 1, 0)
+		right.TextXAlignment = Enum.TextXAlignment.Right
+		right.Text = note
+		return button
+	end
+
+	if party.invitedBy ~= "" then
+		caption("AN INVITATION")
+		local accept = row(party.invitedBy .. " WANTS YOU", "ACCEPT", COLOR.AccentBright)
+		Widgets.rowHover(rowTrove, accept)
+		rowTrove:connect(accept.Activated, function()
+			UiSound.play(AudioConfig.UI.MenuConfirm)
+			Remotes.Event.PartyRespond:FireServer(true)
+		end)
+		local decline = row("NO THANKS", "DECLINE", COLOR.TextDim)
+		Widgets.rowHover(rowTrove, decline)
+		rowTrove:connect(decline.Activated, function()
+			UiSound.play(AudioConfig.UI.MenuBack)
+			Remotes.Event.PartyRespond:FireServer(false)
+		end)
+	end
+
+	if not party.inParty then
+		if party.invitedBy == "" then
+			local empty = Widgets.label(serverList, "Empty", FONT.Body, TEXT.Small, COLOR.TextDim)
+			empty.LayoutOrder = nextOrder()
+			empty.Size = UDim2.new(1, -PANEL.ScrollBarWidth - 2, 0, 40)
+			empty.TextWrapped = true
+			empty.Text = "NO PARTY YET. OPEN ONE AND EVERYONE IN THIS SERVER BECOMES INVITABLE."
+		end
+		return
+	end
+
+	caption(string.format("PARTY  ·  %d OF %d", #party.members, GameConfig.MaxSurvivors))
+	for _, name in party.members do
+		local isHost = name == party.host
+		local mine = name == player.Name
+		row(name, if isHost then "HOST" else "", if mine then COLOR.AccentBright else COLOR.TextPrimary)
+	end
+
+	--[[ Only the host sees anybody to invite. A member pressing a name would be
+	     asking the server for something it refuses, and a button that exists to
+	     be refused is worse than no button. ]]
+	if party.host ~= player.Name then
+		return
+	end
+
+	local invitable = {}
+	for _, other in Players:GetPlayers() do
+		if other ~= player and not table.find(party.members, other.Name) then
+			table.insert(invitable, other)
+		end
+	end
+	if #invitable == 0 then
+		caption("NOBODY ELSE IS HERE YET")
+		return
+	end
+
+	caption("IN THIS SERVER")
+	for _, other in invitable do
+		local button = row(other.Name, "INVITE", COLOR.TextPrimary)
+		local id = other.UserId
+		Widgets.rowHover(rowTrove, button)
+		rowTrove:connect(button.Activated, function()
+			UiSound.play(AudioConfig.UI.MenuConfirm)
+			Remotes.Event.PartyInvite:FireServer(id)
+		end)
+	end
+end
+
 local function refresh()
 	if not state.open then
 		return
@@ -339,10 +476,19 @@ local function refresh()
 	     would invite typing a code into a screen that does not read one. ]]
 	modeRow.Visible = state.choice == "Create"
 	codeBox.Visible = state.choice == "Join"
-	serverList.Visible = state.choice == "Find"
+	--[[ The one list serves both pages. See refreshParty. ]]
+	serverList.Visible = state.choice == "Find" or state.choice == "Create"
 	codeLabel.Visible = state.choice == "Create" and codeLabel.Text ~= ""
 
-	actionLabel.Text = if state.pending then "…" else action.verb
+	--[[ The button says what pressing it will actually do, which on the party
+	     page is three different things. A single verb here was fine while CREATE
+	     meant one irreversible act; it now opens a party, starts one, or is the
+	     wrong control entirely for somebody who is only a member. ]]
+	local verb = action.verb
+	if state.choice == "Create" and party.inParty then
+		verb = if party.host == player.Name then "START" else "LEAVE PARTY"
+	end
+	actionLabel.Text = if state.pending then "…" else verb
 	actionLabel.TextColor3 = if state.pending then COLOR.TextDim else COLOR.TextPrimary
 	actionButton.Active = not state.pending
 
@@ -466,6 +612,20 @@ local function commit()
 	end
 
 	if action.id == "Create" then
+		--[[ Three verbs behind one button, decided by what the server last said
+		     the party is. Nothing is predicted: each of these asks and the panel
+		     redraws when PartyState comes back. ]]
+		if party.inParty and party.host == player.Name then
+			beginRequest()
+			Remotes.Event.PartyLaunch:FireServer()
+			refresh()
+			return
+		end
+		if party.inParty then
+			Remotes.Event.PartyLeave:FireServer()
+			UiSound.play(AudioConfig.UI.MenuBack)
+			return
+		end
 		beginRequest()
 		codeLabel.Text = ""
 		Remotes.Event.CreateLobby:FireServer(state.mode)
@@ -481,6 +641,38 @@ local function commit()
 	end
 end
 
+--[[ The party, as the server describes it. Replaced wholesale rather than
+     merged, for the reason every mirror in this game gives: a field the server
+     stopped sending must not survive as whatever it was last set to, and
+     `invitedBy` is exactly the field where a stale value would leave an
+     invitation on screen for a party that has already gone. ]]
+local function onPartyState(payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local members = {}
+	if typeof(payload.members) == "table" then
+		for _, name in payload.members do
+			if typeof(name) == "string" then
+				table.insert(members, name)
+			end
+		end
+	end
+	party.inParty = payload.inParty == true
+	party.host = tostring(payload.host or "")
+	party.members = members
+	party.mode = tostring(payload.mode or "")
+	party.invitedBy = tostring(payload.invitedBy or "")
+
+	if state.open and state.choice == "Create" then
+		refreshParty()
+		refresh()
+	end
+	--[[ The menu's PLAY line carries the marker, so an invitation is visible
+	     without this panel being open. Same treatment the daily streak gets. ]]
+	callController("MainMenuController", "refreshPlayLine", party.invitedBy)
+end
+
 local function onLobbyResult(payload: any)
 	if typeof(payload) ~= "table" then
 		return
@@ -488,9 +680,20 @@ local function onLobbyResult(payload: any)
 	state.pending = false
 
 	if payload.ok == true then
-		if payload.action == "Create" and typeof(payload.code) == "string" then
+		if payload.action == "Create" then
+			--[[ Nobody is going anywhere. CREATE opens a party on this server
+			     now, and saying "taking you there" — which is what this branch
+			     used to say, because a create WAS a teleport — would be the
+			     screen describing the opposite of what just happened. ]]
+			showMessage("PARTY OPEN. INVITE ANYONE IN THIS SERVER.", COLOR.Accent)
+		elseif payload.action == "Launch" and typeof(payload.code) == "string" then
+			--[[ The code arrives on the way OUT, not on the way in. Shown because
+			     it is the only thing anybody in another server can use, and this
+			     is the last moment it can be read. ]]
 			codeLabel.Text = payload.code
-			showMessage("LOBBY READY. TAKING YOU THERE.", COLOR.Accent)
+			showMessage("TAKING THE PARTY THERE. CODE: " .. payload.code, COLOR.Accent)
+		elseif payload.action == "Invite" then
+			showMessage("INVITED.", COLOR.Accent)
 		else
 			showMessage("FOUND IT. TAKING YOU THERE.", COLOR.Accent)
 		end
@@ -549,6 +752,12 @@ local function buildAction(index: number, definition: any, top: number)
 		state.choice = definition.id
 		state.pending = false
 		UiSound.play(AudioConfig.UI.MenuHover)
+		--[[ The party page's list is built from state this client already holds,
+		     so it is redrawn on arrival rather than requested. FIND asks the
+		     server; this one does not need to. ]]
+		if definition.id == "Create" then
+			refreshParty()
+		end
 		refresh()
 	end)
 
@@ -726,6 +935,12 @@ function PlayController:open()
 	state.open = true
 	state.pending = false
 	state.messageUntil = 0
+	--[[ Rebuilt on every open: the roster can have changed while this panel was
+	     closed, and people joining or leaving the SERVER change who is
+	     invitable without any party event firing at all. ]]
+	if state.choice == "Create" then
+		refreshParty()
+	end
 	gui.Enabled = true
 	refreshPanelSize()
 	applyTouchSizing()
@@ -771,6 +986,7 @@ end
 
 function PlayController:start()
 	trove:connect(Remotes.Event.LobbyResult.OnClientEvent, onLobbyResult)
+	trove:connect(Remotes.Event.PartyState.OnClientEvent, onPartyState)
 	trove:connect(Remotes.Event.ServerListUpdated.OnClientEvent, function(payload: any)
 		state.pending = false
 		drawServers(payload)

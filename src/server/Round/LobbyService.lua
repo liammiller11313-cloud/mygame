@@ -10,11 +10,29 @@
 
 	That is this file. Three verbs, and they are genuinely different questions:
 
-	  CREATE   reserve a private server, mint a code, go there. The code is a
-	           password; only the person who made it is ever told what it is.
+	  CREATE   open a PARTY here, on the server you are already standing in.
+	           Nobody is moved. See THE PARTY below.
 	  JOIN     look a code up and go to the server behind it.
 	  FIND     the public browser MatchmakingService already keeps, handed to the
 	           player as a LIST instead of being sorted and auto-picked.
+
+	── THE PARTY, AND WHY CREATE STOPPED TELEPORTING ───────────────────────────
+	CREATE used to reserve a server and send the host to it alone, immediately.
+	Everything after that was the host reading a code out and hoping. The person
+	they wanted to play with was usually standing next to them in the lobby they
+	had just left, and the game's answer to "play with him" was "leave, then tell
+	him a password".
+
+	So the reserved server is made LAST. A party is assembled here — invite the
+	people in this lobby, watch them accept, pick the mode — and pressing start is
+	the single moment anything is reserved, minted or teleported, and it moves
+	everybody at once. The code still exists and is still handed to the host on
+	launch, because somebody in ANOTHER server has no other way in; it is just no
+	longer the only way to play with a friend.
+
+	One party per host, one party per player. Invites are offered to a UserId
+	rather than a code because there is nothing to look up — the invitee is in
+	this server, which is the entire premise.
 
 	── WHY RESERVED SERVERS AND NOT "THIS SERVER, PRIVATELY" ────────────────────
 	A private lobby that is the server you are standing in is not private: whoever
@@ -40,6 +58,7 @@ local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
 local GameModeConfig = require(Shared.Config.GameModeConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -202,34 +221,319 @@ local function claimCode(map: any, code: string, entry: any): boolean
 	return not taken
 end
 
+-- ── the party ───────────────────────────────────────────────────────────────
+
+--[[
+	Every party open on this server, keyed by its HOST.
+
+	Keyed by the host rather than by an id because a host is what a party is: it
+	ends when they leave, there is exactly one per host, and every question worth
+	asking ("is this mine", "may I start it") is a comparison against that one
+	field. An id would be a second thing to keep in step for no gain.
+
+	Weak keys on both tables, so a party whose host disconnects and a membership
+	whose player disconnects both fall out without anything having to notice.
+]]
+type Party = {
+	host: Player,
+	mode: string,
+	members: { Player },
+	--[[ Offered but not answered. A set rather than a list: the only questions
+	     are "is this player invited" and "stop being invited", and both are one
+	     lookup. ]]
+	pending: { [Player]: boolean },
+}
+
+local parties = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: Party }
+--[[ The party a player is IN, host included, so membership is one lookup rather
+     than a walk over every party's roster. Every write to a party's `members`
+     writes here too; nothing else may. ]]
+local partyOf = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: Party }
+--[[ Who has offered this player a place, so a response knows whose party it is
+     answering without the client naming one. Cleared on accept, decline, and on
+     the inviter's party ending. ]]
+local invitedBy = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: Player }
+
+local function partyNames(party: Party): { string }
+	local names = {}
+	for _, member in party.members do
+		if member.Parent then
+			table.insert(names, member.Name)
+		end
+	end
+	return names
+end
+
+--[[ Pushes the party's state to one player. Sent to people with no party too —
+     an empty state is what closes the panel on somebody who just left, and a
+     client that had to infer that from silence would keep a stale roster. ]]
+local function pushParty(player: Player)
+	if not player.Parent then
+		return
+	end
+	local party = partyOf[player]
+	local offer = invitedBy[player]
+	Remotes.Event.PartyState:FireClient(player, {
+		inParty = party ~= nil,
+		host = if party then party.host.Name else "",
+		members = if party then partyNames(party) else {},
+		mode = if party then party.mode else "",
+		--[[ Nil unless there is an offer waiting AND the party behind it still
+		     exists. A host who left between the invite and this redraw would
+		     otherwise leave a prompt on screen for a party nobody can join. ]]
+		invitedBy = if offer and offer.Parent and parties[offer] then offer.Name else nil,
+	})
+end
+
+local function pushToParty(party: Party)
+	for _, member in party.members do
+		pushParty(member)
+	end
+	for invitee in party.pending do
+		pushParty(invitee)
+	end
+end
+
+--[[ Takes a player out of whatever party they are in, and closes the party
+     entirely if they were hosting it.
+
+     A host leaving DISBANDS rather than promoting somebody. Promotion sounds
+     kinder and is not: the party exists because one person is assembling it, and
+     handing it to whoever happens to be next in a table gives a stranger the
+     button that spends everybody's next twenty minutes. Everyone is told, and
+     anybody can open a new one. ]]
+local function removeFromParty(player: Player)
+	local party = partyOf[player]
+	if not party then
+		return
+	end
+
+	if party.host == player then
+		parties[player] = nil
+		for _, member in party.members do
+			partyOf[member] = nil
+		end
+		for invitee in party.pending do
+			invitedBy[invitee] = nil
+		end
+		--[[ After the state is torn down, not before: pushParty reads these
+		     tables, and telling somebody about a party mid-disband would send
+		     them a roster that is half gone. ]]
+		for _, member in party.members do
+			pushParty(member)
+		end
+		for invitee in party.pending do
+			pushParty(invitee)
+		end
+		return
+	end
+
+	local index = table.find(party.members, player)
+	if index then
+		table.remove(party.members, index)
+	end
+	partyOf[player] = nil
+	pushParty(player)
+	pushToParty(party)
+end
+
+--[[
+	Opens a party on THIS server, with the caller hosting it.
+
+	Nothing is reserved, nothing is minted and nobody moves — see THE PARTY in
+	the header. All of that happens in launchParty, once the host has the people
+	they wanted.
+
+	Works in Studio, and that is a real gain rather than an accident: the old
+	CREATE could not do anything at all without TeleportService, so the whole
+	feature was untestable without publishing. A party is in-memory state on one
+	server, so it can be built and torn down anywhere; only pressing start needs
+	the platform.
+]]
 function LobbyService:createLobby(player: Player, mode: string): boolean
 	local wanted = normalizeMode(mode)
 
+	--[[ Already in one. Re-pressed rather than a second party: a host who presses
+	     CREATE twice means "show me my party", and silently making a new one
+	     would strand everybody who had already accepted into the first. ]]
+	local existing = partyOf[player]
+	if existing then
+		if existing.host == player then
+			existing.mode = wanted
+			pushToParty(existing)
+			answer(player, "Create", true, "ok")
+			return true
+		end
+		answer(player, "Create", false, "inparty")
+		return false
+	end
+
+	local party: Party = {
+		host = player,
+		mode = wanted,
+		members = { player },
+		pending = {},
+	}
+	parties[player] = party
+	partyOf[player] = party
+
+	--[[ An offer this player was sitting on is dropped. Hosting one party and
+	     holding an invitation to another is a state with no correct answer, and
+	     the one they just acted on is the one they meant. ]]
+	local offer = invitedBy[player]
+	if offer then
+		invitedBy[player] = nil
+		local theirs = parties[offer]
+		if theirs then
+			theirs.pending[player] = nil
+			pushToParty(theirs)
+		end
+	end
+
+	answer(player, "Create", true, "ok")
+	pushParty(player)
+	return true
+end
+
+--[[
+	Offers somebody in this server a place.
+
+	The invitee is named by UserId and found in this server's player list, which
+	is the premise of the whole feature: they are standing in the same lobby. A
+	UserId that is not here is not an error worth a message — it is a stale click
+	on a list that has since changed.
+]]
+function LobbyService:inviteToParty(player: Player, userId: any): boolean
+	local party = parties[player]
+	if not party or party.host ~= player then
+		answer(player, "Invite", false, "nothost")
+		return false
+	end
+	if #party.members >= GameConfig.MaxSurvivors then
+		answer(player, "Invite", false, "full")
+		return false
+	end
+
+	local id = tonumber(userId)
+	if not id then
+		return false
+	end
+	local target: Player? = nil
+	for _, other in Players:GetPlayers() do
+		if other.UserId == id then
+			target = other
+			break
+		end
+	end
+	if not target or target == player then
+		return false
+	end
+	--[[ Somebody already in a party — including this one — is not invitable. The
+	     alternative is an invite that would have to steal them out of a roster
+	     somebody else is counting on. ]]
+	if partyOf[target] then
+		answer(player, "Invite", false, "busy")
+		return false
+	end
+	if invitedBy[target] then
+		answer(player, "Invite", false, "pending")
+		return false
+	end
+
+	party.pending[target] = true
+	invitedBy[target] = player
+	answer(player, "Invite", true, "ok")
+	pushParty(target)
+	pushToParty(party)
+	return true
+end
+
+--[[ Yes or no to whatever offer is outstanding. The party is looked up from
+     `invitedBy` rather than named by the client, so a response can only ever
+     answer the invitation this server actually sent. ]]
+function LobbyService:respondToParty(player: Player, accept: boolean): boolean
+	local host = invitedBy[player]
+	invitedBy[player] = nil
+	if not host then
+		pushParty(player)
+		return false
+	end
+
+	local party = parties[host]
+	if not party then
+		--[[ The host left, or launched without them. Nothing to join and nothing
+		     to apologise for; the prompt just goes. ]]
+		pushParty(player)
+		return false
+	end
+	party.pending[player] = nil
+
+	if not accept or partyOf[player] or #party.members >= GameConfig.MaxSurvivors then
+		pushParty(player)
+		pushToParty(party)
+		return false
+	end
+
+	table.insert(party.members, player)
+	partyOf[player] = party
+	pushToParty(party)
+	return true
+end
+
+function LobbyService:leaveParty(player: Player): boolean
+	--[[ Declining a pending offer is leaving, from the player's side: one button
+	     that means "I am not part of this", whichever half of it they are in. ]]
+	if invitedBy[player] and not partyOf[player] then
+		return self:respondToParty(player, false)
+	end
+	removeFromParty(player)
+	return true
+end
+
+--[[
+	The one moment anything leaves this server.
+
+	Reserves a server, mints a code for it and teleports the WHOLE ROSTER in one
+	call. One call matters: TeleportToPrivateServer takes a list, and Roblox
+	keeps a group sent together together — teleporting four people one at a time
+	is four chances to land in a different place than the person beside you.
+
+	The code is still minted and still handed to the host, because somebody in
+	another server has no other way to reach this one. It is no longer the
+	mechanism, it is the fallback.
+]]
+function LobbyService:launchParty(player: Player): boolean
+	local party = parties[player]
+	if not party or party.host ~= player then
+		answer(player, "Launch", false, "nothost")
+		return false
+	end
+
 	if not IS_LIVE then
-		--[[ Studio, or a server with no JobId. Said in words rather than failing
-		     quietly: a developer pressing this needs to know it is the environment
-		     and not their code, and they can still press Play. ]]
-		answer(player, "Create", false, "studio")
+		--[[ Studio. The party itself worked and can be inspected; only the
+		     platform half is missing, and saying which is the difference between
+		     a developer debugging their code and debugging their environment. ]]
+		answer(player, "Launch", false, "studio")
 		return false
 	end
 
 	local map = lobbyMap()
 	if not map then
-		answer(player, "Create", false, "unavailable")
+		answer(player, "Launch", false, "unavailable")
 		return false
 	end
 
 	local ok, accessCode = pcall(TeleportService.ReserveServer, TeleportService, game.PlaceId)
 	if not ok or typeof(accessCode) ~= "string" then
 		warnOnce("reserve", "TeleportService:ReserveServer failed: " .. tostring(accessCode))
-		answer(player, "Create", false, "unavailable")
+		answer(player, "Launch", false, "unavailable")
 		return false
 	end
 
 	local entry = {
 		accessCode = accessCode,
 		placeId = game.PlaceId,
-		mode = wanted,
+		mode = party.mode,
 		host = player.UserId,
 		createdAt = os.time(),
 	}
@@ -243,27 +547,40 @@ function LobbyService:createLobby(player: Player, mode: string): boolean
 		end
 	end
 	if not code then
-		answer(player, "Create", false, "unavailable")
+		answer(player, "Launch", false, "unavailable")
 		return false
 	end
 
-	--[[ Told BEFORE the teleport, not after. TeleportToPrivateServer does not
-	     return on success — the client is gone — so a code sent afterwards is a
-	     code nobody receives. ]]
-	answer(player, "Create", true, "ok", code)
+	--[[ Everybody still here, gathered before the teleport rather than during
+	     it: a member who left while the reserve was in flight must not be handed
+	     to TeleportToPrivateServer, which throws on a Player that has gone. ]]
+	local going: { Player } = {}
+	for _, member in party.members do
+		if member.Parent then
+			table.insert(going, member)
+		end
+	end
+	if #going == 0 then
+		answer(player, "Launch", false, "unavailable")
+		return false
+	end
+
+	--[[ Told BEFORE the teleport, for the reason it always was: the call does
+	     not return on success, so anything said afterwards is said to nobody. ]]
+	answer(player, "Launch", true, "ok", code)
 
 	local sent = pcall(
 		TeleportService.TeleportToPrivateServer,
 		TeleportService,
 		game.PlaceId,
 		accessCode,
-		{ player },
+		going,
 		nil,
-		{ lobbyCode = code, lobbyMode = wanted }
+		{ lobbyCode = code, lobbyMode = party.mode }
 	)
 	if not sent then
-		warnOnce("teleportcreate", "TeleportToPrivateServer failed for a lobby we just reserved")
-		answer(player, "Create", false, "teleport", code)
+		warnOnce("teleportlaunch", "TeleportToPrivateServer failed for a party we just reserved")
+		answer(player, "Launch", false, "teleport", code)
 		return false
 	end
 	return true
@@ -362,6 +679,43 @@ end
 function LobbyService:init() end
 
 function LobbyService:start()
+	--[[ A party is same-server state, so it dies with the server and with the
+	     player. The weak tables would drop these on their own eventually; doing
+	     it on the signal means the ROSTER everyone else is looking at updates the
+	     moment somebody leaves rather than whenever Luau next collects. ]]
+	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
+		local offer = invitedBy[player]
+		invitedBy[player] = nil
+		if offer then
+			local theirs = parties[offer]
+			if theirs then
+				theirs.pending[player] = nil
+				pushToParty(theirs)
+			end
+		end
+		removeFromParty(player)
+	end)
+
+	serviceTrove:connect(Remotes.Event.PartyInvite.OnServerEvent, function(player: Player, userId: any)
+		if admit(player) then
+			LobbyService:inviteToParty(player, userId)
+		end
+	end)
+
+	serviceTrove:connect(Remotes.Event.PartyRespond.OnServerEvent, function(player: Player, accept: any)
+		LobbyService:respondToParty(player, accept == true)
+	end)
+
+	serviceTrove:connect(Remotes.Event.PartyLeave.OnServerEvent, function(player: Player)
+		LobbyService:leaveParty(player)
+	end)
+
+	serviceTrove:connect(Remotes.Event.PartyLaunch.OnServerEvent, function(player: Player)
+		if admit(player) then
+			LobbyService:launchParty(player)
+		end
+	end)
+
 	serviceTrove:connect(Remotes.Event.CreateLobby.OnServerEvent, function(player: Player, mode: any)
 		if not admit(player) then
 			return

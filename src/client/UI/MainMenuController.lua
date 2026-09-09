@@ -937,6 +937,33 @@ end
      player back here rather than reimplementing mode selection: this page
      already owns the pending state, the refusal messages and the countdown, and
      a second copy of any of them would be a second thing to keep in step. ]]
+--[[
+	The PLAY line, which is the only place an invitation is visible from outside
+	the party panel.
+
+	A party invite is same-server and expires when its host leaves or launches, so
+	somebody who never opens PLAY would miss it entirely — and the person who sent
+	it is standing next to them wondering why. Called by PlayController whenever
+	the server describes the party; a one-line change to a label the menu already
+	draws is the cheapest honest way to say "somebody is asking".
+
+	Silently does nothing before the menu is built. It is driven by a remote, and
+	a remote can land in the gap between a client connecting and this screen
+	existing.
+]]
+function MainMenuController:refreshPlayLine(invitedBy: string?)
+	if not playLine then
+		return
+	end
+	if typeof(invitedBy) == "string" and invitedBy ~= "" then
+		playLine.Text = string.upper(invitedBy) .. " INVITED YOU TO A PARTY"
+		playLine.TextColor3 = COLOR.AccentBright
+		return
+	end
+	playLine.Text = "CHOOSE A MODE AND FIND A ROUND"
+	playLine.TextColor3 = COLOR.TextSecondary
+end
+
 function MainMenuController:showModes()
 	setPage("Modes")
 end

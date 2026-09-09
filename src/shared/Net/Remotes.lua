@@ -101,8 +101,25 @@ local EVENTS: { string } = {
 	--[[ Three ways to end up in a round with other people, and they are genuinely
 	     different questions. RequestMode above is "put me somewhere"; these are
 	     "put me with THESE people" (a code) and "let me choose" (the browser). ]]
+	--[[ CREATE no longer leaves the server. It opens a PARTY here, on the server
+	     the host is already standing in, so the people they want to play with can
+	     be gathered before anybody is moved — see the party note in LobbyService.
+	     The reserved server is made when the host presses start, not before. ]]
 	"CreateLobby", -- C->S (mode: string)
 	"JoinLobby", -- C->S (code: string)
+
+	-- ── The party, before it goes anywhere ──────────────────────────────────
+	--[[ Four verbs and one state. Everything here is same-server: an invite is
+	     offered to somebody standing in the same lobby, which is why it carries a
+	     UserId rather than a code — there is nothing to look up. ]]
+	"PartyInvite", -- C->S (userId: number)
+	"PartyRespond", -- C->S (accept: boolean)
+	"PartyLeave", -- C->S ()
+	"PartyLaunch", -- C->S () — host only; reserves the server and takes everyone
+	--[[ One shape for every recipient, because there is one panel drawing it.
+	     `invitedBy` is set only for somebody with an offer waiting, and is the
+	     whole of what makes the prompt appear. ]]
+	"PartyState", -- {inParty, host, members: {string}, mode, invitedBy: string?}
 	--[[ The answer to any of the three. `code` is set only on a create, and only
 	     the creator ever receives it — a lobby code is a password. ]]
 	"LobbyResult", -- {action, ok: boolean, reason: string, code: string?}
