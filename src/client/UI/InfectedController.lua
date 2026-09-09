@@ -55,11 +55,23 @@ local BLURB = {
 	[Enums.Infected.Boomer] = "BURST ON DEATH · BLIND THEM AND CALL THE HORDE",
 	[Enums.Infected.Spitter] = "ACID ON THE GROUND · MAKE A CORNER COST SOMETHING",
 	[Enums.Infected.Tank] = "FOUR THOUSAND HEALTH · THROW THE WORLD AT THEM",
+	--[[ She had no line at all, which the paragraph below this table claimed
+	     was impossible — "the blurbs above cover every special". The kill feed
+	     reads this table, so killing a Witch drew a row with nothing in it.
+
+	     Says what she does to you, like the rest, and the important half is
+	     the second clause: she is the one creature in the game you are meant
+	     to walk past. ]]
+	[Enums.Infected.Witch] = "KILLS WHOEVER WOKE HER · LEAVE HER ALONE OR END IT IN ONE GO",
 	--[[ Not playable, and here anyway: the kill feed reads this table, so a kind
 	     missing from it is a kill with no line against it. Says what it does to
 	     YOU rather than what it is, like the rest — the drills are the thing to
 	     recognise and the lane is the thing to leave. ]]
 	[Enums.Infected.Metallic] = "SIX THOUSAND HEALTH · DRILLS A LANE STRAIGHT THROUGH YOU",
+	--[[ Says what it does to YOU, like the rest. Not "it is slow" — slow is the
+	     least useful true thing about it — but that the floor you are shooting
+	     from is the thing it is attacking. ]]
+	[Enums.Infected.BacteriaMonster] = "ROTS THE GROUND YOU SHOOT FROM · BURN IT, AND KEEP MOVING",
 }
 
 --[[ The blurbs above cover every special, playable or not. Only the rows in

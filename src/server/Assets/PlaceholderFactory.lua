@@ -862,6 +862,94 @@ local SHAPES = {
 
 	-- Slight, pale and still. She is the only thing in the game a player is
 	-- supposed to walk around, so she must not read as a threat until she does.
+	--[[
+		── THE THREE THAT HAD NONE ──────────────────────────────────────────────
+		Tongue, Boomer and Spitter shipped without a shape entry, and that was
+		never a cosmetic gap: `buildRig` returns nil without one, the caller then
+		has nothing to add to `prepared`, and the kind ends up with no template at
+		all. Not a grey box — no creature. A misnamed or missing Assets.Infected
+		folder for any of these three deleted them from the game and said one line
+		about it.
+
+		They are supplied models today and none of this is drawn. That is exactly
+		when to write it: the fallback that only runs on the day something is
+		wrong is the one nobody notices is absent.
+
+		Each is built off the Common's proportions and then bent toward what the
+		creature does, the same way the Hunter and Jockey above are — a silhouette
+		has to be readable across a room before the animation starts.
+	]]
+
+	--[[ Thin, long-armed and stooped, with an oversized head: everything about
+	     it is reach. It attacks from ninety studs and dies at close range, so the
+	     silhouette has to say "far away" from far away. ]]
+	[Enums.Infected.Tongue] = {
+		head = V(0.95, 0.90, 0.95),
+		neck = 0.12,
+		upperTorso = V(1.45, 1.40, 0.80),
+		lowerTorso = V(1.25, 0.55, 0.75),
+		upperArm = V(0.50, 1.45, 0.50),
+		lowerArm = V(0.46, 1.50, 0.46),
+		hand = V(0.55, 0.55, 0.80),
+		upperLeg = V(0.72, 1.10, 0.72),
+		lowerLeg = V(0.66, 1.05, 0.66),
+		foot = V(0.70, 0.35, 1.05),
+		root = V(1.25, 1.30, 0.75),
+		legSpread = 0.52,
+		armDrop = 0.20,
+		hunch = 26,
+		armPitch = 14,
+		roll = 0,
+		headTilt = -12,
+	},
+
+	--[[ Enormous torso, tiny everything else. The whole read is a thing that is
+	     about to come apart, and at 1.35 scale it is the widest silhouette in the
+	     horde without being the tallest — which is what makes shooting it at
+	     close range a decision. ]]
+	[Enums.Infected.Boomer] = {
+		head = V(0.80, 0.70, 0.80),
+		neck = 0.04,
+		upperTorso = V(2.30, 1.55, 1.90),
+		lowerTorso = V(2.10, 0.75, 1.75),
+		upperArm = V(0.60, 0.95, 0.60),
+		lowerArm = V(0.55, 0.90, 0.55),
+		hand = V(0.60, 0.55, 0.70),
+		upperLeg = V(0.80, 0.75, 0.80),
+		lowerLeg = V(0.72, 0.70, 0.72),
+		foot = V(0.75, 0.35, 1.00),
+		root = V(2.10, 1.40, 1.70),
+		legSpread = 0.62,
+		armDrop = 0.02,
+		hunch = 8,
+		armPitch = -6, -- arms pushed out by the belly rather than hanging
+		roll = 0,
+		headTilt = 8,
+	},
+
+	--[[ Narrow, hunched and neckless, with the head carried forward — it spits
+	     from the front of a body angled at the floor, which is where the acid
+	     goes. Slightest frame in the roster after the Jockey. ]]
+	[Enums.Infected.Spitter] = {
+		head = V(0.80, 0.75, 0.90),
+		neck = 0.02,
+		upperTorso = V(1.30, 1.30, 0.75),
+		lowerTorso = V(1.15, 0.55, 0.70),
+		upperArm = V(0.48, 1.10, 0.48),
+		lowerArm = V(0.44, 1.05, 0.44),
+		hand = V(0.50, 0.48, 0.66),
+		upperLeg = V(0.70, 1.15, 0.70),
+		lowerLeg = V(0.64, 1.10, 0.64),
+		foot = V(0.66, 0.32, 1.00),
+		root = V(1.15, 1.25, 0.70),
+		legSpread = 0.46,
+		armDrop = 0.16,
+		hunch = 34,
+		armPitch = 20,
+		roll = 0,
+		headTilt = -18,
+	},
+
 	[Enums.Infected.Witch] = {
 		head = V(0.76, 0.74, 0.76),
 		neck = 0.08,
@@ -955,6 +1043,48 @@ local SHAPES = {
 		headTilt = 0,
 		shoulders = true,
 		eyes = true,
+	},
+
+	--[[
+		The Bacteria Monster's fallback.
+
+		Every VERTICAL dimension is the Metallic's, deliberately and to the
+		decimal: 0.45 + 0.05 + 1.55 + 0.60 + 1.30 + 1.30 + 0.45 is 5.70 studs
+		unscaled, which is the number InfectedConfig's `scale` of 2.11 was solved
+		backwards from to reach a targetHeight of 12. Change a Y here and that
+		arithmetic has to be redone.
+
+		What differs is BULK and posture. It is wider than the Metallic at every
+		joint and hunched twice as far — a swollen thing that grew rather than a
+		machine that was built — and it has no shoulders and no eyes, because
+		both are pieces of anatomy and this is supposed to read as a growth
+		wearing the shape of a person.
+
+		The supplied rig under Assets/Infected/Bacteria Monster is what should
+		actually turn up. This exists because without a shape entry buildRig
+		returns nil, and a kind with no grey box is a kind that silently fails to
+		arrive on the one wave that asks for it.
+	]]
+	[Enums.Infected.BacteriaMonster] = {
+		head = V(0.75, 0.45, 0.80),
+		neck = 0.05,
+		upperTorso = V(2.40, 1.55, 1.70),
+		lowerTorso = V(1.90, 0.60, 1.40),
+		upperArm = V(1.15, 1.45, 1.15),
+		lowerArm = V(1.05, 1.70, 1.05),
+		hand = V(0.95, 0.90, 0.95),
+		upperLeg = V(1.20, 1.30, 1.20),
+		lowerLeg = V(1.10, 1.30, 1.10),
+		foot = V(1.25, 0.45, 1.60),
+		root = V(1.90, 1.50, 1.40),
+		legSpread = 0.86,
+		armDrop = 0.10,
+		hunch = 34,
+		armPitch = 4,
+		roll = 0,
+		headTilt = 12,
+		shoulders = false,
+		eyes = false,
 	},
 }
 

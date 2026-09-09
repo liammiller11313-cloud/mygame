@@ -1567,6 +1567,61 @@ for _path, _text in code.items():
             )
 
 
+# ── 22. A special or boss missing from the tables that make it real ─────────
+# The bug this exists for: the Backrooms finale was added with an Enums entry, a
+# full InfectedConfig definition and a behaviour module, and was missing from
+# three other tables — each of which fails SILENTLY and differently.
+#
+#   EconomyConfig.KillRewards      -> falls to DefaultKillReward, so the longest
+#                                     fight on the map pays the Common rate of 2
+#   PlaceholderFactory SHAPES      -> buildRig returns nil, so a kind whose model
+#                                     is missing does not grey-box, it does not
+#                                     ARRIVE
+#   InfectedController blurbs      -> the kill feed has no line against the kill
+#
+# Every one of those is a thing you find by playing a fifteen-wave round to its
+# finale and noticing something absent. Commons are exempt: they are the
+# baseline the default reward exists for, and they have their own shape path.
+_inf_enum = re.search(r"Enums\.Infected = table\.freeze\(\{(.*?)\n\}\)",
+                      read(SRC / "shared/Enums/init.lua"), re.S)
+if _inf_enum:
+    _kinds = re.findall(r"^\t(\w+) = ", _inf_enum.group(1), re.M)
+    _ic = read(SRC / "shared/Config/InfectedConfig.lua")
+    _econ = read(SRC / "shared/Config/EconomyConfig.lua")
+    _shapes = read(SRC / "server/Assets/PlaceholderFactory.lua")
+    _blurbs = read(SRC / "client/UI/InfectedController.lua")
+
+    for _kind in _kinds:
+        if _kind == "Common":
+            continue
+        # Only kinds that actually have a definition — an enum entry with no
+        # InfectedConfig row is a different problem and check 1 owns it.
+        _block = re.search(r"\[Enums\.Infected\.%s\] = \{(.*?)\n\t\}," % _kind, _ic, re.S)
+        if not _block:
+            continue
+        _boss = re.search(r"^\s*isBoss = true", _block.group(1), re.M) is not None
+        _ref = "Enums.Infected." + _kind + "]"
+
+        if _boss and _ref not in _econ:
+            problems.append(
+                f"InfectedConfig has boss {_kind!r} and EconomyConfig.KillRewards does not — "
+                f"it would pay DefaultKillReward, the Common rate, for the longest fight "
+                f"in the round"
+            )
+        if _ref not in _shapes:
+            problems.append(
+                f"InfectedConfig has {_kind!r} and PlaceholderFactory's SHAPES does not — "
+                f"buildRig returns nil without one, so a round whose supplied model is "
+                f"missing or misnamed does not grey-box it, it never spawns it at all"
+            )
+        if _ref not in _blurbs:
+            problems.append(
+                f"InfectedConfig has {_kind!r} and InfectedController's blurbs do not — "
+                f"the kill feed reads that table, so killing one draws a line with no "
+                f"text against it"
+            )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

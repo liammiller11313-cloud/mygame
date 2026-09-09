@@ -926,6 +926,26 @@ function SurvivorService:_onCharacterAdded(player: Player, character: Model)
 	record.baseJumpHeight = humanoid.JumpHeight
 	record.appliedSpeed = -1
 
+	--[[
+		A fresh body is never slowed by whatever the last one walked through.
+
+		SpeedDrag lives on the PLAYER rather than the character, so it survives a
+		respawn, a defib and a closet rescue — which is the correct lifetime for a
+		thing applied continuously and cleared continuously, and exactly the wrong
+		one the moment the thing applying it stops.
+
+		Both ways it can stop are real. A survivor who goes down inside a
+		Bacteria Monster's colony leaves the alive roster that clears it, so they
+		would come back up still slowed; and a round that ends mid-fight despawns
+		the creature, so nothing ever ticks the clear at all.
+
+		Rather than asking every future source to remember its own teardown, the
+		service that OWNS walk speed drops the drag whenever it hands out a body.
+		Anything still applying one re-applies it on its next tick, which is under
+		half a second away.
+	]]
+	player:SetAttribute(PA.SpeedDrag, nil)
+
 	for _, child in character:GetChildren() do
 		stripDefaultHealthScript(child)
 	end

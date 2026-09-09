@@ -149,6 +149,16 @@ EconomyConfig.KillReward = table.freeze({
 	     Common rate of 2 — a quarter of what the Tank it replaces pays, for a
 	     fight several times longer. ]]
 	[Enums.Infected.Metallic] = 8,
+	--[[ The same 8 again, and for the reason the row above gives rather than
+	     because it is as hard: 8 is the ceiling, the round bonuses are where the
+	     money is, and ranking bosses against each other here would move the whole
+	     economy to pay for a distinction nobody counts.
+
+	     It is here because the paragraph above turned out to be a prophecy — the
+	     Backrooms finale was added without a row and would have paid the Common
+	     rate of 2 for the longest fight on the map. There is an audit check for
+	     that now. ]]
+	[Enums.Infected.BacteriaMonster] = 8,
 })
 
 --[[ Anything that dies without a row above. A kind added to InfectedConfig and

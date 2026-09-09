@@ -301,10 +301,25 @@ local function sweepColonies(now: number)
 		end
 	end
 
-	--[[ Who is in ANY colony this tick, gathered before anything is applied.
-	     Two overlapping colonies must not slow a player twice and must not
-	     un-slow them when the first one is stepped out of. ]]
+	--[[
+		Who is in ANY colony this tick, and the WORST of them — both gathered
+		before anything is applied.
+
+		Gathered rather than applied inline because colonies overlap, and by
+		design: MIN_SEPARATION is 9 studs while a grown one reaches 13, so the
+		infested area is meant to join up into a spreading surface rather than a
+		field of separate discs. Damaging per colony would then multiply by
+		however many happened to reach a player — three or four in the middle of
+		a long fight, at four times the tuned rate, which is not a floor to leave
+		but an instant death with no tell.
+
+		The WORST rather than the sum, so standing where two colonies meet is as
+		bad as the older of them and no worse. And a single slow, so overlapping
+		growth cannot stack that either — or un-slow somebody the moment they
+		step out of one while still standing in the next.
+	]]
 	local inAny: { [Player]: boolean } = {}
+	local worst: { [Player]: number } = {}
 
 	for index = #colonies, 1, -1 do
 		local colony = colonies[index]
@@ -347,8 +362,25 @@ local function sweepColonies(now: number)
 
 			local ramp = math.clamp(held / COLONY_RAMP, 0, 1)
 			local dps = COLONY_DPS_MIN + (COLONY_DPS_MAX - COLONY_DPS_MIN) * ramp
+			worst[player] = math.max(worst[player] or 0, dps)
+		end
 
-			if damageService and typeof(damageService.applyDamage) == "function" then
+		--[[ Anybody who left is forgotten, so stepping out and back in starts the
+		     ramp again. Standing in it is what this punishes; having stood in it
+		     once is not. ]]
+		for player in colony.standing do
+			if not inAny[player] then
+				colony.standing[player] = nil
+			end
+		end
+	end
+
+	--[[ One damage application per player per tick, at the worst rate any colony
+	     reaching them is running. See the gather above for why this is not a sum. ]]
+	if damageService and typeof(damageService.applyDamage) == "function" then
+		for player, dps in worst do
+			local character, root = Support.rootOf(player)
+			if character and root then
 				pcall(
 					damageService.applyDamage,
 					damageService,
@@ -362,22 +394,21 @@ local function sweepColonies(now: number)
 				)
 			end
 		end
-
-		--[[ Anybody who left is forgotten, so stepping out and back in starts the
-		     ramp again. Standing in it is what this punishes; having stood in it
-		     once is not. ]]
-		for player in colony.standing do
-			if not inAny[player] then
-				colony.standing[player] = nil
-			end
-		end
 	end
 
-	--[[ Slowed and un-slowed once per player per tick, from the gathered set.
-	     Every alive survivor is visited whether or not any colony exists, which
-	     is what guarantees a player is never left slow after the last one
-	     expires. ]]
-	for _, player in alive do
+	--[[
+		Slowed and un-slowed once per player per tick, from the gathered set.
+
+		Over EVERY player, not the alive roster the damage loop used. Somebody who
+		went down inside a colony is no longer "alive" by that roster's
+		definition, so clearing only the living would leave them slowed through
+		the revive and out the other side — up off the floor and walking at
+		fifty-five percent for the rest of the round.
+
+		Four entries. The cost of getting this wrong is much larger than the cost
+		of the loop.
+	]]
+	for _, player in Players:GetPlayers() do
 		applySlow(player, inAny[player] == true)
 	end
 end
