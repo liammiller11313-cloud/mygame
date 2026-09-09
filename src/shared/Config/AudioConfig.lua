@@ -713,6 +713,13 @@ AudioConfig.Infected = {
 
 	TankRoar = sound(ID.MonsterRoar, 1.0, 0.98, 1.02, 700, 9),
 	TankFootstep = sound(ID.HeavyFootsteps, 0.7, 0.95, 1.05, 280, 5),
+	--[[ A swing that hit nobody, and the window that opens behind it. A DIFFERENT
+	     sample from the roar on purpose: the roar means "it is here" and carries
+	     700 studs to say so, and this one means "hit it now" and is only worth
+	     hearing by the people close enough to. Pitched above the Tank's own cues
+	     rather than under them — everything below a Tank's register in this file
+	     is a bigger thing, and this is the one moment the Tank is a smaller one. ]]
+	TankStagger = sound(ID.MonsterBellow, 0.95, 1.14, 1.22, 420, 8),
 
 	--[[ The Metallic. Every one of these is an existing sample re-pitched rather
 	     than a dedicated upload, and they are named honestly for that reason —

@@ -515,16 +515,65 @@ export type HeadcountRow = {
 	--[[ Divides specialInterval, so a value under 1 makes specials arrive LESS
 	     often. Named for what it does rather than for the field it touches. ]]
 	specialPace: number,
+	--[[ Multiplier on a BOSS's health at spawn. Applied by InfectedService and
+	     nothing else; see the boss note below. ]]
+	bossHealth: number,
 }
 
+--[[
+	── AND THE BOSS BAR, WHICH WAS THE WORST OF IT ─────────────────────────────
+	A boss's health was the one number in the game that did not move at all. Wave
+	5 hands a solo player the same 4,000-health Tank a full team gets, and wave 15
+	hands them the Apex at 12,000.
+
+	Worked through with the actual roster: a median primary does about 150 damage
+	a second with perfect uptime and no reloading under fire. Four survivors put
+	12,000 down in twenty seconds of that, which is the ninety-second fight the
+	Apex was designed to be once the dodging and the reloading are added back. One
+	survivor needs eighty seconds of PERFECT uptime — realistically well past two
+	minutes — while the thing chases them, and the finale wave is 144 seconds
+	long. It was not a hard fight solo. It was an arithmetic impossibility, and no
+	amount of skill closes a gap the clock closes first.
+
+	These fall harder than population and not quite as hard as specials. A boss
+	fight alone is worse than its health bar suggests for reasons the bar does not
+	show: nobody else is drawing its attention, nobody is picking you up, and
+	every second of the fight is a second you are the only target in the room. 40%
+	of an Apex is 4,800, which is around a minute of real solo shooting inside a
+	144-second wave — hard, and finishable.
+]]
 GameModeConfig.Headcount = table.freeze({
-	table.freeze({ population = 0.46, spawnRate = 0.70, specials = 0.34, specialPace = 0.60 }),
-	table.freeze({ population = 0.66, spawnRate = 0.85, specials = 0.55, specialPace = 0.78 }),
-	table.freeze({ population = 0.84, spawnRate = 0.94, specials = 0.80, specialPace = 0.92 }),
+	table.freeze({
+		population = 0.46,
+		spawnRate = 0.70,
+		specials = 0.34,
+		specialPace = 0.60,
+		bossHealth = 0.40,
+	}),
+	table.freeze({
+		population = 0.66,
+		spawnRate = 0.85,
+		specials = 0.55,
+		specialPace = 0.78,
+		bossHealth = 0.62,
+	}),
+	table.freeze({
+		population = 0.84,
+		spawnRate = 0.94,
+		specials = 0.80,
+		specialPace = 0.92,
+		bossHealth = 0.82,
+	}),
 	--[[ Four is 1.0 across the board by definition: it is the team the wave
 	     table was written against, and a scale that touched it would be a
 	     retune of every wave hiding in a lookup. ]]
-	table.freeze({ population = 1.0, spawnRate = 1.0, specials = 1.0, specialPace = 1.0 }),
+	table.freeze({
+		population = 1.0,
+		spawnRate = 1.0,
+		specials = 1.0,
+		specialPace = 1.0,
+		bossHealth = 1.0,
+	}),
 }) :: { HeadcountRow }
 
 --[[ The row for a headcount, clamped into the table. An empty server and a

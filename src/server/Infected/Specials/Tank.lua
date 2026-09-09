@@ -16,6 +16,11 @@
 	    furthest away, so distance is not a solution either. Damage lands through
 	    DamageService:applyExplosion, so cover genuinely works against it.
 
+	And one window, which is the only thing here a team can EARN. A swing that
+	lands on nobody overextends it: rooted where it stands and taking double for a
+	second and a half. See THE WINDOW below — it is the answer to a Tank that was
+	otherwise beaten purely by spending ammunition.
+
 	Fire is the intended counter — burnDamagePerSecond is 150, six times a
 	Common's — and that lives in InfectedService's ignite path, not here.
 
@@ -53,6 +58,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
@@ -70,6 +76,7 @@ local PHASE = table.freeze({
 	Pursue = "Pursue", -- the brain drives
 	Swing = "Swing", -- rooted, arm back, arc about to land
 	Tear = "Tear", -- rooted, ripping a chunk out of the floor
+	Exposed = "Exposed", -- swung at nothing; rooted, wide open, taking double
 	Direct = "Direct", -- pathing gave up; walking straight at the target
 })
 
@@ -81,6 +88,42 @@ local SWING_HALF_ANGLE = 70
 -- passed through them.
 local SWING_REACH = ATTACK.range * 1.15
 local SWING_RECOVER = 0.35
+
+--[[
+	THE WINDOW.
+
+	Metallic's own header makes the argument this exists to answer: "a boss with
+	no window is a boss you shoot continuously, which is the same as a boss with
+	more health; a boss with a window is a boss you bait." The Tank had no window
+	at all. Four thousand health, stagger immunity, and three things that vary per
+	body — none of which a team can PUNISH. Every Tank fight was the same
+	transaction: spend ammunition, take the hits you were always going to take.
+
+	So a swing that lands on nobody overextends it. Rooted where it stands, taking
+	double, for a second and a half. It is the mirror of the Metallic's overheat
+	and deliberately not a copy of it: the Metallic's window is granted at the end
+	of a charge whether the charge worked or not, and this one has to be EARNED by
+	getting out of a 70-degree arc during a 0.4-second wind-up. The behaviour the
+	Tank was already built to demand — spread out, move, do not stand in front of
+	it — is now the behaviour that kills it faster.
+
+	── WHY IT HAS A COOLDOWN ───────────────────────────────────────────────────
+	Without one this is not a punish, it is a farm. A Tank swings on a 1.4-second
+	cooldown and a team that walks backwards in a circle makes it whiff every one
+	of them, which would leave it permanently at double damage and turn the
+	hardest fight in the round into the easiest. Eight seconds is roughly one
+	window per rock, so a dodge is worth something and kiting is not a strategy.
+
+	── AND WHY THE ENRAGE TAKES MOST OF IT ─────────────────────────────────────
+	Same fraction the Metallic loses, for the same reason: the last quarter of the
+	bar is where the fight is supposed to get worse, and a window that stayed full
+	length would mean the enrage made a Tank easier to kill than it was at half
+	health.
+]]
+local EXPOSED_TIME = 1.5
+local EXPOSED_MULTIPLIER = 2.0
+local EXPOSED_COOLDOWN = 8
+local EXPOSED_ENRAGE = 0.6 -- fraction of the window that survives the enrage
 
 -- Being thrown is the point of the swing: it breaks up the firing line and costs
 -- the survivor the time it takes to get up and re-aim.
@@ -169,6 +212,13 @@ type State = {
 	nextRoar: number,
 	nextFootstep: number,
 	swung: boolean,
+	--[[ Whether the swing that already resolved this phase reached anybody. Has
+	     to be carried across frames rather than recomputed at the end of the
+	     recovery: by then the survivor who dodged has moved further, and one who
+	     walked back in would retroactively cancel a window they had already
+	     earned. ]]
+	connected: boolean,
+	nextExposure: number,
 	target: Player?,
 	rock: BasePart?,
 	rockFrom: Vector3,
@@ -213,6 +263,8 @@ local function ensure(model: Model): State
 			nextRoar = 0,
 			nextFootstep = 0,
 			swung = false,
+			connected = false,
+			nextExposure = 0,
 			damage = ATTACK.damage,
 			opening = OPENING.Charge,
 			openingUntil = 0,
@@ -450,10 +502,21 @@ end
 
 -- ─── phases ──────────────────────────────────────────────────────────────────
 
+--[[ Opens or closes the window. Written rather than cleared, for the reason the
+     Metallic gives: 1 is "no window" and nothing downstream should have to treat
+     nil as a special case. InfectedService multiplies incoming damage by it and
+     BossBarController prints EXPOSED off it, so this one line is the whole
+     mechanic on both sides of the wire. ]]
+local function setVulnerable(model: Model, multiplier: number)
+	model:SetAttribute(Attributes.Infected.Vulnerable, multiplier)
+end
+
 local function backToPursue(model: Model, brain: any, state: State)
 	state.phase = PHASE.Pursue
 	state.phaseTime = 0
 	state.swung = false
+	state.connected = false
+	setVulnerable(model, 1)
 
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
@@ -579,6 +642,7 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 		state.openingUntil = 0
 		state.nextRoar = 0
 
+		state.connected = false
 		local survivors: any = Registry.find("SurvivorService")
 		if survivors then
 			local origin = root.Position
@@ -598,6 +662,7 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 					continue
 				end
 
+				state.connected = true
 				Support.damage(model, character, victimRoot, origin, state.damage)
 				local away = Vector3.new(delta.X, 0, delta.Z)
 				local heading = if away.Magnitude > 0.05 then away.Unit else facing
@@ -611,7 +676,41 @@ local function stepSwing(model: Model, brain: any, state: State, root: BasePart,
 		end
 	end
 
-	if state.phaseTime >= ATTACK.windup + SWING_RECOVER then
+	if state.phaseTime < ATTACK.windup + SWING_RECOVER then
+		return
+	end
+
+	--[[ It swung at nobody. Read once, here, off what the swing itself measured
+	     rather than off where anyone is standing now — see State.connected.
+
+	     The cooldown is checked at the moment the window would OPEN rather than
+	     when it closes, so a Tank that whiffs three times inside eight seconds
+	     pays for the first one only. That is the difference between rewarding a
+	     dodge and rewarding a lap of the room. ]]
+	local now = os.clock()
+	if not state.connected and now >= state.nextExposure then
+		state.nextExposure = now + EXPOSED_COOLDOWN
+		state.phase = PHASE.Exposed
+		state.phaseTime = 0
+		setVulnerable(model, EXPOSED_MULTIPLIER)
+		--[[ Its own cue rather than the roar, and no on-screen announcement. The
+		     Metallic announces its overheat because a team meets one twice a
+		     round at most; Tanks arrive on three waves and in packs, and a line
+		     of text every time one misses would be noise inside the fight it is
+		     supposed to be read during. The boss bar already prints EXPOSED. ]]
+		Support.playSound("TankStagger", root)
+		return
+	end
+
+	backToPursue(model, brain, state)
+end
+
+--[[ Rooted and wide open. The brain is still paused and WalkSpeed is still 0
+     from the entry into the swing, so there is nothing to hold down — this phase
+     only has to decide when it is over. ]]
+local function stepExposed(model: Model, brain: any, state: State)
+	local window = if state.enraged then EXPOSED_TIME * EXPOSED_ENRAGE else EXPOSED_TIME
+	if state.phaseTime >= window then
 		backToPursue(model, brain, state)
 	end
 end
@@ -695,6 +794,10 @@ function Tank.onSpawn(model: Model, brain: any)
 	state.ignore[1] = model
 	state.probe.FilterDescendantsInstances = { model }
 	state.damage = Support.scaledDamage(model, ATTACK.damage)
+	--[[ Written on spawn, not left to the first swing. The rigs are pooled, so a
+	     body could otherwise stand up still carrying the window the last Tank
+	     died inside of. ]]
+	setVulnerable(model, 1)
 
 	local now = os.clock()
 
@@ -759,6 +862,8 @@ function Tank.onUpdate(model: Model, brain: any, dt: number)
 
 	if state.phase == PHASE.Swing then
 		stepSwing(model, brain, state, root, dt)
+	elseif state.phase == PHASE.Exposed then
+		stepExposed(model, brain, state)
 	elseif state.phase == PHASE.Tear then
 		stepTear(model, brain, state, root, dt)
 	elseif state.phase == PHASE.Direct then
@@ -769,6 +874,10 @@ function Tank.onUpdate(model: Model, brain: any, dt: number)
 end
 
 function Tank.onDeath(model: Model, brain: any, _ctx: any)
+	-- Before the state check: a Tank killed mid-window must not leave a corpse
+	-- (or a pooled rig after it) attributed as still taking double.
+	setVulnerable(model, 1)
+
 	local state = states[model]
 	if state then
 		-- A rock still in the air when the Tank dies goes with it: a detonation

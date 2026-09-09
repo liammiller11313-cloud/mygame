@@ -10,7 +10,7 @@ reads it rather than naming kinds again.
 | | Health | Fire does | Bar | Counter |
 |---|---|---|---|---|
 | **Witch** | 1000 | 45/s | no | avoid her, or kill her in one go |
-| **Tank** | 4000 | 150/s | yes | keep moving, fire in turns, burn it |
+| **Tank** | 4000 | 150/s | yes | keep moving, fire in turns, burn it, bait a whiff |
 | **Metallic** | 6000 | **25/s** | yes | don't be in the lane, then fill the window |
 | **Bacteria Monster** | 3000 | **200/s** | yes | burn it, and stop standing still |
 
@@ -151,6 +151,81 @@ Below a quarter health it roars, moves 10% faster and acts noticeably oftener.
 Deliberately modest — the last quarter of a Tank should be the hardest quarter,
 not a different creature — and deliberately aligned with the boss bar going hot,
 so the readout a team is already watching is the warning.
+
+### The window
+
+The Metallic's own notes make the case: *a boss with no window is a boss you
+shoot continuously, which is the same as a boss with more health.* The Tank had
+none. The opening, the tempo and the enrage all change what it does and when —
+none of them is something a team can **punish**.
+
+Now a swing that lands on nobody overextends it. It stays rooted where it stands,
+takes **double damage for 1.5 seconds**, and the boss bar prints `EXPOSED` in the
+same place the Metallic's overheat does. `TankStagger` is its own cue, pitched
+above the Tank's other sounds and carrying 420 studs rather than 700 — it is for
+the people close enough to act on it, not for the room.
+
+Deliberately not a copy of the overheat:
+
+| | Metallic overheat | Tank window |
+|---|---|---|
+| How you get it | granted at the end of every charge | **earned** by leaving a 70° arc during a 0.4s wind-up |
+| Length | 2.5s | 1.5s |
+| Cooldown | none — it is part of the loop | **8s**, so kiting is not a strategy |
+| Announced | on screen, out loud | boss bar only |
+
+The cooldown is the load-bearing part. A Tank swings on a 1.4-second cooldown and
+a team walking backwards in a circle makes it miss every one of them; without a
+cooldown that leaves it permanently at double damage and turns the hardest fight
+in the round into the easiest. Eight seconds is roughly one window per rock. And
+the enrage takes 40% of the window with it, for the same reason it takes 40% of
+the Metallic's: the last quarter of the bar must not be where the fight gets
+easier.
+
+The behaviour the Tank was always built to demand — spread out, keep moving,
+don't stand in front of it — is now the behaviour that kills it faster.
+
+---
+
+## How many people turned up
+
+Every boss health figure on this page is the **four-player** one. It is the only
+number in the table that used to be a constant, and that was the single most
+over-tuned thing in the game.
+
+A median primary does roughly 150 damage a second with perfect uptime and no
+reloading under fire. Four survivors put an Apex Tank's 12,000 down in twenty
+seconds of that — the ninety-second fight it was designed to be, once dodging and
+reloading are added back. One survivor needs **eighty seconds of perfect uptime**,
+realistically well past two minutes, while it chases them, and the finale wave is
+144 seconds long. Solo, the Apex was not hard; it was arithmetically impossible.
+
+`GameModeConfig.Headcount` now carries a `bossHealth` column alongside the
+population, spawn-rate and specials scales, applied by `InfectedService:spawn`
+after the tier and elite multipliers:
+
+| Players | ×health | Tank | Apex Tank | Metallic |
+|---|---|---|---|---|
+| 1 | 0.40 | 1,600 | 4,800 | 2,400 |
+| 2 | 0.62 | 2,480 | 7,440 | 3,720 |
+| 3 | 0.82 | 3,280 | 9,840 | 4,920 |
+| 4 | 1.00 | 4,000 | 12,000 | 6,000 |
+
+Bosses fall harder than population and not as hard as specials. A boss fight
+alone is worse than its bar suggests for reasons the bar does not show: nobody
+else is drawing its attention, nobody is picking you up, and every second is a
+second you are the only target in the room.
+
+Read off the **server roster**, not off who is still standing — the same rule
+`RoundService` uses for the rest of the difficulty. A boss that got weaker as the
+team died would pay a team for losing people, and this is the fight where that
+would be most obvious.
+
+Damage is untouched. A Tank hit is 24 whoever you are; the Apex's 32 is
+deliberately four hits rather than five, because instant death is not difficulty.
+Commons and ordinary specials are untouched too — their answer is how many
+arrive, and a Common with less health would mean re-learning your weapon because
+somebody left.
 
 ---
 

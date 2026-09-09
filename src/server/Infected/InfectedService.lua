@@ -65,6 +65,7 @@ local AnimationConfig = require(Shared.Config.AnimationConfig)
 local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
+local GameModeConfig = require(Shared.Config.GameModeConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
 local ModifierConfig = require(Shared.Config.ModifierConfig)
@@ -427,6 +428,29 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?,
 	     above every multiplier here. ]]
 	if kind == Enums.Infected.Common then
 		health = math.floor(health * ModifierConfig.commonHealthScale(Workspace) + 0.5)
+	end
+	--[[ HOW MANY PEOPLE TURNED UP. Bosses only, and the last multiplier applied
+	     so it scales whatever the tier and the elite already made of the number.
+
+	     A boss was the one thing in the round that did not care how many
+	     survivors there were: RoundService already scales the horde, the spawn
+	     rate and the specials off GameModeConfig.headcountRow, and a solo player
+	     still met the identical 12,000-health Apex a full team does. See the boss
+	     note in that table for the arithmetic — the short version is that it
+	     could not be killed inside the wave it spawns in.
+
+	     Read off the server roster rather than who is still standing, exactly as
+	     RoundService reads it, for the reason stated there: a boss that got
+	     weaker as the team died would pay a team for losing people, and this is
+	     the one fight where that would be most obvious.
+
+	     Commons and ordinary specials are deliberately untouched. Their answer is
+	     the population and spawn-rate scales, which change how MANY arrive; a
+	     Common with less health would change what a bullet does, and a survivor
+	     should not have to re-learn their weapon because somebody left. ]]
+	if definition.isBoss then
+		local crew = GameModeConfig.headcountRow(#Players:GetPlayers())
+		health = math.max(math.floor(health * crew.bossHealth + 0.5), 1)
 	end
 
 	humanoid.MaxHealth = health

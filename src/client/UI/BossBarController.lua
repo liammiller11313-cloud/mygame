@@ -129,7 +129,10 @@ local function titleFor(model: Model): string
 end
 
 --[[ Its damage multiplier right now, defaulting to 1 for every boss that never
-     writes the attribute — which is all of them but the Metallic. ]]
+     writes the attribute. The Metallic writes it from its overheat and the Tank
+     from a swing that hit nobody; the Bacteria Monster has no window and does
+     not. Read generically on purpose — the two that do write it are not the two
+     it will always be. ]]
 local function vulnerabilityOf(model: Model): number
 	local value = tonumber(Attributes.get(model, IA.Vulnerable, 1))
 	if not value or value ~= value then
