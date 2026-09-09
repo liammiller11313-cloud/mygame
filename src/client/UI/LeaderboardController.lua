@@ -72,10 +72,27 @@ local player = Players.LocalPlayer
 local PANEL_WIDTH = 720
 local HEADER_HEIGHT = PANEL.HeaderHeight
 
-local TAB_HEIGHT = 40
+--[[
+	The two controls on this screen a finger has to hit, and both are sized from
+	PANEL.RowHeightTouch rather than from how they look on a desktop.
+
+	The interface is drawn at ScaleLayer's 0.75 floor on a phone, so a reference
+	pixel is three quarters of a real one and this project's touch standard is 42
+	REAL pixels. These were 40 and 46 when they were drawn against a mouse, which
+	is 30 and 34.5 — both comfortably under it, on a screen whose entire content
+	is a list you tab between.
+
+	Unconditional rather than input-dependent, following the argument the main
+	menu's own NAV_HEIGHT makes: the difference is invisible on a desktop, and a
+	control that resizes when somebody picks up a controller is a control with two
+	layouts to keep working instead of one.
+]]
+local TAB_HEIGHT = PANEL.RowHeightTouch
 local BLURB_HEIGHT = 18
+--[[ A row is not a target — nothing on this list is pressable — so it stays the
+     size that fits a hundred of them on a screen. ]]
 local ROW_HEIGHT = 30
-local SELF_HEIGHT = 46
+local SELF_HEIGHT = PANEL.RowHeightTouch
 
 --[[ Column geometry, as fractions of the row. Fractions rather than offsets for
      the reason every panel here uses them: the whole thing is drawn at
@@ -587,11 +604,21 @@ end
 function LeaderboardController:start()
 	trove:connect(Remotes.Event.LeaderboardPage.OnClientEvent, onPage)
 
+	--[[ B backs out, which is what B does on every console screen there has ever
+	     been — and it is checked BEFORE the processed guard, because the panel is
+	     focused while it is up and its own presses arrive marked processed. This
+	     had only the Escape half, which is a screen a controller can open and
+	     cannot leave. Copied deliberately from CareerController rather than
+	     invented, so the two behave identically. ]]
 	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
-		if not state.open or processed then
+		if not state.open then
 			return
 		end
-		if input.KeyCode == Enum.KeyCode.Escape then
+		if input.KeyCode == Enum.KeyCode.ButtonB then
+			LeaderboardController:close()
+			return
+		end
+		if not processed and input.KeyCode == Enum.KeyCode.Escape then
 			LeaderboardController:close()
 		end
 	end)

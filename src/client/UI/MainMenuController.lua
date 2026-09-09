@@ -1567,17 +1567,61 @@ local function buildNav()
 		holder.Position = UDim2.new((index - 1) * (NAV_WIDTH + MENU.NAV_GAP), 0, 0, 0)
 		holder.Size = UDim2.new(NAV_WIDTH, 0, 1, 0)
 
+		--[[
+			── THE NAV ROW HAS TO SURVIVE A PHONE ───────────────────────────────
+			NAV_WIDTH is solved from the entry count, so every entry added narrows
+			all of them — and nothing here had ever been told what to do when the
+			text stopped fitting. It does not wrap and it does not clip: a
+			TextLabel simply draws past its frame, so on a handset the longest
+			title ran under its neighbour.
+
+			The arithmetic, because it is not obvious from looking at it in
+			Studio. The interface is authored in reference pixels and scaled by
+			viewportHeight / 900, floored at 0.75. A phone in landscape is around
+			390 tall, so it is pinned to that floor and a 667-wide screen is 889
+			REFERENCE pixels across. The nav row is 82% of that, and at seven
+			entries each cell is about 95 reference pixels — while "ABILITIES" at
+			TextSize 22 wants roughly 120. It was already over at six.
+
+			So both labels scale down to fit and stop at a floor rather than
+			overflowing. The floors are legibility numbers, not layout ones: 15 on
+			the title and 9 on the line, which at the 0.75 scale render as 11 and
+			7 real pixels — the same reasoning UITheme.Scale.Min is written
+			against.
+		]]
 		local label = Widgets.label(holder, "Label", FONT.Heading, TEXT.Large, COLOR.TextPrimary)
 		label.Size = UDim2.new(1, 0, 0, TEXT.Large + 2)
 		label.Text = definition.title
+		label.TextScaled = true
+		local labelBounds = Instance.new("UITextSizeConstraint")
+		labelBounds.MinTextSize = 15
+		labelBounds.MaxTextSize = TEXT.Large
+		labelBounds.Parent = label
 		if definition.soon then
 			label.TextColor3 = COLOR.TextDim
 		end
 
+		--[[ NOT `tracked`, and that is the other half of the fix. Letter-spacing
+		     costs this string about eighty per cent more width, and it is the
+		     smallest type in the interface sitting in the tightest space there
+		     is. The tracking on the titles above is what carries the look; on the
+		     sub-line it was buying a flourish with the only room left.
+
+		     Measured: a tracked 25-character line wants about 248 reference
+		     pixels, which does not fit a nav cell on ANY device — 171 on a 1080p
+		     desktop at seven entries, 138 on an iPad. This was overflowing
+		     everywhere, not only on phones, and it is why it went unnoticed:
+		     everywhere is the same as nowhere when nothing draws a boundary.
+		     Untracked it is 138 and scales down from there. ]]
 		local line = Widgets.label(holder, "Line", FONT.Body, TEXT.Tiny, COLOR.TextDim)
 		line.Position = UDim2.fromOffset(0, TEXT.Large + 2)
 		line.Size = UDim2.new(1, 0, 0, TEXT.Body)
-		line.Text = tracked(definition.line)
+		line.Text = definition.line
+		line.TextScaled = true
+		local lineBounds = Instance.new("UITextSizeConstraint")
+		lineBounds.MinTextSize = 9
+		lineBounds.MaxTextSize = TEXT.Tiny
+		lineBounds.Parent = line
 
 		--[[ The id rides along so `refreshBalance` can find the one entry whose
 		     line is live without a second top-level local — this file is already
@@ -1653,7 +1697,8 @@ local function refreshBalance()
 	end
 	for _, entry in navEntries do
 		if entry.id == "Career" then
-			entry.line.Text = tracked(summary)
+			-- Untracked, matching the line it replaces. See buildNav.
+			entry.line.Text = summary
 			break
 		end
 	end

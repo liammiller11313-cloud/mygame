@@ -99,8 +99,14 @@ local leaveLabel: TextLabel
 
 --[[ The way-out button's own height. Outside the card rather than inside it,
      because the card is sized for two lines of text and a late joiner should not
-     make a dead survivor's card taller. ]]
-local LEAVE_HEIGHT = 26
+     make a dead survivor's card taller.
+
+     Sized from the touch standard rather than by eye. It was 26, which on a
+     phone — where the interface is drawn at ScaleLayer's 0.75 floor — is 19.5
+     REAL pixels against this project's 42. It is the only control on the screen
+     and it is offered to somebody who has just been told they cannot play for
+     seventeen minutes; being unable to press it is the worst version of that. ]]
+local LEAVE_HEIGHT = UITheme.Panel.RowHeightTouch
 local hintLabel: TextLabel
 
 local state = {

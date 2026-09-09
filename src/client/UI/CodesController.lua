@@ -345,12 +345,32 @@ function CodesController:start()
 	trove:connect(Remotes.Event.CodeResult.OnClientEvent, onResult)
 
 	trove:connect(UserInputService.InputBegan, function(input: InputObject, processed: boolean)
-		if not state.open or processed then
+		if not state.open then
 			return
 		end
-		--[[ Escape closes, unless the box has focus — there, escape is how a
-		     player abandons what they were typing, and closing the whole panel
-		     as well would take two intentions from one press. ]]
+		--[[
+			B backs out, as it does on every other panel in the game. This screen
+			was the one that did not have it — the only way out was Escape, which
+			a console does not have, so a controller could open CODES and could
+			not leave it.
+
+			Before the processed guard, because the panel is focused while it is
+			up and its own presses arrive marked processed. It follows Escape's
+			rule about the text box for the same reason: while somebody is typing,
+			back means abandon the typing, and taking two intentions from one
+			press is how a player loses a code they were halfway through.
+		]]
+		if input.KeyCode == Enum.KeyCode.ButtonB then
+			if field:IsFocused() then
+				field:ReleaseFocus(false)
+			else
+				CodesController:close()
+			end
+			return
+		end
+		if processed then
+			return
+		end
 		if input.KeyCode == Enum.KeyCode.Escape and not field:IsFocused() then
 			CodesController:close()
 		end

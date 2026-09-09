@@ -89,11 +89,26 @@ local QUEST_ROW_HEIGHT = 62
 	on a phone as much as on a desktop. A seven-pip row that reflowed would be a
 	row whose pips stopped reading as "seven", which is the only thing they are
 	there to say.
+
+	── AND THE BUTTON IS A TOUCH TARGET ────────────────────────────────────
+	CLAIM TODAY was 38 reference pixels, which on a phone — where the whole
+	panel is drawn at ScaleLayer's 0.75 floor — is 28.5 REAL pixels against
+	this project's 42-pixel standard. It is now sized from PANEL.RowHeightTouch
+	like every other control somebody presses, and the card grew to hold it.
+
+	Unconditional rather than input-dependent, on the argument the main menu's
+	NAV_HEIGHT already makes: the difference is invisible on a desktop, and a
+	control that resizes when the input scheme changes is two layouts to keep
+	working instead of one.
 ]]
-local STREAK_CARD_HEIGHT = 116
+local STREAK_BUTTON_HEIGHT = PANEL.RowHeightTouch
 local STREAK_PIP_HEIGHT = 9
 local STREAK_PIP_GAP = 4
-local STREAK_BUTTON_HEIGHT = 38
+--[[ Everything above the button, plus the button, plus its inset. Derived so
+     the two cannot drift: a card sized by hand around a button that grew is how
+     a CLAIM control ends up half outside the frame it lives in. ]]
+local STREAK_REWARD_TOP = 28 + STREAK_PIP_HEIGHT + 6
+local STREAK_CARD_HEIGHT = STREAK_REWARD_TOP + (TEXT.Small + 2) + 6 + STREAK_BUTTON_HEIGHT + 8
 
 --[[
 	A pass tier row, and the same row on a phone.
@@ -631,20 +646,31 @@ local function buildBanner()
 	scripLabel.Text = scripText(0)
 end
 
---[[ The card itself. Built once — see streakPips — and positioned at the top
-     of the left column, with the quest caption pushed down past it by the
-     caller. Returns the y the quest column may start at, so the two cannot
-     disagree about where one ends and the other begins. ]]
-local function buildStreak(top: number): number
-	local caption = Widgets.label(panel, "StreakCaption", FONT.Heading, TEXT.Small, COLOR.TextDim)
-	caption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top)
-	caption.Size = UDim2.new(QUEST_WIDTH, 0, 0, SECTION_LABEL_HEIGHT)
-	caption.Text = "DAILY STREAK"
+--[[
+	The card, as the FIRST ROW OF THE LEFT COLUMN rather than a fixed block above
+	it.
 
-	local card = Widgets.frame(panel, "Streak", COLOR.PanelRaised, PANEL.RaisedFill)
-	card.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top + SECTION_LABEL_HEIGHT)
-	card.Size = UDim2.new(QUEST_WIDTH, -LAYOUT.PanelPadding, 0, STREAK_CARD_HEIGHT)
-	Widgets.stroke(card, COLOR.Border)
+	It was the second, and the arithmetic did not survive a phone. The left column
+	was a plain frame of fixed height holding three 62-pixel quest rows, and it
+	had never fitted on a handset — three rows plus their gaps want 198 reference
+	pixels and the column had 186, so it was twelve over before any of this. The
+	card took another 139 with it and turned a twelve-pixel overflow into a
+	hundred and seventy: on an iPhone the orders were simply not on the screen.
+
+	So the column is a scroller now, exactly like the pass track beside it, and
+	the card is a row inside it with LayoutOrder 0. On a desktop everything is
+	visible and nothing looks different; on a phone the whole column scrolls as
+	one, which is what a player would try anyway. It also deletes the fixed-height
+	arithmetic entirely — nothing computes where the quests start any more,
+	because the layout does.
+]]
+local function buildStreak()
+	local card = Widgets.frame(questHolder, "Streak", COLOR.PanelRaised, PANEL.RaisedFill)
+	--[[ Zero, so it sorts above every quest row. They start at 1 — see
+	     buildQuestRow, which uses the quest's own index. ]]
+	card.LayoutOrder = 0
+	card.Size = UDim2.new(1, 0, 0, STREAK_CARD_HEIGHT)
+	Widgets.stroke(card, COLOR.Accent)
 
 	local edge = Widgets.frame(card, "Edge", COLOR.Accent, 0)
 	edge.Size = UDim2.new(0, LAYOUT.BorderThickness * 2, 1, 0)
@@ -674,7 +700,7 @@ local function buildStreak(top: number): number
 	end
 
 	streakReward = Widgets.label(card, "Reward", FONT.Numeric, TEXT.Small, COLOR.Accent)
-	streakReward.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 28 + STREAK_PIP_HEIGHT + 6)
+	streakReward.Position = UDim2.fromOffset(LAYOUT.PanelPadding, STREAK_REWARD_TOP)
 	streakReward.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Small + 2)
 	streakReward.Text = ""
 
@@ -708,8 +734,6 @@ local function buildStreak(top: number): number
 		UiSound.play(AudioConfig.UI.MenuConfirm)
 		refreshStreak()
 	end)
-
-	return top + SECTION_LABEL_HEIGHT + STREAK_CARD_HEIGHT + LAYOUT.PanelPadding
 end
 
 local function buildQuestRow(index: number, quest: ProgressionConfig.Quest)
@@ -747,7 +771,11 @@ end
 local function buildQuests()
 	table.clear(questRows)
 	for _, child in questHolder:GetChildren() do
-		if child:IsA("Frame") then
+		--[[ By NAME, not by class. The streak card is a Frame in this same
+		     scroller now, and a midnight rebuild that swept every Frame would
+		     take it with the quests — leaving a column with no card and every
+		     reference in refreshStreak pointing at a destroyed instance. ]]
+		if child:IsA("Frame") and string.sub(child.Name, 1, 5) == "Quest" then
 			child:Destroy()
 		end
 	end
@@ -843,22 +871,21 @@ local function build()
 	local top = BODY_TOP
 	local bodyHeight = -(top + FOOTER_HEIGHT + LAYOUT.PanelPadding)
 
-	--[[ The streak takes the top of the left column and hands back where the
-	     quests may start. The pass column on the right still begins at `top`:
-	     only the left one moved, so the two captions no longer line up and that
-	     is correct — they are two lists of different lengths, not a table. ]]
-	local questTop = buildStreak(top)
-
 	local questCaption = Widgets.label(panel, "QuestCaption", FONT.Heading, TEXT.Small, COLOR.TextDim)
-	questCaption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, questTop)
+	questCaption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top)
 	questCaption.Size = UDim2.new(QUEST_WIDTH, 0, 0, SECTION_LABEL_HEIGHT)
-	questCaption.Text = "TODAY'S ORDERS"
+	questCaption.Text = "TODAY"
 
-	questHolder = Widgets.frame(panel, "Quests", COLOR.Panel, 1)
-	questHolder.Position = UDim2.fromOffset(LAYOUT.PanelPadding, questTop + SECTION_LABEL_HEIGHT)
-	questHolder.Size =
-		UDim2.new(QUEST_WIDTH, -LAYOUT.PanelPadding, 1, bodyHeight - SECTION_LABEL_HEIGHT - (questTop - top))
+	--[[ A scroller, matching the pass track opposite. It was a plain frame, and
+	     a plain frame is a promise that everything inside it fits — which on a
+	     phone it never did. See buildStreak. ]]
+	questHolder = Widgets.scroller(panel, "Quests")
+	questHolder.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top + SECTION_LABEL_HEIGHT)
+	questHolder.Size = UDim2.new(QUEST_WIDTH, -LAYOUT.PanelPadding, 1, bodyHeight - SECTION_LABEL_HEIGHT)
+	questHolder.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	Widgets.list(questHolder, LAYOUT.ElementGap)
+
+	buildStreak()
 
 	local passCaption = Widgets.label(panel, "PassCaption", FONT.Heading, TEXT.Small, COLOR.TextDim)
 	passCaption.Position = UDim2.new(QUEST_WIDTH, LAYOUT.PanelPadding + COLUMN_GAP, 0, top)
