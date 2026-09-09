@@ -48,7 +48,7 @@ By an enormous margin the sound you hear most. Each of your guns gets its own.
 | **Scoped Mk-18** | Same body as the Mk 18, but with more air around it. |
 | **M1A EBR** | Big, authoritative, single-shot 7.62. Long tail that carries across the map. |
 | **Machete** | Not a gunshot — a fast air *whoosh*. |
-| **Tesla Rifle** | **A stand-in today — the glass-impact sample, pitched up.** Wanted: a single hard electrical *crack*, one per shot at about 2.7 a second. Sharp attack, a short crackling tail, and a sense of the air being ripped rather than a bullet leaving. Think capacitor discharge or a taser arc, not a sci-fi laser. It fires slowly enough that each one is the sound of the weapon rather than a texture, so it can afford to be big. No sustained loop — unlike the flamethrower this is discrete shots with silence between, and a bed under it would turn it into a stream. |
+| **Tesla Rifle** | ~~Wanted~~ **— filled in, and it is the only weapon in the game with a voice of its own.** Six cues rather than one: the arc, the charge that leads it, the recharge that replaces a magazine change, an idle hum under the trigger, a fizzle instead of a dry click, and a power-on when you pick it up. See `AudioConfig.WeaponVoice` and the note below. |
 
 Also needed: **dry fire** (a hollow click — the player has to *feel* empty before
 they read the number), **mag out / mag in / bolt release**, **shell insert** for
@@ -200,18 +200,20 @@ Two things to check on every result before you commit to it:
 > **Tip:** search for the same term several times and grab 3–5 *different*
 > results. That's your variation set — the engine pitch-shifts them for you.
 
-> **On the Tesla Rifle specifically:** it fires 2.75 times a second, so it is
-> over the once-a-second line and wants a variation set like the guns do — but it
-> is also over that line by very little, so one good sample ships fine and three
-> is the upgrade. What it must NOT have is a long tail: at 2.75 a second a 2s
-> sample overlaps itself five deep and turns a rifle into a drone. Under ~0.6s.
+> **On the Tesla Rifle:** all six of its cues are filled in. It is the one weapon
+> that does not share the common reload bank, because none of that bank is true
+> of it — it has no magazine to drop, no bolt to release and no round to fail to
+> chamber, and played those it sounds like a rifle pretending. `AudioConfig.
+> WeaponVoice` is where its own set lives, and the rule there is that a voice
+> REPLACES the bank rather than patching it: keys it does not name are silent,
+> not inherited, so a weapon with no magazine cannot end up dropping one because
+> somebody forgot a key.
 >
-> Two traps in these search terms. `lightning` and `thunder` almost always return
-> the rumble rather than the strike — three to eight seconds, entirely the wrong
-> shape. And `laser`, `plasma` and `railgun` return sci-fi pews, which is the one
-> register this weapon was written not to be in: it should sound like something
-> that hurts, not something from a spaceship. `taser` and `arc weld` are the two
-> that most reliably return what is actually wanted.
+> If you replace any of the six, the one number worth checking is the **arc**:
+> at 2.75 shots a second a sample over ~0.6s overlaps itself and turns the rifle
+> into a drone. And if the **recharge** sample is not about 3.6 seconds long,
+> say how long it actually is — `reloadTime` should be moved to match the sound
+> rather than the sound left to end in silence or be cut off.
 
 ## Flesh, bone and gore
 

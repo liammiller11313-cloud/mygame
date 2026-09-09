@@ -238,6 +238,42 @@ export type WeaponDefinition = {
 		it and honours this flag as the one way to say you meant it.
 	]]
 	floorOnly: boolean?,
+
+	--[[
+		── THE CAPACITOR BANK ───────────────────────────────────────────────────
+		How long the first shot of a burst waits, and how long the charge survives
+		once you stop.
+
+		Present on exactly one weapon, and absent means "the trigger fires the
+		gun", which is what every other weapon in the roster does.
+
+		`spinUp` is the cold start: the trigger goes down, the charge cue plays,
+		and the shot lands this many seconds later. `spinHold` is how long the
+		charge stays up after a shot, so a player working an engagement pays the
+		spool ONCE rather than on every trigger pull. Two seconds is a comfortable
+		five shot-intervals at this weapon's rate — you can pace your shots and
+		stay hot; you cannot walk away, come back and be hot.
+
+		That split is the whole design. A flat per-shot delay would make the
+		weapon feel broken; a flat one-off delay with no decay would make it free
+		after the first shot of the round. This makes it a weapon you commit to an
+		engagement with.
+
+		── THE PRESS IS THE COMMITMENT ─────────────────────────────────────────
+		Letting go mid-charge does not cancel it: the shot still lands, aimed
+		wherever the player is looking when it does. That is not leniency, it is
+		the only version that survives contact with a player's instincts — the
+		instinct with a slow gun is to TAP it, and a charge that cancels on
+		release fires nothing at all for somebody who taps.
+
+		── AUTO ONLY ───────────────────────────────────────────────────────────
+		The spool is driven by WeaponController's held-trigger loop, which only
+		runs for `fireMode == "Auto"`. On a Semi or Pump weapon the trigger fires
+		once per press and would return during the spool, so the gun would simply
+		never shoot. Do not put these on one without teaching that loop first.
+	]]
+	spinUp: number?,
+	spinHold: number?,
 }
 
 local WHITE_HOT = Color3.fromRGB(255, 236, 190)
@@ -2668,6 +2704,21 @@ WeaponConfig.Definitions = {
 		     rhythm of cracks rather than a stream, which is the difference
 		     between a weapon you sweep and a weapon you aim. ]]
 		fireMode = "Auto",
+
+		--[[ It charges before the first shot. A third of a second, which is
+		     almost exactly one of this weapon's own shot intervals — so a cold
+		     start costs you one crack and nothing else — and the charge then
+		     stays up for two seconds, which is five intervals and enough to pace
+		     your shots deliberately without going cold.
+
+		     This is the one thing that stops penetration six being simply the
+		     best gun in the game. Everything else here is a sidegrade against the
+		     flamethrower; the spool is the price of a bolt that kills a corridor,
+		     and it is paid at the moment a player would most like not to pay
+		     it — the instant the corridor lines up. See WeaponConfig's type for
+		     why it decays rather than being a flat tax or a one-off. ]]
+		spinUp = 0.33,
+		spinHold = 2.0,
 
 		--[[ Twenty-six is two shots on a Common and it does not fall off much,
 		     which sounds strong until you notice there are only forty of them and

@@ -169,6 +169,23 @@ local state = {
 	nextSwingAt = 0,
 	reload = nil :: any,
 
+	--[[
+		The capacitor bank, for the one weapon that has one.
+
+		`spinReadyAt` is the clock the CURRENT charge completes at, or 0 when
+		nothing is charging. `spunUntil` is the clock the charge decays at, so a
+		player working an engagement pays the spool once rather than on every
+		trigger pull.
+
+		Two fields rather than one because they answer different questions —
+		"am I charging" and "am I still hot" — and a single timer would have to
+		mean both, which is how a weapon ends up either charging forever or never
+		going cold. Zero on every other weapon in the game and never read there:
+		see WeaponConfig's spinUp.
+	]]
+	spinReadyAt = 0,
+	spunUntil = 0,
+
 	--[[ Set when an attribute update disagreed with the prediction and was not
 	     believed yet. The Heartbeat only re-reads the loadout while this is up,
 	     so an idle player costs zero attribute reads per frame. ]]
@@ -259,6 +276,21 @@ local function setWeaponLoop(definition: any, on: boolean)
 	if not live.IsPlaying then
 		live:Play()
 	end
+end
+
+--[[
+	One reload-bank cue for the weapon in hand.
+
+	Every call site below used to index AudioConfig.WeaponReload directly, which
+	is right for thirty-five magazine-fed guns and wrong for the one weapon that
+	has no magazine — the Tesla Rifle would drop a mag it does not have, seat a
+	mag it does not have, and click on a firing pin it does not have.
+
+	The rule and its reasoning live in AudioConfig.weaponCue; this is just the
+	one line that stops any of these sites having to know about it.
+]]
+local function cue(definition: any, name: string): any
+	return AudioConfig.weaponCue(if definition then definition.id else nil, name)
 end
 
 local function playLocal(definition: any)
@@ -444,6 +476,12 @@ local function refreshLoadout(force: boolean)
 		state.firing = false
 		setWeaponLoop(nil, false)
 		state.pumpAt = 0
+		--[[ Cold. A charge is a property of the weapon in your hands, so putting
+		     one away and taking it back out is a cold start — otherwise
+		     quick-swapping would be the way to skip the spool, which is exactly
+		     the trick `drawTime` two lines below exists to stop. ]]
+		state.spinReadyAt = 0
+		state.spunUntil = 0
 		endReload(false)
 
 		if definition then
@@ -451,11 +489,18 @@ local function refreshLoadout(force: boolean)
 			-- learns to quick-swap out of every reload in the game.
 			state.nextFireAt = os.clock() + definition.drawTime
 
-			--[[ Melee only, and deliberately. Every slot switch making a noise
-			     would be a sound three times a fight for no information; the melee
-			     key is a toggle you press mid-panic without looking, and the cue
-			     is how you know it took. ]]
-			if definition.slot == Enums.Slot.Melee then
+			--[[ Melee, and anything with a draw cue of its own. Still not every
+			     slot switch: that would be a sound three times a fight for no
+			     information. The melee key is a toggle you press mid-panic without
+			     looking and the cue is how you know it took — and a weapon with
+			     its own Draw in AudioConfig.WeaponVoice has said, explicitly, that
+			     picking it up is worth hearing. Exactly one has, and it is the one
+			     you find once a round on the floor of a room you walked five
+			     generators for. ]]
+			local drawn = cue(definition, "Draw")
+			if AudioConfig.isConfigured(drawn) then
+				playLocal(drawn)
+			elseif definition.slot == Enums.Slot.Melee then
 				playLocal(AudioConfig.UI.MeleeDraw)
 			end
 		end
@@ -670,7 +715,7 @@ local function dryFire()
 	end
 	state.nextDryAt = now + DRY_FIRE_INTERVAL
 
-	playLocal(AudioConfig.WeaponReload.DryFire)
+	playLocal(cue(state.definition, "DryFire"))
 	local viewmodel = Registry.find("ViewmodelController")
 	if viewmodel then
 		viewmodel:onDryFire()
@@ -787,6 +832,61 @@ local function useHeldConsumable(): boolean
 	return true
 end
 
+--[[
+	Whether the capacitor is charged, and starting the charge if it is not.
+
+	Returns false to mean "not yet" — the held-trigger loop calls fireOnce again
+	next frame, so a false here is a shot deferred rather than a shot lost. True
+	for every weapon in the game that has no spinUp, which is all of them but
+	one, and it costs those a single nil test.
+
+	── THE CUE PLAYS ONCE, NOT EVERY FRAME ─────────────────────────────────────
+	`spinReadyAt` being non-zero is what says "already charging", and it is the
+	reason this is a state machine rather than a comparison. The loop re-enters
+	on every frame of the third of a second the spool takes; without that field
+	the charge sound would play twenty times into it.
+
+	── THE PRESS IS THE COMMITMENT ─────────────────────────────────────────────
+	Releasing the trigger does not cancel a charge — see the Fire binding in
+	start() for why, which is that tapping is the instinct with a slow gun and a
+	cancel-on-release charge never fires for a player who taps.
+
+	── AND A WARM GUN STAYS WARM ───────────────────────────────────────────────
+	Every shot pushes `spunUntil` forward, so the tax is on STARTING to shoot
+	rather than on shooting. A player pacing their shots inside spinHold never
+	hears the charge again; one who stops, walks somewhere and starts again pays
+	it once more. That is the difference between a weapon you commit to and a
+	weapon that is simply slower than its rate says.
+]]
+local function spunUp(definition: any, now: number): boolean
+	local spinUp = definition.spinUp
+	if not spinUp or spinUp <= 0 then
+		return true
+	end
+
+	local hold = definition.spinHold or 0
+	if now < state.spunUntil then
+		--[[ Still hot from the last shot. Pushed forward rather than left alone,
+		     so the window is measured from the most recent shot rather than from
+		     whenever the burst happened to begin. ]]
+		state.spunUntil = now + hold
+		return true
+	end
+
+	if state.spinReadyAt <= 0 then
+		state.spinReadyAt = now + spinUp
+		playLocal(cue(definition, "Charge"))
+		return false
+	end
+	if now < state.spinReadyAt then
+		return false
+	end
+
+	state.spinReadyAt = 0
+	state.spunUntil = now + hold
+	return true
+end
+
 local function fireOnce()
 	local definition = state.definition
 	if not definition then
@@ -807,10 +907,34 @@ local function fireOnce()
 	end
 
 	local now = os.clock()
-	if now < state.nextFireAt or not canAct() then
+	if now < state.nextFireAt then
+		return
+	end
+	--[[
+		Split from the cooldown test above, and the two `spinReadyAt = 0` lines
+		below it are why.
+
+		A pending charge is what keeps the Heartbeat loop calling this function
+		after the trigger is released, so a charge that can never reach a shot is
+		a loop that never stops: sit in a turret mid-spool, or have the server
+		reconcile the magazine to empty under one, and the old code would spin
+		this every frame for the rest of the round — clicking on an empty gun and
+		re-requesting a reload each time.
+
+		A charge only survives while it could still become a shot. Both exits
+		from this function that mean "not any more" put the capacitor back to
+		cold; the cooldown exit above does not, because that one is the ordinary
+		wait between two shots of a burst that IS going to happen.
+
+		Kept in this order so the cheap clock test still short-circuits `canAct`
+		on every frame between two shots, which is what it did as one condition.
+	]]
+	if not canAct() then
+		state.spinReadyAt = 0
 		return
 	end
 	if state.ammo <= 0 then
+		state.spinReadyAt = 0
 		dryFire()
 		return
 	end
@@ -819,6 +943,15 @@ local function fireOnce()
 	-- exactly as InventoryService:consumeAmmo does. The doorway decision between
 	-- two more shells and shooting now is the point of a shell reload.
 	endReload(false)
+
+	--[[ After the reload is dropped, before anything is spent. Starting to charge
+	     IS pulling the trigger as far as a running reload is concerned — the
+	     player has committed — but nothing below this line may happen on a frame
+	     that does not actually fire, or a cold start would burn bloom, a round
+	     and a tracer a third of a second before the shot. ]]
+	if not spunUp(definition, now) then
+		return
+	end
 
 	local origin, direction = cameraRay()
 	local seed = ShotPattern.generateSeed()
@@ -900,7 +1033,7 @@ function WeaponController:beginReload(): boolean
 		timer = 0,
 		startedAt = os.clock(),
 	}
-	playLocal(AudioConfig.WeaponReload.MagOut)
+	playLocal(cue(definition, "MagOut"))
 
 	local viewmodel = Registry.find("ViewmodelController")
 	if viewmodel then
@@ -938,7 +1071,7 @@ local function stepReload(dt: number)
 				end
 				state.lastPredictAt = os.clock()
 				WeaponController.ammoChanged:fire(state.ammo, state.reserve)
-				playLocal(AudioConfig.WeaponReload.ShellInsert)
+				playLocal(cue(definition, "ShellInsert"))
 				if viewmodel then
 					viewmodel:onShellLoaded()
 				end
@@ -958,14 +1091,14 @@ local function stepReload(dt: number)
 			state.ammo += taken
 			state.lastPredictAt = os.clock()
 			WeaponController.ammoChanged:fire(state.ammo, state.reserve)
-			playLocal(AudioConfig.WeaponReload.MagIn)
+			playLocal(cue(definition, "MagIn"))
 			endReload(true)
 			return
 		end
 	end
 
 	if reload.phase == "Tail" and reload.timer >= reloadTimeFor(definition) then
-		playLocal(AudioConfig.WeaponReload.Pump)
+		playLocal(cue(definition, "Pump"))
 		if viewmodel then
 			viewmodel:onPump()
 		end
@@ -1150,6 +1283,8 @@ function WeaponController:init()
 		if blocked then
 			state.firing = false
 			setWeaponLoop(nil, false)
+			state.spinReadyAt = 0
+			state.spunUntil = 0
 			endReload(false)
 			WeaponController:setAiming(false)
 		end
@@ -1172,6 +1307,23 @@ function WeaponController:start()
 	trove:add(input:onEnded(Action.Fire):connect(function()
 		state.firing = false
 		setWeaponLoop(nil, false)
+		--[[
+			A charge in progress is NOT cancelled here, and that is the decision
+			that makes the weapon playable.
+
+			Cancelling on release was the obvious reading of "hold to charge" and
+			it is wrong for this gun, because the instinct with a slow weapon is
+			to TAP it. Tapping a cancel-on-release charge fires nothing, ever —
+			press, charge starts, release a tenth of a second later, nothing
+			happens, and the player concludes the gun is broken while listening to
+			it charge over and over.
+
+			So the press is the commitment. Let go and the shot still lands a
+			third of a second later, aimed wherever you are looking when it does.
+			Which is also what removes the reason to cancel in the first place:
+			there is no held charge to pre-load from cover, because a charge
+			always discharges.
+		]]
 	end))
 
 	trove:add(input:onBegan(Action.Aim):connect(function()
@@ -1225,17 +1377,22 @@ function WeaponController:start()
 
 		if state.pumpAt > 0 and now >= state.pumpAt then
 			state.pumpAt = 0
-			playLocal(AudioConfig.WeaponReload.Pump)
+			playLocal(cue(definition, "Pump"))
 			local viewmodel = Registry.find("ViewmodelController")
 			if viewmodel then
 				viewmodel:onPump()
 			end
 		end
 
-		if state.firing and definition then
-			if definition.fireMode == "Auto" then
-				fireOnce()
-			elseif definition.fireMode == "Melee" then
+		--[[ `spinReadyAt` keeps this running after the trigger is released, which
+		     is the whole of the fire-and-forget rule above: a charge that has
+		     started has to reach a shot, and the only thing that drives one is
+		     this loop. Zero on every weapon without a capacitor, so nothing else
+		     in the roster notices. ]]
+		if definition and definition.fireMode == "Auto" and (state.firing or state.spinReadyAt > 0) then
+			fireOnce()
+		elseif state.firing and definition then
+			if definition.fireMode == "Melee" then
 				swingMelee()
 			elseif state.ammo <= 0 and now >= state.nextFireAt then
 				-- Semi and Pump fire once per press, but an empty gun still has

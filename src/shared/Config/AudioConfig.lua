@@ -95,19 +95,28 @@ local ID = table.freeze({
 	     bursts has no attack. ]]
 	FlamethrowerBurst = "rbxassetid://129504465599355",
 	FlamethrowerLoop = "rbxassetid://108835547890095",
-	--[[ The Tesla Rifle's arc, and a STAND-IN — named honestly the way the event
-	     cues are. This is the glass-impact sample: a brittle crack with a fast
-	     attack, which is the closest thing in the library to electricity and is
-	     not electricity. It is here as a named id rather than written inline at
-	     the weapon so that swapping in a real upload is this one line and
-	     nothing else in the file moves.
+	--[[
+		The Tesla Rifle, in six pieces — the only weapon in the game with a voice
+		of its own rather than a shot and a share of the common reload bank.
 
-	     Unlike the flamethrower there is no LOOP half, and that is a decision
-	     rather than an omission: the arc fires under three times a second, so
-	     each crack is its own event with silence between. A sustained bed under
-	     it would make it a stream, which is the weapon it was written not to
-	     be. ]]
-	TeslaArc = "rbxassetid://124695435769496",
+		It earns that because none of the shared cues are true of it. It has no
+		magazine to drop and no bolt to release, so MagOut and MagIn would be a
+		gun noise from a gun that is not there; it has no round to fail to
+		chamber, so the dry click is wrong; and it is the one weapon a player
+		picks up ONCE a round, off the floor of a room they walked five
+		generators for, which is a moment worth a sound.
+
+		See AudioConfig.WeaponVoice for how they are wired, and note the rule
+		there: a weapon with a voice uses ONLY that voice. Nothing here falls
+		back to the common bank, because falling back is how a weapon with no
+		magazine ends up dropping one.
+	]]
+	TeslaArc = "rbxassetid://7554632797",
+	TeslaCharge = "rbxassetid://87894569924328",
+	TeslaRecharge = "rbxassetid://118206070547709",
+	TeslaHum = "rbxassetid://109938838638994",
+	TeslaEmpty = "rbxassetid://17871250897",
+	TeslaDraw = "rbxassetid://130114397986399",
 	AkShot = "rbxassetid://1065188024",
 	M4Shot = "rbxassetid://18521643711",
 	SniperShot = "rbxassetid://135333708100426",
@@ -222,8 +231,15 @@ AudioConfig.WeaponFire = {
 	     for the same reason the weapons are opposites: this fires under three
 	     times a second, so each one IS the sound of the weapon rather than a
 	     texture, and it reaches as far as the bolt does. Priority 5, so a crack
-	     is never the voice that gets dropped. ]]
-	[Enums.Weapon.TeslaRifle] = sound(ID.TeslaArc, 0.85, 1.24, 1.4, 520, 5),
+	     is never the voice that gets dropped.
+
+	     The pitch window sits either side of 1.0 now. It was 1.24-1.40 while the
+	     id was the glass-impact stand-in, which needed pitching up hard to read
+	     as electrical at all — with a real arc that would be shifting a sample
+	     away from the register it was recorded in for no reason. A narrow window
+	     rather than none, because two cracks a second at exactly one pitch is a
+	     machine rather than a weapon. ]]
+	[Enums.Weapon.TeslaRifle] = sound(ID.TeslaArc, 0.85, 0.95, 1.06, 520, 5),
 	[Enums.Weapon.M1911A1] = sound(ID.PistolShot, 0.72, 0.97, 1.05, 320, 4),
 	[Enums.Weapon.Magnum357] = sound(ID.RevolverShot, 1.0, 0.94, 1.02, 560, 5),
 	--[[ These four shipped with no row and this table is indexed directly — no
@@ -347,6 +363,82 @@ AudioConfig.WeaponLoop = {
 		rollOffMax = 120,
 		looped = true,
 		priority = 3,
+	},
+	--[[
+		Two entries now, and they are doing opposite jobs.
+
+		The flamethrower's loop IS the weapon: it fires ten times a second, so
+		the bursts are a texture over the bed and the bed is what you hear.
+
+		The Tesla Rifle's is the opposite — a capacitor bank idling under three
+		cracks a second that are each loud enough to be the sound of the weapon
+		on their own. So it is quiet, and it is here for one reason: the loop
+		starts on the trigger going DOWN, which is the same instant the charge
+		begins, and the spool is the half-second where the weapon is doing
+		something the player cannot otherwise hear. Without it a cold start is a
+		charge cue and then silence until the shot.
+
+		Rolls off half as far as the flamethrower's. A teammate should hear the
+		cracks from across a street and the hum only if they are next to you.
+	]]
+	[Enums.Weapon.TeslaRifle] = {
+		id = ID.TeslaHum,
+		ids = nil,
+		volume = 0.3,
+		pitchMin = 1.0,
+		pitchMax = 1.0,
+		rollOffMin = 8,
+		rollOffMax = 60,
+		looped = true,
+		priority = 2,
+	},
+}
+
+--[[
+	A weapon's OWN cues, where the shared bank would be a lie.
+
+	Every gun in the game shares one reload bank — a magazine out, a magazine in,
+	a bolt, a dry click — and that is right, because they are all magazine-fed
+	guns and thirty separate reload sets would be thirty chances for one of them
+	to be missing.
+
+	It stops being right for a weapon that has no magazine. The Tesla Rifle drops
+	nothing, chambers nothing and clicks on nothing; played the shared bank it
+	sounds like a rifle pretending, which is worse than silence because the
+	player can hear the pretending.
+
+	── A VOICE REPLACES THE BANK, IT DOES NOT PATCH IT ─────────────────────────
+	A weapon with a row here uses ONLY that row. Keys it does not name are
+	SILENT, not inherited — which is the whole point: the failure this table
+	exists to prevent is a weapon with no magazine dropping one because nobody
+	remembered to override the key that does it. Opt in to each sound you want,
+	and the ones you say nothing about say nothing.
+
+	`Charge` and `Draw` have no shared counterpart at all. Nothing else in the
+	game charges, and only the melee has a draw cue — see WeaponController, which
+	deliberately does not make every slot switch a noise.
+]]
+AudioConfig.WeaponVoice = {
+	[Enums.Weapon.TeslaRifle] = {
+		--[[ The capacitor spooling, on the first shot of a burst. See
+		     WeaponConfig's spinUp: this plays at the instant the trigger goes
+		     down and the shot lands a third of a second later, so the sound is
+		     not decoration on the delay — it is the only warning the player gets
+		     that the delay is happening. ]]
+		Charge = sound(ID.TeslaCharge, 0.6, 0.98, 1.03, 90, 4),
+		--[[ Picking it up off the floor of the loot room. The one weapon in the
+		     game that gets a draw cue for a reason other than being a toggle:
+		     you find exactly one a round, and it should power on in your
+		     hands. ]]
+		Draw = sound(ID.TeslaDraw, 0.65, 1.0, 1.0, 70, 4),
+		--[[ The whole 3.6-second reload in one sample, played at the start.
+		     MagIn is deliberately absent — see the header. There is nothing to
+		     seat at the end of it, and a clack there would be the shared bank
+		     leaking back in through the one key somebody forgot. ]]
+		MagOut = sound(ID.TeslaRecharge, 0.7, 1.0, 1.0, 80, 4),
+		--[[ Out of charge. A fizzle rather than a click, because there is no
+		     firing pin to fall on nothing. ]]
+		DryFire = sound(ID.TeslaEmpty, 0.6, 0.98, 1.04, 45, 3),
 	},
 }
 
@@ -734,6 +826,22 @@ AudioConfig.Mix = table.freeze({
 
 --[[ True when a definition has a usable id. Every play path checks this so a
      partially-filled bank stays silent instead of erroring. ]]
+--[[
+	One cue for a weapon, by name.
+
+	The single place the replace-don't-patch rule at WeaponVoice is enforced, so no caller
+	has to remember it. A weapon with a voice gets that voice and nothing else; a
+	weapon without one gets the shared bank; a name neither has is nil, and every
+	play path in the game already treats nil as silence.
+]]
+function AudioConfig.weaponCue(weaponId: string?, name: string): any
+	local voice = if typeof(weaponId) == "string" then AudioConfig.WeaponVoice[weaponId] else nil
+	if voice then
+		return voice[name]
+	end
+	return (AudioConfig.WeaponReload :: any)[name]
+end
+
 function AudioConfig.isConfigured(definition: { id: string, ids: { string }? }?): boolean
 	if definition == nil then
 		return false
