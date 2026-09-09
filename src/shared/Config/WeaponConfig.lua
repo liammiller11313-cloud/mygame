@@ -246,6 +246,11 @@ local AMBER = Color3.fromRGB(255, 196, 92)
      Flamethrower: twelve fat short ones of these a shot is the flame. ]]
 local FLAME = Color3.fromRGB(255, 122, 40)
 
+--[[ Tesla Rifle: one thin long one of these a shot is the arc. Pale rather than
+     saturated, because a blue tracer at full chroma reads as a sci-fi laser and
+     this is supposed to look like something that hurts. ]]
+local ARC = Color3.fromRGB(150, 214, 255)
+
 local WeaponConfig = {}
 
 --[[
@@ -2622,6 +2627,131 @@ WeaponConfig.Definitions = {
 		--[[ Never on a shop shelf and never on an item pad. It exists in exactly
 		     one place — the floor of the vault — and putting it anywhere else
 		     would undo the reason anybody solves the puzzle. ]]
+		placeable = false,
+		floorOnly = true,
+		price = 0,
+	},
+
+	--[[
+		The other end of the same idea, and deliberately nothing like it.
+
+		Zombieville's loot room pays out a special the way Clinton's vault does,
+		and the temptation was to give it a second flamethrower with a blue
+		tracer. That would be one weapon printed twice: found the same way, spent
+		the same way, and worth going back for exactly as often.
+
+		So it is built against the flamethrower rather than from it. The
+		flamethrower is a WIDE, SHORT cone whose damage mostly happens after the
+		trigger comes up — you paint a doorway and walk away. This is a NARROW,
+		LONG bolt whose damage all happens at once, and its trick is that it goes
+		THROUGH: penetration six with a gentle falloff means one shot down a
+		corridor kills the whole corridor, and one shot into an open street kills
+		whatever the first body was standing in front of.
+
+		Which is why one is Clinton's and one is Zombieville's. A cone is worth
+		having in a building full of doorways; a line is worth having on a street
+		with a sightline. Take the wrong one to the wrong map and it is merely a
+		gun.
+
+		Same distribution rules as the flamethrower, for the same reasons:
+		floorOnly so the Director never leaves one lying about, reserveMax zero so
+		a crate cannot top it up, and no shop row. Found once a round, in one
+		room, behind five generators.
+	]]
+	[Enums.Weapon.TeslaRifle] = {
+		id = Enums.Weapon.TeslaRifle,
+		displayName = "Tesla Rifle",
+		modelName = "Tesla Rifle",
+		slot = Enums.Slot.Primary,
+		class = "Special",
+		--[[ Auto, but at a quarter of the flamethrower's rate. Held down it is a
+		     rhythm of cracks rather than a stream, which is the difference
+		     between a weapon you sweep and a weapon you aim. ]]
+		fireMode = "Auto",
+
+		--[[ Twenty-six is two shots on a Common and it does not fall off much,
+		     which sounds strong until you notice there are only forty of them and
+		     no way to get a forty-first. See magSize. ]]
+		damage = 26,
+		rpm = 165,
+		--[[ One. The arc is a line, not a cone — everything this weapon does that
+		     is interesting is in `penetration` below, and a second pellet would
+		     turn a bolt into a spray and undo the whole point of it. ]]
+		pellets = 1,
+		--[[ Forty arcs and no reserve, which at 165rpm is about fifteen seconds of
+		     held trigger. Same bargain the flamethrower strikes: a burst of power
+		     you found once and spend on the wave you choose. ]]
+		magSize = 40,
+		reserveMax = 0,
+		--[[ The weapon. Six bodies deep with only a gentle taper, so a bolt fired
+		     into a queue kills the queue — nothing else in the roster reaches past
+		     three, and the RPG-7 that does it by explosion cannot do it down a
+		     corridor without killing the person holding it. ]]
+		penetration = 6,
+		penetrationFalloff = 0.88,
+
+		--[[ Reaches, and then stops dead. Longer than the flamethrower by a
+		     street and shorter than a rifle by half of one: this is a weapon for
+		     the length of a Zombieville block, and a Tesla Rifle that could
+		     answer a marksman across the map would be a marksman rifle that also
+		     penetrates six. ]]
+		falloffStart = 45,
+		falloffEnd = 130,
+		falloffMin = 0.55,
+		maxRange = 190,
+
+		--[[ Almost none, and aiming removes what is left. A bolt of electricity
+		     does not have a shot group, and a player who lines five bodies up has
+		     earned the shot landing where they put it. ]]
+		spreadHip = 1.1,
+		spreadAim = 0.0,
+		spreadMoving = 1.8,
+		spreadMax = 3.0,
+		bloomPerShot = 0.35,
+		bloomRecovery = 6.0,
+
+		--[[ A hard snap rather than a climb. It kicks once per crack and settles
+		     before the next one, which is what makes the slow rate read as weight
+		     instead of as sluggishness. ]]
+		recoilVertical = 0.9,
+		recoilHorizontal = 0.25,
+		recoilRecovery = 9.0,
+		kickback = 0.5,
+
+		reloadTime = 3.6,
+		reloadPerShell = 0,
+		drawTime = 0.95,
+		aimTime = 0.35,
+
+		walkSpeedScale = 0.92,
+		aimWalkSpeedScale = 0.62,
+		aimFov = 66,
+
+		shakeMagnitude = 0.5,
+		shakeRoughness = 8,
+		--[[ Thin, long and pale blue. The flamethrower's tracer is fat and short
+		     because it is drawing fire; this one is drawing a line through six
+		     people, and the line IS the feedback for a weapon whose whole appeal
+		     is what it hit behind what you aimed at. ]]
+		tracerWidth = 0.22,
+		tracerColor = ARC,
+		muzzleFlashSize = 1.6,
+		--[[ Nothing is ejected. There is no cartridge. ]]
+		shellEject = false,
+
+		--[[ It cooks rather than tears. Electrocution leaves a body, so there is
+		     no gib and no dismemberment — and no ignite either, which is the one
+		     line that would have made it the flamethrower again. ]]
+		gibPower = 0.0,
+		dismemberPower = 0.0,
+		--[[ A jolt. Enough to stagger the front of a queue backwards into the
+		     rest of it, which is a real tactical difference from fire and costs
+		     nothing to anyone standing behind the shooter. ]]
+		knockback = 14,
+
+		--[[ Never on a shelf, never on a pad, never in the shop. It exists on the
+		     floor of the loot room and nowhere else, and every round the team
+		     wants one they walk the five generators again. ]]
 		placeable = false,
 		floorOnly = true,
 		price = 0,

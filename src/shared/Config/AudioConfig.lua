@@ -95,6 +95,19 @@ local ID = table.freeze({
 	     bursts has no attack. ]]
 	FlamethrowerBurst = "rbxassetid://129504465599355",
 	FlamethrowerLoop = "rbxassetid://108835547890095",
+	--[[ The Tesla Rifle's arc, and a STAND-IN — named honestly the way the event
+	     cues are. This is the glass-impact sample: a brittle crack with a fast
+	     attack, which is the closest thing in the library to electricity and is
+	     not electricity. It is here as a named id rather than written inline at
+	     the weapon so that swapping in a real upload is this one line and
+	     nothing else in the file moves.
+
+	     Unlike the flamethrower there is no LOOP half, and that is a decision
+	     rather than an omission: the arc fires under three times a second, so
+	     each crack is its own event with silence between. A sustained bed under
+	     it would make it a stream, which is the weapon it was written not to
+	     be. ]]
+	TeslaArc = "rbxassetid://124695435769496",
 	AkShot = "rbxassetid://1065188024",
 	M4Shot = "rbxassetid://18521643711",
 	SniperShot = "rbxassetid://135333708100426",
@@ -205,6 +218,12 @@ AudioConfig.WeaponFire = {
 	     weapon, and a budget of 2 means the ones that would have stacked are
 	     dropped instead of turning into a wall. ]]
 	[Enums.Weapon.Flamethrower] = sound(ID.FlamethrowerBurst, 0.38, 0.96, 1.04, 120, 2),
+	--[[ Loud, high and carrying. The opposite mix to the flamethrower above it
+	     for the same reason the weapons are opposites: this fires under three
+	     times a second, so each one IS the sound of the weapon rather than a
+	     texture, and it reaches as far as the bolt does. Priority 5, so a crack
+	     is never the voice that gets dropped. ]]
+	[Enums.Weapon.TeslaRifle] = sound(ID.TeslaArc, 0.85, 1.24, 1.4, 520, 5),
 	[Enums.Weapon.M1911A1] = sound(ID.PistolShot, 0.72, 0.97, 1.05, 320, 4),
 	[Enums.Weapon.Magnum357] = sound(ID.RevolverShot, 1.0, 0.94, 1.02, 560, 5),
 	--[[ These four shipped with no row and this table is indexed directly — no

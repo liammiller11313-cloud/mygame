@@ -310,6 +310,11 @@ AmmoConfig.Weapons = {
 	     magazine to drop, and the empty row is how "has none" stays
 	     distinguishable from "was forgotten". ]]
 	[Enums.Weapon.Flamethrower] = { casing = "", magazine = "" },
+	--[[ Nothing, again, and for the same reason: it fires a charge, so there is
+	     no case and no magazine. Said explicitly rather than left absent, so
+	     "has none" stays distinguishable from "was forgotten" — which is the
+	     whole point of this table having empty rows in it at all. ]]
+	[Enums.Weapon.TeslaRifle] = { casing = "", magazine = "" },
 
 	[Enums.Weapon.ScopedMk18] = { casing = "556", magazine = "StanagMag" },
 	[Enums.Weapon.M1AEBR] = { casing = "762", magazine = "MarksmanMag" },

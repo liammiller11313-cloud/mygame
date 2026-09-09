@@ -572,8 +572,12 @@ for p, text in sources.items():
         called = re.search(
             r"(?<![.:\w])" + re.escape(name) + r"\s*[({\"']", text.replace(line, "", 1)
         )
+        # `= name` at the end of a line covers `local alias = fn` and, with the
+        # optional trailing comma, `[Kind.Wire] = buildWireMatch,` — a dispatch
+        # table. A function put into a table IS passed somewhere, and requiring
+        # the line to end at the name flagged every such table as dead code.
         passed = re.search(
-            r"[(,]\s*" + re.escape(name) + r"\s*[,)]|=\s*" + re.escape(name) + r"\s*$",
+            r"[(,]\s*" + re.escape(name) + r"\s*[,)]|=\s*" + re.escape(name) + r"\s*,?\s*$",
             text.replace(line, "", 1),
             re.M,
         )

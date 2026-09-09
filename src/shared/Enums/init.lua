@@ -91,6 +91,16 @@ Enums.Weapon = table.freeze({
 	     the vault, behind the puzzle, and that is the whole of its distribution. ]]
 	Flamethrower = "Flamethrower",
 
+	--[[ Primary: also not a gun, and deliberately the opposite of the one above
+	     it. The flamethrower is a wide short cone that sets a room alight and
+	     keeps killing after you stop; this is a single bolt that goes exactly
+	     where you point it and arcs straight down a line of bodies. One is area
+	     denial, the other is a queue-deleter, and neither refills — both lie on
+	     the floor of a room somebody had to earn.
+
+	     Zombieville's, the way the Flamethrower is Clinton's. ]]
+	TeslaRifle = "TeslaRifle",
+
 	-- Primary: marksman
 	ScopedMk18 = "ScopedMk18",
 	M1AEBR = "M1AEBR",

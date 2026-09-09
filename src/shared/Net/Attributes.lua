@@ -230,6 +230,23 @@ Attributes.Puzzle = table.freeze({
 	CluePrompt = "FL_CluePrompt", -- string, what the interact prompt calls it
 	Digits = "FL_PuzzleDigits", -- number, how long the keypad's code is
 	ClueOrder = "FL_ClueOrder", -- number, where this prop sits in the chain
+	--[[
+		Which generator this is, 1 through 5, and whether it is running.
+
+		The ORDER is on the prop rather than held only on the server, because the
+		prompt has to say "GENERATOR 3" before the player presses anything —
+		asking the server what they are looking at would put a round trip in
+		front of a label. It is not a secret: the number is written on the side
+		of the machine in the map, and the whole objective is to find them in
+		that order.
+
+		`GeneratorLive` is what makes a powered generator stop offering a puzzle
+		it has already been given. Server-written, like everything else here; a
+		client that set it locally would get a prompt that does nothing and a
+		refusal from a server that never saw it.
+	]]
+	GeneratorOrder = "FL_GeneratorOrder", -- number, 1..5
+	GeneratorLive = "FL_GeneratorLive", -- boolean, true once it is powered
 })
 
 --[[
@@ -305,6 +322,40 @@ Attributes.Game = table.freeze({
 	CluesFound = "FL_CluesFound", -- number
 	CluesTotal = "FL_CluesTotal", -- number, 0 when no puzzle is armed
 	VaultSolved = "FL_VaultSolved", -- boolean
+	--[[
+		What the counter above is COUNTING, in words.
+
+		The three numbers are generic — a side objective with N steps, M of them
+		done — and Zombieville's five generators are exactly that shape. What is
+		not generic is the wording: a card reading "CLUES 3/5" on a map with no
+		clues in it is a counter that lies about what the player is doing.
+
+		So the numbers stay where they are and the words come down beside them.
+		The alternative was a second pair of attributes and a client that has to
+		work out which pair is live, which is two ways to say one thing and a new
+		way for them to disagree.
+
+		Empty on a map with no side objective, which is most of the roster.
+	]]
+	TrackerLabel = "FL_TrackerLabel", -- string, e.g. "CLUES" or "GENERATORS"
+	TrackerHint = "FL_TrackerHint", -- string, the line under it
+	--[[
+		Where the game is currently pointing, and what it is pointing at.
+
+		Written when a side objective produces a PLACE rather than a fact — the
+		loot room, once every generator is powered. An arrow rather than a line
+		of text because "get to the loot room" is only useful to somebody who
+		already knows where the loot room is, and on a first round nobody does.
+
+		A Vector3 on Workspace rather than a remote, for the same reason every
+		other team-wide fact here is an attribute: a survivor who joins, dies and
+		respawns, or alt-tabs back in gets the current answer for free, and a
+		remote fired once would have missed all three of them.
+
+		Cleared to nil when there is nothing to point at.
+	]]
+	WaypointPosition = "FL_WaypointPosition", -- Vector3?, nil when nothing is marked
+	WaypointLabel = "FL_WaypointLabel", -- string, what the arrow is pointing at
 
 	ReadyHold = "FL_ReadyHold", -- boolean
 	ReadyCount = "FL_ReadyCount", -- number, survivors who have readied

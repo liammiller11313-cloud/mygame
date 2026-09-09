@@ -48,6 +48,7 @@ By an enormous margin the sound you hear most. Each of your guns gets its own.
 | **Scoped Mk-18** | Same body as the Mk 18, but with more air around it. |
 | **M1A EBR** | Big, authoritative, single-shot 7.62. Long tail that carries across the map. |
 | **Machete** | Not a gunshot — a fast air *whoosh*. |
+| **Tesla Rifle** | **A stand-in today — the glass-impact sample, pitched up.** Wanted: a single hard electrical *crack*, one per shot at about 2.7 a second. Sharp attack, a short crackling tail, and a sense of the air being ripped rather than a bullet leaving. Think capacitor discharge or a taser arc, not a sci-fi laser. It fires slowly enough that each one is the sound of the weapon rather than a texture, so it can afford to be big. No sustained loop — unlike the flamethrower this is discrete shots with silence between, and a bed under it would turn it into a stream. |
 
 Also needed: **dry fire** (a hollow click — the player has to *feel* empty before
 they read the number), **mag out / mag in / bolt release**, **shell insert** for

@@ -1,0 +1,165 @@
+# The Generator Grid — what to put in Zombieville
+
+The side objective for **Zombieville**, and the counterpart to Clinton's vault.
+Five generators powered in numerical order, five mini-puzzles dealt fresh every
+round, and a loot room whose gate rolls up when the last machine turns over.
+
+Nothing about Zombieville changes. No streets, no buildings, no rebuild. This is
+five props, one room and one gate — and the room and the gate are already yours.
+
+---
+
+## Where everything goes
+
+```
+Zombieville
+├── Puzzle                     ← the folder the generators live in
+│   ├── Generator 1
+│   ├── Generator 2
+│   ├── Generator 3
+│   ├── Generator 4
+│   └── Generator 5
+└── Lootroom                   ← stays exactly where it is
+    ├── Lootroom Gate          ← must be INSIDE Lootroom
+    ├── Tesla Rifle            ← on the floor
+    └── Dollar Stackpile
+```
+
+`Lootroom` **stays where it is.** It does not move into the folder — the folder
+is only where the generators are looked for first, and everything else is found
+by searching the whole map.
+
+Naming is forgiving: case, spaces, punctuation and a trailing plural are folded
+away, so `generator1`, `Generator  1` and `GENERATOR 1` are the same object.
+Digits are **not** folded, so `Generator 1` never matches `Generator 2`.
+
+You do not tag anything. The game tags what it finds when a round starts and
+untags it when the round ends.
+
+### The gate has to be inside the room
+
+`Lootroom Gate` is looked for **inside `Lootroom` only**, never across the map.
+That is deliberate: a map has any number of things that could answer to "Gate",
+and lifting the wrong one while the loot room stayed shut is a bug that looks
+like the objective being broken.
+
+If the room is missing, or the gate is not inside it, the generators still power
+and the console says so — the objective just does not open anything.
+
+### All five or none
+
+A missing generator turns the whole objective **off** for the round, loudly, with
+the model name it could not find printed in the output. Four machines against a
+counter that needs five is a round where the gate can never open and the loot
+room is sealed for reasons nobody can see, which is worse than no objective at
+all.
+
+So if the counter never appears, check the output — it will name the prop.
+
+---
+
+## How a round plays
+
+1. A **GENERATORS 0/5** card appears down the left, under the orders card.
+2. Walk to **Generator 1**. It is the only one lit in the interact prompt; the
+   other four are dimmed, so you can tell from across a street which is yours.
+3. Press interact. One of five panels opens.
+4. Solve it. The counter moves to 1/5 and everybody on the team is told.
+5. Repeat to 5/5.
+6. The gate vanishes, the loot room arms, the team is paid, and **an arrow
+   appears** pointing at the loot room from wherever you are standing.
+7. A horde spawns around the loot room. It is guarded from the moment it exists.
+
+Interacting with the wrong generator is refused by name:
+
+> Wrong generator, find the third one!
+
+The refusal lands on the counter card, not in a panel. A player who has just been
+told to go somewhere else does not need a screen in front of them.
+
+---
+
+## The five panels
+
+One per generator, and **which puzzle lands on which generator is reshuffled
+every round**. The route never moves — Generator 1 is always first — because the
+route is what a team learns about the map. The puzzle at the end of each leg is
+the half nobody can memorise.
+
+With five puzzles and five generators, every round deals each one exactly once.
+
+| Panel | What you do | The verb |
+|---|---|---|
+| **LOOM SPLICE** | Press the terminal matching each lit wire, top to bottom | match |
+| **BREAKER PANEL** | Throw five breakers in order of amperage — lowest first, or highest, and the line tells you which | sort |
+| **BUS VOLTAGE** | Select three cells that add up to the bus target | add |
+| **FUEL PRESSURE** | Stop a sweeping needle inside a green band, three times, band narrowing | time |
+| **PHASE ALIGN** | Turn four dials to a target — but a dial turns its right-hand neighbour too | reason |
+
+Every one of them is **presses**. No dragging, no holding, no aiming — a drag is
+a mouse, and a controller and a phone are two thirds of the audience. The wire
+panel still reads as connecting wires; you press the terminal instead of
+dragging to it.
+
+Wire colours are drawn **and named**, because a puzzle whose only channel is hue
+is a puzzle a colourblind player cannot do, and this is optional content in a
+co-op game — the version of "inaccessible" where your team goes and does it
+without you.
+
+A wrong answer is a **fault and a 1.5-second cooldown**, not a lockout. The horde
+is the punishment; the panel stays open on the board you were working.
+
+**CLEAR** starts the current puzzle again from the board it was dealt. It never
+re-rolls the puzzle — a CLEAR that changed the picture would look like the
+machine resetting itself.
+
+### Phase align can always be finished
+
+The board is generated by starting at the answer and pressing a few times, so
+every deal is reachable — at worst nine presses, against a limit of twenty-four.
+There is no such thing as a dealt board that cannot be solved.
+
+---
+
+## What is in the loot room
+
+**Tesla Rifle** — a primary, and deliberately the opposite of Clinton's
+flamethrower rather than a recolour of it.
+
+| | Flamethrower | Tesla Rifle |
+|---|---|---|
+| shape | wide short cone | narrow long bolt |
+| kills | mostly after you stop | all at once |
+| trick | sets things alight | goes through six bodies |
+| suits | a building full of doorways | a street with a sightline |
+
+Forty shots, **no reserve**, and no ammo crate will refill it. It is never in the
+shop, never on an item pad, and never in the loadout screen. It exists on the
+floor of the loot room and nowhere else — so every round the team wants one, they
+walk the five generators again. Exactly the flamethrower's bargain, on the other
+map.
+
+**Dollar Stackpile** — one interaction, pays the whole team, once. The same
+function as Clinton's stockpile. Note the spelling: the config says
+`Dollar Stackpile`, with an A, because that is what the model is called. The
+matcher folds case and spaces but not letters.
+
+### If the Tesla Rifle greyboxes
+
+The model is looked up as `Tesla Rifle`. If your model is called something else
+entirely, rename it or say so and the config row moves to match.
+
+### The sound is a stand-in
+
+`AudioConfig.Id.TeslaArc` currently points at the glass-impact sample — a brittle
+crack, which is the closest thing in the library to electricity and is not
+electricity. It is a named id so swapping in a real upload is one line. See
+`docs/AUDIO_NEEDED.md`.
+
+---
+
+## Turning it off
+
+`PuzzleConfig.Enabled = false` turns off both map's objectives. There is no
+per-map switch today; removing the `ZombievilleGrid` entry from
+`PuzzleConfig.Puzzles` is the per-map answer.

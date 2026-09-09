@@ -150,6 +150,14 @@ local CONTROLLERS = {
 	     is what opens both — a world interaction rather than a keybind, so this
 	     has no binding of its own. ]]
 	"UI/VaultController",
+	--[[ The generator panel, and the arrow to the room the generators open.
+
+	     Both after VaultController: the panel asks it to put a refusal on the
+	     counter card that VaultController owns, and the arrow sits beside that
+	     card in the same left column. Both after PromptController for the same
+	     reason the keypad is — a world interaction opens them, not a keybind. ]]
+	"UI/GeneratorController",
+	"UI/WaypointController",
 	--[[ The bar over a deployed turret, and the trigger while you are sitting in
 	     one. After InputController, which it asks whether the fire button is
 	     down — by registry name at tick time rather than at load, so the ordering

@@ -1,6 +1,27 @@
 --!nonstrict
 --[[
-	PuzzleService — the vault, the four documents, and the only copy of the code.
+	PuzzleService — the side objective, in both of the shapes it comes in.
+
+	Clinton's is a VAULT: four documents left in a building, one keypad, and a
+	code that exists nowhere except in this process. Zombieville's is a GRID:
+	five generators walked in numerical order, each opening one of five
+	mini-puzzles dealt fresh every round, and a loot room whose gate rolls up
+	when the last one turns over.
+
+	── WHY ONE SERVICE RUNS BOTH ───────────────────────────────────────────────
+	They are different activities and the same feature. Both are armed when a
+	round starts and cleared when it ends; both find their props by name in
+	whatever map is loaded; both seal a room; both pay a team in Dollars and a
+	weapon that does not survive the round. All of that is written once, below,
+	and a second service would have been a second copy of it — including the
+	parts that took several goes to get right, like putting back a loot weapon a
+	previous round consumed on a map that was never reloaded.
+
+	So the KIND decides which arming half runs and which handlers answer. Finding
+	props, settling them, arming the loot, opening the door, paying out and
+	clearing are one implementation with two front ends. See PuzzleConfig.Kind.
+
+	── THE VAULT ───────────────────────────────────────────────────────────────
 
 	Found by NAME rather than by tag, exactly the way the ammo crates are: a
 	folder called "Puzzle" inside the map holding models called "Keypad", "Vault
@@ -31,6 +52,18 @@
 	is a side objective: a team that never finds the keypad plays exactly the
 	round they would have played, and nothing anywhere else asks whether the
 	vault is open.
+
+	── THE GRID ────────────────────────────────────────────────────────────────
+	Everything above is still true of Zombieville, with one honest difference.
+	The generator puzzles are PICTURES — a wire panel, a gauge, a row of
+	breakers — and a player solves one by looking at it, so the drawable half has
+	to reach their machine or there is nothing to play. What stays here is every
+	decision that could cost somebody else something: whether a generator may be
+	powered at all, whether it is the next one in the order, whether the answer
+	was right, and whether the gate opens. A crafted client can auto-solve its
+	own mini-game and is exactly as far from the loot room as one that did not.
+
+	See GeneratorConfig's header for the long version of that trade.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -43,6 +76,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
+local GeneratorConfig = require(Shared.Config.GeneratorConfig)
 local MapConfig = require(Shared.Config.MapConfig)
 local PuzzleConfig = require(Shared.Config.PuzzleConfig)
 local Registry = require(Shared.Util.Registry)
@@ -68,16 +102,22 @@ local TEMPLATES = {
 	NumberInvestigation = require(script.Parent.Puzzles.NumberInvestigation),
 }
 
+--[[ The five generator mini-puzzles, behind one door for the same reason the
+     templates are: every one of them owns an answer, and an answer in a Shared
+     module is an answer a client can read without playing. This file knows that
+     a generator has a puzzle and has never heard of a wire. ]]
+local Pack = require(script.Parent.Generators.Pack)
+
 local PuzzleService = {}
 
 local serviceTrove = Trove.new()
 local doorTrove = Trove.new()
 
 --[[
-	A spare flamethrower, and why one is needed.
+	A spare of each room's weapon, and why one is needed.
 
 	InventoryService:pickup DESTROYS the world model — correct for a gun somebody
-	dropped, and a problem for the one thing in the game that exists exactly
+	dropped, and a problem for the two things in the game that exist exactly
 	once. MapService:ensure is a no-op when the team votes for the map already
 	loaded, so a Clinton round followed by another Clinton round does not reload
 	the map: the flamethrower was taken, the model is gone, and the vault of the
@@ -88,9 +128,19 @@ local doorTrove = Trove.new()
 	DataModel by a plain reference rather than parked in ServerStorage, because a
 	template that is a descendant of nothing cannot be found by any of the tag
 	sweeps or folder walks that would otherwise trip over it.
+
+	── KEYED BY PUZZLE, NOT ONE SLOT ───────────────────────────────────────────
+	This was a single pair of variables while the flamethrower was the only
+	weapon behind a puzzle, and that stopped being safe the moment Zombieville
+	got its own: a server that played Clinton and then voted Zombieville would
+	arrive at the loot room, fail to find a Tesla Rifle, and restore the
+	FLAMETHROWER it had stashed on the previous map — into a room that had never
+	held one, at a CFrame from a building that is no longer loaded.
+
+	One slot per puzzle id, so each room only ever puts back its own.
 ]]
-local weaponStash: Model? = nil
-local weaponHome: CFrame? = nil
+type WeaponStash = { model: Model, home: CFrame }
+local weaponStash: { [string]: WeaponStash } = {}
 
 --[[ Everything about the puzzle currently armed, or a dead table when there is
      none. One table so `clear` is one assignment and there is no way to leave
@@ -111,11 +161,33 @@ local state = {
 	--[[ The rolled values, kept so a collection can re-print every prop with one
 	     more digit revealed. Never leaves this process. ]]
 	values = nil :: any,
-	--[[ How many clues the TEAM has, 0 through 4. Team-wide rather than per
+	--[[ How many STEPS of the objective the team has done — clues collected on
+	     Clinton, generators powered on Zombieville. Team-wide rather than per
 	     player because this is one objective four people are working on: a
 	     counter that reset for whoever walked in second would be four separate
-	     puzzles in one building. ]]
+	     puzzles in one building.
+
+	     One field for both kinds, because it is the same number: how far along
+	     the team is, and what the counter on everybody's screen reads. ]]
 	found = 0,
+
+	--[[
+		── THE GENERATOR KIND ───────────────────────────────────────────────────
+		The five machines by order, the reverse lookup that turns the instance a
+		player pressed into "which one is this", and the puzzle dealt to each.
+
+		`deals` is the sensitive one and never leaves this process. Each entry
+		holds a challenge — the picture the client is sent — and a solution beside
+		it, and only the first half is ever put on a wire. See onSubmitGenerator:
+		the answer comes back up and is checked HERE.
+	]]
+	generators = {} :: { [number]: Model },
+	generatorOf = {} :: { [Model]: number },
+	deals = {} :: { [number]: any },
+	--[[ The loot room itself, kept so the arrow has somewhere to point that is
+	     not the gate part's own centre — a gate is a flat slab and pointing at it
+	     from behind sends the team round the wrong side of the building. ]]
+	gateRoom = nil :: Instance?,
 	--[[ Two views of the same four props: by config name, so repaint can find
 	     the model for a clue; and by model, so the instance a player interacted
 	     with can be turned back into "which clue is this, and what number is
@@ -457,13 +529,25 @@ local function setDoorOpen(open: boolean)
 	end
 	doorTrove:clean()
 
+	--[[
+		How far open "open" is, which is a difference between the two maps rather
+		than a preference.
+
+		A vault door fades to 0.85 and no further: a doorway with nothing in it
+		reads as a hole in the building, while a ghost of a door reads as a door
+		somebody opened and keeps the frame legible from across the room.
+
+		A loot-room GATE is a grille, and a grille that rolls up is gone. Leaving
+		a ghost of one in the doorway would read as a gate that is still there and
+		is now, inexplicably, walk-through-able. See PuzzleConfig's GateSpec.
+	]]
+	local gate = state.definition and state.definition.gate
+	local openTo = if gate and gate.vanish then 1 else 0.85
+
 	for _, part in partsOf(door) do
 		part.CanCollide = not open
 		part.CanQuery = not open
-		--[[ Faded to 0.85 rather than to 1. A doorway with nothing in it reads as
-		     a hole in the building; a ghost of a door reads as a door somebody
-		     opened, and it keeps the frame legible from across the room. ]]
-		local target = if open then math.max(part.Transparency, 0.85) else state.doorLooks[part] or 0
+		local target = if open then math.max(part.Transparency, openTo) else state.doorLooks[part] or 0
 		TweenService:Create(part, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			Transparency = target,
 		}):Play()
@@ -530,6 +614,61 @@ local function disarmLoot()
 		CollectionService:RemoveTag(state.stockpile, PuzzleConfig.StockpileTag)
 		state.stockpile:SetAttribute(PZ.CluePrompt, nil)
 	end
+end
+
+-- ── what the HUD is told ────────────────────────────────────────────────────
+
+--[[
+	The counter's WORDS, published beside its numbers.
+
+	The three numbers are generic — a side objective with N steps, M of them done
+	— and both kinds are that shape. The wording is not: a card reading
+	"CLUES 3/5" on a map with no clues in it is a counter that lies about what
+	the player is doing.
+
+	Written from here rather than decided on the client, because the client would
+	have to work out which kind is armed to know which noun to use, and that is
+	a fact this process already holds.
+]]
+local function setTracker(label: string, hint: string)
+	Workspace:SetAttribute(GA.TrackerLabel, label)
+	Workspace:SetAttribute(GA.TrackerHint, hint)
+end
+
+--[[
+	Where the arrow points, or nothing.
+
+	A Vector3 on Workspace rather than a remote, for the same reason every other
+	team-wide fact here is an attribute: a survivor who joins late, dies and
+	respawns, or alt-tabs back in gets the current answer for free, and a remote
+	fired once would have missed all three of them.
+
+	Nil clears it. Passing nil is how the round ending takes the arrow down, and
+	it has to be an explicit call rather than a side effect of clearing the
+	puzzle, because an arrow pointing at a room in a map that is no longer loaded
+	is an arrow pointing into the skybox.
+]]
+local function setWaypoint(position: Vector3?, label: string?)
+	Workspace:SetAttribute(GA.WaypointPosition, position)
+	Workspace:SetAttribute(GA.WaypointLabel, if position then label or "" else "")
+end
+
+--[[ The middle of a model or part, whichever it turns out to be. `GetPivot` is
+     right for both and is what the interaction system already uses, so an
+     arrow and a prompt agree about where a thing is. ]]
+local function centreOf(instance: Instance?): Vector3?
+	if not instance then
+		return nil
+	end
+	if instance:IsA("Model") or instance:IsA("BasePart") then
+		local ok, pivot = pcall(function()
+			return (instance :: any):GetPivot()
+		end)
+		if ok and typeof(pivot) == "CFrame" then
+			return pivot.Position
+		end
+	end
+	return nil
 end
 
 -- ── the reward ──────────────────────────────────────────────────────────────
@@ -634,6 +773,19 @@ function PuzzleService:clear()
 		CollectionService:RemoveTag(state.keypad, PuzzleConfig.KeypadTag)
 	end
 
+	--[[ And the machines. Untagged so nothing prompts on them, and their two
+	     attributes wiped so the next round's arm cannot inherit an order or a
+	     running light from this one — the same reason the clue props above are
+	     blanked rather than merely untagged. ]]
+	for _, model in state.generators do
+		if model.Parent then
+			CollectionService:RemoveTag(model, PuzzleConfig.GeneratorTag)
+			model:SetAttribute(PZ.GeneratorOrder, nil)
+			model:SetAttribute(PZ.GeneratorLive, nil)
+			model:SetAttribute(PZ.CluePrompt, nil)
+		end
+	end
+
 	state.definition = nil
 	state.answer = ""
 	state.values = nil
@@ -644,48 +796,94 @@ function PuzzleService:clear()
 	state.weaponDrop = nil
 	state.stockpile = nil
 	state.stockpileClaimed = false
+	state.gateRoom = nil
 	table.clear(state.clues)
 	table.clear(state.props)
 	table.clear(state.clueOf)
+	table.clear(state.generators)
+	table.clear(state.generatorOf)
+	table.clear(state.deals)
 	table.clear(attempts)
 
 	Workspace:SetAttribute(GA.VaultPresent, false)
 	Workspace:SetAttribute(GA.VaultSolved, false)
 	Workspace:SetAttribute(GA.CluesFound, 0)
 	Workspace:SetAttribute(GA.CluesTotal, 0)
+	setTracker("", "")
+	--[[ And the arrow comes down. A waypoint that outlived its round would point
+	     at a room in a map that may no longer be loaded, which is an arrow into
+	     the skybox on every screen until somebody solves something else. ]]
+	setWaypoint(nil, nil)
 end
 
 --[[
-	Rolls a fresh puzzle into the live map.
+	Finds what is actually IN the sealed room, for either kind.
 
-	Called from the round starting rather than from the map loading — see the
-	header. Returns false when there is nothing to arm, which is the NORMAL
-	answer on most of the roster — only Clinton has a puzzle authored today —
-	and must never be an error.
+	Shared, because "a weapon on the floor and a pile of cash" is the shape of
+	both rewards and every hard-won line in it is about somebody else's model
+	rather than about a puzzle: anchoring props that a stray pellet would
+	otherwise shoot across the room, and putting back a loot weapon a previous
+	round consumed on a map that was never reloaded.
+
+	Found here, ARMED later. Both live inside the room the door seals, so
+	resolving them at arm costs nothing and means the moment it opens is a
+	couple of attribute writes rather than a search.
 ]]
-function PuzzleService:arm(random: Random?)
-	self:clear()
+local function resolveLoot(definition: any, folder: Instance?, root: Instance)
+	local loot = definition.loot
+	state.weaponDrop = if loot and loot.weapon then findNamed(folder, root, loot.weapon.object) else nil
 
-	if not PuzzleConfig.Enabled then
-		return false
+	--[[ Kept, or put back. See weaponStash: the pickup destroys the model, and a
+	     map that is not reloaded between rounds never brings it back on its
+	     own. ]]
+	if loot and loot.weapon then
+		local stashed = weaponStash[definition.id]
+		if state.weaponDrop then
+			if not stashed and state.weaponDrop:IsA("Model") then
+				weaponStash[definition.id] = {
+					model = state.weaponDrop:Clone(),
+					home = state.weaponDrop:GetPivot(),
+				}
+			end
+		elseif stashed then
+			local restored = stashed.model:Clone()
+			restored:PivotTo(stashed.home)
+			restored.Parent = folder or root
+			state.weaponDrop = restored
+			print(
+				string.format(
+					"[PuzzleService] restored %s's %s, which a previous round removed",
+					definition.id,
+					loot.weapon.object
+				)
+			)
+		end
 	end
-
-	local mapService = Registry.find("MapService")
-	local mapId = mapService and typeof(mapService.getCurrentId) == "function" and mapService:getCurrentId()
-	local definition = PuzzleConfig.forMap(mapId)
-	if not definition then
-		return false
+	state.stockpile = if loot and loot.stockpile then findNamed(folder, root, loot.stockpile.object) else nil
+	state.stockpileClaimed = false
+	--[[ Both nailed down. Neither survives ten minutes of gunfire lying loose,
+	     and an imported model is unanchored about half the time. ]]
+	if state.stockpile then
+		settle(state.stockpile, false)
 	end
-
-	local root = mapService and mapService:getCurrentRoot()
-	if not root then
-		return false
+	if state.weaponDrop then
+		--[[ Collision dropped as well, the way MapItemService does it for the same
+		     reason: a weapon on the floor of a doorway should not be a thing the
+		     team walks into. ]]
+		settle(state.weaponDrop, true)
 	end
+end
 
-	--[[ Optional. A tidy map keeps its documents together and this narrows the
-	     search; an untidy one is searched whole. See findNamed. ]]
-	local folder = findPuzzleFolder(root)
+--[[
+	Clinton's shape: four documents, a keypad, and a code derived from the same
+	values the documents are printed from.
 
+	Returns false when the map cannot support it — a missing keypad, a template
+	this build does not have, a code the pad could not accept. Every one of those
+	is a config or a map mistake somebody would otherwise diagnose by playing ten
+	minutes of a round that cannot end, so each says what it looked for.
+]]
+local function armInvestigation(definition: any, folder: Instance?, root: Instance, random: Random): boolean
 	--[[
 		One clue per digit, or nothing.
 
@@ -714,7 +912,7 @@ function PuzzleService:arm(random: Random?)
 		return false
 	end
 
-	local values = template.generate(random or Random.new(), definition)
+	local values = template.generate(random, definition)
 	local answer = template.answer(values)
 	--[[ Refused rather than shipped. A code that is not the length the keypad
 	     accepts is a puzzle nobody can solve however well they read, and the one
@@ -742,7 +940,7 @@ function PuzzleService:arm(random: Random?)
 				"[PuzzleService] no %q anywhere in %s — the vault puzzle is off for this round. "
 					.. "The map's top-level folders are: %s",
 				definition.keypad,
-				tostring(mapId),
+				tostring(definition.map),
 				MapConfig.folderNamesIn(root)
 			)
 		)
@@ -766,42 +964,7 @@ function PuzzleService:arm(random: Random?)
 		)
 	end
 
-	--[[ Found now, armed later. Both live inside the room the door seals, so
-	     resolving them here costs nothing and means the moment the vault opens is
-	     a couple of attribute writes rather than a search. ]]
-	local loot = definition.loot
-	state.weaponDrop = if loot and loot.weapon then findNamed(folder, root, loot.weapon.object) else nil
-
-	--[[ Kept, or put back. See weaponStash: the pickup destroys the model, and a
-	     map that is not reloaded between rounds never brings it back on its
-	     own. ]]
-	if loot and loot.weapon then
-		if state.weaponDrop then
-			if not weaponStash and state.weaponDrop:IsA("Model") then
-				weaponStash = state.weaponDrop:Clone()
-				weaponHome = state.weaponDrop:GetPivot()
-			end
-		elseif weaponStash and weaponHome then
-			local restored = weaponStash:Clone()
-			restored:PivotTo(weaponHome)
-			restored.Parent = folder or root
-			state.weaponDrop = restored
-			print("[PuzzleService] restored the vault weapon a previous round removed")
-		end
-	end
-	state.stockpile = if loot and loot.stockpile then findNamed(folder, root, loot.stockpile.object) else nil
-	state.stockpileClaimed = false
-	--[[ Both nailed down. Neither survives ten minutes of gunfire lying loose,
-	     and an imported model is unanchored about half the time. ]]
-	if state.stockpile then
-		settle(state.stockpile, false)
-	end
-	if state.weaponDrop then
-		--[[ Collision dropped as well, the way MapItemService does it for the same
-		     reason: a weapon on the floor of a doorway should not be a thing the
-		     team walks into. ]]
-		settle(state.weaponDrop, true)
-	end
+	resolveLoot(definition, folder, root)
 
 	--[[
 		Resolved into the maps FIRST, printed second.
@@ -855,6 +1018,7 @@ function PuzzleService:arm(random: Random?)
 	Workspace:SetAttribute(GA.VaultSolved, false)
 	Workspace:SetAttribute(GA.CluesFound, 0)
 	Workspace:SetAttribute(GA.CluesTotal, #definition.clues)
+	setTracker("CLUES", "SEARCH THE BUILDING")
 
 	--[[ Printed only now that every prop is in the maps, and printed with the
 	     count at zero — so all four documents are legible from the first second
@@ -865,6 +1029,285 @@ function PuzzleService:arm(random: Random?)
 		string.format("[PuzzleService] %s armed with %d/%d clues", definition.id, painted, #definition.clues)
 	)
 	return true
+end
+
+--[[
+	Zombieville's shape: five machines, and a gate that lifts when the last one
+	turns over.
+
+	── EVERY GENERATOR OR NONE ─────────────────────────────────────────────────
+	A missing machine turns the whole objective off rather than running a short
+	one. Four generators against a counter that needs five is a round where the
+	gate can never open and the loot room is sealed for reasons nobody can see —
+	which is strictly worse than a Zombieville with no side objective, because at
+	least that one does not ask the team to walk it.
+
+	So the failure is loud: it names the model it could not find and prints the
+	map's top-level folders beside it, which between them are enough to fix a
+	misnamed prop from the output alone.
+]]
+local function armGenerators(definition: any, folder: Instance?, root: Instance, random: Random): boolean
+	local set = definition.generators
+	local gate = definition.gate
+	if not set or not gate then
+		warn(
+			string.format(
+				"[PuzzleService] %s is kind %q but has no generators or gate block — puzzle off",
+				tostring(definition.id),
+				PuzzleConfig.Kind.Generators
+			)
+		)
+		return false
+	end
+
+	--[[
+		Which puzzle waits at which machine, rolled fresh for this round.
+
+		This is the mix-up: the ROUTE never moves — generator 1 is always first,
+		and that is what lets a team learn Zombieville — while the puzzle at the
+		end of each leg is dealt from the pack every time. Same split the vault
+		makes between props that stay put and documents that never repeat.
+	]]
+	local kinds = Pack.assign(random, set.count)
+
+	for order = 1, set.count do
+		local wanted = PuzzleConfig.generatorName(set, order)
+		local child = findNamed(folder, root, wanted)
+		local model = child and asModel(child, child.Parent or root)
+		if not model then
+			warn(
+				string.format(
+					"[PuzzleService] no %q anywhere in %s — the generator objective is off for "
+						.. "this round. The map's top-level folders are: %s",
+					wanted,
+					tostring(definition.map),
+					MapConfig.folderNamesIn(root)
+				)
+			)
+			return false
+		end
+
+		local deal = Pack.deal(kinds[order], random)
+		if not deal then
+			warn(
+				string.format(
+					"[PuzzleService] no generator puzzle called %q — puzzle off",
+					tostring(kinds[order])
+				)
+			)
+			return false
+		end
+
+		--[[ Anchored, collision left alone. A generator is a large thing standing
+		     in a street for ten minutes of gunfire, and an imported model is
+		     unanchored about half the time — but it is also something a survivor
+		     can take cover behind, so it keeps its collision. ]]
+		settle(model, false)
+
+		state.deals[order] = deal
+		state.generators[order] = model
+		state.generatorOf[model] = order
+
+		--[[ The number goes on the PROP, so a prompt can read "GENERATOR 3"
+		     without a round trip. It is not a secret: it is painted on the side of
+		     the machine in the map, and finding them in that order is the whole
+		     objective. ]]
+		model:SetAttribute(PZ.GeneratorOrder, order)
+		model:SetAttribute(PZ.GeneratorLive, false)
+		model:SetAttribute(PZ.CluePrompt, string.format("%s %d", set.prompt, order))
+		CollectionService:AddTag(model, PuzzleConfig.GeneratorTag)
+	end
+
+	--[[
+		The room, then the gate INSIDE it.
+
+		Same split the vault's door gets, and for the same reason: a map has any
+		number of things that could answer to "Gate" and exactly one of them is in
+		the loot room. Searching the whole map for the door would raise whichever
+		one GetDescendants reached first, and lifting the wrong gate while the
+		loot room stayed shut is a bug that looks like the objective being broken.
+	]]
+	local roomChild = findNamed(folder, root, gate.room)
+	local room = roomChild and asModel(roomChild, roomChild.Parent or root)
+	local door = if room then findWithin(room, gate.door) else nil
+	if not room then
+		warn(
+			string.format(
+				"[PuzzleService] no %q in %s — the generators will power and nothing will "
+					.. "open. The map's top-level folders are: %s",
+				gate.room,
+				tostring(definition.map),
+				MapConfig.folderNamesIn(root)
+			)
+		)
+	elseif not door then
+		warn(
+			string.format(
+				"[PuzzleService] found %q but no %q inside it — the generators will power "
+					.. "and nothing will open. Put the gate inside the room model.",
+				gate.room,
+				gate.door
+			)
+		)
+	end
+
+	resolveLoot(definition, folder, root)
+
+	state.definition = definition
+	state.found = 0
+	state.solved = false
+	state.gateRoom = room
+	state.door = door
+	if door then
+		for _, part in partsOf(door) do
+			state.doorLooks[part] = part.Transparency
+		end
+	end
+
+	Workspace:SetAttribute(GA.VaultPresent, true)
+	Workspace:SetAttribute(GA.VaultSolved, false)
+	Workspace:SetAttribute(GA.CluesFound, 0)
+	Workspace:SetAttribute(GA.CluesTotal, set.count)
+	setTracker("GENERATORS", "POWER THEM IN ORDER")
+
+	print(
+		string.format(
+			"[PuzzleService] %s armed with %d generators — %s",
+			definition.id,
+			set.count,
+			table.concat(kinds, ", ")
+		)
+	)
+	return true
+end
+
+--[[
+	Rolls a fresh puzzle into the live map.
+
+	Called from the round starting rather than from the map loading — see the
+	header. Returns false when there is nothing to arm, which is the NORMAL
+	answer on most of the roster — two maps of the four have one authored — and
+	must never be an error.
+
+	Everything down to the folder is shared; the KIND picks which half runs from
+	there. A half that refuses leaves nothing behind, because `clear` runs on
+	both the way in and the way out.
+]]
+function PuzzleService:arm(random: Random?)
+	self:clear()
+
+	if not PuzzleConfig.Enabled then
+		return false
+	end
+
+	local mapService = Registry.find("MapService")
+	local mapId = mapService and typeof(mapService.getCurrentId) == "function" and mapService:getCurrentId()
+	local definition = PuzzleConfig.forMap(mapId)
+	if not definition then
+		return false
+	end
+
+	local root = mapService and mapService:getCurrentRoot()
+	if not root then
+		return false
+	end
+
+	--[[ Optional. A tidy map keeps its props together and this narrows the
+	     search; an untidy one is searched whole. See findNamed. ]]
+	local folder = findPuzzleFolder(root)
+
+	local rng = random or Random.new()
+	local armed
+	if PuzzleConfig.kindOf(definition) == PuzzleConfig.Kind.Generators then
+		armed = armGenerators(definition, folder, root, rng)
+	else
+		armed = armInvestigation(definition, folder, root, rng)
+	end
+
+	--[[ A refusal that had already tagged three of five machines would leave a
+	     map holding half an objective, so a failed arm is cleared rather than
+	     merely returned from. Cheap, and it is the only way `state` can be relied
+	     on to mean "there is a puzzle running". ]]
+	if not armed then
+		self:clear()
+		return false
+	end
+	return true
+end
+-- ── opening the room ────────────────────────────────────────────────────────
+
+--[[
+	The moment the lock lets go, for either kind.
+
+	One function, because everything in it is the same job: the door goes, the
+	contents become interactable, the team is paid, the building answers, and
+	everybody is told. What differs between a vault and a loot room is the
+	SENTENCE, and that is the argument.
+
+	Shared rather than copied because the parts of it that are easy to get wrong
+	are the parts neither kind should have to get right twice — arming the loot
+	only after the door opens, so a reward reachable through a wall is not a
+	reward the puzzle was optional for; and paying through EconomyService's own
+	cap rather than inventing a payout.
+]]
+local function openTheRoom(player: Player, line: string)
+	state.solved = true
+	Workspace:SetAttribute(GA.VaultSolved, true)
+
+	setDoorOpen(true)
+	armLoot()
+	payOut()
+
+	--[[ Where the room IS, by the best answer available. The door first, because
+	     that is the thing that just moved and the thing a player walks to; then
+	     the room around it, which on Zombieville is a whole building and a fine
+	     target; then the keypad, which on Clinton is the door's own assembly. ]]
+	local at = centreOf(state.door) or centreOf(state.gateRoom) or centreOf(state.keypad)
+
+	--[[
+		And then they hear it.
+
+		Opening the room is loud, and the map has been listening. This is
+		DirectorService's own crescendo — the same three waves a panic trigger
+		fires — so the horde that answers is the horde the game already knows how
+		to throw, spawned around the ROOM rather than around the team.
+
+		Around the room is the deliberate half. On Clinton the team is standing at
+		the door and the horde arrives on top of them; on Zombieville they are at
+		generator five and the horde is waiting between them and the prize. Both
+		are the same rule — the reward is guarded from the moment it exists — and
+		it is what stops a supply room being a vending machine.
+	]]
+	local director = Registry.find("DirectorService")
+	if director and typeof(director.triggerPanicEvent) == "function" and at then
+		pcall(director.triggerPanicEvent, director, at)
+	end
+
+	--[[ Announced to the whole server, not just whoever finished it. Somebody
+	     found the badge and somebody else found the sign; somebody powered the
+	     first generator and somebody else powered the fifth. The room opening is
+	     the moment all of them were working towards, and a team that hears about
+	     it only from the person who happened to be standing there has been told
+	     the wrong story about what they just did.
+
+	     The LINE comes from here rather than from the client, because the client
+	     would have to work out which kind is armed to know which sentence to
+	     say. ]]
+	Remotes.Event.VaultOpened:FireAllClients({
+		player = player,
+		position = at,
+		line = line,
+	})
+
+	--[[ On the room itself, so the whole team hears WHERE the lock let go rather
+	     than getting a menu click in their ear. playOn wants a BasePart, which a
+	     wrapped prop always has. ]]
+	local source = state.keypad or state.gateRoom
+	local audio = Registry.find("AudioService")
+	local speaker = source and (source.PrimaryPart or source:FindFirstChildWhichIsA("BasePart", true))
+	if audio and typeof(audio.playOn) == "function" and speaker then
+		pcall(audio.playOn, audio, AudioConfig.UI.MenuConfirm, speaker)
+	end
 end
 
 -- ── the gate ────────────────────────────────────────────────────────────────
@@ -881,7 +1324,19 @@ local function onSubmit(player: Player, payload: any)
 	if typeof(payload) ~= "table" then
 		return
 	end
-	if not state.definition then
+	--[[
+		The keypad remotes only answer on a map that HAS a keypad.
+
+		Not defensive tidying. A crafted client can fire SubmitVaultCode on
+		Zombieville, where the armed definition is the generator kind and has no
+		`attemptCooldown` and no `digits` — and the throttle two lines below
+		compares a number against that nil, which is a runtime error inside a
+		handler anybody in the server can reach.
+
+		The generator handlers ask the same question through generatorsArmed, for
+		the same reason and in the same shape.
+	]]
+	if not state.definition or PuzzleConfig.kindOf(state.definition) ~= PuzzleConfig.Kind.Investigation then
 		return
 	end
 
@@ -928,54 +1383,15 @@ local function onSubmit(player: Player, payload: any)
 		return
 	end
 
-	state.solved = true
-	Workspace:SetAttribute(GA.VaultSolved, true)
+	--[[ And the counter card goes. The vault opening genuinely ENDS this
+	     objective — there is nothing left to count and nowhere left to go, the
+	     room is the one you are standing at — whereas the generator kind clears
+	     five machines and then still has to walk somewhere, and keeps its card up
+	     saying so. See refreshTracker on the client: an empty label is what takes
+	     the card down. ]]
+	setTracker("", "")
+	openTheRoom(player, "The vault is open. Take what you need.")
 	reply(player, true, "ACCESS GRANTED", 0)
-
-	setDoorOpen(true)
-	armLoot()
-	payOut()
-
-	--[[
-		And then they hear it.
-
-		Opening the vault is loud, and the building has been listening. This is
-		DirectorService's own crescendo — the same three waves a panic trigger
-		fires — so the horde that answers the door is the horde the game already
-		knows how to throw, spawned around the door rather than around the team.
-
-		It is also what stops the reward being free: a supply room you have to
-		hold for forty-five seconds is a decision, and a supply room you walk
-		into is a vending machine.
-	]]
-	local director = Registry.find("DirectorService")
-	if director and typeof(director.triggerPanicEvent) == "function" then
-		local at = if state.door then state.door:GetPivot().Position else nil
-		if not at and state.keypad then
-			at = state.keypad:GetPivot().Position
-		end
-		if at then
-			pcall(director.triggerPanicEvent, director, at)
-		end
-	end
-
-	--[[ Announced to the whole server, not just the solver. Somebody found the
-	     badge, somebody else found the sign, and the door opening is the moment
-	     that was for. ]]
-	Remotes.Event.VaultOpened:FireAllClients({
-		player = player,
-		position = if state.door then state.door:GetPivot().Position else nil,
-	})
-
-	--[[ On the keypad itself, so the whole team hears WHERE the lock let go
-	     rather than getting a menu click in their ear. playOn wants a BasePart,
-	     which a wrapped prop always has. ]]
-	local audio = Registry.find("AudioService")
-	local speaker = state.keypad
-		and (state.keypad.PrimaryPart or state.keypad:FindFirstChildWhichIsA("BasePart", true))
-	if audio and typeof(audio.playOn) == "function" and speaker then
-		pcall(audio.playOn, audio, AudioConfig.UI.MenuConfirm, speaker)
-	end
 end
 
 --[[
@@ -993,6 +1409,13 @@ end
 ]]
 local function onCollect(player: Player, target: any)
 	if typeof(target) ~= "Instance" or not state.definition then
+		return
+	end
+	--[[ Same guard the keypad carries. Nothing below reaches `definition.clues`
+	     before the clueOf lookup would already have refused a generator map — but
+	     the two remotes are a pair and a reader should not have to prove that
+	     about one of them. ]]
+	if PuzzleConfig.kindOf(state.definition) ~= PuzzleConfig.Kind.Investigation then
 		return
 	end
 
@@ -1054,6 +1477,12 @@ local function onCollect(player: Player, target: any)
 	     holds a number it did not hold a frame ago. ]]
 	state.found = wanted
 	Workspace:SetAttribute(GA.CluesFound, state.found)
+	--[[ And what the card says about it. The last clue changes the instruction
+	     from "search" to "go to the door", which is the one moment in the hunt
+	     where the counter has something new to tell the team. ]]
+	if state.found >= #state.definition.clues then
+		setTracker("CLUES", "HEAD TO THE CODE DOOR AT KFC")
+	end
 	repaint()
 
 	local template = TEMPLATES[state.definition.template]
@@ -1149,6 +1578,262 @@ local function onStockpile(player: Player, target: any)
 	})
 end
 
+-- ── the generators ──────────────────────────────────────────────────────────
+
+--[[ Whether the generator objective is the one running. Both kinds share every
+     handler's rate limiter and none of their logic, so each one asks first —
+     otherwise a crafted client on Clinton could walk the generator remotes into
+     a definition that has no generators in it. ]]
+local function generatorsArmed(): boolean
+	return state.definition ~= nil and PuzzleConfig.kindOf(state.definition) == PuzzleConfig.Kind.Generators
+end
+
+--[[ How many there are this round. Off the definition rather than off the table
+     of models, so a machine that was destroyed mid-round cannot quietly shorten
+     the objective. ]]
+local function generatorCount(): number
+	local set = state.definition and state.definition.generators
+	return if set then set.count else 0
+end
+
+--[[
+	A player walking up to a machine and pressing interact.
+
+	Answers with the PANEL to draw, or with the refusal that names the one they
+	should be looking for. Nothing is granted here and nothing is checked — this
+	is the server handing over a picture, and the picture is worth nothing until
+	an answer comes back through onSubmitGenerator.
+
+	The order is enforced HERE as well as on submit, and that is not redundant:
+	refusing to open the panel is what makes the ordering readable, and refusing
+	to accept the answer is what makes it true.
+]]
+local function onOpenGenerator(player: Player, target: any)
+	if typeof(target) ~= "Instance" or not generatorsArmed() then
+		return
+	end
+
+	local entry = record(player)
+	local now = serverNow()
+	--[[ The rate check first, before anything touches the world — every branch
+	     below answers with a FireClient, and an unthrottled handler that answers
+	     is an outbound amplifier. ]]
+	if now - entry.tookAt < COLLECT_INTERVAL then
+		return
+	end
+
+	local order = state.generatorOf[target]
+	if not order then
+		--[[ Not one of ours. Stamped nothing, because a player looking at a
+		     lamppost should not be spending the budget that lets them open the
+		     generator a tenth of a second later. ]]
+		return
+	end
+	entry.tookAt = now
+
+	local total = generatorCount()
+
+	--[[ Already running. Reachable even though a powered machine is untagged and
+	     therefore prompts on nobody's screen: a client that had the prompt up
+	     when somebody else finished it can still send one press. Answered rather
+	     than dropped, because the player pressed a key and deserves to know
+	     why nothing opened. ]]
+	if order <= state.found then
+		Remotes.Event.GeneratorPanel:FireClient(player, {
+			ok = false,
+			order = order,
+			powered = state.found,
+			total = total,
+			reason = "This generator is already running.",
+		})
+		return
+	end
+
+	local wanted = state.found + 1
+	if order ~= wanted then
+		Remotes.Event.GeneratorPanel:FireClient(player, {
+			ok = false,
+			order = order,
+			powered = state.found,
+			total = total,
+			--[[ Names the one they should be looking for rather than saying no.
+			     The wording lives in PuzzleConfig, with the design. ]]
+			reason = PuzzleConfig.wrongGenerator(wanted),
+		})
+		return
+	end
+
+	local deal = state.deals[order]
+	if not deal then
+		return
+	end
+
+	Remotes.Event.GeneratorPanel:FireClient(player, {
+		ok = true,
+		--[[ The machine itself goes back down with the panel, so the answer that
+		     comes up names it. The alternative — the client remembering which
+		     prop it pressed — is a client deciding which generator its answer
+		     applies to, and that is exactly the decision this handler exists to
+		     make. ]]
+		generator = target,
+		order = order,
+		powered = state.found,
+		total = total,
+		kind = deal.kind,
+		--[[ The DRAWABLE half, and only that. `deal.solution` sits beside it in
+		     this process and is not in this table — see the remote's own comment
+		     for the whole of what that does and does not buy. ]]
+		challenge = deal.challenge,
+	})
+end
+
+--[[
+	An answer coming back from a panel.
+
+	Every branch refuses or accepts here, and the order is the same one every
+	remote handler in this game uses: rate limit first, then identity, then the
+	answer. A handler that reads a client's table before it has decided whether
+	to talk to that client at all is a handler anybody can make work.
+]]
+local function onSubmitGenerator(player: Player, payload: any)
+	if typeof(payload) ~= "table" or not generatorsArmed() then
+		return
+	end
+
+	local entry = record(player)
+	local now = serverNow()
+	if now - entry.typedAt < GeneratorConfig.SubmitInterval then
+		return
+	end
+	--[[ Separate stamps from the collect path, for the reason `attempts` gives:
+	     opening a panel and answering one are throttled for different reasons and
+	     at different rates, so pressing interact must not spend the budget that
+	     lets the answer through a tenth of a second later. ]]
+	entry.typedAt = now
+
+	local total = generatorCount()
+
+	if now < entry.lockedUntil then
+		Remotes.Event.GeneratorResult:FireClient(player, {
+			ok = false,
+			powered = state.found,
+			total = total,
+			reason = "FAULT \226\128\148 WAIT",
+			retryAt = entry.lockedUntil,
+		})
+		return
+	end
+
+	local target = payload.generator
+	local order = if typeof(target) == "Instance" then state.generatorOf[target] else nil
+	if not order then
+		return
+	end
+
+	--[[ Checked again on the way in, not merely on the way out of the panel. A
+	     client that kept a panel open while a teammate powered the machine in
+	     front of it is holding an answer to a puzzle that is no longer the next
+	     one, and the ordering is a server fact or it is not a fact. ]]
+	if order ~= state.found + 1 then
+		Remotes.Event.GeneratorResult:FireClient(player, {
+			ok = false,
+			order = order,
+			powered = state.found,
+			total = total,
+			reason = if order <= state.found
+				then "This generator is already running."
+				else PuzzleConfig.wrongGenerator(state.found + 1),
+			retryAt = 0,
+		})
+		return
+	end
+
+	--[[ The only door an answer comes through. Length first: a handler that
+	     iterates whatever table it was handed is a handler anybody standing at a
+	     machine can hang the round with. ]]
+	local answer = Pack.sanitise(payload.answer)
+	if not answer or not Pack.check(state.deals[order], answer) then
+		--[[ A cooldown rather than a lockout. The horde is the punishment here —
+		     a player who fumbles a wire panel is already losing the thing this
+		     objective actually costs, which is time, and ejecting them from a
+		     screen they are halfway through would be charging them twice. ]]
+		entry.lockedUntil = now + GeneratorConfig.WrongCooldown
+		Remotes.Event.GeneratorResult:FireClient(player, {
+			ok = false,
+			order = order,
+			powered = state.found,
+			total = total,
+			reason = "FAULT \226\128\148 REALIGN AND RETRY",
+			retryAt = entry.lockedUntil,
+		})
+		return
+	end
+
+	--[[ Powered. Counted first, so two players answering the same machine in the
+	     same frame cannot both pass the order check above — the server is
+	     single-threaded, so moving the counter before anything else is a complete
+	     answer rather than a narrowing of the window. ]]
+	state.found = order
+	entry.lockedUntil = 0
+	Workspace:SetAttribute(GA.CluesFound, state.found)
+
+	local model = state.generators[order]
+	if model and model.Parent then
+		--[[ Untagged, so it stops offering a prompt at all — the same rule a
+		     spent ammo crate follows, because offering a hold the server will
+		     refuse is worse than offering nothing.
+
+		     The attribute stays and turns true, because it is the machine's own
+		     state rather than the prompt's: a designer who wants a light on the
+		     side of a running generator has something to bind to. ]]
+		CollectionService:RemoveTag(model, PuzzleConfig.GeneratorTag)
+		model:SetAttribute(PZ.GeneratorLive, true)
+	end
+
+	Remotes.Event.GeneratorResult:FireClient(player, {
+		ok = true,
+		order = order,
+		powered = state.found,
+		total = total,
+		retryAt = 0,
+	})
+
+	--[[ And everybody is told. Five machines across open streets is a job four
+	     people split up to do, and the counter moving is the only way the other
+	     three learn that the next one is somewhere none of them have been. ]]
+	Remotes.Event.GeneratorPowered:FireAllClients({
+		player = player,
+		order = order,
+		powered = state.found,
+		total = total,
+	})
+
+	if state.found < total then
+		setTracker("GENERATORS", "POWER THEM IN ORDER")
+		return
+	end
+
+	--[[
+		All five. The gate goes, the room arms, the team is paid — and an ARROW
+		goes up.
+
+		The arrow is the half that matters on a map like this one. "Get to the
+		loot room" is only useful to somebody who already knows where the loot
+		room is, and on a first round nobody does; five generators is enough
+		walking that a team can finish the objective from a corner of the map
+		they have never been to. So the room is pointed AT, on everybody's screen,
+		from wherever they are standing.
+	]]
+	setTracker("POWERED", "GET TO THE LOOT ROOM!")
+	openTheRoom(player, "Get to the loot room!")
+
+	local gate = state.definition.gate
+	local at = centreOf(state.gateRoom) or centreOf(state.door)
+	if at then
+		setWaypoint(at, if gate then gate.label else "LOOT ROOM")
+	end
+end
+
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function PuzzleService:init() end
@@ -1157,6 +1842,8 @@ function PuzzleService:start()
 	serviceTrove:connect(Remotes.Event.SubmitVaultCode.OnServerEvent, onSubmit)
 	serviceTrove:connect(Remotes.Event.CollectClue.OnServerEvent, onCollect)
 	serviceTrove:connect(Remotes.Event.ClaimStockpile.OnServerEvent, onStockpile)
+	serviceTrove:connect(Remotes.Event.OpenGenerator.OnServerEvent, onOpenGenerator)
+	serviceTrove:connect(Remotes.Event.SubmitGenerator.OnServerEvent, onSubmitGenerator)
 
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		attempts[player] = nil
@@ -1188,11 +1875,10 @@ function PuzzleService:start()
 end
 
 function PuzzleService:destroy()
-	if weaponStash then
-		weaponStash:Destroy()
-		weaponStash = nil
+	for _, stashed in weaponStash do
+		stashed.model:Destroy()
 	end
-	weaponHome = nil
+	table.clear(weaponStash)
 	serviceTrove:destroy()
 	doorTrove:destroy()
 	self:clear()

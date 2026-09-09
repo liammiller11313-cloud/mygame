@@ -458,6 +458,28 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "SUPPLIES")
 			return node, "TAKE", label, false, COLOR.Accent
 		end
+		--[[ A generator, on the map that has them. Tagged only while it is the
+		     objective and untagged the moment it powers, so a running machine
+		     offers nothing at all — the same rule the spent ammo crate follows,
+		     and for the same reason.
+
+		     Instant like the two above it and answered the same way: pressing
+		     interact asks the SERVER for a panel to draw. It is not opened here,
+		     because whether this is the next generator in the order is a fact
+		     only the server has, and a panel that opened and then told the player
+		     it was the wrong machine would be a screen in front of somebody who
+		     needs to be running. ]]
+		if CollectionService:HasTag(node, PuzzleConfig.GeneratorTag) then
+			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "GENERATOR")
+			--[[ The next one in the order is lit; the rest are dim. Read off the
+			     prop's own number against the team's count, so a player crossing
+			     the map can tell at a glance which machine is theirs without
+			     walking up to it and being refused. ]]
+			local order = tonumber(node:GetAttribute(PUZZLE.GeneratorOrder)) or 0
+			local held = tonumber(Attributes.get(Workspace, GA.CluesFound, 0)) or 0
+			local colour = if order == held + 1 then COLOR.Accent else COLOR.TextDim
+			return node, "POWER", label, false, colour
+		end
 		if CollectionService:HasTag(node, PuzzleConfig.ClueTag) then
 			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "DOCUMENT")
 			--[[ A clue already in the team's hands is a document you re-read; one
@@ -640,10 +662,11 @@ end
 --[[
 	Whether this press was the puzzle's, in which case it never reaches the wire.
 
-	The two puzzle verbs open a screen and nothing else. Sending BeginInteract
-	for them would ask SurvivorService to classify an instance its own if-chain
-	has never heard of, get refused, and clear the prompt the player is currently
-	looking at — so the press is answered here and the remote is not fired.
+	The puzzle verbs open a screen, or ask the server for one, and nothing else.
+	Sending BeginInteract for them would ask SurvivorService to classify an
+	instance its own if-chain has never heard of, get refused, and clear the
+	prompt the player is currently looking at — so the press is answered here and
+	the remote is not fired.
 
 	Returns true when it handled the press, so beginInteract can stop.
 ]]
@@ -661,6 +684,14 @@ local function handlePuzzlePress(): boolean
 	     wearing TAKE falls through to the ordinary FL_Slot path on the server. ]]
 	if state.verb == "TAKE" and CollectionService:HasTag(target, PuzzleConfig.StockpileTag) then
 		Remotes.Event.ClaimStockpile:FireServer(target)
+		return true
+	end
+	if state.verb == "POWER" then
+		--[[ Asked, not opened. Same reason READ below is: the ORDER is the
+		     server's and the panel it answers with is the only one that means
+		     anything — including the refusal that names the generator they should
+		     have found first. ]]
+		Remotes.Event.OpenGenerator:FireServer(target)
 		return true
 	end
 	if state.verb == "READ" then

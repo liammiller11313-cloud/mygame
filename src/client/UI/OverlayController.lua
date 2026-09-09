@@ -826,6 +826,10 @@ local function broadcastCinematic(value: boolean)
 			"SubtitleController",
 			"WaveController",
 			"TouchController",
+			--[[ The loot-room arrow. A chevron over a chapter card is a chevron
+			     over the one moment the game is not asking the player to do
+			     anything. ]]
+			"WaypointController",
 		}
 	do
 		local controller = Registry.find(name)

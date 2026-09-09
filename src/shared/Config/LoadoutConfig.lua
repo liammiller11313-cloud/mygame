@@ -207,7 +207,25 @@ function LoadoutConfig.candidates(slot: string): { string }
 		end
 	end
 	for _, id in WeaponConfig.idsForSlot(slot) do
-		if not seen[id] then
+		--[[
+			Everything except the room weapons.
+
+			`floorOnly` means a weapon that exists in exactly one place — the
+			floor of a locked room, behind a puzzle — and is gone at the end of
+			the round. It is not a loadout choice and it never will be: it cannot
+			be bought, so it is never in `owned`, so `sanitise` would refuse it
+			anyway and the row would sit permanently greyed among things the
+			player is saving up for.
+
+			A greyed row is a PROMISE that saving will unlock it. Two of them now
+			— the flamethrower and the Tesla Rifle — and neither is ever coming.
+
+			Pass weapons are the opposite case and stay: they have no catalogue
+			row either, and appending them here is exactly what makes a hundred
+			Robux buy something equippable.
+		]]
+		local definition = WeaponConfig.get(id)
+		if not seen[id] and not (definition and definition.floorOnly) then
 			table.insert(out, id)
 		end
 	end

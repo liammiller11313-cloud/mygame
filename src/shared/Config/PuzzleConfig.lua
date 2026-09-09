@@ -76,10 +76,42 @@ PuzzleConfig.FolderName = "Puzzle"
      server that never saw it. ]]
 PuzzleConfig.KeypadTag = "FL_PuzzleKeypad"
 PuzzleConfig.ClueTag = "FL_PuzzleClue"
+--[[ The generators, on the map that has them. Its own tag rather than a clue's,
+     because the two are answered by completely different screens and a prompt
+     that offered to READ a generator would be a prompt that opens the wrong
+     one. ]]
+PuzzleConfig.GeneratorTag = "FL_PuzzleGenerator"
 --[[ The cash pile in the vault. Its own tag rather than a clue's, because it is
      interacted with once and pays the whole team — nothing about it is a
      document. ]]
 PuzzleConfig.StockpileTag = "FL_PuzzleStockpile"
+
+--[[
+	The two shapes a side objective comes in.
+
+	`Investigation` is Clinton's: four documents, one keypad, a code you read out
+	of the paperwork. `Generators` is Zombieville's: five machines, walked in
+	numerical order, each opening one of five mini-puzzles dealt fresh every
+	round.
+
+	── WHY ONE SERVICE RUNS BOTH ───────────────────────────────────────────────
+	They are different puzzles and they are the SAME feature: a side objective
+	armed when the round starts and cleared when it ends, whose props are found
+	by name in the map, which seals a room, and which pays a team in Dollars and
+	a weapon that does not survive the round. Every one of those is already
+	written once in PuzzleService, and a second service would be a second copy of
+	all of it — including the parts that took several goes to get right, like
+	putting back a loot weapon a previous round consumed on a map that was never
+	reloaded.
+
+	So the KIND decides which half of `arm` runs and nothing else. Finding props,
+	settling them, arming the loot, opening the door, paying out and clearing are
+	one implementation with two front ends.
+]]
+PuzzleConfig.Kind = table.freeze({
+	Investigation = "Investigation",
+	Generators = "Generators",
+})
 
 export type ClueSlot = {
 	--[[ Where this clue sits in the chain, 1 through 4. Collecting them out of
@@ -126,30 +158,95 @@ export type ClueSlot = {
 	prompt: string,
 }
 
+--[[
+	The five machines, and where the arrow points once they are all running.
+
+	The generators do NOT move between rounds and are NOT shuffled — the player
+	was explicit about that, and it is the right call for the same reason the
+	vault's clipboard never moves: a route you can learn is what turns a map into
+	a place. What is shuffled is which mini-puzzle waits at each one, which is
+	the half a team cannot memorise.
+
+	The models are `Generator 1` through `Generator 5` under the puzzle folder —
+	the same numbered pattern every map item family uses, so a designer adding a
+	sixth names it `Generator 6` and raises `count`.
+]]
+export type GeneratorSet = {
+	--[[ The base name, without the number. Matched forgivingly like everything
+	     else in the map, so "Generator 3", "generator 3" and "Generator  3" all
+	     resolve. ]]
+	object: string,
+	count: number,
+	--[[ What the interact prompt calls one. The number is appended by the
+	     service, because a prompt reading GENERATOR on all five is a prompt that
+	     cannot tell a player which one they are standing at — which is the whole
+	     objective. ]]
+	prompt: string,
+}
+
+--[[
+	The room the generators open, and the thing in the doorway.
+
+	`room` is looked up across the whole map and `door` only INSIDE it — the same
+	split the vault makes, and for the same reason: a map has many things that
+	could answer to "Gate" and exactly one of them is inside the loot room.
+
+	`vanish` is the difference between a vault door and a security gate. The
+	vault fades to a ghost, because a doorway with nothing in it reads as a hole
+	in the building and the frame is worth keeping legible. A gate is a grille
+	that rolls up and is gone, so this one goes all the way.
+]]
+export type GateSpec = {
+	room: string,
+	door: string,
+	vanish: boolean,
+	--[[ What the arrow says it is pointing at, once every generator is live. ]]
+	label: string,
+}
+
 export type PuzzleDefinition = {
 	id: string,
 	--[[ The map this puzzle belongs to, by MapConfig id. A puzzle is authored
 	     against one building's geometry and means nothing in another. ]]
 	map: string,
-	template: string,
-	digits: number,
+	--[[ Which of the two shapes this is. Absent means Investigation, so Clinton's
+	     definition did not have to change to gain a field it is the default
+	     of. ]]
+	kind: string?,
 
+	--[[
+		── INVESTIGATION ONLY ──────────────────────────────────────────────────
+		Optional because the generator kind has none of them: there is no code, no
+		keypad and no document. One type covering both shapes rather than two
+		types and a union, because every field OUTSIDE these two blocks is shared
+		and a union would duplicate the shared half to avoid duplicating the
+		unshared one.
+
+		`arm` checks that the fields its kind needs are actually present and turns
+		the puzzle off with a named warning when they are not, which is the check
+		a union would have bought at the cost of every reader carrying a cast.
+	]]
+	template: string?,
+	digits: number?,
 	--[[ Seconds a player must wait between two attempts. Not a punishment — it is
 	     the difference between a keypad and a brute-force oracle. See
 	     LockoutAfter for the part that actually stops one. ]]
-	attemptCooldown: number,
+	attemptCooldown: number?,
 	--[[ Wrong answers in a row before the pad locks that player out, and for how
 	     long. Ten thousand codes at one a second is under three hours; a team
 	     that guesses instead of reading should not beat the puzzle inside a
 	     round, and a team that reads never sees this. ]]
-	lockoutAfter: number,
-	lockoutSeconds: number,
-
+	lockoutAfter: number?,
+	lockoutSeconds: number?,
 	--[[ The objects, by role. The keypad and the door are the two the service
 	     needs by name; the rest are clue surfaces the template fills in. ]]
-	keypad: string,
-	door: string,
-	clues: { ClueSlot },
+	keypad: string?,
+	door: string?,
+	clues: { ClueSlot }?,
+
+	--[[ ── GENERATORS ONLY ──────────────────────────────────────────────────── ]]
+	generators: GeneratorSet?,
+	gate: GateSpec?,
 
 	--[[ The physical contents of the vault, armed when the door opens. Optional:
 	     a puzzle with no loot table still pays through `reward`. ]]
@@ -419,6 +516,90 @@ local DEFINITIONS: { PuzzleDefinition } = {
 			}),
 		}),
 	}),
+
+	--[[
+		── ZOMBIEVILLE ──────────────────────────────────────────────────────────
+		Five generators, walked in numerical order, and a loot room that opens
+		when the last one turns over.
+
+		The same feature as Clinton's and a completely different activity, which
+		is the point of there being two: the vault is a thing you SOLVE, once,
+		standing still, by reading. This is a thing you DO, five times, moving,
+		and the map is most of the difficulty — the generators are spread across
+		open streets with long sightlines, and the walk between four and five is
+		the part a horde gets to have an opinion about.
+
+		── WHY THE ORDER IS FIXED AND THE PUZZLES ARE NOT ──────────────────────
+		Generator 1 is always first. That is deliberate and it was asked for: the
+		route is what a team learns about Zombieville, and a route that reshuffled
+		every round would make the map unlearnable and the objective a search.
+
+		The MINI-PUZZLE at each one is dealt fresh every round from a pack of
+		five, so the fourth generator is a breaker panel tonight and a pressure
+		gauge in ten minutes. Same split the vault makes between props that never
+		move and documents that never repeat.
+	]]
+	table.freeze({
+		id = "ZombievilleGrid",
+		map = "Zombieville",
+		kind = PuzzleConfig.Kind.Generators,
+
+		generators = table.freeze({
+			object = "Generator",
+			count = 5,
+			prompt = "GENERATOR",
+		}),
+
+		--[[ Both models the designer built, by the names they already carry.
+		     `Lootroom` sits under Zombieville and `Lootroom Gate` sits inside it,
+		     which is exactly the shape findNamed-then-findWithin was written
+		     for. ]]
+		gate = table.freeze({
+			room = "Lootroom",
+			door = "Lootroom Gate",
+			--[[ Gone rather than ghosted. See GateSpec. ]]
+			vanish = true,
+			label = "LOOT ROOM",
+		}),
+
+		--[[ Half the vault's cash and the same restock, because the generators
+		     are the cheaper objective of the two: five machines you interact with
+		     is more walking and less thinking than four documents that have to be
+		     found without a map marker, and paying them the same would make
+		     Clinton's the one nobody bothers with.
+
+		     Still split across the team, still through EconomyService, still
+		     capped by the round's own earnings ceiling. Nothing here is a new
+		     currency or a new reward path. ]]
+		reward = table.freeze({ dollars = 1_500, restockItems = true }),
+
+		loot = table.freeze({
+			--[[ The room's own special, and the counterpart to Clinton's
+			     flamethrower — see WeaponConfig for why it is a line rather than
+			     a cone. Same distribution: it lies on the floor, it is taken
+			     through the ordinary pickup path, it has no reserve, and it does
+			     not survive the round. Every round the team wants one, they walk
+			     the five generators again. ]]
+			weapon = table.freeze({
+				object = "Tesla Rifle",
+				itemId = "TeslaRifle",
+				slot = "Primary",
+			}),
+			--[[ Spelled the way the MAP spells it, which is with an A.
+
+			     Clinton's says "Stockpile" and Zombieville's model says
+			     "Stackpile", and the forgiving matcher folds case, spaces and
+			     punctuation but not letters — so a config that quietly corrected
+			     the spelling would find nothing and the pile would be scenery for
+			     the life of the map. The config follows the build; the build does
+			     not have to follow the config. ]]
+			stockpile = table.freeze({
+				object = "Dollar Stackpile",
+				dollars = 350,
+				prompt = "DOLLAR STACKPILE",
+			}),
+		}),
+	}),
 }
 
 PuzzleConfig.Puzzles = table.freeze(DEFINITIONS) :: { PuzzleDefinition }
@@ -453,10 +634,47 @@ end
 --[[ "first", "second", "third", "fourth" — for the refusal a player reads when
      they try to take the note before the clipboard. A number would be correct
      and would read like an error code. ]]
-local ORDINALS = table.freeze({ "FIRST", "SECOND", "THIRD", "FOURTH" })
+--[[ Five now, because Zombieville has five generators and the refusal a player
+     reads when they walk up to the third one first names the one they should
+     have found. A number would be correct and would read like an error code. ]]
+local ORDINALS = table.freeze({ "FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH" })
 
 function PuzzleConfig.ordinal(order: number): string
 	return ORDINALS[order] or tostring(order)
+end
+
+--[[ The same five in the case a sentence wants them. Kept beside the shouty set
+     rather than lowercased at the call site, so the one place that decides how
+     this game spells "fourth" is this line. ]]
+local ORDINALS_SOFT = table.freeze({ "first", "second", "third", "fourth", "fifth" })
+
+--[[
+	What a player is told when they interact with the wrong generator.
+
+	Written here rather than in the service because it is a piece of the design
+	rather than a piece of the plumbing: it names the one they should be looking
+	for, which is the entire difference between a refusal that teaches the
+	objective and a refusal that just says no.
+]]
+function PuzzleConfig.wrongGenerator(wanted: number): string
+	return string.format("Wrong generator, find the %s one!", ORDINALS_SOFT[wanted] or tostring(wanted))
+end
+
+--[[ Which shape a definition is, with the default filled in. Absent means
+     Investigation — see PuzzleConfig.Kind — so Clinton's definition never had to
+     grow a field to keep saying what it always said. ]]
+function PuzzleConfig.kindOf(definition: PuzzleDefinition?): string
+	if not definition then
+		return PuzzleConfig.Kind.Investigation
+	end
+	return definition.kind or PuzzleConfig.Kind.Investigation
+end
+
+--[[ The nth generator's model name: "Generator 3". One function so the name the
+     service LOOKS for and the name a warning PRINTS are the same string, which
+     is what makes a missing prop diagnosable from the output. ]]
+function PuzzleConfig.generatorName(set: GeneratorSet, order: number): string
+	return string.format("%s %d", set.object, order)
 end
 
 --[[

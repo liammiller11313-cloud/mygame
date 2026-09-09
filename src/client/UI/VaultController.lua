@@ -98,7 +98,15 @@ local CLUE_LINE_SECONDS = 3
      not agree on where their right edge is reads as two things that happen to be
      near each other rather than as one column. ]]
 local TRACKER_WIDTH = 208
-local TRACKER_HEIGHT = 52
+--[[ Two lines under the count rather than one.
+
+     The refusals this card carries are sentences — "COLLECT THE FIRST CLUE
+     FIRST", "Wrong generator, find the first one!" — and at 208 wide none of
+     them fit on one row. They used to truncate, which turned the one message
+     whose whole job is to name the thing you are missing into a message that
+     names most of it. ]]
+local TRACKER_HEIGHT = 68
+local TRACKER_LINES = 2
 local TRACKER_FLASH = 1.6
 local TRACKER_IDLE = 0.45
 local TRACKER_LIVE = 0.0
@@ -314,12 +322,26 @@ end
 local function refreshTracker()
 	local total = tonumber(Attributes.get(Workspace, GA.CluesTotal, 0)) or 0
 	local found = tonumber(Attributes.get(Workspace, GA.CluesFound, 0)) or 0
-	local solved = Attributes.get(Workspace, GA.VaultSolved, false) == true
+	local label = tostring(Attributes.get(Workspace, GA.TrackerLabel, "") or "")
 
-	--[[ The counter's job ends when the door opens. What happens after that is a
-	     horde, and a card counting clues through it would be the least useful
-	     thing on the screen. ]]
-	local wanted = total > 0 and not solved
+	--[[
+		Up while the server says there is something to say.
+
+		This used to hide on VaultSolved, which was right when there was one
+		puzzle: the vault opening ends the objective — nothing left to count, and
+		the room is the one you are standing at.
+
+		It is wrong for the generator kind, where powering the fifth machine is
+		not the end of anything. The team still has to cross the map to the loot
+		room, and the card saying POWERED 5/5 / GET TO THE LOOT ROOM beside the
+		arrow is the most useful thing on the screen at that moment rather than
+		the least.
+
+		So the SERVER decides, by clearing the label when it means "we are done
+		here". One rule, and the map that wants each behaviour gets it without
+		this file knowing which map it is on.
+	]]
+	local wanted = total > 0 and label ~= ""
 	trackerGui.Enabled = wanted
 	if not wanted then
 		return
@@ -330,14 +352,26 @@ local function refreshTracker()
 	     was going to be. ]]
 	trackerCard.Position = trackerPosition()
 
-	trackerCount.Text = string.format("CLUES  %d/%d", found, total)
+	--[[
+		The noun and the instruction come off the server, the numbers off the
+		attributes beside them.
+
+		This card counts whatever the map's side objective counts — clues on
+		Clinton, generators on Zombieville — and the numbers are identical in both
+		cases. The WORDS are not, and "CLUES 3/5" on a map with no clues in it is
+		a counter that lies about what the player is doing. Working out which
+		puzzle is armed on the client would mean four clients deriving a fact the
+		server already holds; see Attributes.Game.TrackerLabel.
+
+		Clinton's own wording is unchanged. It just arrives from somewhere else.
+	]]
+	trackerCount.Text = string.format("%s  %d/%d", label, found, total)
+	trackerLine.Text = tostring(Attributes.get(Workspace, GA.TrackerHint, "") or "")
 	if found >= total then
 		trackerCount.TextColor3 = COLOR.HealthGood
-		trackerLine.Text = "HEAD TO THE CODE DOOR AT KFC"
 		trackerLine.TextColor3 = COLOR.AccentBright
 	else
 		trackerCount.TextColor3 = COLOR.AccentBright
-		trackerLine.Text = "SEARCH THE BUILDING"
 		trackerLine.TextColor3 = COLOR.TextSecondary
 	end
 end
@@ -513,8 +547,12 @@ local function buildTracker()
 
 	trackerLine = Widgets.label(trackerCard, "Line", FONT.Body, TEXT.Tiny, COLOR.TextSecondary)
 	trackerLine.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 6 + TEXT.Body + 4)
-	trackerLine.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Tiny + 2)
+	trackerLine.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, (TEXT.Tiny + 2) * TRACKER_LINES)
 	trackerLine.TextXAlignment = Enum.TextXAlignment.Left
+	trackerLine.TextYAlignment = Enum.TextYAlignment.Top
+	--[[ Wrapped rather than truncated, and truncated only if it overflows BOTH
+	     rows — so a long refusal loses its tail instead of its point. ]]
+	trackerLine.TextWrapped = true
 	trackerLine.TextTruncate = Enum.TextTruncate.AtEnd
 end
 
@@ -615,6 +653,30 @@ function VaultController:openDocument(clue: Instance?)
 	show("document", DOC_WIDTH, DOC_HEIGHT, tostring(clue:GetAttribute(PUZZLE.CluePrompt) or "DOCUMENT"))
 end
 
+--[[
+	Puts a refusal on the counter card, and lights it up.
+
+	The counter is where this game says no about a side objective: it is already
+	on screen, it is already about the objective, and it is already the thing the
+	player glances at. A refusal in a modal would be a screen in front of
+	somebody who has just been told to go somewhere else, and a refusal in the
+	objective bar would be overwritten by the next wave edge.
+
+	Called by GeneratorController, which owns a panel and deliberately does not
+	open it for a refusal, and shaped so the vault's own out-of-order message
+	could come through here too.
+]]
+function VaultController:sayRefusal(text: string)
+	if typeof(text) ~= "string" or text == "" then
+		return
+	end
+	--[[ Newlines folded to a dash: refusals are written two lines deep on the
+	     server so a page could show one, and this card is a card. ]]
+	trackerLine.Text = string.gsub(text, "\n", " \226\128\148 ")
+	trackerLine.TextColor3 = COLOR.Danger
+	flashTracker()
+end
+
 function VaultController:close()
 	if not state.open then
 		return
@@ -696,13 +758,15 @@ function VaultController:start()
 		end
 		local who = payload.player
 		local name = if typeof(who) == "Instance" and who:IsA("Player") then who.DisplayName else ""
-		callController(
-			"SubtitleController",
-			"say",
-			name,
-			"The vault is open. Take what you need.",
-			VAULT_LINE_SECONDS
-		)
+		--[[ The sentence comes down with the event rather than being written
+		     here, because there are two rooms now and only the server knows which
+		     one just opened. A missing line falls back to the vault's, which is
+		     the one this handler was written for. ]]
+		local line = payload.line
+		if typeof(line) ~= "string" or line == "" then
+			line = "The vault is open. Take what you need."
+		end
+		callController("SubtitleController", "say", name, line, VAULT_LINE_SECONDS)
 	end)
 
 	--[[
@@ -722,12 +786,7 @@ function VaultController:start()
 		flashTracker()
 
 		if payload.ok ~= true then
-			--[[ Newlines folded to a dash: the refusal is two lines on the server so
-			     a page could show it, and one line here because the counter is one
-			     line tall. ]]
-			local reason = string.gsub(tostring(payload.reason or "NOT YET"), "\n", " \226\128\148 ")
-			trackerLine.Text = reason
-			trackerLine.TextColor3 = COLOR.Danger
+			VaultController:sayRefusal(tostring(payload.reason or "NOT YET"))
 			UiSound.play(AudioConfig.UI.MenuBack)
 			return
 		end
@@ -769,6 +828,39 @@ function VaultController:start()
 
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.CluesFound), refreshTracker)
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.CluesTotal), refreshTracker)
+	--[[ The words as well as the numbers. Both move — the hint changes when the
+	     last clue lands and again when the generators finish — and a card that
+	     redrew only on a count change would keep saying SEARCH THE BUILDING to a
+	     team standing at the door. ]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.TrackerLabel), refreshTracker)
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.TrackerHint), refreshTracker)
+
+	--[[ A generator powering is the same event as a clue landing, on the other
+	     map: the team's counter moved, and everybody's card should say so and
+	     flash. Handled here rather than in GeneratorController because this file
+	     owns the card. ]]
+	trove:connect(Remotes.Event.GeneratorPowered.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refreshTracker()
+		flashTracker()
+		local who = payload.player
+		if typeof(who) == "Instance" and who:IsA("Player") and who ~= player then
+			callController(
+				"SubtitleController",
+				"say",
+				who.DisplayName,
+				string.format(
+					"Generator %s online. %s of %s.",
+					tostring(payload.order),
+					tostring(payload.powered),
+					tostring(payload.total)
+				),
+				CLUE_LINE_SECONDS
+			)
+		end
+	end)
 	trove:connect(RunService.Heartbeat, stepTracker)
 	refreshTracker()
 
@@ -797,7 +889,6 @@ function VaultController:start()
 	     because a player staring at a number pad is a player who was working on
 	     exactly this. ]]
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.VaultSolved), function()
-		refreshTracker()
 		if Workspace:GetAttribute(GA.VaultSolved) == true and state.open and state.mode == "keypad" then
 			VaultController:close()
 		end

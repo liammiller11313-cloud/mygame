@@ -296,7 +296,45 @@ local EVENTS: { string } = {
 	"StockpileClaimed", -- S->all {player: Player, dollars: number}
 	"SubmitVaultCode", -- C->S {code: string}
 	"VaultCodeResult", -- S->asker {ok: boolean, reason: string, retryAt: number}
-	"VaultOpened", -- S->all {player: Player, position: Vector3?}
+	--[[ Named for the vault and now carrying both rooms — Clinton's door and
+	     Zombieville's loot-room gate fire the same event with a different `line`,
+	     because "the room somebody just opened is at this position and here is
+	     what to say about it" is one fact whichever room it was. Kept under the
+	     old name rather than renamed: a manifest row is a wire protocol, and
+	     renaming one to read better is a rename with no behaviour in it. ]]
+	"VaultOpened", -- S->all {player: Player, position: Vector3?, line: string?}
+
+	-- ── The generator puzzle ────────────────────────────────────────────────
+	--[[
+		Zombieville's side objective: five machines, powered in numerical order,
+		each guarded by one of five mini-puzzles dealt fresh every round.
+
+		Three of these four are one player's conversation with one machine.
+		`GeneratorPowered` is the fourth and it goes to everybody, because five
+		generators across a map is a job four people split up to do and the
+		counter moving is the only way the other three learn it.
+
+		── WHAT IS IN THE PAYLOAD, AND WHAT IS NOT ─────────────────────────────
+		`GeneratorPanel` carries the DRAWABLE half of a challenge and nothing
+		else: the wire colours, the breaker ratings, the target voltage. It has
+		to — the player solves it by looking at it, so anything they can see is
+		by definition on their machine.
+
+		What never goes down is the SOLUTION: the order, the sum, the pairing.
+		Those stay in the generator module on the server, the submission comes
+		back up, and the server is the only thing that decides. A crafted client
+		can work the answer out of what it was drawn — that is what a puzzle IS —
+		and it still cannot make the server accept a wrong one, cannot power a
+		generator out of turn, and cannot open the gate without walking to five
+		machines. The exploit available here is skipping a mini-game in your own
+		team's round, and that is a price worth paying for a puzzle a player can
+		actually see.
+	]]
+	"OpenGenerator", -- C->S (generator: Instance)
+	"GeneratorPanel", -- S->asker {ok, generator?, order, powered, total, kind?, challenge?, reason?}
+	"SubmitGenerator", -- C->S {generator: Instance, answer: {number}}
+	"GeneratorResult", -- S->asker {ok, order, powered, total, reason?, challenge?}
+	"GeneratorPowered", -- S->all {player, order, powered, total}
 }
 
 -- Every RemoteFunction. Keep this list SHORT: remote functions block and can be
