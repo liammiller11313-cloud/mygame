@@ -898,8 +898,28 @@ function SurvivorService:_onCharacterAdded(player: Player, character: Model)
 		-- player in the void when a map has just been swapped underneath them.
 		local level = Registry.find("LevelService")
 		if level and typeof(level.getSurvivorSpawnCFrame) == "function" then
+			--[[
+				THIS player's place in the line, not how many people are in the
+				server.
+
+				It passed the head count, which is the same number for everybody
+				spawning at the same moment — so on a map with six spawn points
+				laid out around it, an unstaged spawn put every survivor on the
+				one pad and let the physics solver push them apart.
+
+				The index into the player list is not stable across a join or a
+				leave, and does not need to be: the only thing being asked of it
+				is that two people spawning right now land on different pads.
+			]]
+			local slot = 1
+			for index, other in Players:GetPlayers() do
+				if other == player then
+					slot = index
+					break
+				end
+			end
 			local ok, cframe = pcall(function()
-				return level:getSurvivorSpawnCFrame(#Players:GetPlayers())
+				return level:getSurvivorSpawnCFrame(slot)
 			end)
 			if ok and typeof(cframe) == "CFrame" then
 				spawnAt = cframe

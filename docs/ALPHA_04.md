@@ -222,6 +222,12 @@ Honest list. None of these are worth a report.
 - **The Backrooms has no side objective**, and that is normal rather than
   missing — so does Crossroads. The map itself is complete: all six item
   families, ammo crates and six spawns. It is a full test target.
+- **Survivors now start on the loaded map's own SpawnLocations**, one per
+  survivor, facing the way each pad points. Before this build the game searched
+  all of Workspace and took the first SpawnLocation it found, which on a
+  map-swapping game routinely belonged to a map that was not loaded — the team
+  started the round outside the level. `FL_SurvivorSpawn` still overrides when a
+  map tags one.
 - **Two constants on the boss are untested by anyone**: 300 damage per bloom and
   a cap of 12 colonies. Whether that is uncomfortable or impassable is the thing
   play decides.

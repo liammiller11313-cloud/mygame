@@ -590,6 +590,72 @@ local function ringPoint(centre: Vector3, slot: number): Vector3
 		+ Vector3.new(math.cos(bearing) * SPAWN_RING_RADIUS, 0, math.sin(bearing) * SPAWN_RING_RADIUS)
 end
 
+--[[
+	Every SpawnLocation inside the map that is actually loaded.
+
+	Cached against the root it was built from, so it rebuilds by itself the
+	moment a different map is underneath it and needs no signal to tell it — a
+	map swap replaces the root, the comparison fails, and the next ask walks the
+	new one. A round asks this a handful of times, so a descendants walk on a
+	miss is not worth a subscription.
+
+	Disabled ones are skipped, because that is what the property means and a
+	designer who switched one off has said something.
+
+	Sorted by name so the round-robin below is STABLE. GetDescendants order is
+	whatever the file happened to be saved in, and six survivors who each get a
+	different spawn every round is a team that cannot agree where "the start" is.
+]]
+local mapSpawnRoot: Instance? = nil
+local mapSpawns: { SpawnLocation } = {}
+
+local function mapSpawnPoints(): { SpawnLocation }
+	local mapService = Registry.find("MapService")
+	local root = mapService
+		and typeof(mapService.getCurrentRoot) == "function"
+		and mapService:getCurrentRoot()
+	if typeof(root) ~= "Instance" then
+		mapSpawnRoot = nil
+		table.clear(mapSpawns)
+		return mapSpawns
+	end
+	if root == mapSpawnRoot then
+		--[[ Re-verified rather than trusted: a designer deleting a spawn mid-
+		     session, or a map that streams its geometry in, would otherwise leave
+		     a destroyed instance in this list forever. ]]
+		for index = #mapSpawns, 1, -1 do
+			if not mapSpawns[index].Parent then
+				table.remove(mapSpawns, index)
+			end
+		end
+		if #mapSpawns > 0 then
+			return mapSpawns
+		end
+	end
+
+	mapSpawnRoot = root
+	table.clear(mapSpawns)
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("SpawnLocation") and descendant.Enabled then
+			table.insert(mapSpawns, descendant)
+		end
+	end
+	table.sort(mapSpawns, function(a: SpawnLocation, b: SpawnLocation): boolean
+		if a.Name == b.Name then
+			--[[ Six children all called "SpawnLocation" is the normal case, and
+			     names alone cannot order them. Position does, and any consistent
+			     answer is the whole requirement. ]]
+			local left, right = a.Position, b.Position
+			if left.X == right.X then
+				return left.Z < right.Z
+			end
+			return left.X < right.X
+		end
+		return a.Name < b.Name
+	end)
+	return mapSpawns
+end
+
 local function flatLook(direction: Vector3): Vector3
 	local flat = Vector3.new(direction.X, 0, direction.Z)
 	if flat.Magnitude < 1e-3 then
@@ -622,9 +688,30 @@ end
 
 	In order of preference: a part tagged FL_SurvivorSpawn (handed out round-robin
 	so one part works and four parts work better, and its rotation is the way the
-	survivor faces), a SpawnLocation anywhere in Workspace, the middle of the flow
-	spline, and finally the ground under the world origin — which is a bad answer
-	and says so in the log rather than pretending.
+	survivor faces), THE LOADED MAP'S OWN SpawnLocations on the same round-robin,
+	a SpawnLocation anywhere in Workspace, the middle of the flow spline, and
+	finally the ground under the world origin — which is a bad answer and says so
+	in the log rather than pretending.
+
+	── THE MAP'S OWN SPAWNS ARE A REAL ANSWER, NOT A FALLBACK ──────────────────
+	The second branch used to be the third one, and it was wrong twice over.
+
+	It searched the WHOLE of Workspace and took the first SpawnLocation it found.
+	On a game that swaps maps in and out of Workspace, and that has other things
+	parked beside them, "first" is descendant order — which is to say arbitrary,
+	and routinely a spawn belonging to a map that is not loaded. That is a team
+	starting the round outside the level, which is exactly how it was reported.
+
+	And it used only ONE of them. A designer who places six SpawnLocations around
+	a map has said where the six of them are; ringing everybody around whichever
+	one came first throws away five of those decisions.
+
+	So the map's own spawns are now their own branch, handed out round-robin like
+	the tagged parts, each survivor standing on their own pad and facing the way
+	it points. FL_SurvivorSpawn still wins when it is present, because tagging a
+	part is a deliberate override of a native one — but a map with SpawnLocations
+	in it and nothing tagged is a map that has answered the question, and it no
+	longer gets warned at for it.
 ]]
 function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 	if survivorSpawnDirty then
@@ -638,14 +725,31 @@ function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 		return CFrame.lookAt(top, top + flatLook(pad.CFrame.LookVector))
 	end
 
+	--[[ The map's own, one survivor per pad, on top of it and facing the way it
+	     points — the same treatment a tagged part gets, because a SpawnLocation
+	     the author placed is the same statement. No warning: this is a correct
+	     way to author a map, not a thing to be nagged out of. ]]
+	local placed = mapSpawnPoints()
+	if #placed > 0 then
+		local pad = placed[((index - 1) % #placed) + 1]
+		local top = pad.Position + Vector3.new(0, pad.Size.Y * 0.5 + SPAWN_ROOT_HEIGHT, 0)
+		return CFrame.lookAt(top, top + flatLook(pad.CFrame.LookVector))
+	end
+
+	--[[ Anywhere at all, and now genuinely a last resort before the spline. The
+	     map has none of its own, so this is a spawn belonging to something else
+	     in Workspace — worth using rather than dropping somebody in the void, and
+	     worth saying out loud, because it is almost certainly not where the
+	     author meant. ]]
 	local spawnLocation = Workspace:FindFirstChildWhichIsA("SpawnLocation", true)
 	if spawnLocation then
 		warnOnce(
 			"nosurvivorspawn",
 			string.format(
-				"no %s parts in the map, so survivors are starting at the SpawnLocation %q. Tag a part "
-					.. "with %s where you want the team to begin the round — its rotation is the "
-					.. "direction they face.",
+				"the loaded map contains no %s part and no SpawnLocation of its own, so survivors "
+					.. "are starting at %q, which is somewhere else in Workspace. Put a SpawnLocation "
+					.. "in the map, or tag a part with %s — either answers this, and its rotation is "
+					.. "the direction the team faces.",
 				TAG_SURVIVOR_SPAWN,
 				spawnLocation:GetFullName(),
 				TAG_SURVIVOR_SPAWN
@@ -660,8 +764,9 @@ function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 		warnOnce(
 			"nosurvivorspawn",
 			string.format(
-				"no %s part and no SpawnLocation in the map, so survivors are starting in the middle "
-					.. "of the %s spline. Tag a part with %s where you want the team to begin.",
+				"no %s part and no SpawnLocation anywhere, so survivors are starting in the middle "
+					.. "of the %s spline. Put a SpawnLocation in the map or tag a part with %s where "
+					.. "you want the team to begin.",
 				TAG_SURVIVOR_SPAWN,
 				TAG_FLOW,
 				TAG_SURVIVOR_SPAWN
