@@ -474,6 +474,66 @@ function GameModeConfig.rollBosses(
 	return releases
 end
 
+--[[
+	── HOW MANY PEOPLE ARE ACTUALLY PLAYING ────────────────────────────────────
+	Every number in the wave table above is tuned against a FULL team. Nothing
+	anywhere scaled them by how many people turned up, so a solo player and a
+	four-stack were handed the identical horde, the identical spawn rate and the
+	identical five specials alive.
+
+	That is not merely harder. It is a different game, and on the specials it is
+	an unwinnable one: a Hunter, a Jockey, a Charger and a Tongue all end with a
+	survivor pinned and needing a TEAMMATE to break it. Alone, the first pin of
+	the round is the end of the round, and no amount of skill changes that —
+	there is nobody to shoot it off you.
+
+	── SPECIALS FALL HARDEST, AND THAT IS THE POINT ────────────────────────────
+	Population scales sub-linearly: a lone survivor can only fight what fits in
+	front of them, so quartering the horde for one player would leave a corridor
+	empty rather than a fight winnable. Just under half is enough to be a horde
+	and few enough to be a horde one person can hold a door against.
+
+	Specials scale much harder than population, because they are the mechanic
+	that requires a second player to exist. At wave 15 a full team faces five
+	alive; solo that becomes one, which is a threat rather than a sentence.
+
+	And the interval LENGTHENS rather than shortening — it is seconds between
+	specials, so fewer players means dividing it by a number below one, which is
+	why it has its own row instead of sharing the population multiplier.
+
+	── ON THE ROSTER, NOT ON WHO IS STILL UP ───────────────────────────────────
+	Read from the number of players IN the round rather than the number currently
+	alive. Scaling on the living would make the round get easier the moment
+	somebody went down, which pays a team for losing people and makes the last
+	survivor's fight softer than the fight that killed the other three. The
+	difficulty is a property of who showed up.
+]]
+export type HeadcountRow = {
+	population: number,
+	spawnRate: number,
+	specials: number,
+	--[[ Divides specialInterval, so a value under 1 makes specials arrive LESS
+	     often. Named for what it does rather than for the field it touches. ]]
+	specialPace: number,
+}
+
+GameModeConfig.Headcount = table.freeze({
+	table.freeze({ population = 0.46, spawnRate = 0.70, specials = 0.34, specialPace = 0.60 }),
+	table.freeze({ population = 0.66, spawnRate = 0.85, specials = 0.55, specialPace = 0.78 }),
+	table.freeze({ population = 0.84, spawnRate = 0.94, specials = 0.80, specialPace = 0.92 }),
+	--[[ Four is 1.0 across the board by definition: it is the team the wave
+	     table was written against, and a scale that touched it would be a
+	     retune of every wave hiding in a lookup. ]]
+	table.freeze({ population = 1.0, spawnRate = 1.0, specials = 1.0, specialPace = 1.0 }),
+}) :: { HeadcountRow }
+
+--[[ The row for a headcount, clamped into the table. An empty server and a
+     five-player future both get an answer rather than a nil index. ]]
+function GameModeConfig.headcountRow(players: number): HeadcountRow
+	local count = math.clamp(math.floor(tonumber(players) or 1), 1, #GameModeConfig.Headcount)
+	return GameModeConfig.Headcount[count]
+end
+
 GameModeConfig.Classic = table.freeze({
 	PrepDuration = 15, -- the calm before wave 1: pick up a gun, find your team
 

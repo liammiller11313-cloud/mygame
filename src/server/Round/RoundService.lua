@@ -283,11 +283,37 @@ local function setWaveBudget(
 	     that spends them, so a modifier that scales the horde only has to be
 	     right once — and the Director keeps its own clamps, which is what stops
 	     DOUBLE SPAWN asking for more Commons than the roster can produce. ]]
+	--[[
+		And how many people are actually here.
+
+		Applied in the same place and for the same reason the modifier is: this
+		is the one seam a wave's numbers cross on their way to the thing that
+		spends them, so a scale that has to be right has to be right once.
+
+		Every number in the wave table is written against a full team, and until
+		now nothing divided them by anything — a solo player got four players'
+		horde and, far worse, four players' specials. See
+		GameModeConfig.Headcount: a pin needs a teammate to break, so alone the
+		first Hunter of the round ends it.
+
+		Counted off the ROSTER rather than off who is still upright. Scaling on
+		the living would soften the round the moment somebody went down, which
+		pays a team for losing people.
+	]]
+	local crew = GameModeConfig.headcountRow(#Players:GetPlayers())
+
 	director:setWaveBudget({
-		populationScale = populationScale * ModifierConfig.populationScale(Workspace),
-		spawnRateScale = spawnRateScale * ModifierConfig.spawnRateScale(Workspace),
-		maxSpecialsAlive = maxSpecials,
-		specialInterval = specialInterval,
+		populationScale = populationScale * ModifierConfig.populationScale(Workspace) * crew.population,
+		spawnRateScale = spawnRateScale * ModifierConfig.spawnRateScale(Workspace) * crew.spawnRate,
+		--[[ Floored at one. A wave that declared specials must be able to send
+		     one of them, or a solo round quietly loses the entire special
+		     roster and becomes a Common simulator. ]]
+		maxSpecialsAlive = if maxSpecials > 0
+			then math.max(1, math.floor(maxSpecials * crew.specials + 0.5))
+			else 0,
+		--[[ DIVIDED: this is seconds between specials, so a crew factor below one
+		     has to make the gap longer rather than shorter. ]]
+		specialInterval = specialInterval / math.max(crew.specialPace, 0.05),
 		waveIndex = waveIndex,
 		isBreather = isBreather,
 	})
