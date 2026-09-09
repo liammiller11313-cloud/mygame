@@ -317,7 +317,11 @@ EconomyConfig.Catalogue = table.freeze({
 	     sidegrade can be worth money. ]]
 	{ id = Enums.Weapon.M9, category = "SECONDARY", price = 900 },
 	{ id = Enums.Weapon.DualBerettas, category = "SECONDARY", price = 1500 },
-	{ id = Enums.Weapon.Glock18, category = "SECONDARY", price = 2800 },
+	--[[ Rifle burst out of a sidearm slot, which is the thing the ladder above
+	     says the Magnum is expensive for. Still under the Sawn-Off, still a
+	     sidegrade rather than an upgrade — just no longer the cheapest way in
+	     the game to hold down a trigger and delete a doorway. ]]
+	{ id = Enums.Weapon.Glock18, category = "SECONDARY", price = 3600 },
 	--[[ Between the Glock and the Sawn-Off, which is where a sidegrade belongs
 	     and not where its damage would put it. Twelve on impact is nothing; what
 	     is being bought is the burn, and the burn is the molotov's, which means
@@ -325,7 +329,9 @@ EconomyConfig.Catalogue = table.freeze({
 	     rations one throwable at a time. The light it makes is worth nothing to
 	     the economy and quite a lot at three in the morning on Blackout. ]]
 	{ id = Enums.Weapon.FlareGun, category = "SECONDARY", price = 3500 },
-	{ id = Enums.Weapon.SawnOff, category = "SECONDARY", price = 4200 },
+	-- Nudged with the shotguns it belongs to. The highest single-pull damage of
+	-- anything that is not a launcher, and two shells to deliver it with.
+	{ id = Enums.Weapon.SawnOff, category = "SECONDARY", price = 4600 },
 	{ id = Enums.Weapon.Magnum357, category = "SECONDARY", price = 6000 },
 	--[[
 		The RPG-7, and the most expensive thing in the game by a factor of two.
@@ -347,15 +353,44 @@ EconomyConfig.Catalogue = table.freeze({
 		blurb = "Four rockets. Kills the Tank, the horde, and you.",
 	},
 
-	-- ── primaries ───────────────────────────────────────────────────────────
-	-- Shotgun. Cheap because it is the most conditional weapon in the game.
-	{ id = Enums.Weapon.Shotgun, category = "PRIMARY", price = 3000 },
-	--[[ Priced across the ladder rather than above it. The four shotguns are
-	     sidegrades of each other — pump, pump, semi, drum — so the money buys
-	     a different rhythm, not a better gun. ]]
-	{ id = Enums.Weapon.TacticalShotty, category = "PRIMARY", price = 2600 },
-	{ id = Enums.Weapon.M1014, category = "PRIMARY", price = 4200 },
-	{ id = Enums.Weapon.DAO12, category = "PRIMARY", price = 5400 },
+	--[[
+		── SHOTGUNS, AND THE CONDITION NOBODY WAS PAYING ────────────────────────
+		These were the four cheapest real weapons per point of damage in the game,
+		on the argument written above them: "cheap because it is the most
+		conditional weapon in the game." The falloff is genuinely brutal — the
+		M1014 does 347 a second at 25 studs and 60 at 150 — so the argument was
+		about a real number. It was still the wrong argument, because it priced a
+		condition the round almost never makes you meet.
+
+		This is a horde-defence game. Every wave sends bodies TOWARD you; you do
+		not choose to fight at 25 studs, the game chooses it for you, and a
+		shotgun spends most of a round at the range it is best at while a rifle
+		spends most of a round at a fraction of the range it paid for. Measured
+		at 25 studs the M1014 was the highest damage per second of ANY weapon in
+		the roster — 43% above the 10,500 marksman rifle — for four thousand two
+		hundred dollars.
+
+		The condition is real in four places and they are worth naming, because
+		they are what the price now buys out of rather than nothing: kiting a
+		Tank, a Spitter or a Smoker working from range, standing out of a
+		Metallic's charge lane, and any map with a street on it. That is a real
+		cost. It was not a 3,000-dollar cost.
+
+		So the shotguns move up into the middle of the roster, where a weapon that
+		wins every fight under 40 studs belongs. They are still sidegrades of each
+		other — pump, pump, semi, drum — and the ladder between them is unchanged;
+		the whole family just stops being the correct first purchase for a player
+		who has read the numbers.
+	]]
+	{ id = Enums.Weapon.Shotgun, category = "PRIMARY", price = 4200 },
+	-- The entry shotgun, and still the affordable one. Its own damage is the
+	-- lowest of the four, which is what keeps it under the rest of them.
+	{ id = Enums.Weapon.TacticalShotty, category = "PRIMARY", price = 3400 },
+	--[[ LMG money for a shotgun, deliberately. Nothing else in the game does
+	     what this does inside 40 studs, and past 100 it does less than a
+	     sidearm — that is the trade the price is finally charging for. ]]
+	{ id = Enums.Weapon.M1014, category = "PRIMARY", price = 6800 },
+	{ id = Enums.Weapon.DAO12, category = "PRIMARY", price = 6600 },
 
 	-- SMGs. The UMP is the free primary, so everything near it is priced as a
 	-- sidegrade rather than as an upgrade.
@@ -370,7 +405,11 @@ EconomyConfig.Catalogue = table.freeze({
 	{ id = Enums.Weapon.AKM, category = "PRIMARY", price = 5800 },
 	{ id = Enums.Weapon.HK416A5, category = "PRIMARY", price = 7000 },
 	{ id = Enums.Weapon.Mk18CQBR, category = "PRIMARY", price = 7500 },
-	{ id = Enums.Weapon.M16A4, category = "PRIMARY", price = 3800 },
+	--[[ Was 3,800, which put a rifle with the third-highest sustained damage at
+	     range under both carbines it beats outright. A burst rifle is supposed to
+	     cost you something for the burst — the answer is that it costs money,
+	     because it plainly does not cost damage. ]]
+	{ id = Enums.Weapon.M16A4, category = "PRIMARY", price = 5200 },
 	{ id = Enums.Weapon.HK416D, category = "PRIMARY", price = 5000 },
 	{ id = Enums.Weapon.AK12, category = "PRIMARY", price = 8000 },
 	-- The battle rifle sits above the assault rifles and below the marksman

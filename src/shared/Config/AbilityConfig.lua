@@ -28,11 +28,25 @@
 	you keep. Putting abilities on the other currency would have made the two
 	mean nothing in particular.
 
-	They are priced WELL under the guns on purpose. The cheapest weapon is $900
-	and the roster is $157,000; the whole ability set is $6,500. An ability
-	changes how you play and a rifle changes what you can kill, and a player
-	should be able to reach the first one early enough that it shapes how they
-	learn the game.
+	── AND WHY THE LADDER CLIMBS THE WAY IT DOES ───────────────────────────────
+	The FIRST one is priced WELL under the guns on purpose. An ability changes how
+	you play and a rifle changes what you can kill, and a player should be able to
+	reach the first one early enough that it shapes how they learn the game. The
+	Shield is $500 for exactly that reason and has never moved.
+
+	The last one is not an on-ramp and should not be priced like one. An ability
+	is the only thing in the game that is purely ADDITIVE: it does not take the
+	slot your gun is in, it never runs out of ammunition, and once bought it is
+	there in every round you ever play again. An Airstrike is 260 damage five
+	times over a sixteen-stud radius, three times a match, forever. It used to
+	cost $3,000 — less than a shotgun — which said that deleting a horde was
+	worth less than a weapon that shoots one body at a time.
+
+	So the five climb rather than sitting in a heap: $500 to learn what an ability
+	is, and $5,000 for the one that answers a wave. scripts/economy.py prints the
+	set and its total next to the weapon roster, so the number in this paragraph
+	cannot quietly go stale again — it already had, by a thousand dollars, before
+	the model was taught to look.
 
 	── ADDING ONE ─────────────────────────────────────────────────────────────
 	A definition here, a module under server/Abilities/Abilities named for its
@@ -132,7 +146,7 @@ local DEFINITIONS: { Ability } = {
 		id = Enums.Ability.Turret,
 		displayName = "TURRET",
 		blurb = "Drops a gun that watches an angle you cannot.",
-		price = 1_000,
+		price = 1_600,
 		cooldown = 300,
 		--[[ Targeted, so it is PLACED rather than dropped at your feet. Where a
 		     turret stands is the whole skill of the ability — an angle it can see
@@ -241,7 +255,7 @@ local DEFINITIONS: { Ability } = {
 		id = Enums.Ability.FieldMedic,
 		displayName = "FIELD MEDIC",
 		blurb = "Patches up everyone standing near you, including you.",
-		price = 1_000,
+		price = 1_800,
 		cooldown = 300,
 		targeted = false,
 		range = 0,
@@ -259,7 +273,7 @@ local DEFINITIONS: { Ability } = {
 		id = Enums.Ability.CryoBlast,
 		displayName = "CRYO BLAST",
 		blurb = "Freezes a doorway solid. Buys the seconds you needed.",
-		price = 2_000,
+		price = 3_200,
 		cooldown = 300,
 		targeted = true,
 		range = 90,
@@ -282,7 +296,7 @@ local DEFINITIONS: { Ability } = {
 		id = Enums.Ability.Airstrike,
 		displayName = "AIRSTRIKE",
 		blurb = "Marks a spot. Everything standing on it stops standing.",
-		price = 3_000,
+		price = 5_000,
 		cooldown = 300,
 		targeted = true,
 		range = 140,

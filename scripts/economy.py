@@ -106,6 +106,27 @@ def catalogue():
     return out
 
 
+def abilities():
+    """The other Dollars sink, which this model could not see until now.
+
+    Abilities are permanent unlocks bought with the same currency as the weapon
+    roster, and nothing here knew they existed — so "the roster costs N rounds"
+    was answering a smaller question than it looked like it was answering. They
+    are reported SEPARATELY rather than folded into the roster sum, for the same
+    reason the RPG-7 is: the per-weapon pacing target is about the weapon ladder,
+    and averaging a five-item set into a thirty-two-item one describes neither.
+    """
+    src = read("src/shared/Config/AbilityConfig.lua")
+    out = []
+    for m in re.finditer(
+        r"id = Enums\.Ability\.(\w+),\s*\n\s*displayName = \"([^\"]+)\","
+        r"(?:.*?\n)*?\s*price = ([\d_]+),",
+        src,
+    ):
+        out.append({"id": m.group(1), "name": m.group(2), "price": int(m.group(3).replace("_", ""))})
+    return out
+
+
 def waves():
     """Every wave's duration and how hard it leans on the horde."""
     block = MODE.split("GameModeConfig.Waves = {")[1]
@@ -129,6 +150,7 @@ def waves():
 
 REWARDS = kill_rewards()
 CATALOGUE = catalogue()
+ABILITIES = abilities()
 WAVES = waves()
 
 START = scalar("StartingDollars")
@@ -316,6 +338,15 @@ def main() -> int:
         print(f"  then {entry['id']} at ${entry['price']:,} — "
               f"{entry['price'] / won['total']:.0f} more won rounds on top")
     print()
+
+    if ABILITIES:
+        total = sum(a["price"] for a in ABILITIES)
+        cheap = min(ABILITIES, key=lambda a: a["price"])
+        dear = max(ABILITIES, key=lambda a: a["price"])
+        print(f"  abilities          {len(ABILITIES)}, ${total:,} in total — "
+              f"{cheap['name']} ${cheap['price']:,} to {dear['name']} ${dear['price']:,}")
+        print(f"                     the whole set is {total / won['total']:.1f} won rounds, "
+              f"or {total / roster:.0%} of the weapon roster\n")
 
     print(f"  {'price':>8}  {'category':<9} id")
     for entry in sorted(CATALOGUE, key=lambda e: (e["category"], e["soon"], e["price"], e["id"])):
