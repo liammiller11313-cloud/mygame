@@ -175,6 +175,11 @@ local MODULES = {
 	"Economy/PassService",
 	--[[ After ProfileService, whose redeemed set is what makes a code exclusive. ]]
 	"Economy/CodeService",
+	--[[ After ProfileService, which owns the lifetime totals it publishes, and
+	     after StatsService, whose round snapshot it folds into them. Registered
+	     rather than required by either: this is the only file that knows a
+	     DataStore is involved, and neither of those two should. ]]
+	"Economy/LeaderboardService",
 	--[[ After ProfileService, whose ability set and slot list it reads and writes,
 	     and after ProgressionService for tidiness rather than need. Abilities are
 	     bought with Dollars through ProfileService's own spend, so this does not

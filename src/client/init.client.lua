@@ -136,6 +136,9 @@ local CONTROLLERS = {
 	-- A panel like the shop and the loadout screen, opened from the same nav row,
 	-- so it loads with them and before the menu that opens it.
 	"UI/CareerController",
+	--[[ Beside the career panel it borrows its whole vocabulary from: the tag on
+	     a leaderboard row IS a pass callsign, drawn in a pass accent. ]]
+	"UI/LeaderboardController",
 	-- The PLAY flow: quick play, private lobbies, and the server browser. Loaded
 	-- with the other panels and before the menu that opens it.
 	"UI/PlayController",

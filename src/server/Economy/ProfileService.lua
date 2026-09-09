@@ -81,6 +81,7 @@ local EconomyConfig = require(Shared.Config.EconomyConfig)
 local CodeConfig = require(Shared.Config.CodeConfig)
 local PassConfig = require(Shared.Config.PassConfig)
 local AbilityConfig = require(Shared.Config.AbilityConfig)
+local LeaderboardConfig = require(Shared.Config.LeaderboardConfig)
 local LoadoutConfig = require(Shared.Config.LoadoutConfig)
 local ProgressionConfig = require(Shared.Config.ProgressionConfig)
 local Registry = require(Shared.Util.Registry)
@@ -167,6 +168,15 @@ export type Profile = {
 	     the one that goes stale is always the one that was written down. ]]
 	loginStreak: number,
 	loginClaimedDay: number,
+	--[[ Everything this account has done since it started playing, which is what
+	     the global boards rank. Separate from StatsService's per-round counters
+	     and from the per-SESSION leaderstats beside them: three tallies of the
+	     same events, at three different lifetimes, and the boards need the only
+	     one of the three that survives a rejoin.
+
+	     The shape is LeaderboardConfig.blankLifetime rather than a literal here,
+	     so a board can never name a field this table does not have. ]]
+	lifetime: { [string]: number },
 	passTier: number,
 	--[[ Codes this account has already redeemed, and what redeeming them handed
 	     over. Both persist — see unlockedSet for why passGrants is the one thing
@@ -237,6 +247,7 @@ local function blankProfile(): Profile
 		     which is the correct first impression of a streak. ]]
 		loginStreak = 0,
 		loginClaimedDay = 0,
+		lifetime = LeaderboardConfig.blankLifetime(),
 		passTier = 0,
 		--[[ Codes already redeemed, so one cannot be claimed twice, and the
 		     entitlements a code handed over. Both persist; see unlockedSet for
@@ -417,6 +428,16 @@ local function migrate(stored: any): Profile
 	profile.loginStreak = storedNumber(stored.loginStreak, ProgressionConfig.MaxLoginStreak)
 	profile.loginClaimedDay = storedNumber(stored.loginClaimedDay, MAX_QUEST_DAY)
 
+	--[[ Read field by field off the blank rather than copied wholesale, which is
+	     what makes adding a counter safe: a profile saved before the field
+	     existed reads 0 for it instead of nil, and a field somebody removed from
+	     the blank stops being loaded rather than lingering in every save. ]]
+	if typeof(stored.lifetime) == "table" then
+		for key in profile.lifetime do
+			profile.lifetime[key] = storedNumber(stored.lifetime[key], LeaderboardConfig.MaxValue)
+		end
+	end
+
 	--[[ A worn reward is kept only if the track still has it AND the tier it
 	     sits at has actually been claimed. The second half matters: without it,
 	     a profile whose passTier was clamped down by a shortened track would go
@@ -455,6 +476,7 @@ local function serialise(profile: Profile, lock: any): any
 		questDay = profile.questDay,
 		loginStreak = profile.loginStreak,
 		loginClaimedDay = profile.loginClaimedDay,
+		lifetime = profile.lifetime,
 		passTier = profile.passTier,
 		redeemed = profile.redeemed,
 		passGrants = profile.passGrants,
@@ -1029,6 +1051,72 @@ function ProfileService:rollQuests(player: Player, day: number)
 	profile.quests = {}
 	profile.questDay = clean
 	markChanged(player, profile, false)
+end
+
+--[[ This account's lifetime totals, as the stored table. Read-only to callers
+     by convention — recordLifetime below is the only thing that writes it, so
+     that "best" and "total" are decided in one place. ]]
+function ProfileService:getLifetime(player: Player): { [string]: number }
+	local profile = profiles[player]
+	if not profile then
+		return LeaderboardConfig.blankLifetime()
+	end
+	return profile.lifetime
+end
+
+--[[
+	Folds one round's numbers into the lifetime totals, and says which fields
+	actually moved.
+
+	The return is the point. A caller publishing to a global board needs to know
+	what changed — a Best that was not beaten must not be written, because
+	writing it costs a request to say nothing, and there are three boards and
+	four players and a round every seventeen minutes.
+
+	Each field is folded by its own rule: LeaderboardConfig.isBest decides
+	whether a number replaces the stored one when it is larger, or adds to it.
+	Getting that per-FIELD rather than per-caller is what stops a bad round
+	lowering somebody's record and a good one resetting their total.
+]]
+function ProfileService:recordLifetime(player: Player, row: { [string]: number }?): { [string]: number }
+	local profile = profiles[player]
+	if not profile or typeof(row) ~= "table" then
+		return {}
+	end
+
+	local moved: { [string]: number } = {}
+	for key, current in profile.lifetime do
+		local value = row[key]
+		if typeof(value) ~= "number" or value ~= value or value <= 0 then
+			continue
+		end
+		value = math.floor(value)
+
+		local updated: number
+		if LeaderboardConfig.isBest(key) then
+			if value <= current then
+				continue
+			end
+			updated = value
+		else
+			updated = current + value
+		end
+
+		updated = math.clamp(updated, 0, LeaderboardConfig.MaxValue)
+		if updated == current then
+			continue
+		end
+		profile.lifetime[key] = updated
+		moved[key] = updated
+	end
+
+	if next(moved) then
+		--[[ Not structural: nothing on screen reads these live, and the caller
+		     flushes anyway — a round end already writes the profile for the XP
+		     it just paid. ]]
+		markChanged(player, profile, false)
+	end
+	return moved
 end
 
 --[[ The stored streak and the day it was last claimed on. Both, always: one

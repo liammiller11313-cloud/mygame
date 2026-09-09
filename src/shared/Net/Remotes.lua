@@ -181,6 +181,18 @@ local EVENTS: { string } = {
 	"ClaimDailyLogin", -- C->S ()
 	"SetWornReward", -- C->S (kind: "Callsign"|"Accent", id: string)
 
+	-- ── Global leaderboards ─────────────────────────────────────────────────
+	--[[ Asks for one board's top page. The id is the only argument and an
+	     unknown one is answered with silence rather than an error — a client
+	     built against a board that has since been renamed should draw nothing,
+	     not throw. ]]
+	"RequestLeaderboard", -- C->S (boardId: string)
+	--[[ One board's page, plus this player's own number on it. Sent to EVERY
+	     client in the server when a fetch lands rather than only to whoever
+	     asked, because a fetch is a shared resource and everyone waiting on it
+	     wants the answer. See LeaderboardService. ]]
+	"LeaderboardPage", -- {board, rows: {{rank, userId, name, value}}, ok, reason, me}
+
 	-- ── Abilities ───────────────────────────────────────────────────────────
 	--[[ Permanent unlocks, equipped before a match and activated during one.
 	     What is EQUIPPED and how long each slot has left ride Attributes.Player,

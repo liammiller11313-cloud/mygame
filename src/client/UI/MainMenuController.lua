@@ -1519,6 +1519,16 @@ local NAV_ENTRIES = {
 		controller = "AbilityPanelController",
 	},
 	{ id = "Career", title = "CAREER", line = "LEVEL  QUESTS  PASS", controller = "CareerController" },
+	--[[ RANKS rather than LEADERBOARD, and the short word is doing real work:
+	     NAV_WIDTH is solved from the entry count, so a seventh entry narrows all
+	     seven, and the longest title in the row is the one that decides whether
+	     any of them fit. ]]
+	{
+		id = "Ranks",
+		title = "RANKS",
+		line = "GLOBAL  ALL-TIME  TOP 100",
+		controller = "LeaderboardController",
+	},
 	{ id = "Codes", title = "CODES", line = "REDEEM  WHILE  THEY  LAST", controller = "CodesController" },
 	{
 		id = "Settings",
