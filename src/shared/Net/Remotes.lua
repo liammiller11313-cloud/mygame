@@ -335,6 +335,23 @@ local EVENTS: { string } = {
 	"SubmitGenerator", -- C->S {generator: Instance, answer: {number}}
 	"GeneratorResult", -- S->asker {ok, order, powered, total, reason?, challenge?}
 	"GeneratorPowered", -- S->all {player, order, powered, total}
+
+	-- ── Joining a server whose round has already started ────────────────────
+	--[[
+		A player who presses PLAY while a wave is running does not interrupt it.
+		They watch instead, and are in the next round automatically — which is
+		what SPECTATING already means to every other system, so the server tells
+		them why rather than changing what they are.
+
+		`FindAnotherServer` is the one way out that is not waiting. It is a
+		Roblox matchmaking teleport, and Roblox does not promise a DIFFERENT
+		instance — which is why the button says "find another server" rather than
+		"join another round", and why the server answers with a failure the
+		client can show rather than leaving somebody staring at a dead button.
+	]]
+	"RoundInProgress", -- S->asker {wave: number, mode: string}
+	"FindAnotherServer", -- C->S ()
+	"TeleportFailed", -- S->asker {reason: string}
 }
 
 -- Every RemoteFunction. Keep this list SHORT: remote functions block and can be

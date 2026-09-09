@@ -666,52 +666,31 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --[[
-	Spawns a player into a round that is already under way.
+	Somewhere else to be, for a player who does not want to watch.
 
-	They arrive on their feet at full health, which is deliberately NOT what the
-	breather does for a dead teammate (RespawnHealth, and it hurts): this player
-	was not in the round to lose the health, and taxing them for joining late is
-	how a join-in-progress slot goes unused.
+	The only way out of a running round that is not waiting for it to finish, and
+	the honest framing is in the button's own words: it finds another SERVER, not
+	another round. Roblox's matchmaking picks the instance and does not promise a
+	different one — occasionally it hands back the server they are standing in,
+	and a button that had promised a new round would have lied.
+
+	Failure is ANSWERED rather than swallowed. A teleport can be refused for
+	reasons none of this can see — the place is not published, the player is
+	already teleporting, Roblox is rate-limiting — and the failure mode that
+	matters is somebody pressing a button that does nothing, forever, with no
+	way to tell whether it is broken or slow.
 ]]
-local function spawnIntoRound(player: Player)
-	-- Versus decides which team a joiner lands on; there is no sensible default
-	-- this service could pick, so it hands the player over when it can.
-	if roundMode() == MODES.Versus then
-		local versus = Registry.find("VersusService")
-		if versus and typeof(versus.assignTeam) == "function" then
-			local assigned = pcall(versus.assignTeam, versus, player)
-			if assigned then
-				return
-			end
-		end
-	end
-
-	local survivors = Registry.find("SurvivorService")
-	if not survivors then
-		warnOnce(
-			"nosurvivors",
-			"SurvivorService is not registered, so a join-in-progress player has no character."
-		)
+local function findAnotherServer(player: Player)
+	local ok, err = pcall(function()
+		TeleportService:TeleportAsync(game.PlaceId, { player })
+	end)
+	if ok then
 		return
 	end
-
-	local level = Registry.find("LevelService")
-	if
-		level
-		and typeof(level.getSurvivorSpawnCFrame) == "function"
-		and typeof(survivors.setSpawnCFrame) == "function"
-	then
-		local slot = table.find(Players:GetPlayers(), player) or 1
-		local ok, cframe = pcall(level.getSurvivorSpawnCFrame, level, slot)
-		if ok and typeof(cframe) == "CFrame" then
-			survivors:setSpawnCFrame(player, cframe)
-		end
-	end
-
-	local spawned, err = pcall(survivors.spawnSurvivor, survivors, player)
-	if not spawned then
-		warnOnce("spawnfailed", "SurvivorService:spawnSurvivor threw for a joiner: " .. tostring(err))
-	end
+	warnOnce("teleport", "TeleportAsync threw for a joiner: " .. tostring(err))
+	Remotes.Event.TeleportFailed:FireClient(player, {
+		reason = "Could not find another server. Staying here.",
+	})
 end
 
 --[[ Puts a player into whatever this server is doing. No teleport and no
@@ -731,12 +710,30 @@ local function admit(player: Player, mode: string)
 	end
 
 	if roundIsRunning() then
-		spawnIntoRound(player)
-		tell(
-			player,
-			string.format("Dropping into wave %d. Find the team.", math.max(roundWaveIndex(), 1)),
-			true
-		)
+		--[[
+			A round that is already under way is not interrupted.
+
+			This used to drop the player straight in, on their feet at full
+			health, in the middle of whatever wave was happening. That is
+			generous to the person who just clicked PLAY and it is paid for by
+			the four people already in the run — a stranger materialising mid-
+			wave with a starting pistol is a body the Director now has to
+			pressure and the team now has to cover.
+
+			So they WATCH. No character is created, which is all "spectating"
+			has ever meant to this codebase — SurvivorService reports Spectating
+			for anybody with no record, SpectateController engages off exactly
+			that, and the breather respawn already refuses to conscript them.
+			Every piece of this was built; none of it was reachable from here.
+
+			They stay admitted. `desired` and setReady above are untouched, so
+			the next round starts with them in it and they never touch a menu
+			again.
+		]]
+		Remotes.Event.RoundInProgress:FireClient(player, {
+			wave = math.max(roundWaveIndex(), 1),
+			mode = roundMode(),
+		})
 		return
 	end
 
@@ -1035,6 +1032,23 @@ function MatchmakingService:_step()
 end
 
 function MatchmakingService:start()
+	--[[ Throttled per player, because a teleport is the one thing on this service
+	     that reaches outside the server — and a button somebody is mashing while
+	     nothing visibly happens is exactly the shape of press that arrives forty
+	     times. ]]
+	local teleportedAt: { [Player]: number } = {}
+	serviceTrove:connect(Remotes.Event.FindAnotherServer.OnServerEvent, function(player: Player)
+		local now = serverNow()
+		if now - (teleportedAt[player] or 0) < 5 then
+			return
+		end
+		teleportedAt[player] = now
+		findAnotherServer(player)
+	end)
+	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
+		teleportedAt[player] = nil
+	end)
+
 	serviceTrove:connect(Remotes.Event.RequestMode.OnServerEvent, function(player: Player, mode: any)
 		local now = os.clock()
 		local last = lastRequestAt[player]

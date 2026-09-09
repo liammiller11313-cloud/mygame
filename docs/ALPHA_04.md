@@ -159,6 +159,23 @@ and get thrown. Capped at nine jumps high.
 `OG-BRICKBATTLE` redeems the pack free plus 250 Dollars, in a two-hour window on
 10 September, 4–6pm US Central. The CODES panel is in the main menu.
 
+### Joining a server whose round has started
+
+You no longer drop into a live wave. You **watch**, with a card saying
+`WAVE 7 IN PROGRESS · YOU ARE IN THE NEXT ROUND`, and you are spawned
+automatically when this one ends — no menu, no second click.
+
+Before this, a late joiner materialised mid-wave on their feet at full health.
+That is generous to the person who clicked PLAY and it is paid for by the four
+already in the run: a stranger appearing with a starting pistol is a body the
+Director now has to pressure and the team now has to cover.
+
+One button under the card, and only for a late joiner: **FIND ANOTHER SERVER**.
+It is a Roblox matchmaking teleport, and it says *server* rather than *round*
+because Roblox does not promise a different instance — occasionally it hands
+back the one you are standing in. A refused teleport puts the button back rather
+than leaving it saying LOOKING.
+
 ### Sound
 
 The Tesla Rifle is the only weapon in the game with a **voice of its own** — six
@@ -303,7 +320,15 @@ Then two things after it dies: the floor clears, and **nobody is left slow.**
 That second one had two separate bugs in it this build, so it is worth checking
 deliberately — get somebody downed inside a colony and revive them.
 
-### G. Controller and phone
+### G. Two clients, one server
+
+Join with a second client while the first is mid-round. The second should get
+the spectate camera and the `WAVE n IN PROGRESS` card — **not** a character —
+and should be spawned into the next round on its own. Press FIND ANOTHER SERVER
+once in Studio to see it refuse politely; a Studio session has nowhere to
+teleport to, which is the failure path worth seeing.
+
+### H. Controller and phone
 
 Every generator panel is presses only and was built for this. If any of the five
 cannot be finished on a pad or a phone, that is the single most important thing

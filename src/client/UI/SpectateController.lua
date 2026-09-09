@@ -43,6 +43,7 @@ local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
+local Remotes = require(Shared.Net.Remotes)
 local UITheme = require(Shared.Config.UITheme)
 
 local FreeCursor = require(script.Parent.FreeCursor)
@@ -54,7 +55,9 @@ local Widgets = require(script.Parent.Widgets)
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
 local TEXT = UITheme.TextSize
+local LAYOUT = UITheme.Layout
 
+local GA = Attributes.Game
 local PA = Attributes.Player
 local STATE = Enums.SurvivorState
 
@@ -91,6 +94,13 @@ local SPECTATE_ZOOM_MAX = 70
 local gui: ScreenGui
 local card: Frame
 local nameLabel: TextLabel
+local leaveButton: TextButton
+local leaveLabel: TextLabel
+
+--[[ The way-out button's own height. Outside the card rather than inside it,
+     because the card is sized for two lines of text and a late joiner should not
+     make a dead survivor's card taller. ]]
+local LEAVE_HEIGHT = 26
 local hintLabel: TextLabel
 
 local state = {
@@ -101,6 +111,21 @@ local state = {
 	target = nil :: Player?,
 	shownName = "",
 	shownHint = "",
+	--[[
+		Set when this player joined a server whose round had already started.
+
+		They are spectating for a different reason from everybody else on this
+		screen — not dead, not out of lives, just late — and the difference is
+		worth saying, because "WAVE 7 IN PROGRESS · YOU ARE IN THE NEXT ONE" is
+		the whole answer to the question they are actually asking, which is
+		whether the game is broken.
+
+		It is also the only state in which the way out is offered. A dead
+		survivor has teammates who can defib them; a late joiner has nothing to
+		wait for except the clock.
+	]]
+	late = false,
+	lateWave = 0,
 }
 
 --[[ Everyone worth watching, in a stable order.
@@ -188,7 +213,15 @@ local function redraw()
 	     out from the fact that nobody has come. ]]
 	local out = Attributes.get(player, PA.Eliminated, false) == true
 	local text
-	if name ~= "" then
+	if state.late then
+		--[[ A late joiner is not out and is not waiting on a defib — they are
+		     early for the next round. Saying THAT is the whole point of the
+		     flag: it answers the question they are actually asking, which is
+		     whether the game failed to spawn them. ]]
+		text = if state.lateWave > 0
+			then string.format("WAVE %d IN PROGRESS", state.lateWave)
+			else "ROUND IN PROGRESS"
+	elseif name ~= "" then
 		text = if out then "OUT — SPECTATING  " .. name else "SPECTATING  " .. name
 	else
 		text = "NOBODY LEFT TO WATCH"
@@ -197,7 +230,9 @@ local function redraw()
 		state.shownName = text
 		nameLabel.Text = text
 	end
-	local hint = if target then hintText() else ""
+	--[[ The promise, and it is the load-bearing half. Somebody who has just been
+	     told they are not playing needs to know they will be, and when. ]]
+	local hint = if state.late then "YOU ARE IN THE NEXT ROUND" elseif target then hintText() else ""
 	if hint ~= state.shownHint then
 		state.shownHint = hint
 		hintLabel.Text = hint
@@ -364,6 +399,31 @@ local function build()
 	hintLabel.Position = UDim2.fromOffset(0, 5 + TEXT.Body + 4)
 	hintLabel.Size = UDim2.new(1, 0, 0, TEXT.Tiny + 2)
 	hintLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+	--[[ Under the card and only for a late joiner. Hidden rather than absent, so
+	     the ordinary spectate view — a dead survivor waiting on a defib — is
+	     exactly the card it has always been, with nothing new on it. ]]
+	leaveButton = Widgets.button(card, "Leave")
+	leaveButton.AnchorPoint = Vector2.new(0.5, 0)
+	leaveButton.Position = UDim2.new(0.5, 0, 1, LAYOUT.ElementGap)
+	leaveButton.Size = UDim2.fromOffset(CARD_WIDTH, LEAVE_HEIGHT)
+	leaveButton.BackgroundColor3 = COLOR.PanelRaised
+	leaveButton.BackgroundTransparency = 0.15
+	leaveButton.Visible = false
+	local stroke = Widgets.stroke(leaveButton, COLOR.Border)
+	leaveLabel = Widgets.label(leaveButton, "Label", FONT.Heading, TEXT.Tiny, COLOR.TextSecondary)
+	leaveLabel.Size = UDim2.fromScale(1, 1)
+	leaveLabel.TextXAlignment = Enum.TextXAlignment.Center
+	leaveLabel.Text = "FIND ANOTHER SERVER"
+	Widgets.outlineHover(trove, leaveButton, stroke)
+	trove:connect(leaveButton.Activated, function()
+		--[[ Says so immediately. A teleport takes a moment and gives no feedback
+		     of its own, so without this the button reads as broken and gets
+		     pressed again — which the server throttles, which makes it read as
+		     more broken. ]]
+		leaveLabel.Text = "LOOKING\226\128\166"
+		Remotes.Event.FindAnotherServer:FireServer()
+	end)
 end
 
 local SpectateController = {}
@@ -392,6 +452,51 @@ function SpectateController:start()
 			end))
 		end
 	end
+
+	--[[ The server saying why this player is watching. It arrives once, when
+	     they press PLAY into a running round, and it is the difference between a
+	     spectate camera that explains itself and one that looks like a failed
+	     spawn. ]]
+	trove:connect(Remotes.Event.RoundInProgress.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		state.late = true
+		state.lateWave = tonumber(payload.wave) or 0
+		state.shownHint = ""
+		if leaveButton then
+			leaveButton.Visible = true
+			leaveLabel.Text = "FIND ANOTHER SERVER"
+		end
+		redraw()
+	end)
+
+	--[[ And the teleport not working. Put back rather than left saying LOOKING,
+	     because a button stuck on its own progress text is the same dead button
+	     it was pressed to escape. ]]
+	trove:connect(Remotes.Event.TeleportFailed.OnClientEvent, function(payload: any)
+		if not leaveButton then
+			return
+		end
+		leaveLabel.Text = "NO SERVER FOUND \226\128\148 RETRY"
+		if typeof(payload) == "table" and typeof(payload.reason) == "string" then
+			hintLabel.Text = string.upper(payload.reason)
+			state.shownHint = hintLabel.Text
+		end
+	end)
+
+	--[[ A round ending takes the notice down with it: whatever this player was
+	     late for is over, and the next thing that happens to them is being
+	     spawned into the new one. ]]
+	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
+		if Attributes.get(Workspace, GA.RoundState, "") ~= Enums.RoundState.InProgress then
+			state.late = false
+			state.lateWave = 0
+			if leaveButton then
+				leaveButton.Visible = false
+			end
+		end
+	end)
 
 	trove:connect(RunService.RenderStepped, update)
 end
