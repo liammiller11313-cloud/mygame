@@ -187,6 +187,68 @@ shop's hover tick, and a generator coming online made no noise in the world at
 all. Now the start-up carries 260 studs, they hum while running, and the gate
 rolls up.
 
+### The way the game feels, in six passes
+
+Six balance and systems passes landed after the sections above were written, and
+they change what the whole build feels like rather than adding a screen.
+
+**Recoil.** Guns climbed too much and never stopped climbing. There is a settle
+curve now — the first five shots climb, the next six decay to a quarter of it —
+plus an honest ceiling with a knee, so a weapon nowhere near the cap does not
+quietly get one. Measured: **-7% on a three-round tap, -21% on a thirty-round
+spray**. `GameConfig.Recoil` documents an alternative tuning if play says it is
+still too much.
+
+**Fewer people, easier round.** Nothing scaled to how many turned up, so a solo
+player got a full team's horde and a full team's five specials — which on the
+specials is unwinnable rather than merely hard, since every pin needs a teammate
+to break it. Population, spawn rate, special count and special pacing now all
+read `GameModeConfig.headcountRow`. At wave 15 solo: **two specials instead of
+five, and 27 seconds between them instead of 16**.
+
+**Boss health scales too, which was the worse half.** A solo player met the same
+12,000-health Apex Tank a full team does, in a 144-second wave they could not
+finish it in. Bosses only — Commons keep their health, because a survivor should
+not have to re-learn what a bullet does because somebody left. See
+`docs/BOSSES.md`.
+
+**The Tank has a window.** A swing that lands on nobody overextends it: rooted,
+taking double damage, for a second and a half, with `EXPOSED` on the boss bar
+and a cue of its own. Eight-second cooldown so kiting is not a strategy. Worth
+testing specifically — dodge a swing on purpose and see whether the punish reads.
+
+**Melee.** Two of the four paid melee weapons were strictly worse than something
+cheaper — the Lead Pipe lost to the *free* knife on both axes. All six retuned so
+each gives something up. See the ladder table at the top of the melee block in
+`WeaponConfig`.
+
+**Prices.** Shotguns were the cheapest real weapons in the game per point of
+damage, on a range condition this game almost never makes you meet; the M1014 was
+the highest close-range DPS in the roster for $4,200. They move into the middle
+of the roster. Abilities climbed too — the Airstrike was $3,000, less than a
+shotgun, for something purely additive that deletes a horde three times a match
+forever. **The $500 Shield did not move**: reaching the first ability early is
+the point of pricing them under guns at all.
+
+### Daily streak, and RANKS
+
+**A seven-day login streak**, on the CAREER panel above today's orders. A perfect
+week is about two won rounds — enough to feel, not enough to compete with
+playing. Miss a day and it resets, with no grace period. Rollover is UTC
+midnight, the same instant the quests roll.
+
+**Three global leaderboards** under `RANKS` on the main menu: FURTHEST (highest
+wave in one round), VICTORIES, BODY COUNT. Rows carry the player's earned pass
+callsign as a **tag**, in their earned accent colour — for players in your own
+server, since there is nothing to look up for anybody else. See
+`docs/LEADERBOARDS.md`.
+
+> **In Studio these will be empty and say so.** Global ranks need DataStore
+> access, which Studio does not have unless *Enable Studio Access to API
+> Services* is switched on in Game Settings → Security. The panel prints
+> `GLOBAL RANKS ARE OFF IN THIS SESSION` rather than an error. On a published
+> place they work, and a board is up to two minutes stale by design.
+
 ---
 
 ## Bugs fixed for this build
@@ -328,7 +390,25 @@ and should be spawned into the next round on its own. Press FIND ANOTHER SERVER
 once in Studio to see it refuse politely; a Studio session has nowhere to
 teleport to, which is the failure path worth seeing.
 
-### H. Controller and phone
+### H. The new systems, in one pass
+
+Four things, quickest first:
+
+1. **RANKS** from the main menu. Three tabs. In Studio without API services it
+   should say so in words, not sit on `LOADING…`. On a published place, finish a
+   round and check you appear within two minutes.
+2. **CAREER** — the streak card is above TODAY'S ORDERS. A fresh account should
+   have `CLAIM TODAY` live immediately. Claim it, watch the card go to `CLAIMED`
+   and the toast say `1 DAY STREAK`, then press it again: nothing should happen
+   twice.
+3. **A Tank, dodged on purpose.** Let it wind up, step out of the arc, and watch
+   for `EXPOSED` on the bar and the stagger cue. It should not happen twice in
+   eight seconds however many swings you make it miss.
+4. **A round alone.** Wave 15 solo should be a hard fight rather than an
+   arithmetic impossibility. If the Apex still cannot be killed inside the wave,
+   that is the number to report.
+
+### I. Controller and phone
 
 Every generator panel is presses only and was built for this. If any of the five
 cannot be finished on a pad or a phone, that is the single most important thing
