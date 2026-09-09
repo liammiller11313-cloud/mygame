@@ -40,6 +40,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AbilityConfig = require(Shared.Config.AbilityConfig)
+local Enums = require(Shared.Enums)
 local Attributes = require(Shared.Net.Attributes)
 local Registry = require(Shared.Util.Registry)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
@@ -58,8 +59,85 @@ local trove = Trove.new()
 --[[ Fifteen a second. Fast enough that the barrel tracks a mouse without
      visible stepping, slow enough that four players manning four turrets is 60
      small packets a second rather than 240. ]]
-local INPUT_HZ = 15
+local INPUT_HZ = 20
 local INPUT_PERIOD = 1 / INPUT_HZ
+
+--[[
+	THE BARREL IS DRAWN HERE, NOT WAITED FOR.
+
+	A manned turret felt laggy because it WAS: the aim went to the server at
+	INPUT_HZ, the server turned the model on its own Heartbeat, and the new angle
+	came back down the wire — so the gun sat a full round trip plus up to a tick
+	of quantisation behind the crosshair. On a hundred-millisecond connection
+	that is most of a fifth of a second of the barrel visibly trailing the mouse,
+	which is exactly what "very buggy and laggy" describes.
+
+	A client already knows where it is aiming. So while YOU are the driver, your
+	own client pivots the gun every frame from your own camera and does not wait
+	for anyone. RenderStepped runs after replication inside a frame, so the local
+	angle is what gets drawn even though the server keeps writing its own for
+	everybody else.
+
+	── AND IT CANNOT CHEAT ─────────────────────────────────────────────────────
+	Nothing about the SHOT moves. The server fires from the direction it was
+	sent, applies its own clamp, and picks its own target; a client that lied
+	about where the model points would change what the gun looks like and not
+	what it hits. That split — cosmetic on the client, authority on the server —
+	is the only reason this is safe to do at all.
+]]
+local MAX_PITCH = math.rad(AbilityConfig.get(Enums.Ability.Turret).tuning.MaxPitchDegrees)
+
+--[[ The same clamp the server applies, from the same shared number. Duplicated
+     as CODE and not as a constant on purpose: two files agreeing on 28 is a
+     config read, two files agreeing on the arithmetic is four lines. ]]
+local function aimHeading(delta: Vector3): Vector3?
+	local flat = Vector3.new(delta.X, 0, delta.Z)
+	local run = flat.Magnitude
+	if run < 0.05 then
+		return nil
+	end
+	local pitch = math.clamp(math.atan2(delta.Y, run), -MAX_PITCH, MAX_PITCH)
+	return (flat / run) * math.cos(pitch) + Vector3.yAxis * math.sin(pitch)
+end
+
+--[[ Resolved once per turret and remembered. Weak keys, so a turret that
+     expires or is destroyed takes its entry with it — this is looked up every
+     frame while somebody is driving, and a recursive FindFirstChild per frame
+     for an answer that cannot change is the kind of waste that only shows up on
+     a phone. ]]
+local aimParts = (setmetatable({}, { __mode = "k" }) :: any) :: { [Model]: PVInstance | false }
+
+--[[
+	Whatever has to turn to point the gun.
+
+	The same two candidates the server resolves, in the same order: a supplied
+	model's child called `gun` (see buildSupplied), or the procedural body's
+	`Head` (see the grey-box build). Getting this wrong is worse than not
+	predicting at all — the client would turn one part while the server turned
+	another — so it mirrors that function rather than guessing.
+
+	`false` is cached for a turret with neither, which is a model somebody
+	supplied without a gun child. The server stands those still and shoots from
+	the base, and this leaves them alone.
+]]
+local function aimPartOf(turret: Model): PVInstance?
+	local cached = aimParts[turret]
+	if cached ~= nil then
+		return if cached then cached else nil
+	end
+	local found: PVInstance? = nil
+	local gun = turret:FindFirstChild("gun", true)
+	if gun and (gun:IsA("BasePart") or gun:IsA("Model")) then
+		found = gun :: PVInstance
+	else
+		local head = turret:FindFirstChild("Head", true)
+		if head and head:IsA("BasePart") then
+			found = head :: PVInstance
+		end
+	end
+	aimParts[turret] = found or false
+	return found
+end
 
 local BAR_WIDTH = 132
 local BAR_HEIGHT = 6
@@ -299,12 +377,34 @@ end
 function TurretController:start()
 	trove:connect(RunService.RenderStepped, function()
 		local now = os.clock()
+
+		--[[
+			The barrel first, and OUTSIDE the send throttle.
+
+			These were one block, so the gun turned at INPUT_HZ even for the
+			person driving it — the throttle exists to spare the network and was
+			costing the driver frames it was never meant to touch. Drawing is
+			every frame; telling the server is twenty times a second.
+		]]
+		local seatedNow = seatedTurret()
+		if seatedNow then
+			local camera = Workspace.CurrentCamera
+			local aim = camera and aimPartOf(seatedNow)
+			if camera and aim then
+				local at = aim:GetPivot().Position
+				local heading = aimHeading(aimPoint(camera, seatedNow) - at)
+				if heading then
+					aim:PivotTo(CFrame.lookAt(at, at + heading))
+				end
+			end
+		end
+
 		if now < nextSendAt then
 			return
 		end
 		nextSendAt = now + INPUT_PERIOD
 
-		local seated = seatedTurret()
+		local seated = seatedNow
 		refreshHints(seated)
 
 		if not seated then

@@ -754,6 +754,25 @@ local function forward(action: string)
 		if not humanoid or humanoid.Health <= 0 then
 			return
 		end
+		--[[
+			── SEATED FIRST, AND BEFORE BOTH GUARDS BELOW ──────────────────────
+			Jump is how you leave a turret, and neither guard under this one lets
+			you. A seated humanoid's FloorMaterial is Air — it is sitting, not
+			standing on anything — so the ground check refuses every press, which
+			is the whole of "you can't jump out of the turret whenever you want".
+
+			ChangeState(Jumping) would not have unseated it anyway. `Sit = false`
+			is the call that leaves a Seat, and it is a different mechanism from
+			jumping rather than a variant of it.
+
+			Above the JumpPower guard as well, deliberately. A survivor manning a
+			turret when a Hunter pins somebody they were covering has to be able to
+			get out, and the seat is not the grip that guard exists to protect.
+		]]
+		if humanoid.Sit then
+			humanoid.Sit = false
+			return
+		end
 		--[[ Zero while a survivor is pinned or downed — SurvivorService drops both
 		     to immobilise them — and a state change would jump them out of a
 		     Hunter's grip. ]]

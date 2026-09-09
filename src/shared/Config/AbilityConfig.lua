@@ -171,6 +171,13 @@ local DEFINITIONS: { Ability } = {
 			FireRate = 3.0,
 			Range = 70,
 			Health = 250,
+			--[[ How far the barrel may pitch, in degrees. Here rather than in
+			     Turret.lua because the DRIVER'S CLIENT now draws the barrel
+			     locally — a manned turret whose model waited for the server to
+			     turn it was a full round trip behind its own crosshair — and two
+			     copies of a clamp in two files is one copy too many. The server
+			     still owns the shot; this only decides where the gun looks. ]]
+			MaxPitchDegrees = 28,
 			--[[
 				Seventy-five seconds, up from thirty.
 

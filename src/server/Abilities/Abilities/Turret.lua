@@ -369,6 +369,21 @@ local SEAT_GROUP = "TurretSeat"
      frames for as long as it stands there. ]]
 local EJECT_COOLDOWN = 1.0
 
+--[[
+	How long the seat ignores touches after its DRIVER gets out.
+
+	The other half of "you can't jump out of the turret whenever you want", and
+	the half that survives fixing the jump. A Seat seats on touch, the seat is
+	right where you were sitting, and standing up puts your legs through it — so
+	you leave and are seated again in the same breath, forever. From the player's
+	side that is a jump key that does nothing.
+
+	Shorter than the eject cooldown because this one is answering a person who
+	meant it: long enough to step off, short enough that changing your mind and
+	getting back in feels immediate rather than punished.
+]]
+local DISMOUNT_COOLDOWN = 0.6
+
 local function buildSeat(model: Model, root: BasePart, facing: Vector3, visible: boolean): Seat
 	--[[ The artist's own, if they built one. Any Seat inside a supplied model is
 	     taken as the place to sit — so somebody who has modelled a gunner's stool
@@ -481,6 +496,20 @@ local function setDriver(turret: Emplacement, player: Player?)
 	turret.manualAt = 0
 	if player then
 		player:SetAttribute(PA.ManningTurret, true)
+	else
+		--[[ Somebody just got OUT. Shut the seat for a moment so standing up does
+		     not put them straight back in it — see DISMOUNT_COOLDOWN. Guarded on
+		     `previous` so a turret that never had a driver does not disable its
+		     own seat on the frame it is built. ]]
+		local seat = turret.seat
+		if previous and seat and seat.Parent then
+			seat.CanTouch = false
+			task.delay(DISMOUNT_COOLDOWN, function()
+				if seat.Parent then
+					seat.CanTouch = true
+				end
+			end)
+		end
 	end
 	publish(turret)
 end
@@ -530,7 +559,11 @@ end
 	down — where there is no heading to point along and the last one is the
 	better answer than a spin.
 ]]
-local MAX_PITCH = math.rad(28)
+--[[ Read from the shared tuning rather than declared here: the driver's own
+     client applies the same clamp when it draws the barrel locally, and a limit
+     that lived only on this side would let the two disagree about where the gun
+     is pointing. ]]
+local MAX_PITCH = math.rad(TUNING.MaxPitchDegrees)
 
 --[[ For the missed-shot ray only. Rebuilt per shot rather than kept in sync,
      because the one thing it must exclude — every turret in the world plus the
@@ -921,6 +954,15 @@ function Turret.step(_dt: number)
 
 		if heading then
 			local at = turret.aim:GetPivot().Position
+			--[[ For everybody who is NOT driving it. The driver's own client
+			     pivots this model locally every frame off its own camera — see
+			     TurretController — because the barrel arriving a full round trip
+			     behind their crosshair is the whole of "the turret feels laggy",
+			     and a client already knows where it is aiming without being told.
+
+			     Nothing about the SHOT moves: the round is fired here, from
+			     `manualDirection`, and a client that lies about where the model
+			     points changes what it looks like and not what it hits. ]]
 			turret.aim:PivotTo(CFrame.lookAt(at, at + heading))
 		end
 
