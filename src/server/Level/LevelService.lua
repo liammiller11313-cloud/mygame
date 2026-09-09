@@ -879,6 +879,38 @@ local function survivorSpawnSummary(): string
 	return "NONE anywhere — falling back to the flow spline or the map's centre"
 end
 
+--[[
+	One survivor, standing on one pad.
+
+	── WHY THIS IS NOT JUST "THE PAD'S POSITION" ───────────────────────────────
+	Both pad branches wrapped with `((index - 1) % count) + 1` and stopped there,
+	which is correct until there are more survivors than pads. Then the fifth
+	player is handed pad one — the EXACT CFrame the first player already has —
+	and two characters are spawned inside each other. Roblox resolves that
+	overlap the only way it can, by ejecting one at speed, and on a map whose
+	floor is thin that is straight through it.
+
+	That is the whole of "in other maps I spawn under or away, but when I test on
+	my own I spawn fine": alone nobody ever shares a pad, so the bug cannot
+	happen, and the more people are in the round the likelier it is.
+
+	So a survivor who is not the first on their pad is placed AROUND it instead of
+	on it, using the same ring the untagged fallbacks already use, and dropped
+	onto whatever floor is actually there — a ring point over a stairwell is a
+	worse answer than the pad it came from, and standOn is what turns it back
+	into a place a person can stand.
+]]
+local function padCFrame(pad: BasePart, index: number, count: number): CFrame
+	local top = pad.Position + Vector3.new(0, pad.Size.Y * 0.5 + SPAWN_ROOT_HEIGHT, 0)
+	local facing = flatLook(pad.CFrame.LookVector)
+	--[[ Which time around the pads this is. Zero for everybody while there are
+	     enough to go round, which is the ordinary case and costs nothing. ]]
+	if index > count then
+		top = standOn(ringPoint(top, index))
+	end
+	return CFrame.lookAt(top, top + facing)
+end
+
 function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 	if survivorSpawnDirty then
 		rebuildSurvivorSpawns()
@@ -886,9 +918,8 @@ function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 	local index = math.max(math.floor(tonumber(slot) or 1), 1)
 
 	if #survivorSpawns > 0 then
-		local pad = survivorSpawns[((index - 1) % #survivorSpawns) + 1]
-		local top = pad.Position + Vector3.new(0, pad.Size.Y * 0.5 + SPAWN_ROOT_HEIGHT, 0)
-		return CFrame.lookAt(top, top + flatLook(pad.CFrame.LookVector))
+		local count = #survivorSpawns
+		return padCFrame(survivorSpawns[((index - 1) % count) + 1], index, count)
 	end
 
 	--[[ The map's own, one survivor per pad, on top of it and facing the way it
@@ -897,9 +928,8 @@ function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 	     way to author a map, not a thing to be nagged out of. ]]
 	local placed = mapSpawnPoints()
 	if #placed > 0 then
-		local pad = placed[((index - 1) % #placed) + 1]
-		local top = pad.Position + Vector3.new(0, pad.Size.Y * 0.5 + SPAWN_ROOT_HEIGHT, 0)
-		return CFrame.lookAt(top, top + flatLook(pad.CFrame.LookVector))
+		local count = #placed
+		return padCFrame(placed[((index - 1) % count) + 1], index, count)
 	end
 
 	--[[ Anywhere at all, and now genuinely a last resort before the spline. The

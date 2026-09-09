@@ -259,6 +259,8 @@ local playButton: TextButton? = nil
 local playLine: TextLabel? = nil
 local backButton: TextButton? = nil
 local resultContinueButton: TextButton? = nil
+local resultAgainButton: TextButton? = nil
+local resultAgain: TextLabel
 local resultReturn: TextLabel
 
 local masterGroup: SoundGroup
@@ -520,7 +522,10 @@ local function refreshVisibility()
 		-- selection while it is up.
 		GamepadFocus.release(nil)
 	elseif state.results then
-		GamepadFocus.capture(resultContinueButton)
+		--[[ On PLAY AGAIN, not on the way out. A pad landing on RETURN TO LOBBY
+		     makes leaving the default action of a screen whose whole purpose is
+		     to ask whether you want another go. ]]
+		GamepadFocus.capture(resultAgainButton or resultContinueButton)
 	elseif lobbyVisible then
 		--[[ Whichever page is up. Pointing a pad at a mode entry that PLAY has not
 		     revealed yet is pointing it at a hidden button, which eats every D-pad
@@ -988,6 +993,46 @@ local function requestMode(mode: string)
 	setMessage("")
 	refreshEntries()
 	Remotes.Event.RequestMode:FireServer(mode)
+end
+
+--[[
+	PLAY AGAIN. The results screen's other way out, and the one people want.
+
+	Dismissing this poster put you in the main menu, where the next thing every
+	single player did was press the mode they had just played. That is a click to
+	confirm something they had already decided by pressing a button called PLAY
+	AGAIN, which is a click for nothing.
+
+	── IT ASKS FOR THE MODE THE ROUND WAS ──────────────────────────────────────
+	Read off the game attribute rather than remembered, because "the mode that
+	just ended" is a fact about the server and this screen is not the only thing
+	that can change it — a player who left a Versus round and came back to a
+	Classic server should get the round they are actually in. An unrecognised
+	value falls back to the default, which is the same thing an unknown mode does
+	everywhere else in this file.
+
+	── AND IT LEAVES FIRST, FOR THE REASON dismissResults DOES ─────────────────
+	Same LeaveMatch, same case: a wipe on a busy server can put the next prep
+	window behind this poster, and asking for a mode without leaving first is how
+	somebody ends up queued for one round while standing in another.
+]]
+local function playAgain()
+	if not state.results then
+		return
+	end
+	local mode = tostring(Attributes.get(Workspace, Attributes.Game.Mode, MODES.Classic))
+	--[[ Modes is keyed name -> the same string, so an unknown value indexes to
+	     nil and this one line is the whole validation. ]]
+	if not GameModeConfig.Modes[mode] then
+		mode = GameModeConfig.DefaultMode
+	end
+
+	Remotes.Event.LeaveMatch:FireServer()
+	state.results = false
+	confetti:clear()
+	UiSound.play(AudioConfig.UI.MenuConfirm)
+	MainMenuController:open()
+	requestMode(mode)
 end
 
 -- ── round state ─────────────────────────────────────────────────────────────
@@ -1853,11 +1898,50 @@ local function buildResults()
 		table.insert(resultRows, buildResultRow(index))
 	end
 
+	--[[
+		Two ways out, stacked rather than side by side.
+
+		Side by side is the obvious arrangement and it collides: the countdown
+		label opposite already reaches to 0.4 of the width from the right, and a
+		second button beside this one would run under it on any screen narrower
+		than the one this poster was drawn against.
+
+		PLAY AGAIN sits ON TOP because it is the one people want. Nothing about
+		the poster changes for the other button, which is what keeps the compact
+		layout below correct without knowing this exists.
+	]]
+	local buttonHeight = TEXT.Display + LAYOUT.PanelPadding
+
+	local again = Widgets.button(resultsLayer, "PlayAgain")
+	resultAgainButton = again
+	again.AnchorPoint = Vector2.new(0, 1)
+	again.Position =
+		UDim2.new(MENU.COLUMN_X, 0, 1, -(LAYOUT.ScreenMargin * 2 + buttonHeight + LAYOUT.ElementGap))
+	again.Size = UDim2.new(0.3, 0, 0, buttonHeight)
+	again.ZIndex = 2
+
+	local againRule = Widgets.rule(again, "Rule", COLOR.Accent)
+	againRule.ZIndex = 2
+
+	resultAgain = Widgets.label(again, "Label", FONT.Display, TEXT.Display, COLOR.AccentBright)
+	resultAgain.Position = UDim2.fromOffset(0, LAYOUT.PanelPadding)
+	resultAgain.Size = UDim2.new(1, 0, 0, TEXT.Display + 4)
+	resultAgain.ZIndex = 2
+	resultAgain.Text = "PLAY AGAIN"
+
+	trove:connect(again.MouseEnter, function()
+		resultAgain.TextColor3 = COLOR.TextPrimary
+	end)
+	trove:connect(again.MouseLeave, function()
+		resultAgain.TextColor3 = COLOR.AccentBright
+	end)
+	trove:connect(again.Activated, playAgain)
+
 	local continue = Widgets.button(resultsLayer, "Continue")
 	resultContinueButton = continue
 	continue.AnchorPoint = Vector2.new(0, 1)
 	continue.Position = UDim2.new(MENU.COLUMN_X, 0, 1, -LAYOUT.ScreenMargin * 2)
-	continue.Size = UDim2.new(0.3, 0, 0, TEXT.Display + LAYOUT.PanelPadding)
+	continue.Size = UDim2.new(0.3, 0, 0, buttonHeight)
 	continue.ZIndex = 2
 
 	local continueRule = Widgets.rule(continue, "Rule", COLOR.Border)
