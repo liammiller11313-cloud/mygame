@@ -644,7 +644,16 @@ function RoundService:_enterWave(entry)
 		     promoted boss does not get one, and promoting the list afterwards
 		     would hand a full team three Apex Tanks on a single wave. ]]
 		local promotion = if ModifierConfig.eliteBosses(Workspace) then "Apex" else nil
-		local releases = GameModeConfig.rollBosses(wave, uprightCount(), bossRng, promotion)
+		--[[ The map's own finale, looked up HERE rather than inside rollBosses:
+		     GameModeConfig requires Enums and nothing else on purpose, and the
+		     map that is loaded is a fact this service already holds. Nil on every
+		     map but the Backrooms, and nil is the ordinary answer. ]]
+		local mapService = Registry.find("MapService")
+		local mapId = mapService
+			and typeof(mapService.getCurrentId) == "function"
+			and mapService:getCurrentId()
+		local finale = MapConfig.finaleBossFor(if typeof(mapId) == "string" then mapId else nil)
+		local releases = GameModeConfig.rollBosses(wave, uprightCount(), bossRng, promotion, finale)
 
 		local callout = bossCallout(releases)
 		if callout then

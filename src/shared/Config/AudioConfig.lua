@@ -731,6 +731,22 @@ AudioConfig.Infected = {
 	MetallicCharge = sound(ID.MonsterBellow, 1.0, 0.68, 0.74, 640, 9),
 	MetallicSlam = sound(ID.ImpactConcrete, 1.0, 0.54, 0.62, 580, 9),
 	MetallicVent = sound(ID.FlamethrowerBurst, 0.95, 0.6, 0.68, 500, 10),
+
+	--[[ The Bacteria Monster. Same approach as the Metallic above it — existing
+	     samples re-pitched rather than new uploads — and pitched the other way:
+	     everything this creature does is WET and low, where the Metallic is dry
+	     and metallic. It never roars a challenge; it announces itself by being
+	     already in the room, which is why its loudest cue is the one that
+	     carries furthest and the rest are close and quiet.
+
+	     `Bloom` is the cue that matters: a colony taking root under the team's
+	     feet. It has to be audible over gunfire from the middle of a firefight,
+	     because a player who cannot hear the ground going bad has to look down
+	     to learn it, and looking down in this fight is how you die. ]]
+	BacteriaRoar = sound(ID.MonsterBellow, 1.0, 0.52, 0.6, 820, 10),
+	BacteriaStep = sound(ID.ImpactWater, 0.7, 0.6, 0.7, 260, 5),
+	BacteriaBloom = sound(ID.ImpactWater, 0.9, 0.85, 1.0, 340, 8),
+	BacteriaDeath = sound(ID.MonsterRoar, 1.0, 0.5, 0.58, 700, 10),
 } :: { [string]: SoundDefinition }
 
 AudioConfig.Survivor = {

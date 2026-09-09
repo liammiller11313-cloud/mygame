@@ -649,6 +649,33 @@ function SurvivorService:_computeWalkSpeed(record): number
 		end
 	end
 
+	--[[
+		Whatever is currently dragging on their legs, from outside this service.
+
+		One number, multiplied in last, written by anything that needs a survivor
+		slowed — today that is the Bacteria Monster's colonies, which is the
+		floor of the Backrooms finale going bad under them.
+
+		── AND WHY IT IS NOT A HUMANOID WRITE ──────────────────────────────────
+		The obvious version is for the creature to set WalkSpeed itself and put
+		it back afterwards, and that is broken in a way that only shows up later:
+		this function runs EVERY FRAME and the tick above it writes the result
+		whenever it differs from what was last applied. So an outside write
+		survives right up until the survivor sprints, swaps weapon or crosses
+		into Hurt — and then it is silently overwritten, while the creature is
+		still holding what it thinks is the "real" speed to restore. The player
+		ends the fight walking at a number nothing in the game ever chose.
+
+		The service owns this property. Anything that wants to change it asks
+		here, and the multiplication happening in one place is what guarantees a
+		slow can never outlive whatever applied it: the attribute goes, the next
+		frame is full speed, and nobody has to remember to put anything back.
+	]]
+	local drag = record.player:GetAttribute(PA.SpeedDrag)
+	if typeof(drag) == "number" and drag > 0 and drag < 1 then
+		speed *= drag
+	end
+
 	return speed
 end
 

@@ -668,6 +668,115 @@ InfectedConfig.Definitions = {
 		gibbable = false, -- a machine does not burst either. See the Boomer.
 		corpseLifetime = 60,
 	},
+
+	--[[
+		── THE BACTERIA MONSTER ─────────────────────────────────────────────────
+		The Backrooms' finale, and the first creature in the roster that belongs
+		to one map. See MapConfig.finaleBoss.
+
+		── THE ANSWER IT ATTACKS ───────────────────────────────────────────────
+		The other three bosses each take away one habit. The Tank says keep
+		moving; the Witch says do not make noise; the Metallic says read the
+		arena rather than the boss. None of them touches the thing every team
+		actually does, on every map, in every fight: pick a room, cover the one
+		door, and focus fire.
+
+		This one takes the room.
+
+		It is SLOW and it never charges, never leaps, never closes a gap you did
+		not give it. You can walk away from it whenever you like. What you cannot
+		do is stand anywhere — because the ground it walks on, and more
+		importantly the ground it is SHOT FROM, starts to grow. See
+		Specials/BacteriaMonster: the harder a team holds a firing position, the
+		faster that position rots underneath them.
+
+		The Backrooms is the one map where that is a real problem rather than an
+		inconvenience. Identical rooms, no landmarks, nothing to navigate by — so
+		being forced to relocate mid-fight costs a team something everywhere else
+		would not.
+
+		── AND FIRE IS THE ANSWER AGAIN ────────────────────────────────────────
+		burnDamagePerSecond is 200, the highest in the game and eight times the
+		Metallic's. That is deliberate symmetry: the Metallic exists partly to
+		take the molotov away from a team that opens every boss fight with one,
+		and this thing hands it straight back. While it burns it also stops
+		seeding — see the module — so fire both hurts it most and stops the floor
+		spreading, which is the cleanest possible way to say "this is the answer"
+		without a tutorial.
+
+		── HEALTH IS LOW, ON PURPOSE ───────────────────────────────────────────
+		Three thousand, under a Tank's four and half a Metallic's six. It is not
+		a bullet sponge; it is a TIMER on wherever the team is standing. Giving it
+		Metallic health would mean a fight long enough to infest the whole floor,
+		which is not pressure, it is a wipe with extra steps.
+	]]
+	[Enums.Infected.BacteriaMonster] = {
+		id = Enums.Infected.BacteriaMonster,
+		displayName = "Bacteria Monster",
+		--[[ Their folder, which holds a rig of the same name. ]]
+		modelFolder = "Bacteria Monster",
+		health = 3000,
+		isBoss = true,
+		isSpecial = true,
+
+		--[[ Slower than a survivor walks, and it never runs. Everything about
+		     this creature is built on being escapable: the threat is the ground
+		     it leaves behind, and a boss that could also catch you would be
+		     asking the team to solve two problems with one set of legs. ]]
+		walkSpeed = 11,
+		runSpeed = 11,
+		sprintChance = 0,
+		--[[ Turns freely. It has no dodge to punish and nothing to sidestep, so
+		     the Metallic's blind spot would be a free win rather than a
+		     mechanic. ]]
+		turnSpeed = 180,
+		jumpPower = 0,
+
+		headshotAlwaysKills = false,
+		damageResistance = 1.0,
+		stumbleResistance = 1.0,
+		--[[ The highest in the game, and the point of the fight. See the header. ]]
+		burnDamagePerSecond = 200,
+
+		--[[ It barely swings. Getting hit by this thing means you let a creature
+		     that moves at eleven studs a second walk into you, which is a mistake
+		     the game should charge for once rather than delete you over — the
+		     colonies are where its damage actually lives. ]]
+		attack = { damage = 14, range = 9, cooldown = 1.1, windup = 0.35 },
+
+		sightRange = 500,
+		hearingRange = 600,
+		--[[ It never loses interest. A creature you are supposed to walk away
+		     from has to keep following, or walking away solves it. ]]
+		loseInterestTime = 900,
+
+		spawnCost = 150,
+		maxAlive = 1,
+
+		--[[ Sickly, wet and pale. It has to read as a growth rather than as a
+		     corpse at a glance, because the floor it leaves behind is the same
+		     colour and the player has to connect the two without being told. ]]
+		bodyColor = Color3.fromRGB(178, 190, 128),
+		accentColor = Color3.fromRGB(120, 140, 74),
+		--[[ Solved backwards from targetHeight the way the Metallic's is: the
+		     grey-box proportions add up to 5.70 studs, and 5.70 x 2.11 is 12.0.
+		     Only ever builds the fallback rig. ]]
+		scale = 2.11,
+		--[[ Twelve studs — under a Tank's measured 13.6, which is the only size
+		     statement worth making about it. It is not the biggest thing on the
+		     map and it should not look like it is: what makes it a boss is what
+		     it does to the floor, and a silhouette that promised a Tank fight
+		     would teach the wrong lesson before the first shot. ]]
+		targetHeight = 12,
+		outlineColor = Color3.fromRGB(154, 214, 92),
+
+		gibThreshold = 2200,
+		dismemberable = false,
+		--[[ It bursts. A thing made of growth coming apart is the one death in
+		     the roster where the gore is telling the truth about the creature. ]]
+		gibbable = true,
+		corpseLifetime = 45,
+	},
 } :: { [string]: InfectedDefinition }
 
 --[[
@@ -783,6 +892,11 @@ InfectedConfig.CommonTiers = table.freeze({
 InfectedConfig.PeakBosses = table.freeze({
 	[Enums.Infected.Tank] = true,
 	[Enums.Infected.Metallic] = true,
+	--[[ A fight, not a hazard. It is slow and escapable, which sounds like the
+	     Witch's category and is the opposite of it: the Witch is avoidable and
+	     this thing follows you until one of you is dead. The pressure it applies
+	     is real and the Director should be at its peak for it. ]]
+	[Enums.Infected.BacteriaMonster] = true,
 })
 
 export type EliteTier = {

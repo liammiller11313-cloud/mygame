@@ -45,6 +45,28 @@ export type MapDefinition = {
 		an absolute so the author's own relative choices survive it.
 	]]
 	musicVolume: number?,
+
+	--[[
+		A boss this map, and only this map, ends on.
+
+		Present on one map. When it is set, the FINAL wave releases this instead
+		of whatever the wave table declared — and instead of whatever its
+		substitution pool would have rolled, because a boss that is exclusive to
+		a map is not exclusive if a coin flip can replace it with a Metallic.
+
+		Here rather than in GameModeConfig because the wave table is the round's
+		SHAPE and is deliberately the same everywhere: a boss lands on 5, 8, 11
+		and 15, and a team that has played four rounds can feel that rhythm
+		coming whatever they voted for. What changes per map is a fact about the
+		map, and this file is where facts about maps live.
+
+		It replaces the finale's TIER as well as its kind — see
+		GameModeConfig.rollBosses, which drops the Apex multiplier for the same
+		reason it drops it from a substitute: the multiplier exists to make a
+		Tank into a finale, and a creature that already is one does not need
+		tripling.
+	]]
+	finaleBoss: string?,
 }
 
 MapConfig.Maps = {
@@ -77,6 +99,12 @@ MapConfig.Maps = {
 	},
 	{
 		id = "Backrooms",
+		--[[ The one map with a finale of its own. See finaleBoss above, and
+		     InfectedConfig for why this creature belongs here rather than in the
+		     general roster: it attacks standing still, and identical rooms with
+		     no landmarks is the one place where being moved actually costs
+		     something. ]]
+		finaleBoss = Enums.Infected.BacteriaMonster,
 		displayName = "BACKROOMS",
 		--[[ A different SHAPE of blurb from the other three, deliberately. Those
 		     are three fragments naming what the map is and what to bring, which
@@ -115,6 +143,21 @@ local function foldFolderName(name: string): string
 		folded = string.sub(folded, 1, -2)
 	end
 	return folded
+end
+
+--[[ The boss a map ends on, or nil — which is the answer for every map but
+     one. Nil means "whatever the wave table declared", which is the whole
+     roster's normal behaviour and must never read as a mistake. ]]
+function MapConfig.finaleBossFor(mapId: string?): string?
+	if typeof(mapId) ~= "string" then
+		return nil
+	end
+	for _, map in MapConfig.Maps do
+		if map.id == mapId then
+			return map.finaleBoss
+		end
+	end
+	return nil
 end
 
 function MapConfig.folderMatches(name: string, wanted: string): boolean

@@ -199,6 +199,10 @@ Enums.Infected = table.freeze({
 	--[[ Bigger than a Tank and built rather than turned: a mechanical thing on
 	     drills. See InfectedConfig for the fight it is meant to be. ]]
 	Metallic = "Metallic",
+	--[[ The Backrooms' own finale, and the only creature in the roster that
+	     belongs to ONE map — see MapConfig.finaleBoss. It attacks the answer none
+	     of the other three do: standing still. ]]
+	BacteriaMonster = "BacteriaMonster",
 })
 
 -- Survivor lifecycle. Drives the HUD, the Director, and revive logic.

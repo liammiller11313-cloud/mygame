@@ -382,15 +382,21 @@ export type BossRelease = {
 	a caller that promoted the list after this returned would hand a full team
 	three Apex Tanks on one wave.
 
+	`finale` is the map's own last-wave boss, or nil on every map but one. See
+	inside: it applies to the final wave only, and it takes the pool and the tier
+	with it.
+
 	Pure apart from `rng`, which the caller supplies so a test can pin it. Never
 	returns nil — a wave with no bosses returns an empty list — and never returns
-	a kind the wave did not name or list in its pool.
+	a kind the wave did not name, list in its pool, or that the map did not ask
+	for by name.
 ]]
 function GameModeConfig.rollBosses(
 	wave: WaveDefinition,
 	humans: number,
 	rng: Random,
-	promotion: string?
+	promotion: string?,
+	finale: string?
 ): { BossRelease }
 	local releases: { BossRelease } = {}
 	if not wave or typeof(wave.bosses) ~= "table" then
@@ -400,9 +406,40 @@ function GameModeConfig.rollBosses(
 	local pool = wave.bossPool
 	local poolChance = wave.bossPoolChance or 0
 
+	--[[
+		A map that ends on something of its own.
+
+		`finale` is MapConfig.finaleBoss, passed down by the caller rather than
+		looked up here — this file requires Enums and nothing else on purpose,
+		and a config that reaches sideways into another config to answer a
+		question about the round's shape is a config that has stopped being the
+		round's shape.
+
+		It applies on the LAST wave only, which is what "finale" means. A map's
+		exclusive boss showing up on wave 8 would be the same creature three
+		times a round and none of them special.
+
+		It also switches OFF the substitution pool for that wave. A boss
+		exclusive to a map is not exclusive if a coin flip can replace it with a
+		Metallic, and wave 15's pool is a 50/50 by design.
+	]]
+	local override = if typeof(finale) == "string"
+			and finale ~= ""
+			and wave.index >= #GameModeConfig.Waves
+		then finale
+		else nil
+	if override then
+		pool = nil
+		poolChance = 0
+	end
+
 	for _, declared in wave.bosses do
-		local kind = declared
-		local tier = wave.bossTier
+		local kind = if override then override else declared
+		--[[ And it drops the wave's tier, for exactly the reason a substitute
+		     does: Apex triples health because that is what turns a Tank into a
+		     finale, and a creature that was authored AS one does not need
+		     tripling. See BossRelease. ]]
+		local tier = if override then nil else wave.bossTier
 
 		if pool and #pool > 0 and poolChance > 0 and rng:NextNumber() < poolChance then
 			kind = pool[rng:NextInteger(1, #pool)]
@@ -423,7 +460,7 @@ function GameModeConfig.rollBosses(
 
 		--[[ The pack, and only for a plain Tank. An Apex is already this wave's
 		     escalation and two of them is the same wave twice as long. ]]
-		if wave.bossPack and kind == Enums.Infected.Tank and tier == nil then
+		if not override and wave.bossPack and kind == Enums.Infected.Tank and tier == nil then
 			local row = GameModeConfig.TankPack[math.clamp(math.floor(humans), 1, #GameModeConfig.TankPack)]
 			if row and rng:NextNumber() < row[1] then
 				table.insert(releases, { kind = kind, tier = nil })

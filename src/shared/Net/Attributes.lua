@@ -24,6 +24,22 @@ local Attributes = {}
 -- keep rendering a teammate's slot while they are dead and awaiting a defib.
 Attributes.Player = table.freeze({
 	State = "FL_State", -- string, Enums.SurvivorState
+	--[[
+		A multiplier on this survivor's walk speed, from something outside
+		SurvivorService. Absent or 1 means nothing is dragging on them.
+
+		Written by whatever is doing the slowing — today the Bacteria Monster's
+		colonies — and read once, last, inside _computeWalkSpeed. It exists
+		because that function runs every frame and writes the result: an outside
+		write straight to Humanoid.WalkSpeed survives until the survivor sprints
+		or swaps weapon, then vanishes, while whatever applied it is still
+		holding a stale "real" speed to put back.
+
+		The consequence of doing it this way is the useful one: a slow cannot
+		outlive whatever applied it. Clear the attribute and the next frame is
+		full speed, with nothing to remember to restore.
+	]]
+	SpeedDrag = "FL_SpeedDrag", -- number, < 1 while something is slowing them
 	--[[ Set on a player who chose to leave the match, and cleared when they pick
 	     a mode again. It is what makes RETURN TO MAIN MENU mean it: without it
 	     the next round spawns everybody in the server, which pulls somebody who

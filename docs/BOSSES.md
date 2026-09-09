@@ -1,6 +1,6 @@
 # Bosses
 
-Three creatures set `isBoss`. Two of them are fights and one of them is a hazard,
+Four creatures set `isBoss`. Two of them are fights and one of them is a hazard,
 and that split matters more than the flag does — the Witch is meant to be tiptoed
 past, so she is the only one with no health bar and the only one whose arrival
 does not push the AI Director to its peak state. The set lives in
@@ -12,6 +12,70 @@ reads it rather than naming kinds again.
 | **Witch** | 1000 | 45/s | no | avoid her, or kill her in one go |
 | **Tank** | 4000 | 150/s | yes | keep moving, fire in turns, burn it |
 | **Metallic** | 6000 | **25/s** | yes | don't be in the lane, then fill the window |
+| **Bacteria Monster** | 3000 | **200/s** | yes | burn it, and stop standing still |
+
+---
+
+## The Bacteria Monster
+
+**Backrooms only.** The first creature in the roster that belongs to one map —
+see `MapConfig.finaleBoss`, which replaces wave 15's boss on that map and
+switches off its 50/50 substitution pool, because a boss exclusive to a map is
+not exclusive if a coin flip can swap it for a Metallic.
+
+### The answer it takes away
+
+The other three each remove one habit and leave the rest — keep moving, don't
+make noise, read the arena. Underneath, a team beats all three the same way, and
+none of them touch it: **pick a room, cover the one door, put every gun on the
+same target.**
+
+This one takes the room.
+
+### How
+
+It is **slow**. No charge, no leap, walks below survivor pace. You can leave
+whenever you like. You just can't *stay*.
+
+It seeds **colonies** — growth on the floor that damages, slows you to 55%, and
+keeps spreading after it lands. Two sources:
+
+1. **Where it walks**, on a slow drip every 26 studs. On its own that's a Spitter
+   with a longer fuse.
+2. **Where it's shot.** Every 300 damage it takes, a colony takes root a few
+   studs short of whoever it's chasing — which is whoever has been shooting
+   hardest.
+
+That second one is the fight. Four guns on one target from one doorway is the
+fastest possible way to make that doorway uninhabitable. The better a team is at
+the fight they already know, the sooner they have to leave the place they were
+winning it from.
+
+### The counter is fire
+
+`burnDamagePerSecond` is **200** — the highest in the game, eight times the
+Metallic's — and **while it burns it stops seeding entirely**. Damage taken while
+alight isn't banked either, so burning it is a way to *stop* the blooms, never a
+way to defer them.
+
+That's deliberate symmetry. The Metallic exists partly to take the opening
+molotov away from a team that throws one at every boss; this hands it straight
+back as the whole answer.
+
+### It is not a damage race
+
+3000 health — under a Tank's, half a Metallic's. The fight is a timer on the
+team's **position**, not on its ammunition. At Metallic health the colonies would
+eat the whole floor before it died, which isn't pressure, it's a wipe with a
+longer preamble.
+
+When it dies the floor clears and everyone gets their legs back. A finale that
+left the map poisoned would make winning feel like losing more slowly.
+
+### Adding another map-exclusive boss
+
+One line: `finaleBoss = Enums.Infected.<Kind>` on that map's `MapConfig` entry.
+`rollBosses` takes it from there — last wave only, pool off, tier dropped.
 
 ---
 
