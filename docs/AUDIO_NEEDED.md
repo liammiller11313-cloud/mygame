@@ -192,12 +192,26 @@ Two things to check on every result before you commit to it:
 | M4 / HK416 / Mk18 | `m4 shot`, `m4a1 fire`, `ar15 shot`, `rifle shot` |
 | M1A EBR / marksman | `sniper shot`, `battle rifle`, `dmr shot`, `762 rifle` |
 | Machete swing | `sword swing`, `whoosh`, `blade swing`, `knife swoosh` |
+| Tesla Rifle arc | `taser`, `stun gun`, `electric zap`, `tesla coil`, `arc weld`, `static discharge` |
 | Reload | `gun reload`, `magazine reload`, `mag out`, `bolt pull`, `weapon reload` |
 | Shell insert | `shotgun shell load`, `shell insert` |
 | Dry fire | `dry fire`, `gun click`, `empty gun click` |
 
 > **Tip:** search for the same term several times and grab 3–5 *different*
 > results. That's your variation set — the engine pitch-shifts them for you.
+
+> **On the Tesla Rifle specifically:** it fires 2.75 times a second, so it is
+> over the once-a-second line and wants a variation set like the guns do — but it
+> is also over that line by very little, so one good sample ships fine and three
+> is the upgrade. What it must NOT have is a long tail: at 2.75 a second a 2s
+> sample overlaps itself five deep and turns a rifle into a drone. Under ~0.6s.
+>
+> Two traps in these search terms. `lightning` and `thunder` almost always return
+> the rumble rather than the strike — three to eight seconds, entirely the wrong
+> shape. And `laser`, `plasma` and `railgun` return sci-fi pews, which is the one
+> register this weapon was written not to be in: it should sound like something
+> that hurts, not something from a spaceship. `taser` and `arc weld` are the two
+> that most reliably return what is actually wanted.
 
 ## Flesh, bone and gore
 
