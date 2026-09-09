@@ -138,6 +138,36 @@ local clientReady: { [Player]: boolean } = {}
      the cost of being early is the bug above, and the cost of being late is a
      second of standing still on a screen that is still showing a loading map. ]]
 local READY_TIMEOUT = 12
+
+--[[
+	How long the SERVER keeps hold of a freshly spawned body before handing it
+	back to the client that plays it.
+
+	THE BUG THIS EXISTS FOR: "for them it says I'm in the map and I still get
+	attacked, but I'm not in the map."
+
+	A character's root belongs to the owning CLIENT the moment it exists, and an
+	owning client's simulation is authoritative for that client. Setting the
+	CFrame on the server moves the body for the server and for everybody else and
+	does NOT move it for its owner — so the team, the Director and the zombies all
+	agree you are on the spawn pad while your own screen has you wherever
+	LoadCharacter dropped you. Split-brain, and every symptom of it is somebody
+	else's report about you.
+
+	It was invisible for a long time because _holdUntilReady anchors the root, and
+	an anchored part IS server-authoritative. But that hold returns immediately
+	when `clientReady[player]` is already true — which is every spawn after the
+	first. So a first join worked and every round start afterwards did not, which
+	is exactly the shape of "it only happens when I play with my friends": on your
+	own you test a first spawn, in a session you play round after round.
+
+	Half a second is a round trip on a bad connection and nowhere near long enough
+	to feel: the body is server-simulated for the moment it takes the new position
+	to reach its owner, then goes straight back. Same pattern the Tongue's drag,
+	the Pogo and Versus already use — this was the one place that teleported a
+	player without it.
+]]
+local SPAWN_OWNERSHIP_TIME = 0.5
 --[[ Ping callouts. One key, one line of dialogue, and a cooldown so it cannot be
      held down to flood every client's subtitle queue. ]]
 local PING_COOLDOWN = 1.6
@@ -817,6 +847,16 @@ function SurvivorService:_holdUntilReady(player: Player, record)
 			root.AssemblyLinearVelocity = Vector3.zero
 			root.AssemblyAngularVelocity = Vector3.zero
 		end
+		--[[ And hand the body back, because the spawn teleport took it — see
+		     SPAWN_OWNERSHIP_TIME. Unanchoring alone does not undo a
+		     SetNetworkOwner(nil): the root would stay server-simulated for the
+		     rest of the round, which is the laggiest a character in this game
+		     can feel. ]]
+		if root.Parent then
+			pcall(function()
+				root:SetNetworkOwnershipAuto()
+			end)
+		end
 	end
 
 	record.releaseHold = release
@@ -928,12 +968,37 @@ function SurvivorService:_onCharacterAdded(player: Player, character: Model)
 	end
 
 	if spawnAt then
+		local root = record.root
+		--[[ Taken BEFORE the move, not after: an owning client that has already
+		     started simulating will not accept a server CFrame, and asking for
+		     the body back afterwards does not retroactively make the teleport
+		     land. See SPAWN_OWNERSHIP_TIME. ]]
+		if root then
+			pcall(function()
+				root:SetNetworkOwner(nil)
+			end)
+		end
+
 		character:PivotTo(spawnAt)
 		record.spawnCFrame = nil
-		local root = record.root
+
 		if root then
 			root.AssemblyLinearVelocity = Vector3.zero
 			root.AssemblyAngularVelocity = Vector3.zero
+			--[[ And given straight back. On the charTrove so a player who dies or
+			     respawns inside the window does not have a stale timer hand
+			     ownership of a body they no longer have. ]]
+			record.charTrove:add(task.delay(SPAWN_OWNERSHIP_TIME, function()
+				--[[ Not while it is anchored. _holdUntilReady owns that case and
+				     releases it — see release() there, which hands ownership back
+				     itself. Doing it here as well would return a held body to its
+				     client mid-hold. ]]
+				if root.Parent and not root.Anchored then
+					pcall(function()
+						root:SetNetworkOwnershipAuto()
+					end)
+				end
+			end))
 		end
 	end
 
