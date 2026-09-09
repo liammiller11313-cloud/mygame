@@ -203,6 +203,27 @@ end
 	land in the wrong server. Returning nil from the transform aborts the write,
 	which is how "taken" is expressed without a separate read.
 ]]
+--[[
+	Points an EXISTING code somewhere else, and re-arms its clock.
+
+	Written rather than claimed, because the whole value of this is that the code
+	does not change: a host reads six characters out while the party is being
+	assembled, and pressing START must not turn what they said into a lie. The
+	code follows the party — first to this server, then to the reserved one.
+
+	SetAsync rather than UpdateAsync, and the difference is the point: there is no
+	condition to test. The code already belongs to this party and the only thing
+	being decided is where it now leads.
+]]
+local function repointCode(map: any, code: string, entry: any): boolean
+	local ok, err = pcall(map.SetAsync, map, code, entry, MM.LobbyTtl)
+	if not ok then
+		warnOnce("repoint", "MemoryStoreHashMap:SetAsync failed: " .. tostring(err))
+		return false
+	end
+	return true
+end
+
 local function claimCode(map: any, code: string, entry: any): boolean
 	local taken = false
 	local ok, err = pcall(map.UpdateAsync, map, code, function(existing)
@@ -238,6 +259,12 @@ type Party = {
 	host: Player,
 	mode: string,
 	members: { Player },
+	--[[ The six characters somebody reads out, minted the moment the party opens
+	     and pointing at THIS server until the host presses start. Empty in Studio
+	     and on any server where MemoryStore refused — a party without a code is a
+	     party you can still invite people into, so it is a missing convenience
+	     rather than a broken feature. ]]
+	code: string,
 	--[[ Offered but not answered. A set rather than a list: the only questions
 	     are "is this player invited" and "stop being invited", and both are one
 	     lookup. ]]
@@ -278,6 +305,10 @@ local function pushParty(player: Player)
 		host = if party then party.host.Name else "",
 		members = if party then partyNames(party) else {},
 		mode = if party then party.mode else "",
+		--[[ Sent to members, and to nobody else. A party code is a password: the
+		     people in the party may hand it out, and somebody who has merely been
+		     invited has not accepted yet. ]]
+		code = if party then party.code else "",
 		--[[ Nil unless there is an offer waiting AND the party behind it still
 		     exists. A host who left between the invite and this redraw would
 		     otherwise leave a prompt on screen for a party nobody can join. ]]
@@ -373,9 +404,44 @@ function LobbyService:createLobby(player: Player, mode: string): boolean
 		mode = wanted,
 		members = { player },
 		pending = {},
+		code = "",
 	}
 	parties[player] = party
 	partyOf[player] = party
+
+	--[[
+		The code, minted now and pointing HERE.
+
+		This is the half the first version was missing: a party you can only be
+		invited into is a party your friend in another server cannot reach at all.
+		The entry carries this server's JobId rather than a reserved server's
+		access code, so joining it brings somebody to where the party is standing
+		— and the host can then invite them like anybody else in the room.
+
+		When START is pressed the SAME code is repointed at the reserved server,
+		so six characters read out during the gathering keep working after it. See
+		repointCode.
+
+		Best effort by design. No MemoryStore, no code, and the party carries on
+		without one — everything that matters about it is same-server.
+	]]
+	local map = if IS_LIVE then lobbyMap() else nil
+	if map then
+		local entry = {
+			jobId = game.JobId,
+			placeId = game.PlaceId,
+			mode = wanted,
+			host = player.UserId,
+			createdAt = os.time(),
+		}
+		for _ = 1, MM.LobbyCodeAttempts do
+			local candidate = mintCode()
+			if claimCode(map, candidate, entry) then
+				party.code = candidate
+				break
+			end
+		end
+	end
 
 	--[[ An offer this player was sitting on is dropped. Hosting one party and
 	     holding an invitation to another is a state with no correct answer, and
@@ -538,17 +604,36 @@ function LobbyService:launchParty(player: Player): boolean
 		createdAt = os.time(),
 	}
 
-	local code: string? = nil
-	for _ = 1, MM.LobbyCodeAttempts do
-		local candidate = mintCode()
-		if claimCode(map, candidate, entry) then
-			code = candidate
-			break
+	--[[
+		THE PARTY'S OWN CODE, MOVED — not a new one.
+
+		The host has had six characters on screen since they opened the party and
+		may well have read them out. Minting a second code here would leave the
+		first one pointing at a server the party is about to leave, so anybody who
+		wrote it down would arrive in an empty lobby and be told nothing is wrong.
+
+		A party with no code — Studio, or a MemoryStore that refused when it
+		opened — mints one now instead, because this is the moment it stops being
+		a convenience: the reserved server has no other way in.
+	]]
+	local code = party.code
+	if code ~= "" then
+		if not repointCode(map, code, entry) then
+			answer(player, "Launch", false, "unavailable")
+			return false
 		end
-	end
-	if not code then
-		answer(player, "Launch", false, "unavailable")
-		return false
+	else
+		for _ = 1, MM.LobbyCodeAttempts do
+			local candidate = mintCode()
+			if claimCode(map, candidate, entry) then
+				code = candidate
+				break
+			end
+		end
+		if code == "" then
+			answer(player, "Launch", false, "unavailable")
+			return false
+		end
 	end
 
 	--[[ Everybody still here, gathered before the teleport rather than during
@@ -615,7 +700,22 @@ function LobbyService:joinLobby(player: Player, rawCode: string): boolean
 		answer(player, "Join", false, "unavailable")
 		return false
 	end
-	if typeof(entry) ~= "table" or typeof(entry.accessCode) ~= "string" then
+	--[[
+		TWO SHAPES BEHIND ONE CODE, and which one it is says where the party is.
+
+		  accessCode   a reserved server. The party has launched, or the code was
+		               minted by the old create-and-leave flow.
+		  jobId        this-place, that-instance. The party is still being
+		               assembled in an ordinary server and the code brings you to
+		               where they are standing, so the host can invite you.
+
+		A code moves from the second to the first when the host presses START —
+		see repointCode. The same six characters keep working across that, which
+		is the entire reason they are handed out before the party goes anywhere.
+	]]
+	local hasAccess = typeof(entry) == "table" and typeof(entry.accessCode) == "string"
+	local hasJob = typeof(entry) == "table" and typeof(entry.jobId) == "string" and entry.jobId ~= ""
+	if not hasAccess and not hasJob then
 		--[[ Expired or never existed, and the player cannot tell the difference —
 		     which is correct. Saying "that lobby has expired" for a code nobody
 		     ever minted would confirm the format to somebody guessing. ]]
@@ -623,19 +723,40 @@ function LobbyService:joinLobby(player: Player, rawCode: string): boolean
 		return false
 	end
 
+	--[[ Already here. A code for the server you are standing in is not an error
+	     and teleporting to your own instance is a loading screen for nothing —
+	     it is somebody who was invited, joined, and pressed it again. ]]
+	if hasJob and not hasAccess and entry.jobId == game.JobId then
+		answer(player, "Join", false, "alreadyhere")
+		return false
+	end
+
 	answer(player, "Join", true, "ok")
 
-	local sent = pcall(
-		TeleportService.TeleportToPrivateServer,
-		TeleportService,
-		entry.placeId or game.PlaceId,
-		entry.accessCode,
-		{ player },
-		nil,
-		{ lobbyCode = code, lobbyMode = entry.mode }
-	)
+	local sent: boolean
+	if hasAccess then
+		sent = pcall(
+			TeleportService.TeleportToPrivateServer,
+			TeleportService,
+			entry.placeId or game.PlaceId,
+			entry.accessCode,
+			{ player },
+			nil,
+			{ lobbyCode = code, lobbyMode = entry.mode }
+		)
+	else
+		--[[ A specific running instance of this place. The party is in it and has
+		     not gone anywhere yet, so this is a join rather than a reservation. ]]
+		sent = pcall(
+			TeleportService.TeleportToPlaceInstance,
+			TeleportService,
+			entry.placeId or game.PlaceId,
+			entry.jobId,
+			player
+		)
+	end
 	if not sent then
-		warnOnce("teleportjoin", "TeleportToPrivateServer failed for an existing lobby")
+		warnOnce("teleportjoin", "teleport failed for an existing lobby code")
 		answer(player, "Join", false, "teleport")
 		return false
 	end

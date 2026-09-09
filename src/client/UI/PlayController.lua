@@ -153,6 +153,7 @@ local REASONS: { [string]: string } = {
 	badcode = "THAT IS NOT A CODE. SIX CHARACTERS, LETTERS AND DIGITS.",
 	notfound = "NO LOBBY WITH THAT CODE. IT MAY HAVE EXPIRED.",
 	teleport = "COULD NOT REACH THAT SERVER.",
+	alreadyhere = "THAT PARTY IS IN THIS SERVER. ASK THEM TO INVITE YOU.",
 	nothost = "ONLY THE PERSON WHO OPENED THE PARTY CAN DO THAT.",
 	inparty = "YOU ARE ALREADY IN SOMEBODY ELSE'S PARTY.",
 	busy = "THEY ARE ALREADY IN A PARTY.",
@@ -179,6 +180,7 @@ local party = {
 	members = {} :: { string },
 	mode = "",
 	invitedBy = "",
+	code = "",
 }
 local codeBox: TextBox
 local modeRow: Frame
@@ -305,6 +307,34 @@ local function liftForKeyboard(active: boolean)
 	panel.Position = UDim2.new(0.5, 0, 0.5, -lift)
 end
 
+--[[
+	Where the list starts, which is NOT the same on both pages.
+
+	FIND owns the whole control area. PARTY has the mode row above it — CLASSIC
+	and VERSUS, the thing a host is choosing for everybody — and the list has to
+	begin under it. They used to be mutually exclusive, so both were positioned at
+	CONTROL_TOP and neither knew about the other; making the list visible on the
+	party page put the roster underneath the mode buttons, which is exactly what
+	it looked like.
+
+	One function so the build and the resize pass cannot disagree about it. The
+	mode row's own height already varies by input scheme, so this reads the same
+	number it does rather than a copy of it.
+]]
+local function listTopFor(): number
+	if state.choice ~= "Create" then
+		return CONTROL_TOP
+	end
+	local rowHeight = if isTouch() then TOUCH_HEIGHT else MODE_ROW_HEIGHT
+	return CONTROL_TOP + rowHeight + LAYOUT.ElementGap
+end
+
+--[[ The detail column's left inset, which is a term in three positions and was
+     spelled out at each of them. ]]
+local function detailLeftOffset(): number
+	return LAYOUT.PanelPadding + COLUMN_GAP
+end
+
 local function applyTouchSizing()
 	local foot = footerHeight()
 	if footRule then
@@ -325,12 +355,10 @@ local function applyTouchSizing()
 		)
 	end
 	if serverList then
-		serverList.Size = UDim2.new(
-			1 - ACTION_WIDTH,
-			-(LAYOUT.PanelPadding * 2 + COLUMN_GAP),
-			1,
-			-(CONTROL_TOP + foot + 12)
-		)
+		local listTop = listTopFor()
+		serverList.Position = UDim2.new(ACTION_WIDTH, detailLeftOffset(), 0, listTop)
+		serverList.Size =
+			UDim2.new(1 - ACTION_WIDTH, -(LAYOUT.PanelPadding * 2 + COLUMN_GAP), 1, -(listTop + foot + 12))
 	end
 end
 
@@ -416,6 +444,31 @@ local function refreshParty()
 			empty.Text = "NO PARTY YET. OPEN ONE AND EVERYONE IN THIS SERVER BECOMES INVITABLE."
 		end
 		return
+	end
+
+	--[[
+		The code, above the roster, for the people who are NOT in this server.
+
+		Everything else on this page is about the room you are standing in —
+		invite the person next to you, watch them accept. This is the one line
+		here that reaches anybody else, and it is the first thing a host wants
+		once the party exists rather than something they discover on the way out.
+
+		The same six characters survive pressing START: the server repoints them
+		at the reserved lobby rather than minting a second code, so a host who
+		read them out during the gathering has not lied. That is worth saying on
+		screen, because the alternative reading — "this code expires when we go" —
+		is the one a player would otherwise assume.
+	]]
+	if party.code ~= "" then
+		caption("CODE  ·  ANYONE, ANYWHERE")
+		row(party.code, "STILL WORKS AFTER START", COLOR.AccentBright)
+	else
+		--[[ Said without guessing why. A client cannot tell Studio from a
+		     MemoryStore that refused, and both answer the player identically:
+		     there is no code, and the party works anyway. ]]
+		caption("CODE")
+		row("NONE", "INVITES STILL WORK", COLOR.TextDim)
 	end
 
 	caption(string.format("PARTY  ·  %d OF %d", #party.members, GameConfig.MaxSurvivors))
@@ -663,6 +716,7 @@ local function onPartyState(payload: any)
 	party.members = members
 	party.mode = tostring(payload.mode or "")
 	party.invitedBy = tostring(payload.invitedBy or "")
+	party.code = tostring(payload.code or "")
 
 	if state.open and state.choice == "Create" then
 		refreshParty()
@@ -758,6 +812,9 @@ local function buildAction(index: number, definition: any, top: number)
 		if definition.id == "Create" then
 			refreshParty()
 		end
+		--[[ The list's TOP moves between pages — the party page has the mode row
+		     over it — so a page change is a re-layout and not only a refill. ]]
+		applyTouchSizing()
 		refresh()
 	end)
 
@@ -881,8 +938,12 @@ local function build()
 	end)
 
 	serverList = Widgets.scroller(panel, "Servers")
-	serverList.Position = UDim2.new(ACTION_WIDTH, detailLeft, 0, controlTop)
-	serverList.Size = UDim2.new(1 - ACTION_WIDTH, detailWidth, 1, -(controlTop + FOOTER_HEIGHT + 12))
+	--[[ Positioned by the same helper the resize pass uses, so the party page's
+	     list clears the mode row above it on the first frame as well as after a
+	     resize. See listTopFor. ]]
+	local listTop = listTopFor()
+	serverList.Position = UDim2.new(ACTION_WIDTH, detailLeft, 0, listTop)
+	serverList.Size = UDim2.new(1 - ACTION_WIDTH, detailWidth, 1, -(listTop + FOOTER_HEIGHT + 12))
 	serverList.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	serverList.Visible = false
 	Widgets.list(serverList, LAYOUT.ElementGap)
