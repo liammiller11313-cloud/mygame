@@ -26,6 +26,7 @@
 	the surface — so the two can never disagree.
 ]]
 
+local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -78,6 +79,38 @@ local PANEL_HEIGHT = 520
      unreadable on the platform least able to spare the pixels. ]]
 local DOC_WIDTH = 560
 local DOC_HEIGHT = 560
+
+--[[ A page's own margin, wider than a panel's. Type that starts ten pixels from
+     the edge of a sheet reads as a text box; type with a real margin around it
+     reads as something that was printed. ]]
+local DOC_MARGIN = 20
+
+--[[
+	The page, and the ink on it.
+
+	Deliberately the one surface in this interface that is not a screen. Every
+	other panel in this game is dark chrome with light type on it because every
+	other panel IS an interface — a shop, a loadout, a keypad. This one is a
+	sheet of paper somebody left behind, and the entire reason a document works
+	as a clue is that the player believes that. Ink on paper is most of the
+	belief.
+]]
+local PAPER = Color3.fromRGB(224, 214, 192)
+local PAPER_SHADE = Color3.fromRGB(191, 179, 155)
+local INK = Color3.fromRGB(32, 28, 24)
+local INK_FADED = Color3.fromRGB(104, 93, 78)
+
+--[[
+	How far out of focus the world goes behind an open page.
+
+	Below the main menu's 26 on purpose. The menu is a place you have LEFT the
+	round to stand in; this is opened in the middle of one, with a horde
+	somewhere behind you, and burying the world entirely turns a moment of
+	reading into a moment of blindness. Enough that the eye stops trying to track
+	movement out there, not so much that the room stops existing.
+]]
+local READER_BLUR = 18
+local BLUR_INFO = TweenInfo.new(UITheme.Motion.Normal, UITheme.Motion.Easing, UITheme.Motion.EasingDirection)
 
 --[[ How long the vault line stays up. Longer than a callout because it is the
      payoff for ten minutes of reading, and shorter than an announcement because
@@ -168,6 +201,12 @@ local docBody: Frame
 local readout: TextLabel
 local statusLabel: TextLabel
 local docText: TextLabel
+
+--[[ In Lighting rather than in the ScreenGui, because that is where a
+     post-process effect goes. Owned by the trove so a client teardown cannot
+     leave the world blurred with nothing on screen to explain it. ]]
+local blur: BlurEffect
+local blurTween: Tween? = nil
 local keyButtons: { [string]: TextButton } = {}
 
 local trackerGui: ScreenGui
@@ -492,27 +531,45 @@ local function buildKeypad(parent: Instance)
 end
 
 local function buildDocument(parent: Instance)
-	docBody = Widgets.frame(parent, "Document", COLOR.Background, 0.15)
+	docBody = Widgets.frame(parent, "Document", PAPER, 0)
 	docBody.Position = UDim2.fromOffset(LAYOUT.PanelPadding, PANEL.HeaderHeight + LAYOUT.PanelPadding)
 	docBody.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 1, -(PANEL.HeaderHeight + LAYOUT.PanelPadding * 2))
 	docBody.Visible = false
-	Widgets.stroke(docBody, COLOR.Border)
+	Widgets.stroke(docBody, PAPER_SHADE)
+
+	--[[ Dirtier toward the bottom than the top. A flat rectangle of cream is a UI
+	     colour; paper that is darker where it has been held is a thing that has
+	     been somewhere. Parented to the sheet, so it tones the sheet and not the
+	     words — a UIGradient colours the object it sits on and never its
+	     children. ]]
+	local age = Instance.new("UIGradient")
+	age.Color = ColorSequence.new(PAPER, PAPER_SHADE)
+	age.Rotation = 90
+	age.Parent = docBody
 
 	local scroller = Widgets.scroller(docBody, "Page")
-	scroller.Position = UDim2.fromOffset(LAYOUT.PanelPadding, LAYOUT.PanelPadding)
-	scroller.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 1, -LAYOUT.PanelPadding * 2)
+	scroller.Position = UDim2.fromOffset(DOC_MARGIN, DOC_MARGIN)
+	scroller.Size = UDim2.new(1, -DOC_MARGIN * 2, 1, -DOC_MARGIN * 2)
 	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	--[[ The theme's bar is a pale stroke chosen to read on a dark panel, and on
+	     cream it is very nearly invisible — on the one panel in the game whose
+	     content is long enough for the bar to matter. ]]
+	scroller.ScrollBarImageColor3 = INK_FADED
 
 	--[[ The typewriter face and near-black ink on off-white, because this is a
 	     photocopy of a form and not a screen. It is the one place in the
 	     interface that deliberately does not look like the rest of it. ]]
-	docText = Widgets.label(scroller, "Text", FONT.Body, TEXT.Body, COLOR.TextPrimary)
+	docText = Widgets.label(scroller, "Text", FONT.Body, TEXT.Body, INK)
 	docText.Font = Enum.Font.Code
 	docText.Size = UDim2.new(1, -PANEL.ScrollBarWidth, 0, 0)
 	docText.AutomaticSize = Enum.AutomaticSize.Y
 	docText.TextXAlignment = Enum.TextXAlignment.Left
 	docText.TextYAlignment = Enum.TextYAlignment.Top
 	docText.TextWrapped = true
+	--[[ A quarter of a line of extra leading. Single-spaced monospace is a wall,
+	     and a wall is what a player skips — which on this screen means skipping
+	     the sentence the whole side objective is carried by. ]]
+	docText.LineHeight = 1.25
 end
 
 --[[
@@ -579,6 +636,13 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
+	blur = Instance.new("BlurEffect")
+	blur.Name = "FL_VaultReader"
+	blur.Size = 0
+	blur.Enabled = false
+	blur.Parent = Lighting
+	trove:add(blur)
+
 	local layer = ScaleLayer.new(gui, "Scaled")
 	local chrome = Widgets.panel(layer, trove, "SECURITY VAULT", function()
 		VaultController:close()
@@ -598,6 +662,49 @@ function VaultController:isOpen(): boolean
 	return state.open
 end
 
+--[[
+	The world going out of focus behind the page.
+
+	Asked for by name, and it is also the honest signal for what this screen
+	already DOES: it has taken the cursor and the movement keys, so a world drawn
+	sharp behind it is a world offering information the player cannot act on.
+
+	Not while the main menu is up. That has a blur of its own and two BlurEffects
+	stack — the sum is a smear rather than a depth of field — so the one panel
+	that can legally open under the menu's suppression stays out of its way. The
+	same test setSuppressed makes, for the same reason.
+]]
+local function setBlur(on: boolean)
+	if not blur then
+		return
+	end
+	if blurTween then
+		blurTween:Cancel()
+		blurTween = nil
+	end
+
+	local wanted = on and not menuIsOpen()
+	if wanted then
+		blur.Enabled = true
+	end
+
+	local tween = TweenService:Create(blur, BLUR_INFO, { Size = if wanted then READER_BLUR else 0 })
+	blurTween = tween
+	--[[ Switched off rather than left sitting at zero, because an enabled
+	     BlurEffect is a full-screen pass whether or not it is blurring anything.
+	     Only on a tween that RAN to the end: cancelled means something else has
+	     taken this over and must be allowed to own Enabled. ]]
+	tween.Completed:Connect(function(playback: Enum.PlaybackState)
+		if blurTween == tween then
+			blurTween = nil
+		end
+		if playback == Enum.PlaybackState.Completed and not wanted then
+			blur.Enabled = false
+		end
+	end)
+	tween:Play()
+end
+
 --[[ Shared by both entry points, because opening a screen is the same job
      whichever screen it is: size it, suppress the world, take the cursor, put a
      gamepad's focus somewhere it can act. ]]
@@ -614,6 +721,7 @@ local function show(mode: string, width: number, height: number, heading: string
 	     Suppressing unconditionally means the close below hands the round back
 	     even when the main menu is still up over it. ]]
 	setSuppressed(not menuIsOpen())
+	setBlur(true)
 	FreeCursor.take(restore)
 	--[[ A pad lands on a key rather than nowhere. Without this the keypad was
 	     answerable only with a mouse, which on a console is the same as not being
@@ -699,6 +807,7 @@ function VaultController:close()
 	GamepadFocus.release(nil)
 	FreeCursor.giveBack(restore)
 	setSuppressed(false)
+	setBlur(false)
 	--[[ And the menu takes its suppression back, which this was the one panel
 	     close in the folder that never asked for. Without it a keypad closed
 	     over the main menu handed input to a round that is not running. ]]
