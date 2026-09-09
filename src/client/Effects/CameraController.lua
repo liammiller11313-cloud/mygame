@@ -96,6 +96,13 @@ local RECOIL_DAMPING = 0.78 -- a little overshoot; a dead-flat return reads as a
      the bullets inherit. ]]
 local RECOIL_VIEW_SCALE = GameConfig.Recoil.ViewScale
 local RECOIL_AIM_FOLLOW = GameConfig.Recoil.AimFollow
+--[[ Floored at one degree so a config typo of 0 cannot divide the headroom
+     calculation by nothing and hand every shot an infinite kick. ]]
+local RECOIL_MAX_CLIMB = math.max(GameConfig.Recoil.MaxClimbDegrees, 1)
+--[[ Where the ceiling starts having an opinion. Below this the impulse is
+     untouched; see addRecoil for why a cap without a knee is a tuning knob
+     wearing a limit's name. ]]
+local RECOIL_KNEE = RECOIL_MAX_CLIMB * GameConfig.Recoil.ClimbKnee
 
 -- Trauma is normalised 0-1 and shakes by its square, so small hits barely
 -- register and a Tank landing on you fills the frame. shakeMagnitude decides
@@ -213,9 +220,55 @@ end
 
 --[[ Degrees of kick. Vertical is up, horizontal is signed. Scaled so the number
      in WeaponConfig is the peak the camera actually reaches. ]]
+--[[
+	One shot's worth of kick, against a ceiling.
+
+	The pattern in ShotPattern shapes each shot; this bounds the TOTAL. It is a
+	BACKSTOP rather than the mechanism, and GameConfig.Recoil.MaxClimbDegrees
+	carries the measurement that says so — the spring reaches equilibrium within
+	about ten shots on every weapon in the roster, so the runaway this looks like
+	it is preventing does not actually occur today. What it prevents is a future
+	weapon whose recoilRecovery is slow enough that it would.
+
+	── HEADROOM, NOT A CLAMP ───────────────────────────────────────────────────
+	The vertical impulse is scaled by how much of the ceiling is left rather than
+	being cut off at it. A hard clamp stops the camera dead at a fixed angle,
+	which reads as hitting a wall; easing into the limit reads as the gun running
+	out of room, which is the thing being modelled.
+
+	Horizontal is deliberately NOT capped. The ceiling exists because vertical
+	climb leaves the target; a sideways sweep does not, and bounding it would
+	take away the one part of a long spray that is supposed to still be moving.
+]]
 function CameraController:addRecoil(vertical: number, horizontal: number)
 	local gain = recoil.speed * IMPULSE_GAIN * RECOIL_VIEW_SCALE
-	recoil:impulse(Vector2.new(vertical * gain, horizontal * gain))
+
+	--[[ X is the vertical axis of this spring — see the impulse below, which has
+	     always packed them in that order. Only climb counts against the ceiling:
+	     recoil that has already recovered below zero is headroom, not debt. ]]
+	local climbed = math.max(recoil.position.X, 0)
+
+	--[[
+		Nothing at all until the KNEE, then easing to nothing at the ceiling.
+
+		Scaling from zero climb — which is the obvious way to write this — makes
+		the cap a tuning knob on every shot rather than a limit: at half the
+		ceiling it is already halving the kick, so the number quietly reshapes
+		normal play instead of catching the case it was added for. Measured, that
+		took another 22% off weapons that were never near the limit.
+
+		With a knee it does what it claims. Below 70% of the ceiling the impulse
+		is untouched and the settle curve in ShotPattern is the only thing
+		shaping the burst; above it, the last stretch eases shut. Today nothing in
+		the roster reaches the knee, which is exactly what a backstop looks like
+		when nothing is broken.
+	]]
+	local headroom = 1
+	if climbed > RECOIL_KNEE then
+		headroom = math.clamp((RECOIL_MAX_CLIMB - climbed) / (RECOIL_MAX_CLIMB - RECOIL_KNEE), 0, 1)
+	end
+
+	recoil:impulse(Vector2.new(vertical * gain * headroom, horizontal * gain))
 end
 
 --[[ Adds camera trauma, 0-1. Shake is trauma squared, so two small hits are

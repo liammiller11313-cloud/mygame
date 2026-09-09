@@ -114,11 +114,30 @@ function ShotPattern.generateRecoil(
 	local climb = RECOIL.FirstShotScale
 		+ (1 - RECOIL.FirstShotScale) * math.min((index - 1) / RECOIL.ClimbShots, 1)
 
+	--[[
+		And then it comes back down.
+
+		The ramp alone was the whole curve, which meant a weapon kicked at full
+		strength for every round after the seventh — a constant climb rate for as
+		long as the trigger is held. Past SettleShots the vertical decays toward
+		SustainScale, so a long spray flattens out and the horizontal sweep below
+		becomes the thing that is actually moving.
+
+		Only the VERTICAL settles. Horizontal keeps its full scale, which is what
+		turns a plateau into a sideways walk rather than into a gun that has
+		stopped doing anything.
+	]]
+	local settle = 1
+	if index > RECOIL.SettleShots then
+		local through = math.min((index - RECOIL.SettleShots) / RECOIL.SettleFalloff, 1)
+		settle = 1 + (RECOIL.SustainScale - 1) * through
+	end
+
 	--[[ Vertical is mostly consistent so the pattern can be countered. The window
 	     is tighter than it was because the climb now carries the character, and
 	     wide per-shot noise on top of a ramp reads as the sight rattling rather
 	     than as the gun pulling. ]]
-	local verticalKick = vertical * climb * random:NextNumber(0.88, 1.12)
+	local verticalKick = vertical * climb * settle * random:NextNumber(0.88, 1.12)
 
 	--[[ Horizontal is a slow sweep plus noise. The sweep is a pure function of the
 	     burst index, so it is identical every burst and a player can learn to ride

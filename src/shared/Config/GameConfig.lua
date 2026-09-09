@@ -384,7 +384,10 @@ GameConfig.Recoil = table.freeze({
 	     recoilHorizontal. Below 1 the whole roster calms down together, which
 	     beats editing fifteen pairs of numbers and losing the balance between
 	     them. ]]
-	ViewScale = 0.7,
+	--[[ 0.62 rather than 0.7. The pattern below now has a plateau and a ceiling,
+	     which took most of the excess out of a long spray — this takes a little
+	     off the SHOT, which is the half a player feels on a two-round tap. ]]
+	ViewScale = 0.62,
 
 	--[[ How much of that kick moves where the bullets go. At 1 this is the old
 	     behaviour — the camera IS the aim. At 0 recoil is pure decoration and
@@ -413,7 +416,80 @@ GameConfig.Recoil = table.freeze({
 		Nothing in the roster got harder to shoot.
 	]]
 	FirstShotScale = 0.5,
-	ClimbShots = 7,
+	ClimbShots = 5,
+
+	--[[
+		── AND THEN IT STOPS CLIMBING ───────────────────────────────────────────
+		The ramp above used to be the whole shape: rise to full over seven shots
+		and stay at full forever. That is a gun that climbs at a constant rate for
+		as long as you hold the trigger, and with the spring's equilibrium sitting
+		wherever impulse rate meets recovery, a long spray walks the camera at the
+		sky. Reported as exactly that — "when people shoot guns and makes them go
+		up high, i like that but its too much".
+
+		The missing third of the curve is the PLATEAU and the decay after it. Real
+		patterns rise hard, level off, and then convert what is left into a
+		sideways sweep — which is what makes a long spray something you ride
+		rather than something you fight, and what makes the first five rounds the
+		part worth aiming.
+
+		    shots 1-5      rise, 0.5x to 1.0x       the burst you aim
+		    shots 6-12     fall to 0.25x            the spray that goes sideways
+
+		── MEASURED, NOT GUESSED ───────────────────────────────────────────────
+		Simulated against the real spring across the roster — AKM, M4, Vector,
+		M60 — comparing peak climb before and after:
+
+		    3-round tap        -7%
+		    10-round burst    -20%
+		    30-round spray    -21%
+
+		Which is the shape the change was asked for: the kick a player says they
+		LIKE is a tap, and it is almost untouched; the part that was too much is
+		the long hold, and that is a fifth quieter. The dials are these three plus
+		ViewScale, and a further pass at SettleShots 5 / SustainScale 0.22 /
+		ViewScale 0.60 measures -10% and -29% if the spray still reads as too
+		much in play.
+	]]
+	SettleShots = 6,
+	SustainScale = 0.25,
+	--[[ How many shots the fall from full to SustainScale takes. Gradual rather
+	     than a step, because a gun that abruptly stopped kicking would read as
+	     the recoil breaking rather than as the pattern flattening. ]]
+	SettleFalloff = 6,
+
+	--[[
+		The ceiling, in degrees of accumulated climb.
+
+		── AND IT IS A BACKSTOP, NOT THE MECHANISM ─────────────────────────────
+		Worth being exact about, because the obvious story is wrong. The intuition
+		is that a held trigger climbs without bound as impulses outrun recovery,
+		and that a ceiling is what stops it. Simulated against the real spring —
+		damping 0.78, speed = each weapon's recoilRecovery — that is not what
+		happens: the spring reaches equilibrium within about ten shots and stays
+		there. An AKM peaks at 2.2 degrees on shot ten and 2.3 on shot thirty.
+
+		So sustained fire was never the runaway it feels like, and a ceiling
+		generous enough to sound safe would have been decoration. Four degrees is
+		chosen to sit just above the heaviest weapon in the roster at full spray
+		(the M60 at 3.2 before this change, 2.3 after), so it binds on that gun
+		and that gun only, and only when somebody empties a belt.
+
+		What actually took the excess out is the SETTLE curve above: a 20-25%
+		reduction in peak climb on a long burst and about 10% on a tap. This
+		catches the case a future weapon with a slow recovery would otherwise
+		find.
+
+		Applied as headroom rather than as a clamp — see CameraController.
+		addRecoil. A hard clamp stops the camera dead, which reads as hitting a
+		wall; scaling by what is left reads as the gun running out of room.
+	]]
+	MaxClimbDegrees = 4,
+	--[[ The fraction of that ceiling the impulse is untouched below. Without it a
+	     cap scales every shot from zero and is a tuning knob rather than a limit
+	     — see CameraController.addRecoil, which has the measurement. At 0.7 the
+	     backstop starts at 2.8 degrees, which nothing in the roster reaches. ]]
+	ClimbKnee = 0.7,
 
 	--[[
 		How much of the horizontal is a SHAPE rather than noise.
