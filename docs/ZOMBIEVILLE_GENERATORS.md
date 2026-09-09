@@ -149,12 +149,28 @@ matcher folds case and spaces but not letters.
 The model is looked up as `Tesla Rifle`. If your model is called something else
 entirely, rename it or say so and the config row moves to match.
 
-### The sound is a stand-in
+### It charges before it fires
 
-`AudioConfig.Id.TeslaArc` currently points at the glass-impact sample — a brittle
-crack, which is the closest thing in the library to electricity and is not
-electricity. It is a named id so swapping in a real upload is one line. See
-`docs/AUDIO_NEEDED.md`.
+The first shot of a burst lands a third of a second after you pull the trigger,
+with a charge cue leading it. The charge then stays up for **two seconds**, so
+pacing your shots keeps it hot and only a genuinely cold start pays the spool
+again.
+
+**Letting go does not cancel it.** The press is the commitment: tap it and the
+shot still lands, aimed wherever you are looking when it does. That is
+deliberate — the instinct with a slow gun is to tap it, and a charge that
+cancelled on release would fire nothing at all for a player who taps.
+
+This is what stops penetration six being simply the best gun in the game. If it
+feels wrong in play, `spinUp` and `spinHold` in `WeaponConfig` are the two
+numbers, and setting `spinUp = nil` removes the mechanic entirely.
+
+### It has its own voice
+
+The only weapon in the game that does not share the common reload bank — it has
+no magazine to drop and no round to fail to chamber, so it would have sounded
+like a rifle pretending. Six cues: arc, charge, recharge, idle hum, empty fizzle
+and a power-on when you pick it up. See `AudioConfig.WeaponVoice`.
 
 ---
 
