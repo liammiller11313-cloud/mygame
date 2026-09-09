@@ -70,6 +70,9 @@ counter that needs five is a round where the loot room can never open.
 **Clinton** is unchanged from Alpha 02 and should be re-tested anyway — the
 counter card, the vault door and the clue chain all moved through this build.
 
+**The Backrooms** needs nothing new. It already has all six item families, ammo
+crates and its spawns; the boss arrives on wave 15 on its own.
+
 ### 4. Run the checks
 
 ```
@@ -216,9 +219,9 @@ Honest list. None of these are worth a report.
   or the sound is cut off, say how long the sample actually is.
 - **The generator hum has not been verified as seamless.** Five running at once
   will make any loop click obvious.
-- **The Backrooms map is not finished.** It has no item folders, no ammo crates
-  and no puzzle. The Bacteria Monster will spawn there; almost nothing else that
-  makes a round will.
+- **The Backrooms has no side objective**, and that is normal rather than
+  missing — so does Crossroads. The map itself is complete: all six item
+  families, ammo crates and six spawns. It is a full test target.
 - **Two constants on the boss are untested by anyone**: 300 damage per bloom and
   a cap of 12 colonies. Whether that is uncomfortable or impassable is the thing
   play decides.
@@ -273,10 +276,26 @@ Redeem `OG-BRICKBATTLE` (or own the pass). All four equip. **Kills must earn XP
 and Dollars** — that is the entire reason they were not left as tool scripts.
 Pogo the slingshot and the rocket.
 
-### F. The Backrooms
+### F. The Backrooms, to wave 15
 
-Only worth loading to see the boss arrive and to confirm it is not grey-boxed.
-The map has nothing else in it yet.
+The one map in this build that needs a **full round played to the finale**,
+because the boss only exists there and only on the last wave. Everything else
+about the map is ordinary and should behave like Zombieville: items, crates,
+spawns, the horde.
+
+Watch for four things when the Bacteria Monster arrives:
+
+1. It is announced as **BACTERIA MONSTER** and gets a boss bar.
+2. Wave 15 sends it **instead of** the Apex Tank or the Metallic — every time,
+   not half the time. If you get a Tank on the Backrooms, the map override did
+   not fire.
+3. The colonies grow, slow you, and **do not stack** where they overlap.
+4. **Burn it.** Seeding should stop entirely while it is alight, and it should
+   take damage faster than anything else in the game.
+
+Then two things after it dies: the floor clears, and **nobody is left slow.**
+That second one had two separate bugs in it this build, so it is worth checking
+deliberately — get somebody downed inside a colony and revive them.
 
 ### G. Controller and phone
 
