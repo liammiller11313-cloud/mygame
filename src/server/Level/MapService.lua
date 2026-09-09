@@ -281,6 +281,11 @@ end
 --[[ Lifts a map's sky and music out of the model and into the services that can
      actually use them. See the note on AMBIENCE_STASH for why either has to
      move at all. ]]
+--[[ The attribute that says "this Sound is the map's". Declared here because
+     this is the only thing that sets it; MusicController reads the same string
+     from MapConfig so the two cannot drift. ]]
+local MAP_MUSIC_ATTRIBUTE = MapConfig.MusicAttribute
+
 local function installAmbience(clone: Model, definition: any)
 	for _, child in clone:GetChildren() do
 		if child:IsA("Sky") and not installedSky then
@@ -311,6 +316,12 @@ local function installAmbience(clone: Model, definition: any)
 			if typeof(scale) == "number" and scale >= 0 then
 				child.Volume *= scale
 			end
+
+			--[[ Marked so the client can find it. MusicController ducks this
+			     under a boss theme on a map that declares replacesMusic, and a
+			     Sound it does not own is a Sound it cannot find by any other
+			     means — the name belongs to whoever built the map. ]]
+			child:SetAttribute(MAP_MUSIC_ATTRIBUTE, true)
 
 			child.Parent = SoundService
 			child:Play()

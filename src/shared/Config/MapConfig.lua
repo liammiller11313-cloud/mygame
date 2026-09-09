@@ -19,6 +19,12 @@ local MapConfig = {}
 MapConfig.StorageFolder = "Maps" -- ServerStorage.Maps
 MapConfig.LiveFolder = "CurrentMap" -- Workspace.CurrentMap
 
+--[[ Set by MapService on a map's own Sound once it has been adopted into
+     SoundService, and read by MusicController so it can duck it. Here rather
+     than in either of them because it is the one string they have to agree on,
+     and a map author's Sound can be called anything. ]]
+MapConfig.MusicAttribute = "FL_MapMusic"
+
 export type MapDefinition = {
 	id: string, -- must match the model name in ServerStorage.Maps
 	displayName: string,
@@ -67,6 +73,32 @@ export type MapDefinition = {
 		tripling.
 	]]
 	finaleBoss: string?,
+
+	--[[
+		This map's own Sound IS the music, and the round soundtrack stands down.
+
+		Normally a map's Sound is a BED that plays under the wave soundtrack —
+		ambient, buildup, horde — and the two are mixed together. On one map that
+		is wrong: the Backrooms is a place whose whole character is a room tone
+		nobody wrote a melody over, and a horde cue rising through it turns it
+		into a level in an action game.
+
+		So the map says so, and MusicController drops its three wave beds while
+		this map is loaded. What it keeps is deliberate and is the whole reason
+		this is a flag rather than "turn the music off":
+
+		  KEPT     the Tank and Witch themes, and the Victory and Defeat stings.
+		           A boss arriving must still be announced — it is the one thing
+		           the music says that the player cannot see coming — and the end
+		           of a round is a moment, not a mood.
+		  DROPPED  Ambient, Buildup, Horde, and any panic override. Those are the
+		           soundtrack this map is replacing.
+
+		The map's Sound is also DUCKED under a boss theme, on the same rule the
+		wave beds already follow: a drone at full volume under a Tank theme is two
+		tracks arguing rather than one rising over the other.
+	]]
+	replacesMusic: boolean?,
 }
 
 MapConfig.Maps = {
@@ -114,6 +146,11 @@ MapConfig.Maps = {
 		     stop. ]]
 		blurb = "It's an endless maze, there is no exit... or is there?",
 		image = "rbxassetid://3254834849",
+		--[[ The one map with a voice of its own. Its Sound — Backrooms_Ambience,
+		     sitting in the model — is the whole soundtrack here, and the wave
+		     cues stand down for it. Bosses still get their themes. See the field
+		     for what is kept and what is dropped. ]]
+		replacesMusic = true,
 	},
 } :: { MapDefinition }
 

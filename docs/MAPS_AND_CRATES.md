@@ -74,6 +74,41 @@ event — so tag those two by hand when you want them.
 
 ---
 
+## A map with its own music
+
+Drop a `Sound` into the map model and it is adopted on load: looped, moved into
+`SoundService`, played, and scaled by the map's `musicVolume` if it declares one.
+By default it is a **bed** — it plays *under* the wave soundtrack, and the two
+are mixed.
+
+On one map that is wrong. The Backrooms is a place whose whole character is a
+room tone nobody wrote a melody over, and a horde cue rising through it turns it
+into a level in an action game. So its definition sets:
+
+```lua
+replacesMusic = true,
+```
+
+and the round soundtrack stands down for it.
+
+| | On a normal map | With `replacesMusic` |
+|---|---|---|
+| Ambient / Buildup / Horde | plays | **silent** |
+| A panic event's override | plays | **silent** |
+| Tank & Witch themes | plays | **plays**, and the map's Sound ducks under it |
+| Victory / Defeat stings | plays | **plays** |
+
+What is kept is the point: a boss arriving is the one thing the music says that a
+player cannot see coming, and the end of a round is a moment rather than a mood.
+The Backrooms' own finale — the Bacteria Monster — is in
+`InfectedConfig.PeakBosses`, so it raises the boss theme like a Tank does.
+
+The map's Sound is ducked under a boss theme by the same amount the wave beds
+already were (`AudioConfig.Mix.DuckMusicOnTank`), and follows the player's music
+slider — on a map where this Sound *is* the music, somebody who turned the music
+down and still heard it has been ignored.
+
+
 ## Naming a surface nothing may spawn on
 
 A raycast cannot tell a floor from a ceiling. Both are flat, both have an upward

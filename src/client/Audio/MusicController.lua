@@ -60,6 +60,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local MapConfig = require(Shared.Config.MapConfig)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
@@ -422,6 +423,73 @@ local function witchIsNear(): boolean
 	return false
 end
 
+--[[
+	Whether the loaded map's own Sound is the soundtrack.
+
+	Read off the same Workspace attribute everything else reads the map from, and
+	answered by MapConfig — so this controller needs to know nothing about which
+	map is special, only how to ask. A map with no definition, or one that does
+	not claim it, gets the ordinary wave soundtrack and nothing here changes.
+]]
+local function mapOwnsMusic(): boolean
+	local id = Workspace:GetAttribute(Attributes.Game.CurrentMap)
+	if typeof(id) ~= "string" or id == "" then
+		return false
+	end
+	local definition = MapConfig.get(id)
+	return definition ~= nil and definition.replacesMusic == true
+end
+
+--[[
+	The map's own Sound, if it has been adopted and marked.
+
+	Searched rather than remembered, and that is not laziness: the Sound is
+	created and destroyed by the SERVER on every map swap, so a cached reference
+	is a reference to a destroyed instance for exactly as long as nobody notices.
+	SoundService has a handful of children and this runs on the mix clock, not
+	per frame.
+]]
+local function mapAmbience(): Sound?
+	for _, child in SoundService:GetChildren() do
+		if child:IsA("Sound") and child:GetAttribute(MapConfig.MusicAttribute) == true then
+			return child
+		end
+	end
+	return nil
+end
+
+--[[ The volume the map's Sound was adopted at, so the duck has something to
+     return it to. Keyed by the Sound itself with weak keys — a swap destroys the
+     old one and its entry goes with it, and reading a base off a Sound this
+     controller has already turned down would ratchet it toward silence. ]]
+local ambienceBase = (setmetatable({}, { __mode = "k" }) :: any) :: { [Sound]: number }
+
+--[[
+	Holds the map's own Sound under a boss theme, and at the player's own music
+	level.
+
+	Both halves are the same argument the wave beds already make. A drone at full
+	volume under a Tank theme is two tracks arguing rather than one rising over
+	the other; and on a map where this Sound IS the music, a player who turned
+	the music down and still hears it has been ignored.
+]]
+local function applyAmbience(name: string)
+	local sound = mapAmbience()
+	if not sound then
+		return
+	end
+	local base = ambienceBase[sound]
+	if not base then
+		base = sound.Volume
+		ambienceBase[sound] = base
+	end
+	local duck = if state.tankActive or name == CUE.WitchTheme then MIX.DuckMusicOnTank else 1
+	local wanted = base * duck * (if enabled then musicScale else 0)
+	if math.abs(sound.Volume - wanted) > 0.001 then
+		sound.Volume = wanted
+	end
+end
+
 --[[ What should be playing right now, in priority order. Every branch is a
      state read; nothing here is stateful, so the same inputs always produce the
      same cue and the mixer never has to be told twice. ]]
@@ -442,6 +510,19 @@ local function resolveCue(now: number): string
 	end
 	if witchIsNear() then
 		return CUE.WitchTheme
+	end
+	--[[
+		BELOW THE BOSSES AND ABOVE EVERYTHING ELSE, which is the whole design.
+
+		A map that brings its own soundtrack keeps the four cues above this line —
+		a Tank, a Witch, and the two that end a round — because those are moments
+		rather than mood, and a boss arriving is the one thing the music says that
+		a player cannot see coming. Everything below is the bed this map is
+		replacing: the panic override, the wave phases and the Director's
+		fallback. See MapConfig.replacesMusic.
+	]]
+	if mapOwnsMusic() then
+		return ""
 	end
 	if state.overrideCue ~= "" and now < state.overrideUntil then
 		return state.overrideCue
@@ -515,6 +596,11 @@ local function mix(deltaTime: number)
 		ensureVoice(wanted)
 	end
 	state.current = wanted
+
+	--[[ On the mix clock rather than per frame, and unconditionally: a map with
+	     no Sound of its own finds nothing and returns, which is every map but
+	     one. See applyAmbience. ]]
+	applyAmbience(wanted)
 
 	for name, voice in voices do
 		local cue = MUSIC[name]

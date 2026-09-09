@@ -1900,9 +1900,13 @@ end
 	and death only — never on a heartbeat.
 
 	TankActive is misnamed and means "a boss the team has to stand and fight is
-	on the map": the Tank and the Metallic, per InfectedConfig.PeakBosses, and
-	not the Witch, who is a hazard you walk around rather than a fight worth
-	changing the music for.
+	on the map" — whatever InfectedConfig.PeakBosses holds, which is the Tank,
+	the Metallic and the Backrooms' Bacteria Monster. Not the Witch, who is a
+	hazard you walk around rather than a fight worth changing the music for.
+
+	Naming the SET rather than its members on purpose: the finale boss was added
+	to PeakBosses months after this was written and this sentence still listed
+	two, which is how a comment starts describing a table it no longer matches.
 
 	THIS IS THE ONLY WRITER. The two specials used to set it themselves on spawn
 	and clear it on death, each with its own "unless another one is still
