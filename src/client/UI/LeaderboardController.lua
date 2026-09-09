@@ -304,8 +304,13 @@ local function refreshSelf(page: any?)
 	selfName.Text = player.Name
 
 	if typeof(me) ~= "table" then
+		--[[ Dimmed as well as dashed. Left bright, an em dash in the accent
+		     colour reads as a rank rather than as "we do not know yet", which is
+		     the only thing it means. ]]
 		selfRank.Text = "—"
+		selfRank.TextColor3 = COLOR.TextDim
 		selfValue.Text = "—"
+		selfValue.TextColor3 = COLOR.TextDim
 		return
 	end
 
@@ -325,6 +330,7 @@ local function refreshSelf(page: any?)
 	selfRank.Text = if rank then "#" .. tostring(rank) else "UNRANKED"
 	selfRank.TextColor3 = if rank then COLOR.AccentBright else COLOR.TextDim
 	selfValue.Text = commas(tonumber(me.value) or 0) .. board.unit
+	selfValue.TextColor3 = COLOR.AccentBright
 end
 
 function refresh()

@@ -284,6 +284,19 @@ Honours every rule in `DirectorConfig.Spawning`: distance band, flow window,
 out-of-sight requirement (checked against every survivor's camera cone AND a
 line-of-sight raycast), and ground clearance.
 
+Plus three rules that answer "is this place actually reachable", which is the
+question `SpawnVolume` deliberately does not:
+
+- a **height band** against the nearest survivor,
+- **overhead cover** — a candidate that is uncovered *and* above a covered team
+  is a roof (both halves are needed: cover alone would reject the street outside
+  a shop the team walked into),
+- **belongsToMap** — the floor must be part of the loaded map, or Terrain.
+
+The first two relax on the ladder; the last two do not. A failure names which
+rule did the rejecting, so a starving Director logs `18 in sight, 4 too close`
+rather than `could not spawn`.
+
 ### `Director/ItemPlacer.lua`
 ```lua
 ItemPlacer:populateSection(sectionFolder: Instance)
@@ -667,6 +680,16 @@ with the server.
 | `Server/Economy/EconomyService.lua` | the earning rules and the purchase path |
 | `Server/Survivors/LoadoutService.lua` | which two weapons you spawn holding |
 | `Client/UI/ProfileController.lua` | this client's mirror; the shop and loadout screens both read it |
+| `Shared/Config/LeaderboardConfig.lua` | the three global boards, and the shape of a lifetime row |
+| `Server/Economy/LeaderboardService.lua` | the OrderedDataStores: publishing at round end, paging on request |
+| `Client/UI/LeaderboardController.lua` | the RANKS panel |
+
+The profile carries a **`lifetime`** row alongside the balance — the only totals
+in the game that survive a rejoin, and what the global boards rank. Its shape
+comes from `LeaderboardConfig.blankLifetime` rather than a literal, so a board
+can never name a field the profile does not have. `ProfileService.recordLifetime`
+is the only thing that writes it and folds each field by its own rule: a *best*
+is replaced when beaten, a *total* is added to. See `docs/LEADERBOARDS.md`.
 
 **Earning and pricing live together** because they are two ends of one number.
 `scripts/economy.py` models a round from the real wave table and the real
