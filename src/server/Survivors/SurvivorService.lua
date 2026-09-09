@@ -26,6 +26,7 @@
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -129,11 +130,65 @@ local awaitingRescue: { Player } = {} -- dead players queued for a closet, oldes
 	wait is a real event with a real signal, and the timeout below exists only so
 	a client that never speaks is not frozen out of the game.
 
-	FIRST CHARACTER ONLY. A round start and a mid-round respawn both come through
-	_onCharacterAdded too, and by then the client has long since booted — holding
-	those would be a freeze on every single respawn.
+	── AND IT IS PER MAP, NOT PER SESSION ──────────────────────────────────────
+	This used to be a boolean set once, at boot, on the reasoning that "a round
+	start and a mid-round respawn both come through _onCharacterAdded too, and by
+	then the client has long since booted". Every word of that is true and the
+	conclusion was wrong, because booting is not the question. The question is
+	whether the client has received THIS MAP — and the map is destroyed and
+	replaced between rounds. A client that booted twenty minutes ago has not
+	received a map that was cloned into Workspace four seconds ago.
+
+	So from the second round onward nobody was held, and the exact fall the note
+	above describes happened again — to whichever player's client was furthest
+	behind on receiving the new map. Alone it never bit: one client, no
+	contention, the map arrives long before the round starts. With three friends
+	it bit somebody most rounds, and it looked like a different bug every time
+	because it depends on whose link is slowest.
+
+	It is now the map id the client has CONFIRMED it can see. A player is ready
+	when that matches the map the round is actually on, which is false for exactly
+	one moment — the first character handed out on a map they have not received —
+	and true for every mid-round respawn, because the map has not changed.
 ]]
-local clientReady: { [Player]: boolean } = {}
+local clientMap: { [Player]: string } = {}
+
+--[[ The map the round is on, or "" in the lobby. Read from the attribute rather
+     than from MapService so the hold has no dependency on it: this file needs to
+     compare two strings, not to know how a map is loaded. ]]
+local function currentMapId(): string
+	local value = Workspace:GetAttribute(Attributes.Game.CurrentMap)
+	return if typeof(value) == "string" then value else ""
+end
+
+--[[
+	How many times a map has been swapped in this server.
+
+	The id alone is not enough and the case that proves it is ordinary: a team
+	that plays Clinton twice in a row. The map is destroyed and cloned again, so
+	every client has to receive it again — and the id never changed, so an
+	acknowledgement from the first round would still match and release a body onto
+	a model the client has only just started downloading.
+
+	Bumped on Unload and on Load, which is twice per swap and does not matter:
+	the number is never read as a count, only compared for equality.
+]]
+local mapGeneration = 0
+
+--[[ What a confirmation has to match. The id AND the generation, joined into one
+     string so there is a single value to store and a single comparison to make.
+     "#0" is the lobby, where there is no map and nobody is waiting for one. ]]
+local function currentMapToken(): string
+	return currentMapId() .. "#" .. mapGeneration
+end
+
+--[[ Whether this client has confirmed the map the round is actually on. False
+     for exactly one moment — the first character handed out on a map this client
+     has not received — and true for every mid-round respawn, because a respawn
+     does not swap the map. ]]
+local function clientHasMap(player: Player): boolean
+	return clientMap[player] == currentMapToken()
+end
 --[[ How long a joining character waits before it is released anyway. Generous:
      the cost of being early is the bug above, and the cost of being late is a
      second of standing still on a screen that is still showing a loading map. ]]
@@ -313,7 +368,7 @@ function SurvivorService:_destroyRecord(player: Player)
 	self:_cancelHelp(record)
 	record.trove:destroy()
 	records[player] = nil
-	clientReady[player] = nil
+	clientMap[player] = nil
 
 	local index = table.find(awaitingRescue, player)
 	if index then
@@ -817,7 +872,7 @@ end
 	after the timeout cannot unanchor a body twice or strand an anchored one.
 ]]
 function SurvivorService:_holdUntilReady(player: Player, record)
-	if clientReady[player] then
+	if clientHasMap(player) then
 		return
 	end
 	local root = record.root
@@ -861,11 +916,12 @@ function SurvivorService:_holdUntilReady(player: Player, record)
 
 	record.releaseHold = release
 	--[[ The timeout is the floor under this, not the mechanism. A client that
-	     never invokes RequestInitialState — one that failed to boot, or an
-	     exploiter who simply does not — must still end up playable rather than
-	     welded to the spawn pad for the rest of the round. ]]
+	     never confirms the map — one that failed to boot, one whose download
+	     genuinely did not finish, or an exploiter who simply does not answer —
+	     must still end up playable rather than welded to the spawn pad for the
+	     rest of the round. ]]
 	record.charTrove:add(task.delay(READY_TIMEOUT, function()
-		if not clientReady[player] then
+		if not clientHasMap(player) then
 			warn(
 				string.format(
 					"[SurvivorService] %s was held at spawn for %ds without their client reporting "
@@ -884,11 +940,32 @@ end
 	remembered so the player's LATER characters — a respawn, the next round — are
 	never held at all.
 ]]
-function SurvivorService:markClientReady(player: Player)
+--[[
+	A client saying which map it can see.
+
+	`mapId` is nil from the boot handshake, which is not the same as "no map" — a
+	client that finished booting has whatever the world held at that moment, so
+	nil means the CURRENT one. A client that booted in the lobby records "", which
+	is what the lobby's own id is, and is correctly ready there.
+
+	A stale id is ignored rather than argued with. An acknowledgement for the map
+	before last can arrive after the next one has loaded, and taking it would
+	release a body onto a map that client has not received — which is the whole
+	failure this exists to prevent, arriving by a slower route.
+]]
+function SurvivorService:markClientReady(player: Player, mapId: string?)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return
 	end
-	clientReady[player] = true
+	--[[ Compared against the ID, stored as the TOKEN. The client cannot know the
+	     generation and does not need to: the server is the one deciding whether
+	     this acknowledgement is about the map it currently has loaded, and if it
+	     is, this is the generation it is about. ]]
+	local id = if typeof(mapId) == "string" then mapId else currentMapId()
+	if id ~= currentMapId() then
+		return
+	end
+	clientMap[player] = currentMapToken()
 	local record = records[player]
 	if record and typeof(record.releaseHold) == "function" then
 		record.releaseHold()
@@ -2567,6 +2644,24 @@ local function stateRequestAllowed(player: Player, key: string, cooldown: number
 end
 
 function SurvivorService:start()
+	--[[ The other half of the hold. MapService's own "Ready" fires when the
+	     clone is parented on the SERVER; this is a client saying the model has
+	     actually reached it, which is the only version that makes putting a body
+	     on that map safe. ]]
+	serviceTrove:connect(Remotes.Event.MapReady.OnServerEvent, function(player: Player, mapId: any)
+		SurvivorService:markClientReady(player, if typeof(mapId) == "string" then mapId else nil)
+	end)
+
+	--[[ Every swap invalidates every confirmation. Watched as a PHASE rather
+	     than as the map id, because the id does not change when a team replays
+	     the same map and the clone very much does. ]]
+	serviceTrove:connect(Workspace:GetAttributeChangedSignal(Attributes.Game.MapPhase), function()
+		local phase = Workspace:GetAttribute(Attributes.Game.MapPhase)
+		if phase == "Unload" or phase == "Load" then
+			mapGeneration += 1
+		end
+	end)
+
 	--[[ The client asks; the server decides and publishes. Nothing here trusts
 	     the request beyond "this player pressed crouch" — the speed clamp and the
 	     attribute are both computed on this side. ]]

@@ -245,6 +245,19 @@ local EVENTS: { string } = {
 	"MapVoteUpdated", -- {tally: {[string]: number}, voters: number}
 	"MapVoteResult", -- {winner: string, tally: {[string]: number}}
 	"MapLoading", -- {mapId: string, phase: string}  "Unload" | "Load" | "Ready"
+	--[[
+		"I can see this map."
+
+		MapLoading's own "Ready" is the SERVER'S ready — it fires the instant the
+		clone is parented, and a map is a large model that then has to reach four
+		clients over the wire. This is the other half, and the half that matters:
+		a client says the map exists in ITS Workspace, and only then is it safe to
+		put that player's body on it.
+
+		Carries the id so a slow acknowledgement for the map before last cannot be
+		mistaken for one about the map now. See SurvivorService's hold.
+	]]
+	"MapReady", -- C->S (mapId: string)
 	"AmmoCrateUsed", -- {player, crate: Instance, index, respawnAt: number, given: number}
 
 	-- ── Requisitions ────────────────────────────────────────────────────────

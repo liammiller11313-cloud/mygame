@@ -25,7 +25,11 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Workspace = game:GetService("Workspace")
+
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Attributes = require(Shared.Net.Attributes)
+local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 
 -- Assigned in the boot section below, not here: requiring it can fail, and the
@@ -325,6 +329,74 @@ local function requestInitialState(): any
 	return payload
 end
 
+--[[
+	── TELLING THE SERVER WHICH MAP THIS CLIENT CAN SEE ────────────────────────
+
+	MapLoading's "Ready" is fired the instant the clone is parented ON THE
+	SERVER. A map is a large model that then has to cross the wire to four
+	clients, and until it arrives, a body placed on it is a body standing in
+	nothing. SurvivorService holds a character still until this says otherwise —
+	see the hold's note there for the fall it prevents.
+
+	── IT WAITS FOR THE MODEL, NOT FOR THE MESSAGE ─────────────────────────────
+	Answering the moment the remote arrives would confirm nothing: the event is
+	small and overtakes the map it is announcing. So this waits for a child of
+	Workspace.CurrentMap actually named for that map, which is the one fact worth
+	reporting — the model exists here.
+
+	── AND IT GIVES UP ─────────────────────────────────────────────────────────
+	A map that never arrives must not freeze somebody out of the round. The
+	server has its own timeout under the hold; this one exists so a client that
+	waited too long still says something, and says it about the right map.
+]]
+local MAP_WAIT_TIMEOUT = 20
+
+local mapWatch = 0
+
+local function confirmMap(mapId: string)
+	mapWatch += 1
+	local ticket = mapWatch
+	task.spawn(function()
+		local deadline = os.clock() + MAP_WAIT_TIMEOUT
+		while os.clock() < deadline do
+			--[[ Superseded. Another map started loading while this one was still
+			     being waited for, and confirming the old id now would be worse
+			     than saying nothing — the server would release a body onto a map
+			     this client has not begun to receive. ]]
+			if ticket ~= mapWatch then
+				return
+			end
+			local folder = Workspace:FindFirstChild(MapConfig.LiveFolder)
+			if folder and folder:FindFirstChild(mapId) then
+				break
+			end
+			task.wait(0.1)
+		end
+		if ticket == mapWatch then
+			Remotes.Event.MapReady:FireServer(mapId)
+		end
+	end)
+end
+
+local function watchMapLoading()
+	Remotes.Event.MapLoading.OnClientEvent:Connect(function(payload: any)
+		if typeof(payload) ~= "table" or payload.phase ~= "Ready" then
+			return
+		end
+		local mapId = payload.mapId
+		if typeof(mapId) == "string" and mapId ~= "" then
+			confirmMap(mapId)
+		end
+	end)
+
+	--[[ And once for whatever is already loaded, because a client that joins a
+	     server mid-round never sees the event that announced its map. ]]
+	local current = Workspace:GetAttribute(Attributes.Game.CurrentMap)
+	if typeof(current) == "string" and current ~= "" then
+		confirmMap(current)
+	end
+end
+
 local function seed(payload: any)
 	for _, entry in loaded do
 		local method = entry.module.onInitialState
@@ -393,4 +465,9 @@ print(BAR)
 
 --[[ Seeded after start() so a controller's remote listeners are already up: the
      snapshot is a starting point, not a substitute for the events that follow. ]]
+--[[ Before the snapshot, so a client that joins mid-round starts waiting for
+     its map at the earliest possible moment rather than after a blocking call
+     that can take a second to answer. ]]
+watchMapLoading()
+
 seed(requestInitialState())
