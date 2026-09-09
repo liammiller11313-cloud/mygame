@@ -258,6 +258,30 @@ AmmoConfig.Magazines = {
 		lifetime = 2,
 		perShellRound = true,
 	},
+
+	--[[
+		The rocket, and the largest thing anybody loads in this game.
+
+		A launcher does not drop a magazine and does not eject a case — the whole
+		of its reload is one object going down a tube, in front of the camera, for
+		four seconds. `perShellRound` is what says "show the round rather than
+		throw a magazine", and it is true here for a weapon that is not shell-fed
+		at all: see ViewmodelController.onReloadStarted, which shows it for the
+		length of the reload instead of once per shell.
+
+		Big enough to be unmistakable at arm's length and no bigger. The colour is
+		the RPG's own warhead green rather than the tracer orange, because it is
+		the thing being loaded rather than the thing that arrives.
+	]]
+	Rocket = {
+		model = "Rocket",
+		size = Vector3.new(0.34, 0.34, 0.95),
+		color = Color3.fromRGB(96, 104, 68),
+		material = Enum.Material.Metal,
+		dropSpeed = 0,
+		lifetime = 4,
+		perShellRound = true,
+	},
 } :: { [string]: MagazineDefinition }
 
 --[[ Which calibre and magazine each weapon uses. Grouped by what the gun really
@@ -278,7 +302,9 @@ AmmoConfig.Weapons = {
 	     than left absent so the next person to read this table can tell the
 	     difference between "has none" and "was forgotten", which is exactly the
 	     distinction the three rows above got wrong. ]]
-	[Enums.Weapon.RPG7] = { casing = "", magazine = "" },
+	--[[ No case and no magazine, and a ROUND: the rocket itself, shown for the
+	     length of the reload. See AmmoConfig.Magazines.Rocket. ]]
+	[Enums.Weapon.RPG7] = { casing = "", magazine = "Rocket" },
 	[Enums.Weapon.M9] = { casing = "9mm", magazine = "PistolMag" },
 	[Enums.Weapon.Shotgun] = { casing = "12ga", magazine = "ShotgunShell" },
 	[Enums.Weapon.TacticalShotty] = { casing = "12ga", magazine = "ShotgunShell" },
@@ -336,7 +362,9 @@ AmmoConfig.Weapons = {
 	[Enums.Weapon.ClassicSword] = { casing = "", magazine = "" },
 	[Enums.Weapon.ClassicPaintballGun] = { casing = "", magazine = "" },
 	[Enums.Weapon.ClassicSlingshot] = { casing = "", magazine = "" },
-	[Enums.Weapon.ClassicRocketLauncher] = { casing = "", magazine = "" },
+	--[[ The same rocket. A hundred Robux buys a smaller launcher, not a
+	     different kind of ammunition. ]]
+	[Enums.Weapon.ClassicRocketLauncher] = { casing = "", magazine = "Rocket" },
 	[Enums.Weapon.FireAxe] = { casing = "", magazine = "" },
 	[Enums.Weapon.BaseballBat] = { casing = "", magazine = "" },
 	[Enums.Weapon.LeadPipe] = { casing = "", magazine = "" },

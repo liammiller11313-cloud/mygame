@@ -520,6 +520,15 @@ local dual = {
 	]]
 	centreShift = 0,
 }
+--[[ The round in the hand during a reload, and when it goes. Declared up here
+     with the rest of the model's own state rather than beside the magazine
+     below, because destroyModel has to be able to drop the reference — the
+     round is parented INSIDE the viewmodel, so a weapon swap has already
+     destroyed it and only the stale pointer is left. Declared later, those two
+     assignments were silently creating globals. ]]
+local roundContainer: Instance? = nil
+local roundExpiry = 0
+
 local flashPart: BasePart? = nil
 local flashLight: PointLight? = nil
 local flashSparks: ParticleEmitter? = nil
@@ -1376,6 +1385,12 @@ local function destroyModel()
 		model:Destroy()
 		model = nil
 	end
+	--[[ The loaded round lives INSIDE the model, so destroying it has already
+	     taken the round with it — this only drops the stale reference and the
+	     timer, which would otherwise have the sweep destroying a freed
+	     instance. ]]
+	roundContainer = nil
+	roundExpiry = 0
 	muzzle = nil
 	dual.left = nil
 	dual.right = nil
@@ -1898,11 +1913,91 @@ local function dropMagazine()
 	magazineExpiry = os.clock() + MAGAZINE_LIFETIME
 end
 
+--[[
+	The round in the hand, on a weapon that loads them one at a time.
+
+	AmmoConfig has described this for as long as it has existed — "the round the
+	hand carries to the loading port on each shell of a reload", and a flare
+	shell coloured so that "the round in the hand and the light it becomes are
+	obviously the same object". Both entries were written, tuned, documented in
+	AMMO_MODELS.md, and never drawn: `dropMagazine` returns early on
+	perShellRound and `onShellLoaded` only kicked the camera.
+
+	So this is the missing half rather than a new feature. Four weapons have been
+	reloading invisible ammunition.
+
+	── IT IS HELD, NOT THROWN ──────────────────────────────────────────────────
+	Every other piece of ammunition in this file is debris: it is given a
+	velocity and left to the solver. This one is the opposite — it is ANCHORED
+	and parented into the viewmodel, so it travels with the gun while the hand
+	carries it, and it is taken away rather than allowed to fall. A shell that
+	dropped to the floor would read as one being ejected, which is the thing that
+	happens when you FIRE.
+
+	One at a time. A second shell before the first has gone recycles it, the same
+	rule the magazine follows, because a shotgun at 0.42 seconds a shell would
+	otherwise stack seven of them in the air.
+]]
+local ROUND_LIFETIME = 0.45
+
+local function clearLoadedRound()
+	if roundContainer then
+		roundContainer:Destroy()
+		roundContainer = nil
+	end
+	roundExpiry = 0
+end
+
+local function showLoadedRound(seconds: number)
+	local definition = AmmoConfig.magazineFor(current.weaponId)
+	if not definition or not definition.perShellRound then
+		return
+	end
+	if not model or not muzzle then
+		return
+	end
+
+	clearLoadedRound()
+
+	local template = findAmmoTemplate(AmmoConfig.MagazineFolder, definition.model)
+	local container, root, parts =
+		instantiateAmmo(template, definition.size, definition.color, definition.material)
+
+	container.Name = "FL_LoadedRound"
+	configureAmmo(root, parts, false)
+	setAmmoVisible(parts, true)
+	for _, part in parts do
+		--[[ Anchored and welded to nothing: it is parented INTO the viewmodel, so
+		     it inherits the gun's motion for free and needs no physics at all.
+		     An unanchored part in a model the camera drags every frame is a part
+		     the solver fights. ]]
+		part.Anchored = true
+	end
+
+	--[[ Just under the receiver and back from the muzzle — the loading port on
+	     a tube-fed shotgun, and close enough to right on a break-action flare
+	     gun that the hand reads as doing the same job. ]]
+	root.CFrame = muzzle.WorldCFrame
+		* CFrame.new(0.12, -0.22, current.pose.length * 0.42)
+		* CFrame.Angles(0, math.rad(90), 0)
+	container.Parent = model
+
+	roundContainer = container
+	roundExpiry = os.clock() + seconds
+end
+
 local function stepMagazine(now: number)
 	if magazineContainer and magazineExpiry > 0 and now >= magazineExpiry then
 		magazineContainer:Destroy()
 		magazineContainer = nil
 		magazineExpiry = 0
+	end
+	--[[ And the round in the hand, on the same tick. It is parented into the
+	     viewmodel rather than to the world, so a weapon swap destroys it for
+	     free — this is only for the ordinary case where the shell simply goes
+	     into the gun and the hand comes back empty. ]]
+	if roundContainer and roundExpiry > 0 and now >= roundExpiry then
+		clearLoadedRound()
 	end
 end
 
@@ -2033,20 +2128,43 @@ function ViewmodelController:onDryFire()
 	kickPosition:impulse(Vector3.new(0, -0.05 * speed * IMPULSE_GAIN, 0.02 * speed * IMPULSE_GAIN))
 end
 
-function ViewmodelController:onReloadStarted(_definition: any, _perShell: boolean)
+function ViewmodelController:onReloadStarted(definition: any, perShell: boolean)
 	current.inspectClock = -1
 
 	dropMagazine()
+	--[[
+		A weapon that loads one round and is not shell-fed shows it for the whole
+		reload rather than per shell, because there is only one.
+
+		That is the RPG-7 and the classic rocket launcher: four seconds of
+		putting a rocket down a tube, which is the single most visible piece of
+		ammunition in the game and was previously four seconds of holding
+		nothing. The per-shell weapons take the other branch and get one round
+		per shell, from onShellLoaded below.
+	]]
+	if not perShell then
+		local reloadTime = if definition then tonumber(definition.reloadTime) else nil
+		showLoadedRound(math.max((reloadTime or 1) * 0.8, ROUND_LIFETIME))
+	end
 	current.reloading = true
 end
 
 function ViewmodelController:onShellLoaded()
 	local speed = kickPosition.speed
 	kickPosition:impulse(Vector3.new(0, -0.03 * speed * IMPULSE_GAIN, 0.03 * speed * IMPULSE_GAIN))
+	--[[ One shell, carried to the port, for slightly less than the time the next
+	     one takes to arrive — so there is a beat of empty hand between them and
+	     the reload reads as a rhythm rather than as a shell permanently stuck to
+	     the gun. ]]
+	showLoadedRound(ROUND_LIFETIME)
 end
 
 function ViewmodelController:onReloadFinished(_completed: boolean)
 	current.reloading = false
+	--[[ Whatever was in the hand goes with the reload, however it ended. A
+	     cancelled reload — firing out of it, going down, swapping weapon — must
+	     not leave a shell floating in front of the gun. ]]
+	clearLoadedRound()
 end
 
 --[[ The pump, the bolt, the slide — whatever the weapon calls it, the hand

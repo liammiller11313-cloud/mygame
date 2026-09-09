@@ -36,6 +36,13 @@ ReplicatedStorage/
 | **AK ammo** | AKM, AK-12, AKS-74U | `Casing_762`, `Casing_556` | `Mag_AK` |
 | **Sniper ammo** | M1A EBR | `Casing_762` | `Mag_Marksman` |
 | **Flare ammo** | Flare Gun | `Flare Shell (spent)` | `Flare Shell` |
+| **Rocket** | RPG-7, Classic Rocket Launcher | — (no case) | `Rocket` |
+
+> **`Round_12ga`, `Flare Shell` and `Rocket` are the three you actually SEE.**
+> They are not dropped magazines — they are the round in the hand during a
+> reload, held in front of the camera at arm's length. The shotgun and flare gun
+> show one per shell; a launcher shows its rocket for the whole four seconds.
+> Everything else on this list falls out of frame in under a second.
 
 Floor pickups: `AmmoPile`, `AmmoBox`, `ShellBox`.
 

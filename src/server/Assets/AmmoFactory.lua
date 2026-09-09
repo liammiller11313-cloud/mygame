@@ -39,6 +39,10 @@ local LEAD = Color3.fromRGB(152, 152, 158)
 local HULL_RED = Color3.fromRGB(146, 32, 28)
 local STEEL = Color3.fromRGB(48, 48, 52)
 local POLYMER = Color3.fromRGB(40, 42, 40)
+--[[ The rocket's warhead green. Matched to AmmoConfig.Magazines.Rocket rather
+     than picked here, so the stand-in and a supplied model that follows the
+     config's colour are the same object at a glance. ]]
+local OLIVE = Color3.fromRGB(96, 104, 68)
 local BAKELITE = Color3.fromRGB(124, 76, 38)
 local CAN_GREEN = Color3.fromRGB(72, 82, 56)
 local CARDBOARD = Color3.fromRGB(150, 120, 84)
@@ -348,6 +352,74 @@ end
 
 --[[ The PPSh drum: a flat cylinder with a short feed tower. Unmistakable, which
      is the point — the drum is half of what makes the PPSh the PPSh. ]]
+--[[
+	A rocket: warhead, body, and four fins.
+
+	Built rather than left to the block fallback because this is the one round in
+	the game a player looks at for four seconds at arm's length — the launcher's
+	whole reload is this object going down a tube. A featureless green brick at
+	that size and that duration reads as a missing model, which is the exact
+	impression a stand-in is supposed to avoid.
+
+	Fins are four thin plates rather than a cone, because a cone at this scale is
+	several hundred triangles for a silhouette four rectangles already give.
+]]
+local function buildRocket(name: string, box: Vector3): Model
+	local model = Instance.new("Model")
+	model.Name = name
+
+	local calibre = box.X
+	local length = box.Z
+
+	--[[ The body is the PrimaryPart and the thing everything else is placed
+	     against, so a supplied model swapped in later only has to agree about
+	     which part is the tube. ]]
+	local body = newPart(
+		model,
+		"Body",
+		Vector3.new(calibre * 0.62, calibre * 0.62, length * 0.62),
+		CFrame.identity,
+		OLIVE,
+		Enum.Material.Metal
+	)
+	body.Shape = Enum.PartType.Cylinder
+	--[[ A cylinder's axis is X, and this one has to run along the round's LENGTH
+	     — which is Z. Without the turn the rocket is a disc lying on its side,
+	     which is what the drum magazine's own comment above is about from the
+	     other direction. ]]
+	body.CFrame = CFrame.Angles(0, math.rad(90), 0)
+
+	-- The warhead: wider than the body and forward of it, which is the one
+	-- feature that makes this read as a rocket rather than as a pipe.
+	local head = newPart(
+		model,
+		"Warhead",
+		Vector3.new(calibre, calibre, length * 0.34),
+		CFrame.new(0, 0, -length * 0.42) * CFrame.Angles(0, math.rad(90), 0),
+		OLIVE,
+		Enum.Material.Metal
+	)
+	head.Shape = Enum.PartType.Ball
+	head.Size = Vector3.new(calibre, calibre, calibre)
+
+	for index = 0, 3 do
+		local bearing = index * (math.pi * 0.5)
+		local out = calibre * 0.34
+		newPart(
+			model,
+			"Fin" .. index,
+			Vector3.new(calibre * 0.06, calibre * 0.62, length * 0.2),
+			CFrame.new(math.cos(bearing) * out, math.sin(bearing) * out, length * 0.38)
+				* CFrame.Angles(0, 0, bearing),
+			STEEL,
+			Enum.Material.Metal
+		)
+	end
+
+	model.PrimaryPart = body
+	return model
+end
+
 local function buildDrumMagazine(name: string, box: Vector3): Model
 	local model = Instance.new("Model")
 	model.Name = name
@@ -691,6 +763,9 @@ function AmmoFactory:build(): number
 	end))
 	count(place(magazines, M.FlareShell.model, function()
 		return buildShotgunHull("FlareRound", M.FlareShell.size, true)
+	end))
+	count(place(magazines, M.Rocket.model, function()
+		return buildRocket("Rocket", M.Rocket.size)
 	end))
 
 	count(place(pickups, AmmoConfig.Pickups.Box, function()

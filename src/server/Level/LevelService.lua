@@ -56,6 +56,7 @@ local DirectorConfig = require(Shared.Config.DirectorConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
+local MapConfig = require(Shared.Config.MapConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -223,16 +224,92 @@ local function rebuildFlow()
 	end
 end
 
+--[[
+	Spawn candidates borrowed from the map's own item spots.
+
+	A map with no FL_SpawnNode parts is the normal case rather than the excep-
+	tion — tagging is deliberate work in Studio, and every map in this build has
+	had none. The Director still works: SpawnPlacement falls back to sampling a
+	ring around the survivors, which is honest and which its own warning
+	describes as "works but ignores your doorways and alleys". It is the weaker
+	half of the feature, and every map was running on it.
+
+	The item folders are a free answer to that. MapItemService already places
+	medkits, pills and throwables all over a level, and a designer put every one
+	of those where a thing can sit on the floor — which is the same question a
+	spawn node answers. Forty-odd points, spread through the map, on walkable
+	ground, at no cost to anybody.
+
+	── THEY ARE CANDIDATES, NOT PERMISSION ─────────────────────────────────────
+	Nothing here bypasses a rule. Every point still goes through SpawnPlacement's
+	whole filter — the distance band, the flow window, the camera cone AND the
+	line-of-sight ray, the ground test and the volume test — so a borrowed node
+	in a bad place is rejected exactly like a tagged one in a bad place. The only
+	thing this changes is that the Director has somewhere in the LEVEL to try
+	before it falls back to sampling around the team.
+
+	Tagged nodes still win outright when a map has them: this runs only when
+	there are none, and the warning still asks for them, because a person who
+	knows which alley the horde should come out of will always beat a heuristic.
+]]
+local function borrowedSpawnNodes(): { BasePart }
+	local out: { BasePart } = {}
+	local mapService = Registry.find("MapService")
+	local root = mapService
+		and typeof(mapService.getCurrentRoot) == "function"
+		and mapService:getCurrentRoot()
+	if typeof(root) ~= "Instance" then
+		return out
+	end
+
+	for _, family in MapConfig.MapItems do
+		local folder: Instance? = nil
+		for _, child in root:GetChildren() do
+			if
+				(child:IsA("Folder") or child:IsA("Model"))
+				and MapConfig.folderMatches(child.Name, family.folderName)
+			then
+				folder = child
+				break
+			end
+		end
+		if folder then
+			for _, child in folder:GetChildren() do
+				--[[ The part a body would stand next to. A lone Part answers for
+				     itself; a Model answers with whatever it is built around,
+				     which is close enough — a spawn point is a place, and every
+				     rule that matters is applied to it afterwards. ]]
+				local part: BasePart? = if child:IsA("BasePart")
+					then child
+					elseif child:IsA("Model") then (child.PrimaryPart or child:FindFirstChildWhichIsA(
+						"BasePart",
+						true
+					))
+					else nil
+				if part then
+					table.insert(out, part)
+				end
+			end
+		end
+	end
+
+	return out
+end
+
 local function rebuildSpawnNodes()
 	spawnDirty = false
 	spawnNodes = taggedParts(TAG_SPAWN)
 	if #spawnNodes == 0 then
+		spawnNodes = borrowedSpawnNodes()
+	end
+	if #spawnNodes == 0 then
 		warnOnce(
 			"nospawnnodes",
 			string.format(
-				"no %s parts in the map. Infected placement falls back to sampling the space around "
-					.. "the survivors, which works but ignores your doorways and alleys — tag a few "
-					.. "parts out of sight of the play space to control where the horde comes from.",
+				"no %s parts in the map and no item folders to borrow from. Infected placement falls "
+					.. "back to sampling the space around the survivors, which works but ignores your "
+					.. "doorways and alleys — tag a few parts out of sight of the play space to "
+					.. "control where the horde comes from.",
 				TAG_SPAWN
 			)
 		)
