@@ -408,11 +408,37 @@ Four things, quickest first:
    arithmetic impossibility. If the Apex still cannot be killed inside the wave,
    that is the number to report.
 
-### I. Controller and phone
+### I. The spawn fixes, which is the important one
+
+**On the Backrooms, look at the F9 console the moment the map loads.** The
+LevelService line now ends with `survivors start from ...`. It should say
+`N SpawnLocation(s) in the map`. If it says anything containing the word
+`falling back`, the team is starting somewhere that is not the level and every
+other symptom follows from it — report that line verbatim.
+
+Then: start a round, and check you are inside the map. Play to a boss wave and
+check the Tank is in the building with you rather than on top of it. If a boss
+is slow to arrive, F9 will say why in plain words — `N standing on something
+that is not the map` and `N out under open sky while the team is indoors` are
+the two new reasons, and either one means the guard is doing its job.
+
+### J. Controller and phone
 
 Every generator panel is presses only and was built for this. If any of the five
 cannot be finished on a pad or a phone, that is the single most important thing
 you can report from this build.
+
+Newly worth a pass of its own, because an audit found real defects here:
+
+- **On a phone**, open the main menu and read the seven nav entries. Every title
+  and every sub-line should sit inside its own cell — nothing running under its
+  neighbour. Then open CAREER: the left column scrolls now, and the streak card
+  is its first row, so all three orders must be reachable by dragging.
+- **On a controller**, open RANKS and press B. Then CODES and press B. Both used
+  to be screens a pad could open and not leave.
+- **Press everything with a thumb.** The RANKS tabs, the streak CLAIM and the
+  spectate FIND ANOTHER SERVER were all under the 42-pixel touch standard and
+  have been resized; if any of them still feels like a near-miss, say so.
 
 ---
 
