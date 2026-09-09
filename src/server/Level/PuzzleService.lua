@@ -112,6 +112,15 @@ local PuzzleService = {}
 
 local serviceTrove = Trove.new()
 local doorTrove = Trove.new()
+--[[ The hums of every generator currently running.
+
+     Their own trove because they are the one sound in this file with a
+     LIFETIME: AudioService leaves a looped voice alone until its Sound is
+     destroyed, which is correct — a hum that stopped on a timer would be a
+     machine that switched itself off — and means somebody has to destroy it.
+     A generator still running into the next round is a machine nobody
+     powered. ]]
+local runningTrove = Trove.new()
 
 --[[
 	A spare of each room's weapon, and why one is needed.
@@ -671,6 +680,49 @@ local function centreOf(instance: Instance?): Vector3?
 	return nil
 end
 
+--[[ Something on a prop that a Sound can hang off. AudioService:playOn wants a
+     BasePart and a designer's prop is as likely to be a Model, a Model wrapping
+     one part, or a lone Part — all three answer here. ]]
+local function speakerOf(instance: Instance?): BasePart?
+	if not instance then
+		return nil
+	end
+	if instance:IsA("BasePart") then
+		return instance
+	end
+	return (instance :: any).PrimaryPart or instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
+--[[
+	A generator turning over, and the hum it settles into.
+
+	Both at the machine rather than on the solver's screen, which is the entire
+	point. Five generators across open streets is a job four people split up to
+	do, and before this the only evidence a teammate had that the objective moved
+	was a number changing on a card — the person who did it heard a menu confirm
+	and nobody else heard anything at all.
+
+	The start-up and the hum begin together rather than the hum waiting for the
+	cough to finish. Chaining them off `Ended` would be tidier and would also mean
+	no hum at all on any frame the voice budget refused the start-up, which is
+	exactly the frame a horde is on top of somebody. A generator that hums as it
+	turns over is right anyway.
+]]
+local function startRunning(model: Model)
+	local audio = Registry.find("AudioService")
+	local part = speakerOf(model)
+	if not audio or typeof(audio.playOn) ~= "function" or not part then
+		return
+	end
+
+	pcall(audio.playOn, audio, AudioConfig.Generator.Start, part)
+
+	local ok, running = pcall(audio.playOn, audio, AudioConfig.Generator.Run, part)
+	if ok and typeof(running) == "Instance" then
+		runningTrove:add(running)
+	end
+end
+
 -- ── the reward ──────────────────────────────────────────────────────────────
 
 --[[
@@ -731,6 +783,7 @@ end
      rounds' documents or an open vault. ]]
 function PuzzleService:clear()
 	doorTrove:clean()
+	runningTrove:clean()
 
 	--[[ Through the same function that opened it, so there is one place that
 	     knows what a closed door looks like. It used to be restored inline here
@@ -1299,14 +1352,26 @@ local function openTheRoom(player: Player, line: string)
 		line = line,
 	})
 
-	--[[ On the room itself, so the whole team hears WHERE the lock let go rather
-	     than getting a menu click in their ear. playOn wants a BasePart, which a
-	     wrapped prop always has. ]]
-	local source = state.keypad or state.gateRoom
+	--[[
+		On the DOOR, so the whole team hears where the lock let go rather than
+		getting a click in their ear.
+
+		The door first and the room second, which is the other way round from how
+		this used to pick: the door is the thing that just moved, and a loot room
+		can be a whole building whose centre is nowhere near the way in.
+
+		The generator kind gets a gate rolling up; the vault keeps its confirm.
+		That split is only because the sound was sourced for the loot room — the
+		vault door would be better served by the same shutter, and that is a
+		one-line change whenever somebody decides it.
+	]]
+	local speaker = speakerOf(state.door) or speakerOf(state.gateRoom) or speakerOf(state.keypad)
+	local opened = if PuzzleConfig.kindOf(state.definition) == PuzzleConfig.Kind.Generators
+		then AudioConfig.Generator.Gate
+		else AudioConfig.UI.MenuConfirm
 	local audio = Registry.find("AudioService")
-	local speaker = source and (source.PrimaryPart or source:FindFirstChildWhichIsA("BasePart", true))
 	if audio and typeof(audio.playOn) == "function" and speaker then
-		pcall(audio.playOn, audio, AudioConfig.UI.MenuConfirm, speaker)
+		pcall(audio.playOn, audio, opened, speaker)
 	end
 end
 
@@ -1788,6 +1853,7 @@ local function onSubmitGenerator(player: Player, payload: any)
 		     side of a running generator has something to bind to. ]]
 		CollectionService:RemoveTag(model, PuzzleConfig.GeneratorTag)
 		model:SetAttribute(PZ.GeneratorLive, true)
+		startRunning(model)
 	end
 
 	Remotes.Event.GeneratorResult:FireClient(player, {
@@ -1881,6 +1947,7 @@ function PuzzleService:destroy()
 	table.clear(weaponStash)
 	serviceTrove:destroy()
 	doorTrove:destroy()
+	runningTrove:destroy()
 	self:clear()
 end
 

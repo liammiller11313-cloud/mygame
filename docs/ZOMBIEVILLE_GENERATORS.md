@@ -165,7 +165,31 @@ This is what stops penetration six being simply the best gun in the game. If it
 feels wrong in play, `spinUp` and `spinHold` in `WeaponConfig` are the two
 numbers, and setting `spinUp = nil` removes the mechanic entirely.
 
-### It has its own voice
+---
+
+## What it sounds like
+
+The generators had no world audio at all until the ids landed: every switch you
+threw was the shop's hover tick, and a generator coming online made no noise
+outside the panel — the person who solved it heard a menu confirm and the other
+three heard nothing.
+
+| Cue | Where it plays | Carries |
+|---|---|---|
+| **Start-up** | at the machine, on power | 260 studs — this is how a teammate three streets away learns the objective moved |
+| **Running hum** | at the machine, looped | 85 studs — the map audibly comes alive as you go |
+| **Gate** | at the gate, at 5/5 | 320 studs — the payoff, and it used to be a menu click |
+| Press / fault / solved / open | the panel, on your screen | — |
+
+The hum is **destroyed with the round**, not stopped on a timer: a generator that
+switched itself off after thirty seconds would be a machine nobody powered.
+
+Clinton's vault door still plays the menu confirm. The shutter would suit it
+better and that is a one-line change — say the word.
+
+---
+
+## The Tesla Rifle has its own voice
 
 The only weapon in the game that does not share the common reload bank — it has
 no magazine to drop and no round to fail to chamber, so it would have sounded

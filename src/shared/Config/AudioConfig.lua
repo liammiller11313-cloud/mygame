@@ -117,6 +117,20 @@ local ID = table.freeze({
 	TeslaHum = "rbxassetid://109938838638994",
 	TeslaEmpty = "rbxassetid://17871250897",
 	TeslaDraw = "rbxassetid://130114397986399",
+
+	--[[ Zombieville's generators, and the room they open. Seven cues, and the
+	     first three of them are the ones that matter: before these the objective
+	     sounded like a MENU — every breaker thrown was the same tick as scrolling
+	     a shop row, and a generator coming online made no noise in the world at
+	     all, so three teammates across the map learned about it from a counter
+	     and a subtitle. ]]
+	GeneratorStart = "rbxassetid://136132917853307",
+	GeneratorRun = "rbxassetid://86780554044335",
+	GateOpen = "rbxassetid://6326763024",
+	PanelPress = "rbxassetid://9119717523",
+	PanelFault = "rbxassetid://85047859986879",
+	PanelSolved = "rbxassetid://4612374393",
+	PanelOpen = "rbxassetid://86103958267078",
 	AkShot = "rbxassetid://1065188024",
 	M4Shot = "rbxassetid://18521643711",
 	SniperShot = "rbxassetid://135333708100426",
@@ -440,6 +454,68 @@ AudioConfig.WeaponVoice = {
 		     firing pin to fall on nothing. ]]
 		DryFire = sound(ID.TeslaEmpty, 0.6, 0.98, 1.04, 45, 3),
 	},
+}
+
+--[[
+	The generator objective, world and panel in one table.
+
+	Four of these are UI and three are world sounds, which normally would put
+	them in two different places — and they are here together because they are
+	one FEATURE, and the thing that goes wrong with this kind of audio is a cue
+	somebody could not find to change. A designer retuning how the generators
+	sound should not have to know which half of the file each of them lives in.
+
+	── THE THREE WORLD ONES ARE THE POINT ──────────────────────────────────────
+	`Start`, `Run` and `Gate` are played through AudioService at the machine, so
+	everybody hears them from where they actually are. That is the whole reason
+	this table exists: five generators spread across open streets is a job four
+	people split up to do, and before these the only evidence a teammate had that
+	the objective moved was a number changing on a card.
+
+	`Run` is LOOPED and is the one with a lifetime. AudioService leaves a looped
+	voice alone until its Sound is destroyed — see its sweep — so PuzzleService
+	holds each one in a trove and takes it down with the round. A generator still
+	humming into the next round would be a machine nobody powered.
+]]
+AudioConfig.Generator = {
+	--[[ It turns over. Carries 260 studs, which is far — deliberately: this is
+	     the cue that tells somebody three streets away that the team advanced,
+	     and a start-up nobody hears is the problem it was added to fix. ]]
+	Start = sound(ID.GeneratorStart, 0.85, 0.96, 1.04, 260, 5),
+	--[[ And settles into a hum. Quiet and short-range, because five of these
+	     running at once is the end state of every successful round and it must
+	     read as the map coming alive rather than as a drone over the horde. ]]
+	Run = {
+		id = ID.GeneratorRun,
+		ids = nil,
+		volume = 0.3,
+		pitchMin = 0.97,
+		pitchMax = 1.03,
+		rollOffMin = 10,
+		rollOffMax = 85,
+		looped = true,
+		priority = 2,
+	},
+	--[[ The loot-room gate. The payoff for a five-minute objective, and it used
+	     to be the menu-confirm tick. Reaches further than the start-up because
+	     it happens once a round and everybody should hear it land. ]]
+	Gate = sound(ID.GateOpen, 0.9, 0.97, 1.03, 320, 6),
+
+	--[[
+		And the panel, which is UI and is played on the client through UiSound.
+
+		These four replace MenuHover, MenuBack and MenuConfirm. The swap matters
+		more than it sounds: a player throws about twenty switches per generator
+		run, and hearing the shop's hover tick every time is what made the panels
+		read as a menu drawn over a machine rather than as the machine's own
+		front. Rolloff and priority are ignored on this path — UiSound is 2D —
+		and are filled in anyway so a cue moved to the world later is not a
+		silent surprise.
+	]]
+	Press = sound(ID.PanelPress, 0.45, 0.95, 1.07, 30, 2),
+	Fault = sound(ID.PanelFault, 0.55, 0.98, 1.04, 30, 3),
+	Solved = sound(ID.PanelSolved, 0.6, 0.99, 1.02, 30, 4),
+	Open = sound(ID.PanelOpen, 0.5, 0.99, 1.02, 30, 3),
 }
 
 AudioConfig.WeaponReload = {

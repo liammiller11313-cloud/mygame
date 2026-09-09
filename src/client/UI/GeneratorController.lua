@@ -424,7 +424,7 @@ local function buildWireMatch()
 				return
 			end
 			table.insert(state.answer, index)
-			UiSound.play(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.Generator.Press)
 			refresh()
 			if #state.answer >= count then
 				submit()
@@ -515,7 +515,7 @@ local function buildBreakerOrder()
 				return
 			end
 			table.insert(state.answer, index)
-			UiSound.play(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.Generator.Press)
 			refresh()
 			if #state.answer >= count then
 				submit()
@@ -612,7 +612,7 @@ local function buildVoltageMatch()
 			else
 				return
 			end
-			UiSound.play(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.Generator.Press)
 			refresh()
 			--[[ Sent the moment the third one lights, rather than behind a
 			     CONFIRM. There is nothing to confirm: three cells either make the
@@ -719,7 +719,7 @@ local function buildPressureValve()
 			return
 		end
 		table.insert(state.answer, math.floor(state.needle + 0.5))
-		UiSound.play(AudioConfig.UI.MenuHover)
+		UiSound.play(AudioConfig.Generator.Press)
 
 		if state.stage >= #stages then
 			--[[ Stopped, then sent. The needle freezes on the last reading so the
@@ -827,7 +827,7 @@ local function buildPhaseAlign()
 			local right = (index % count) + 1
 			state.dials[index] = (state.dials[index] + 1) % modulus
 			state.dials[right] = (state.dials[right] + 1) % modulus
-			UiSound.play(AudioConfig.UI.MenuHover)
+			UiSound.play(AudioConfig.Generator.Press)
 			refresh()
 
 			local aligned = true
@@ -966,7 +966,7 @@ function GeneratorController:open(payload: any)
 	setSuppressed(not menuIsOpen())
 	FreeCursor.take(restore)
 	GamepadFocus.capture(state.firstButton or closeButton)
-	UiSound.play(AudioConfig.UI.MenuConfirm)
+	UiSound.play(AudioConfig.Generator.Open)
 end
 
 function GeneratorController:close()
@@ -1021,7 +1021,7 @@ function GeneratorController:start()
 		end
 		if payload.ok ~= true then
 			callController("VaultController", "sayRefusal", tostring(payload.reason or ""))
-			UiSound.play(AudioConfig.UI.MenuBack)
+			UiSound.play(AudioConfig.Generator.Fault)
 			return
 		end
 		self:open(payload)
@@ -1041,7 +1041,7 @@ function GeneratorController:start()
 		if payload.ok == true then
 			state.running = false
 			setStatus("ONLINE", COLOR.HealthGood)
-			UiSound.play(AudioConfig.UI.MenuConfirm)
+			UiSound.play(AudioConfig.Generator.Solved)
 			task.delay(DONE_DWELL, function()
 				if state.open then
 					self:close()
@@ -1052,7 +1052,7 @@ function GeneratorController:start()
 
 		redraw()
 		setStatus(tostring(payload.reason or "FAULT"), COLOR.Danger)
-		UiSound.play(AudioConfig.UI.MenuBack)
+		UiSound.play(AudioConfig.Generator.Fault)
 	end)
 
 	--[[ Somebody else finished one. The panel closes rather than sitting on a
