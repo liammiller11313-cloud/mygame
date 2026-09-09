@@ -1622,6 +1622,84 @@ if _inf_enum:
             )
 
 
+# ── 23. The melee ladder: duplicate niches, and paying past the economy ─────
+# `penetration` on a melee is not armour piercing — MeleeService reads it as how
+# many bodies one arc goes through, and since every one of those bodies is a dead
+# Common, it IS the weapon's crowd throughput. Together with damage x rate it is
+# what separates the melee roster from a list of things that all one-shot a
+# Common, so two SHOP melees sharing a penetration value means two prices buying
+# the same swing. That is how the Fire Axe and the Machete were both found
+# sitting on 3.
+#
+# passOnly melee are exempt from that rule and get a stricter one. A Robux
+# weapon is meant to sit BESIDE something in the Dollars roster, which means
+# sharing a niche is the point — the Classic Sword deliberately shares the
+# Knife's single-target arc. What it must never do is top the roster, because
+# then a hundred Robux has bought past an economy the whole round loop is built
+# to make you earn.
+#
+# Also checked: every melee must still one-shot the toughest Common tier. A
+# melee that has to swing twice at a Common is not a melee, and the tier
+# multipliers in InfectedConfig move independently of WeaponConfig's damage.
+_wc = read(SRC / "shared/Config/WeaponConfig.lua")
+_ic23 = read(SRC / "shared/Config/InfectedConfig.lua")
+_common_hp = re.search(r"\[Enums\.Infected\.Common\] = \{.*?\n\t\thealth = (\d+),", _ic23, re.S)
+_tier_mults = [float(x) for x in re.findall(r"^\t\t\thealth = ([\d.]+),", _ic23, re.M)]
+_TOUGHEST_COMMON = (
+    int(_common_hp.group(1)) * max(_tier_mults + [1.0]) if _common_hp else 0
+)
+
+_shop_pen: dict[int, list[str]] = {}
+_shop_dps: dict[str, float] = {}
+_paid_dps: dict[str, float] = {}
+for _m in re.finditer(r"\[Enums\.Weapon\.(\w+)\] = \{(.*?)\n\t\},", _wc, re.S):
+    _wid, _body = _m.group(1), _m.group(2)
+    if not re.search(r'^\t\tclass = "Melee",', _body, re.M):
+        continue
+    _paid = re.search(r"^\t\tpassOnly = true,", _body, re.M) is not None
+    _dmg = re.search(r"^\t\tdamage = (\d+),", _body, re.M)
+    _rpm = re.search(r"^\t\trpm = (\d+),", _body, re.M)
+    _pen = re.search(r"^\t\tpenetration = (\d+),", _body, re.M)
+
+    if _dmg and int(_dmg.group(1)) < _TOUGHEST_COMMON:
+        problems.append(
+            f"WeaponConfig melee {_wid!r} does {_dmg.group(1)} damage and the toughest "
+            f"Common tier has {_TOUGHEST_COMMON:g} health — melee's whole identity is "
+            f"that a swing which lands is a body on the floor, and this one needs two"
+        )
+    if _pen and not _paid:
+        _shop_pen.setdefault(int(_pen.group(1)), []).append(_wid)
+    if _dmg and _rpm:
+        (_paid_dps if _paid else _shop_dps)[_wid] = int(_dmg.group(1)) * int(_rpm.group(1)) / 60
+
+for _pen, _ids in sorted(_shop_pen.items()):
+    if len(_ids) > 1:
+        problems.append(
+            f"WeaponConfig melee {' and '.join(sorted(_ids))} all sit on penetration "
+            f"{_pen} — that number is bodies-per-arc, so it is the only thing telling "
+            f"these weapons apart, and two of them sharing it means two Dollars prices "
+            f"buying the same swing"
+        )
+
+# Free weapons are not part of "the economy" a paid weapon must not buy past —
+# beating the starting knife is the entire reason anything is on the shelf.
+_earned = {
+    _wid: _dps for _wid, _dps in _shop_dps.items()
+    if re.search(r"id = Enums\.Weapon\.%s, category = \"MELEE\", price = 0" % _wid,
+                 read(SRC / "shared/Config/EconomyConfig.lua")) is None
+}
+if _earned and _paid_dps:
+    _best = max(_earned.values())
+    for _wid, _dps in sorted(_paid_dps.items()):
+        if _dps > _best:
+            _top = max(_earned, key=lambda k: _earned[k])
+            problems.append(
+                f"WeaponConfig melee {_wid!r} is passOnly and does {_dps:.0f} single-target "
+                f"damage per second, above every melee on the Dollars shelf (best is "
+                f"{_top} at {_best:.0f}) — a Robux weapon is meant to sit beside the "
+                f"roster, and this one is on top of it"
+            )
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

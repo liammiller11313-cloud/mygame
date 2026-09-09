@@ -2247,10 +2247,73 @@ WeaponConfig.Definitions = {
 		knockback = 36,
 	},
 
-	--[[ Costs no ammo and never runs dry, takes heads off cleanly, and moves
-	     you faster than any gun does. To use it you have to be inside claw
-	     range, which is the entire balance. Handled by MeleeService, not the
-	     ballistics path — the round-related fields below are unused. ]]
+	--[[
+		THE MELEE LADDER
+
+		Six weapons handled by MeleeService rather than the ballistics path, so
+		the round-related fields on all of them are unused. What they share:
+		no ammo, no reload, no recoil, faster movement than any gun, and a swing
+		that one-shots a Common wherever it lands. What separates them is two
+		numbers, and the six sit on a curve rather than a line because of it.
+
+		── THE TWO NUMBERS ──────────────────────────────────────────────────────
+		`damage` decides what a swing does to a SPECIAL. Against a 50-health
+		Common it is decoration — every melee in the game deletes one at any
+		value above 50, including a 3.2x elite at 160 — so damage is entirely a
+		statement about Hunters, Chargers, Witches and Tanks.
+
+		`penetration` decides what a swing does to a CROWD. MeleeService reads it
+		as how many bodies one arc goes through, and since each of those bodies
+		dies, penetration x rate IS the weapon's kills per second against a
+		horde. The five on the Dollars shelf run 1 to 5 with no two sharing a
+		value — knife 1, pipe 2, machete 3, axe 4, bat 5 — and audit.py check 23
+		fails the build if two ever collide, which is how the axe and the machete
+		were caught both sitting on 3. The Classic Sword sits on 1 alongside the
+		knife on purpose and is exempt; see the last section.
+
+		── WHERE EACH ONE LANDS ─────────────────────────────────────────────────
+		Single-target is damage x rpm/60. Crowd is penetration x rpm/60.
+
+		                 price   single   crowd   reach   speed   knock
+		  Knife           free      475    2.50      11    1.10      18
+		  Baseball Bat   1,400      301    7.92      16    1.06      62
+		  Lead Pipe      1,800      573    2.67      14    1.04      44
+		  Machete        2,400      500    5.00      16    1.06      26
+		  Fire Axe       3,200      620    4.13      17    1.02      34
+		  Classic Sword   pass      560    2.33      12    1.10      18
+
+		── WHY IT WAS RETUNED ───────────────────────────────────────────────────
+		The previous numbers put the free knife at 650 single-target — the
+		highest of any melee in the game — and the 3,200 fire axe at 385, the
+		lowest. Two of the four paid melees were then strictly dominated: the
+		Lead Pipe lost to the free Knife on both axes at once, and the Fire Axe
+		lost to the cheaper Machete on both. A player who worked out the table
+		was correct to never buy either, and a price ladder nobody climbs is not
+		an economy.
+
+		The rule the six now hold to: no weapon may be worse than a cheaper one
+		on EVERY axis. Each of them gives something up. The bat cannot hurt a
+		special. The pipe cannot clear a room. The knife gives up reach and the
+		axe gives up your legs. Whichever you carry, something in the game is
+		about to be the wrong answer to it, and that is the point.
+
+		── THE SWORD IS THE ONE THAT COSTS MONEY ────────────────────────────────
+		A Robux weapon is meant to sit BESIDE the roster rather than on top of
+		it, so sharing the knife's single-target niche is the point and the
+		uniqueness rule above does not apply to it. What DOES apply is the
+		harder one: it sits under the Lead Pipe on single-target, under
+		everything but the bat on crowd, and four studs short of the machete's
+		reach. Check 23 fails the build the day a passOnly melee tops the
+		Dollars shelf on damage per second, because the day that happens a
+		hundred Robux has bought past an economy the round loop exists to make
+		you earn. It was 750 before this pass — the highest of any melee in the
+		game — which is exactly the bug that rule now catches.
+	]]
+
+	--[[ Takes heads off cleanly and moves you faster than any gun does. To use
+	     it you have to be inside claw range, which is the entire balance. The
+	     generalist of the six: three bodies an arc, sixteen studs of reach, and
+	     enough damage that a Hunter is two swings rather than four. ]]
 	[Enums.Weapon.Machete] = {
 		id = Enums.Weapon.Machete,
 		displayName = "Machete",
@@ -2260,7 +2323,7 @@ WeaponConfig.Definitions = {
 		fireMode = "Melee",
 
 		damage = 300,
-		rpm = 85,
+		rpm = 100,
 		pellets = 1,
 		magSize = 0,
 		reserveMax = 0,
@@ -2306,8 +2369,10 @@ WeaponConfig.Definitions = {
 	},
 
 	--[[ Slow and enormous. One swing takes a Common apart at the shoulder and
-	     keeps going into the one behind it. The heaviest thing here, and the
-	     one most likely to get you killed if you miss. ]]
+	     keeps going into the three behind it, and 600 damage is a dead Hunter,
+	     a dead Jockey and half a Witch. The heaviest thing here, the longest
+	     reach in the game, and the one most likely to get you killed if you
+	     miss — a whiffed axe is most of a second you do not have. ]]
 	[Enums.Weapon.FireAxe] = {
 		id = Enums.Weapon.FireAxe,
 		displayName = "Fire Axe",
@@ -2316,14 +2381,12 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 420,
-		rpm = 55,
+		damage = 600,
+		rpm = 62,
 		pellets = 1,
 		magSize = 0,
 		reserveMax = 0,
-		--[[ `penetration` is the target CAP for a swing, not armour piercing —
-		     MeleeService reads it as how many bodies one arc goes through. It is
-		     the single number that separates these five from each other. ]]
+		-- Bodies per arc, not armour piercing. See THE MELEE LADDER above.
 		penetration = 4,
 		penetrationFalloff = 0.9,
 
@@ -2366,8 +2429,10 @@ WeaponConfig.Definitions = {
 	},
 
 	--[[ No edge, so nothing comes off — but it sends them. The bat is the
-	     crowd-control melee: wide arc, real knockback, and the bodies it hits
-	     land on the ones behind them. ]]
+	     crowd-control melee: five bodies an arc, the hardest knockback in the
+	     game, and the ones it hits land on the ones behind them. It pays for
+	     that with the lowest damage of the six — swinging a bat at a Charger is
+	     a decision you get to make exactly once. ]]
 	[Enums.Weapon.BaseballBat] = {
 		id = Enums.Weapon.BaseballBat,
 		displayName = "Baseball Bat",
@@ -2376,18 +2441,12 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 300,
-		rpm = 80,
+		damage = 190,
+		rpm = 95,
 		pellets = 1,
 		magSize = 0,
 		reserveMax = 0,
-		--[[ `penetration` is the target CAP for a swing, not armour piercing —
-		     MeleeService reads it as how many bodies one arc goes through. It is
-		     the single number that separates these five from each other, so the
-		     roster runs 1 to 5 with no two sharing a value: knife 1, pipe 2,
-		     machete 3, axe 4, bat 5. verify_melee fails the build if two ever
-		     collide, which is how the axe and the machete were caught both
-		     sitting on 3. ]]
+		-- Bodies per arc, not armour piercing. See THE MELEE LADDER above.
 		penetration = 5,
 		penetrationFalloff = 0.9,
 
@@ -2429,9 +2488,10 @@ WeaponConfig.Definitions = {
 		knockback = 62,
 	},
 
-	--[[ Heavy and short. Fewer targets per swing than the bat and considerably
-	     more damage into each of them — the one to carry if what keeps killing
-	     you is a Hunter rather than a crowd. ]]
+	--[[ Heavy and short. Two bodies an arc where the bat takes five, and more
+	     than twice the damage into each of them — the one to carry if what
+	     keeps killing you is a Hunter rather than a crowd. It will not clear a
+	     doorway and is not meant to. ]]
 	[Enums.Weapon.LeadPipe] = {
 		id = Enums.Weapon.LeadPipe,
 		displayName = "Lead Pipe",
@@ -2440,14 +2500,12 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 380,
-		rpm = 70,
+		damage = 430,
+		rpm = 80,
 		pellets = 1,
 		magSize = 0,
 		reserveMax = 0,
-		--[[ `penetration` is the target CAP for a swing, not armour piercing —
-		     MeleeService reads it as how many bodies one arc goes through. It is
-		     the single number that separates these five from each other. ]]
+		-- Bodies per arc, not armour piercing. See THE MELEE LADDER above.
 		penetration = 2,
 		penetrationFalloff = 0.9,
 
@@ -2489,9 +2547,11 @@ WeaponConfig.Definitions = {
 		knockback = 44,
 	},
 
-	--[[ The fastest swing in the game and the shortest reach in it. Almost
-	     twice the machete's rate, one body at a time, and you have to be close
-	     enough that being wrong about the timing is fatal. ]]
+	--[[ The fastest swing in the game and the shortest reach in it. Half again
+	     the machete's rate, one body at a time, and you have to be close enough
+	     that being wrong about the timing is fatal. It is free, it is the most
+	     mobile thing in the roster, and every weapon above it on the shelf
+	     beats it at something — which is what a starting weapon is for. ]]
 	[Enums.Weapon.Knife] = {
 		id = Enums.Weapon.Knife,
 		displayName = "Combat Knife",
@@ -2500,14 +2560,12 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 260,
+		damage = 190,
 		rpm = 150,
 		pellets = 1,
 		magSize = 0,
 		reserveMax = 0,
-		--[[ `penetration` is the target CAP for a swing, not armour piercing —
-		     MeleeService reads it as how many bodies one arc goes through. It is
-		     the single number that separates these five from each other. ]]
+		-- Bodies per arc, not armour piercing. See THE MELEE LADDER above.
 		penetration = 1,
 		penetrationFalloff = 0.9,
 
@@ -2837,9 +2895,11 @@ WeaponConfig.Definitions = {
 		the price meaningless.
 	]]
 
-	--[[ Fast, short and light. The Machete's damage at nearly twice the swing
-	     rate, and it gives up all of the Machete's reach for it: this is a duel
-	     weapon for a corridor, not a crowd-clearer. ]]
+	--[[ Fast, short and light. Less damage per swing than the Machete at nearly
+	     half again its rate, and it gives up four studs of the Machete's reach
+	     and two of its three bodies per arc to get there: this is a duel weapon
+	     for a corridor, not a crowd-clearer, and the Lead Pipe on the shelf for
+	     Dollars hits harder than it does. ]]
 	[Enums.Weapon.ClassicSword] = {
 		id = Enums.Weapon.ClassicSword,
 		displayName = "Classic Sword",
@@ -2850,8 +2910,8 @@ WeaponConfig.Definitions = {
 		passOnly = true,
 		placeable = false,
 
-		damage = 300,
-		rpm = 150,
+		damage = 240,
+		rpm = 140,
 		pellets = 1,
 		magSize = 0,
 		reserveMax = 0,
