@@ -714,7 +714,7 @@ function PuzzleService:arm(random: Random?)
 		return false
 	end
 
-	local values = template.generate(random or Random.new())
+	local values = template.generate(random or Random.new(), definition)
 	local answer = template.answer(values)
 	--[[ Refused rather than shipped. A code that is not the length the keypad
 	     accepts is a puzzle nobody can solve however well they read, and the one

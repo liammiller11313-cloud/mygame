@@ -50,6 +50,17 @@ refused and the counter tells the player which one they are missing.
 
 The code is those four digits **in that order**. All four change every round.
 
+### The wording changes too, not just the numbers
+
+Each of the four documents has **three phrasings**, one picked per round from the
+same roll that picks the digits. The clipboard is always a security report — so
+the prompt and the "found" line stay true — but it is a formal report one round,
+a shift handover the next, and a night patrol sheet the one after.
+
+That matters more than it sounds. With one fixed wording, a player who has read
+the clipboard once knows to look at `SQUAD ASSIGNMENT` without reading the page,
+and the investigation quietly becomes a lookup.
+
 ### The digits are hidden until collected
 
 Every document is legible from the first second of the round, but the one field

@@ -94,6 +94,51 @@ than a new system.
 
 ## Built since this list was written
 
+### The note was signed by the wrong person five rounds in six — **fixed**
+
+Clinton's handwritten note ended `- {officerInitial}H`. The `H` is a literal,
+left over from writing the note against MARCUS HARPER, and it never moved when
+the officer roster grew to six. So DENISE OKONKWO's note signed `- DH`, RAY
+VASQUEZ's signed `- RH`, and only Harper's was ever right.
+
+That is not cosmetic. The officer appearing on two documents is the puzzle's one
+cross-reference, and `PuzzleConfig`'s own comment calls it *"the cheapest
+possible way to say these papers came from one building"*. A third document
+signing with a surname initial that matches neither the badge nor the report
+does the exact opposite — it tells a player the papers are generated. Values now
+carry `officerLastInitial` and the note signs with it.
+
+### And the clue wording varies, not just the values
+
+Every document had one fixed sentence structure with rolled values dropped into
+it. Fine for a code, where the digits *are* the puzzle — and not fine the moment
+a clue carries an argument rather than a number, which is what Zombieville's
+generator sequence needs. A player who has read the clipboard once knows to look
+at `SQUAD ASSIGNMENT` without reading the page, and the investigation becomes a
+lookup.
+
+`ClueSlot.text` is `ClueSlot.texts` now: three phrasings each, and the round
+picks one. The document TYPE stays fixed per slot — the clipboard is always a
+security report — so `found` and `prompt` keep describing what was actually
+picked up; only the wording inside moves.
+
+The pick is rolled in `generate`, not chosen in `surfaces`, and that ordering is
+load-bearing: `surfaces` runs again on every collection, so picking there would
+reword the documents under a player halfway through reading one. `generate` takes
+the definition now to see how many phrasings each clue has — optional, so a
+caller that only wants values still gets the first phrasing and the behaviour
+this file had before.
+
+All three of the note's phrasings state the collection order, because that is
+the one document that tells a player how to arrange what they are carrying. A
+phrasing that forgot would make the round unsolvable rather than differently
+worded, and it is written down next to them for the next person adding a fourth.
+
+Verified by rendering all 72 combinations — four clues, three phrasings, six
+officers — and checking each for an unresolved placeholder, a missing digit, and
+the right signature.
+
+
 ### Redeemable codes — **built**
 
 A CODES panel off the menu's nav row: a box, a button, and one line that says

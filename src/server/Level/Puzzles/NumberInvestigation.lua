@@ -5,7 +5,7 @@
 	The first puzzle template, and the shape every later one has to fit. A
 	template owns exactly four questions:
 
-	    generate(random)              what values is this round's puzzle made of
+	    generate(random, definition)  what values is this round's puzzle made of
 	    answer(values)                what those values spell
 	    surfaces(definition, values)  what each prop reads, given what is found
 	    prompt(clue, values)          what the HUD says when one is picked up
@@ -42,6 +42,11 @@ export type Values = {
 	--[[ Digit by clue ORDER — [1] is the clipboard's, [4] is the note's — so
 	     `answer` is a walk rather than a lookup table of names. ]]
 	digits: { number },
+	--[[ Which PHRASING each clue prints this round, by the same order. Rolled
+	     here rather than chosen in `surfaces`, because surfaces runs again on
+	     every collection — picking there would reword the documents under a
+	     player who was halfway through reading them. ]]
+	variants: { number },
 	[string]: any,
 }
 
@@ -60,10 +65,22 @@ end
 	reproducible round supplies its own — the same courtesy ModifierConfig.roll
 	extends, and the reason neither of them reaches for math.random.
 ]]
-function NumberInvestigation.generate(random: Random): Values
+function NumberInvestigation.generate(random: Random, definition: PuzzleConfig.PuzzleDefinition?): Values
 	local digits: { number } = {}
 	for index = 1, PuzzleConfig.Digits do
 		digits[index] = random:NextInteger(PuzzleConfig.DigitMin, PuzzleConfig.DigitMax)
+	end
+
+	--[[ One phrasing per clue. The definition is optional so a caller that only
+	     wants values — a test, a future tool — is not forced to hand one over;
+	     without it every clue falls to its first phrasing, which is the same
+	     behaviour this file had before phrasings existed. ]]
+	local variants: { number } = {}
+	if definition then
+		for _, clue in definition.clues do
+			local count = #clue.texts
+			variants[clue.order] = if count > 1 then random:NextInteger(1, count) else 1
+		end
 	end
 
 	--[[ One officer, named on TWO documents. The badge on the floor and the
@@ -74,9 +91,18 @@ function NumberInvestigation.generate(random: Random): Values
 
 	return {
 		digits = digits,
+		variants = variants,
 		officerFirst = officer.first,
 		officerLast = officer.last,
 		officerInitial = string.sub(officer.first, 1, 1),
+		--[[ The surname's initial, which the handwritten note signs with.
+
+		     It used to sign "{officerInitial}H" — a literal H, left over from
+		     writing the note against MARCUS HARPER. Five officers in six
+		     therefore signed somebody else's surname: DENISE OKONKWO's note came
+		     out "- DH". That broke the one cross-reference the puzzle has, which
+		     is that the badge, the report and the note are all the same person. ]]
+		officerLastInitial = string.sub(officer.last, 1, 1),
 		area = PuzzleConfig.Areas[random:NextInteger(1, #PuzzleConfig.Areas)],
 		note = PuzzleConfig.Notes[random:NextInteger(1, #PuzzleConfig.Notes)],
 		date = rollDate(random),
@@ -128,7 +154,13 @@ function NumberInvestigation.surfaces(
 		local digit = values.digits[clue.order]
 		local filled = table.clone(values)
 		filled.digit = if revealed and digit then tostring(digit) else PuzzleConfig.Redacted
-		out[clue.object] = PuzzleConfig.fill(clue.text, filled)
+		--[[ Clamped rather than trusted. `variants` is empty when generate was
+		     called without a definition, and a phrasing index past the end of the
+		     list would print nothing at all — a blank prop reads as a broken
+		     puzzle, where the first phrasing reads as the puzzle. ]]
+		local pick = values.variants and values.variants[clue.order] or 1
+		local text = clue.texts[pick] or clue.texts[1]
+		out[clue.object] = PuzzleConfig.fill(text, filled)
 	end
 	return out
 end

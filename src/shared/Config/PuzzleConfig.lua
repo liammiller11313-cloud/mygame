@@ -91,11 +91,26 @@ export type ClueSlot = {
 	--[[ The line the HUD shows when this one is picked up. Written per clue
 	     because "CLUE FOUND" four times says nothing about what was found. ]]
 	found: string,
-	--[[ What the surface says. `{squad}`, `{room}`, `{officer}`, `{officerName}`,
-	     `{officerInitial}`, `{area}`, `{date}`, `{first}`, `{second}`, `{third}`
-	     and `{note}` are replaced from the rolled values; anything else is left
-	     alone, so a template can contain literal braces. ]]
-	text: string,
+	--[[
+		What the surface says — one entry per PHRASING, and the round picks one.
+
+		Was a single string, which meant every round printed the same sentences
+		with different numbers in them. That is fine for a code (the digits are
+		the puzzle) and it stops being fine the moment a clue carries an argument
+		rather than a value: a player who has read "SQUAD ASSIGNMENT" once knows
+		which field to look at without reading the document, and the investigation
+		becomes a lookup.
+
+		The document TYPE stays fixed per slot — the clipboard is always a
+		security report — so `found` and `prompt` keep describing what was
+		actually picked up. Only the wording inside it moves.
+
+		`{digit}`, `{officerFirst}`, `{officerLast}`, `{officerInitial}`,
+		`{officerLastInitial}`, `{area}`, `{date}` and `{note}` are replaced from
+		the rolled values; anything else is left alone, so a template can contain
+		literal braces.
+	]]
+	texts: { string },
 	--[[ Which face of the part the text is drawn on. A clipboard lying on a desk
 	     wants Top; a sign on a wall wants Front. Named here rather than guessed
 	     from the part's shape, because a guess is wrong exactly often enough to
@@ -270,12 +285,24 @@ local DEFINITIONS: { PuzzleDefinition } = {
 				textSize = 22,
 				prompt = "SECURITY REPORT",
 				found = "SQUAD ASSIGNMENT LOGGED",
-				text = "FRIED CHICKEN SECURITY REPORT\n\n"
-					.. "DATE: {date}\n\n"
-					.. "SQUAD ASSIGNMENT: {digit}\n\n"
-					.. "AREA: {area}\n\n"
-					.. "STATUS:\n{note}\n\n"
-					.. "AUTHORIZED BY:\n{officerInitial}. {officerLast}",
+				texts = table.freeze({
+					"FRIED CHICKEN SECURITY REPORT\n\n"
+						.. "DATE: {date}\n\n"
+						.. "SQUAD ASSIGNMENT: {digit}\n\n"
+						.. "AREA: {area}\n\n"
+						.. "STATUS:\n{note}\n\n"
+						.. "AUTHORIZED BY:\n{officerInitial}. {officerLast}",
+					"SHIFT HANDOVER \226\128\148 {date}\n\n"
+						.. "POST: {area}\n\n"
+						.. "SQUAD ON DUTY: {digit}\n\n"
+						.. "PASSED TO NEXT SHIFT:\n{note}\n\n"
+						.. "SIGNED: {officerInitial}. {officerLast}",
+					"NIGHT PATROL SHEET\n\n"
+						.. "{date} \226\128\148 {area}\n\n"
+						.. "SQUAD {digit} WALKED IT.\n\n"
+						.. "NOTES:\n{note}\n\n"
+						.. "SUPERVISOR: {officerInitial}. {officerLast}",
+				}),
 			}),
 			--[[ SECOND. A sign somebody screwed to a wall, which says nothing
 			     about a code — a room number is a room number, and the player is
@@ -288,7 +315,11 @@ local DEFINITIONS: { PuzzleDefinition } = {
 				textSize = 34,
 				prompt = "ROOM SIGN",
 				found = "ROOM NUMBER NOTED",
-				text = "ROOM {digit}\n\nSUPPLY STORAGE\n\nAUTHORIZED\nPERSONNEL ONLY",
+				texts = table.freeze({
+					"ROOM {digit}\n\nSUPPLY STORAGE\n\nAUTHORIZED\nPERSONNEL ONLY",
+					"STOREROOM {digit}\n\nDRY GOODS\n\nKEEP\nDOOR SHUT",
+					"{digit}\n\nBACK STORE\n\nSTAFF ONLY\nBEYOND THIS POINT",
+				}),
 			}),
 			--[[ THIRD. Named for the same officer who signed the report — the one
 			     cross-reference in the set, and the cheapest possible way to say
@@ -301,10 +332,22 @@ local DEFINITIONS: { PuzzleDefinition } = {
 				textSize = 16,
 				prompt = "SECURITY BADGE",
 				found = "OFFICER ID RECOVERED",
-				text = "THE FRIED CHICKEN\nSECURITY DIVISION\n\n"
-					.. "OFFICER:\n{officerFirst} {officerLast}\n\n"
-					.. "ID:\n{digit}\n\n"
-					.. "CLEARANCE:\nSUPPLY VAULT",
+				texts = table.freeze({
+					"THE FRIED CHICKEN\nSECURITY DIVISION\n\n"
+						.. "OFFICER:\n{officerFirst} {officerLast}\n\n"
+						.. "ID:\n{digit}\n\n"
+						.. "CLEARANCE:\nSUPPLY VAULT",
+					"STAFF PASS\n\n"
+						.. "{officerFirst} {officerLast}\n"
+						.. "SECURITY\n\n"
+						.. "BADGE NO. {digit}\n\n"
+						.. "VAULT ACCESS: YES",
+					"THE FRIED CHICKEN\n\n"
+						.. "NAME: {officerLast}, {officerFirst}\n"
+						.. "DEPT: SECURITY\n"
+						.. "NO: {digit}\n\n"
+						.. "IF FOUND, RETURN TO\nTHE FRONT COUNTER",
+				}),
 			}),
 			--[[ LAST, and the only one written by hand. It states the order the
 			     player has just walked, which turns four digits they are carrying
@@ -317,10 +360,28 @@ local DEFINITIONS: { PuzzleDefinition } = {
 				textSize = 20,
 				prompt = "HANDWRITTEN NOTE",
 				found = "THE LAST DIGIT",
-				text = "if you got this far you have\nthe other three.\n\n"
-					.. "squad, room, id, then {digit}.\n\n"
-					.. "same order you found them.\n\n"
-					.. "dont let anyone else in.\n\n- {officerInitial}H",
+				--[[ Every one of these has to state the ORDER as well as carry the
+				     last digit. It is the only document that tells a player how to
+				     arrange what they are holding, and a phrasing that forgot to
+				     would make the round unsolvable rather than merely differently
+				     worded. ]]
+				texts = table.freeze({
+					"if you got this far you have\nthe other three.\n\n"
+						.. "squad, room, id, then {digit}.\n\n"
+						.. "same order you found them.\n\n"
+						.. "dont let anyone else in.\n\n"
+						.. "- {officerInitial}{officerLastInitial}",
+					"whoever finds this \226\128\148\n\n"
+						.. "the pad wants four.\n"
+						.. "squad first, then the room,\n"
+						.. "then my badge, then {digit}.\n\n"
+						.. "walk it in that order.\n\n"
+						.. "- {officerInitial}{officerLastInitial}",
+					"cant carry it all out.\n\n"
+						.. "code is squad, room, id,\nand {digit} on the end.\n\n"
+						.. "in the order you picked\nthem up. dont get clever.\n\n"
+						.. "- {officerInitial}{officerLastInitial}",
+				}),
 			}),
 		}),
 
