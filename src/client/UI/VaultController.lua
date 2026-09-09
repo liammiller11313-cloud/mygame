@@ -55,7 +55,19 @@ local PANEL = UITheme.Panel
 local TEXT = UITheme.TextSize
 
 local GA = Attributes.Game
+local PA = Attributes.Player
 local PUZZLE = Attributes.Puzzle
+
+--[[ States a panel cannot survive — see the PA.State watch in start(). Held
+     here rather than in both files because the keypad and the generator panel
+     are the same screen in two shapes and this is the same answer. ]]
+local SHUT_STATES: { [string]: boolean } = {
+	[Enums.SurvivorState.Incapacitated] = true,
+	[Enums.SurvivorState.LedgeHanging] = true,
+	[Enums.SurvivorState.Pinned] = true,
+	[Enums.SurvivorState.Dead] = true,
+	[Enums.SurvivorState.Spectating] = true,
+}
 
 local player = Players.LocalPlayer
 
@@ -714,6 +726,29 @@ function VaultController:start()
 	]]
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.RoundState), function()
 		if state.open and Attributes.get(Workspace, GA.RoundState, "") ~= Enums.RoundState.InProgress then
+			self:close()
+		end
+	end)
+
+	--[[
+		Going down closes it too, and nothing used to.
+
+		The round-state watch above catches a round ENDING under an open panel;
+		it does not catch the far commoner thing, which is one player being
+		grabbed, shot down or killed while the round carries on around them. A
+		panel at DisplayOrder.Settings draws OVER the incapacitated card and the
+		death overlay, so a survivor pulled off a generator by a Hunter kept a
+		full-screen puzzle over the one screen that tells them what happened to
+		them — still holding the cursor and the input lock.
+
+		The same five states the trigger refuses on, for the same reason: they
+		are the ones where the player is not standing at the machine any more.
+	]]
+	trove:connect(player:GetAttributeChangedSignal(PA.State), function()
+		if not state.open then
+			return
+		end
+		if SHUT_STATES[Attributes.get(player, PA.State, "")] then
 			self:close()
 		end
 	end)

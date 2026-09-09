@@ -76,6 +76,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Enums = require(Shared.Enums)
+local GameConfig = require(Shared.Config.GameConfig)
 local GeneratorConfig = require(Shared.Config.GeneratorConfig)
 local MapConfig = require(Shared.Config.MapConfig)
 local PuzzleConfig = require(Shared.Config.PuzzleConfig)
@@ -678,6 +679,65 @@ local function centreOf(instance: Instance?): Vector3?
 		end
 	end
 	return nil
+end
+
+--[[
+	Whether this player may work on a machine at all, and whether they are
+	standing at THIS one.
+
+	Both halves were missing, and the second one made a comment in Remotes.lua
+	untrue: it says a crafted client "cannot power a generator out of turn, or
+	from across the map", and only the first of those was actually enforced.
+	Without a range test the whole objective collapses to five remote calls from
+	the spawn point — which is not a cheat that beats the game so much as one
+	that deletes the thing the objective IS, which is walking five legs of a map
+	with a horde on you.
+
+	The state test is the other half. A downed or dead player is not standing at
+	a generator: they are on the floor with a pistol, or spectating, and the
+	prompt they are answering is one their client should not still be drawing.
+
+	Generous on distance rather than exact. GameConfig's interact range is what
+	the prompt uses to decide the player can reach something, and a server that
+	enforced the identical number would refuse honest presses on lag alone — the
+	player was in range when they pressed and had drifted a stud by the time the
+	packet landed. Double it: still nowhere near "from across the map", and it
+	never argues with somebody who was actually there.
+]]
+local UPRIGHT_ONLY = table.freeze({
+	[Enums.SurvivorState.Incapacitated] = true,
+	[Enums.SurvivorState.LedgeHanging] = true,
+	[Enums.SurvivorState.Pinned] = true,
+	[Enums.SurvivorState.Dead] = true,
+	[Enums.SurvivorState.Spectating] = true,
+})
+
+local REACH = GameConfig.Interaction.Range * 2
+
+local function atMachine(player: Player, prop: Instance?): boolean
+	if not prop or not prop.Parent then
+		return false
+	end
+
+	local survivors = Registry.find("SurvivorService")
+	if survivors and typeof(survivors.getState) == "function" then
+		local ok, survivorState = pcall(survivors.getState, survivors, player)
+		if ok and UPRIGHT_ONLY[survivorState] then
+			return false
+		end
+	end
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		--[[ No body, no reach. A player between characters cannot be standing at
+		     anything, and letting a missing root mean "allowed" would make
+		     respawning the way around the check. ]]
+		return false
+	end
+
+	local at = centreOf(prop)
+	return at ~= nil and (root.Position - at).Magnitude <= REACH
 end
 
 --[[ Something on a prop that a Sound can hang off. AudioService:playOn wants a
@@ -1502,6 +1562,14 @@ local function onCollect(player: Player, target: any)
 	end
 	entry.tookAt = now
 
+	--[[ And you have to be standing at it, alive. The vault's objective is a
+	     walk around a building exactly as much as the generators' is a walk
+	     around a map, and a clue chain answerable from the spawn point is four
+	     remote calls rather than a search. Same helper, same reach. ]]
+	if not atMachine(player, target) then
+		return
+	end
+
 	--[[ Already in. Silent rather than refused: walking back past a clipboard
 	     you have read is not a mistake and does not deserve a message. ]]
 	if clue.order <= state.found then
@@ -1604,6 +1672,15 @@ local function onStockpile(player: Player, target: any)
 	end
 	entry.tookAt = now
 
+	--[[ Reached, not merely known about. This one pays the whole team at once,
+	     so claiming it from outside the room would hand four players the reward
+	     for a door nobody opened — and the tag it is guarded on goes up the
+	     instant the room does, which is the moment the pile becomes worth
+	     sending a packet at. ]]
+	if not atMachine(player, target) then
+		return
+	end
+
 	--[[ Untagged BEFORE anything is paid. Two players reaching it in the same
 	     frame would otherwise both pass the check and the team would be paid
 	     twice — the server is single-threaded, so removing the tag first is a
@@ -1695,6 +1772,14 @@ local function onOpenGenerator(player: Player, target: any)
 		return
 	end
 	entry.tookAt = now
+
+	--[[ Silent rather than refused: a request from somewhere this player cannot
+	     be is not a mistake they made, it is a client that should not have sent
+	     it, and answering one is how a rate-limited handler becomes an outbound
+	     amplifier for whoever is sending them. ]]
+	if not atMachine(player, state.generators[order]) then
+		return
+	end
 
 	local total = generatorCount()
 
@@ -1792,6 +1877,10 @@ local function onSubmitGenerator(player: Player, payload: any)
 	local target = payload.generator
 	local order = if typeof(target) == "Instance" then state.generatorOf[target] else nil
 	if not order then
+		return
+	end
+
+	if not atMachine(player, state.generators[order]) then
 		return
 	end
 

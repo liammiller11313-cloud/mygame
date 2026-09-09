@@ -337,6 +337,11 @@ local SIGHT_NAMES = { "Sight", "AimPoint", "AimPart", "Iron" }
      copy now uses it too. ]]
 local GRIP_NAMES = { "Grip" }
 
+--[[ Weapons already reported as having no Grip. One line each per session: this
+     fires on every draw of the weapon, and a warning per swap is a warning
+     nobody reads. ]]
+local warnedNoGrip: { [string]: boolean } = {}
+
 -- Sway. The weapon lags the camera, which is the single cheapest cue that the
 -- thing has mass. Clamped so a flick of the mouse cannot throw it off screen.
 local SWAY_SPEED = 11
@@ -921,7 +926,7 @@ end
 --[[ Which way a supplied model is built, and whether that is close enough to
      forward to leave alone. Shared with the WORLD model's grip — see
      Shared/Util/ModelFacing, whose header carries the reasoning for both. ]]
-local function pinPivot(built: Model, host: BasePart, definition: any)
+local function pinPivot(built: Model, host: BasePart, definition: any, supplied: boolean)
 	local pivot = built:GetPivot()
 	local low, high = ModelFacing.extents(built, pivot)
 	local centre = (low + high) * 0.5
@@ -979,8 +984,50 @@ local function pinPivot(built: Model, host: BasePart, definition: any)
 		return
 	end
 
-	--[[ No grip, which means a grey-box this file built rather than a prepared
-	     weapon. Fall back to measuring, exactly as before. ]]
+	--[[
+		No grip. Two very different causes, and only one of them is fine.
+
+		The benign one is a grey-box this file built for a weapon with no art;
+		`buildFallback` never stamps a Grip and never needed to, because it also
+		builds the model pointing the right way.
+
+		The other one is a SUPPLIED model that never went through the weapon
+		pipeline, and it is worth a line in the output because it is invisible
+		otherwise. PlaceholderFactory prepares a CLONE and leaves the user's
+		original untouched, and it deliberately does not publish that clone when
+		the client can already reach the original — so a model kept in
+		Assets.Viewmodels is cloned here straight from the user's tree, with no
+		Grip on it, and this function silently falls back to measuring. Which is
+		the behaviour the tactical shotgun was sideways under: right in the world
+		where CarryVisualService uses the grip, wrong in the hand where this
+		guessed.
+
+		Guessing is still the right thing to do — a measured model is usually
+		fine and a missing weapon is worse than a rotated one. Guessing SILENTLY
+		is not, because the symptom is "it looks a bit off", which is the hardest
+		possible thing to report and the easiest to live with.
+	]]
+	--[[ Only for a SUPPLIED model, and named by the weapon rather than by the
+	     model — `built.Name` is "FL_Viewmodel" by the time this runs, which
+	     would report every weapon under one name and therefore report exactly
+	     one of them. A grey-box has no Grip either and is not a problem: it is
+	     already listed in PlaceholderFactory's boot report, and warning about it
+	     twice would bury the case that matters under the case that does not. ]]
+	local named = (definition and definition.id) or built.Name
+	if supplied and not warnedNoGrip[named] then
+		warnedNoGrip[named] = true
+		warn(
+			string.format(
+				"[ViewmodelController] %q has no Grip attachment, so its first-person "
+					.. "rotation is being measured rather than read. If it looks rotated in "
+					.. "the hand but correct on a teammate, that is why: put the model in "
+					.. "Assets.Weapons rather than Assets.Viewmodels so the pipeline "
+					.. "prepares the copy the client actually draws.",
+				named
+			)
+		)
+	end
+
 	local forward = ModelFacing.forwardOf(built, host, pivot)
 	if ModelFacing.isForward(forward) and spin == CFrame.identity then
 		-- Already pointing the right way and asking for no roll. Old behaviour.
@@ -1292,7 +1339,28 @@ end
 --[[ The model's sight, in pivot space, or nil for art that did not ship one.
      Measured once per swap: the model never moves relative to its own pivot. ]]
 local function sightOffsetOf(built: Model): Vector3?
-	local sight = findAttachment(built, SIGHT_NAMES)
+	--[[
+		A pair has two sights, and which one this found was descendant order.
+
+		That is not a decision, and unlike the grip it is not harmless either:
+		the offset is a POSITION, subtracted from the aim pose to pull the sight
+		onto the centre line. Solved against the right gun's sight it puts the
+		right gun on the crosshair; against the left gun's it puts the left one
+		there — and then `dual.centreShift` pushes the pair right on top of that,
+		so a model whose halves happened to be built in the other order aims
+		visibly wrong for no reason the player could ever see.
+
+		So the right gun decides, or nothing does. The same rule pinPivot and
+		adoptDualWeapon already follow: it is the half every other path in the
+		game treats as the weapon. Falling back to a whole-model search when the
+		right gun has no sight would reintroduce exactly the coin toss — it would
+		find the left one — so a pair without a right sight aims off its centre,
+		which is what centreShift is already there to do.
+	]]
+	local rightHalf = built:FindFirstChild("FL_Right")
+	local sight = if rightHalf
+		then findAttachment(rightHalf, SIGHT_NAMES)
+		else findAttachment(built, SIGHT_NAMES)
 	if not sight then
 		return nil
 	end
@@ -1458,6 +1526,10 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	local pose = current.pose
 	local template = findTemplate(weaponId, definition)
 	local built: Model
+	--[[ Whether this is the artist's model or a grey-box, carried down to
+	     pinPivot: a supplied model with no Grip is worth a line in the output and
+	     a grey-box without one is not. See there. ]]
+	local supplied = template ~= nil
 	if template then
 		built = template:Clone()
 	else
@@ -1473,10 +1545,11 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 		built = buildFallback(weaponId, definition, pose)
 		prepare(built)
 		host = attachmentHost(built) :: BasePart
+		supplied = false
 	end
 
 	built.Name = "FL_Viewmodel"
-	pinPivot(built, host, definition)
+	pinPivot(built, host, definition, supplied)
 	-- Fit before measuring anything off the model: the muzzle, the sight and the
 	-- flash are all placed against its final geometry.
 	fitScale(built, pose)
