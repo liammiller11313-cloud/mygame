@@ -74,6 +74,42 @@ local GROUND_RISE = 5
 ]]
 local MIN_GROUND_NORMAL_Y = 0.5
 
+--[[
+	── OVERHEAD COVER ──────────────────────────────────────────────────────────
+
+	How far up to look for a roof, from the team and from a candidate alike.
+
+	THE BUG THIS EXISTS FOR: a Tank arrived on top of the Backrooms. Everything
+	that was supposed to prevent that did its job and none of it applied.
+	MaxHeightFromSurvivor is the rule written to keep bodies off roofs, and it is
+	twenty-five studs — chosen against a city map, where a roof is far enough up
+	that twenty-five excludes it. An interior ceiling is about twelve studs over
+	your head, so the roof of the building the team is standing INSIDE sits well
+	within the band, and the guard never fired. The ground test did not object
+	either: a roof is a flat surface with an upward normal, which is the entire
+	definition of a floor.
+
+	Height cannot answer this, because a mezzanine and a roof are at the same
+	height. This asks the question that can: IS THE TEAM UNDER SOMETHING, AND IS
+	THIS CANDIDATE UNDER IT TOO. Inside the Backrooms the answer is yes and no,
+	and the candidate is rejected. On the roof itself — a team that fought its way
+	up there — the answer is no and no, and nothing changes.
+
+	── IT COSTS NOTHING ON AN OUTDOOR MAP ──────────────────────────────────────
+	The team's own cover is sampled once per search, not per attempt. On Clinton
+	or Zombieville the team is under open sky, the rule switches itself off, and
+	the per-candidate ray never runs. It is one extra raycast per candidate on
+	exactly the maps where a roof is reachable and indistinguishable by height,
+	which is where it is worth paying for.
+
+	── WHY NOT A MAP FLAG ──────────────────────────────────────────────────────
+	`enclosed = true` in MapConfig would be simpler and would be wrong twice: a
+	street map with an underpass has covered stretches, and an interior map with
+	an atrium has open ones. The team's own position answers per-moment what a
+	flag could only answer per-map, and it needs no author to remember it.
+]]
+local COVER_HEIGHT = 60
+
 --[[ Spawn nodes are static level geometry, so the tag query is cached. The TTL
      is short enough that a map streamed in mid-round is picked up anyway. ]]
 local NODE_CACHE_TIME = 2
@@ -210,6 +246,16 @@ local survey: { Survey } = {}
 local surveyCount = 0
 
 local ignore: { Instance } = {}
+
+--[[ Reused by isCovered. Built once and refiltered per call, like every other
+     buffer here — a RaycastParams allocated inside the candidate loop would be
+     garbage generated several times a second during a horde. ]]
+local coverParams = RaycastParams.new()
+coverParams.FilterType = Enum.RaycastFilterType.Exclude
+coverParams.IgnoreWater = true
+--[[ Deliberately NOT RespectCanCollide. A non-colliding roof is still a roof —
+     it is the thing that tells you which side of the building you are on, and a
+     body cannot walk down through it whether it collides or not. ]]
 local nodeOrder: { BasePart } = {}
 
 local nodeCache: { BasePart } = {}
@@ -354,6 +400,66 @@ local function sampleAround(origin: Vector3, minDistance: number, maxDistance: n
 	return origin + Vector3.new(math.cos(bearing) * distance, 0, math.sin(bearing) * distance)
 end
 
+--[[ Is anything solid within COVER_HEIGHT above this point. See OVERHEAD COVER.
+
+     Started two studs up so the floor the body would stand on is never itself
+     the thing found, and filtered by the same ignore list every other test uses
+     so a survivor or another body overhead is not mistaken for a ceiling. ]]
+local function isCovered(point: Vector3): boolean
+	coverParams.FilterDescendantsInstances = ignore
+	local hit = Workspace:Raycast(point + Vector3.new(0, 2, 0), Vector3.new(0, COVER_HEIGHT, 0), coverParams)
+	return hit ~= nil
+end
+
+--[[
+	The loaded map's root, or nil when there is not one.
+
+	Resolved per search rather than cached: a map swap replaces it, and a stale
+	root would reject every candidate in the new level rather than the old one.
+	One Registry lookup per find, which is a table read.
+]]
+local function mapRoot(): Instance?
+	local mapService: any = Registry.find("MapService")
+	if not mapService or typeof(mapService.getCurrentRoot) ~= "function" then
+		return nil
+	end
+	local ok, root = pcall(mapService.getCurrentRoot, mapService)
+	return if ok and typeof(root) == "Instance" then root else nil
+end
+
+--[[
+	Does this floor belong to the level.
+
+	The strongest of the three placement guards and the cheapest, because the
+	raycast that found the floor already knew the answer — see RaycastUtil.groundAt,
+	which now returns the instance for this one caller.
+
+	It rules out every surface that is not the map: the lobby, a baseplate, a
+	barricade somebody welded together this round, a dropped medkit, and whatever
+	else is sitting in Workspace. "Actually in the map" is the plainest possible
+	statement of what a spawn has to be, and until now nothing anywhere asserted
+	it — SpawnVolume's own header says it does not check reachability and hands
+	the question to "whatever is choosing candidate points", and no chooser
+	picked it up.
+
+	Terrain is allowed explicitly. It is never a descendant of the map model —
+	it is a single Workspace-wide object — so a map whose floor is terrain would
+	otherwise fail every candidate it has.
+
+	No map root means no test. A test place with geometry and no MapService is a
+	legitimate way to work on this game, and a rule that turned it into a place
+	where nothing spawns would be a rule people delete.
+]]
+local function belongsToMap(part: BasePart?, root: Instance?): boolean
+	if not root or not part then
+		return true
+	end
+	if part:IsA("Terrain") then
+		return true
+	end
+	return part:IsDescendantOf(root)
+end
+
 --[[ True when any survivor can plausibly see this point right now. ]]
 local function isVisible(point: Vector3): boolean
 	for index = 1, surveyCount do
@@ -472,6 +578,28 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		end
 	end
 
+	--[[
+		Is the TEAM under a roof right now.
+
+		Once per search, not per candidate, and it is what switches the whole rule
+		on and off: outdoors this is false, the per-candidate ray never runs, and
+		nothing about an outdoor map changes at all.
+
+		ANY survivor being covered counts, rather than all of them. A team spread
+		across a doorway has one person out in the rain, and the honest reading of
+		"we are inside the building" is that somebody is — the alternative rejects
+		nothing for as long as one player stands in the entrance.
+	]]
+	local root = mapRoot()
+
+	local teamCovered = false
+	for index = 1, surveyCount do
+		if isCovered(survey[index].position) then
+			teamCovered = true
+			break
+		end
+	end
+
 	refreshNodes()
 	local useNodes = #nodeCache > 0
 	if useNodes then
@@ -492,6 +620,13 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	--[[ Candidates whose ground sat too far above or below the team — a roof, a
 	     gantry, the bottom of a shaft. See where this is counted. ]]
 	local tooHigh = 0
+	--[[ Candidates out under open sky while the team is indoors. See OVERHEAD
+	     COVER — this is the counter that says "your map has a reachable roof",
+	     which is a different sentence from "too far above the team" and was the
+	     one nobody could read before. ]]
+	local uncovered = 0
+	--[[ Candidates whose floor was not part of the level. See belongsToMap. ]]
+	local offMap = 0
 	--[[ Nodes the walk stepped straight past because they are outside the band.
 	     Counted rather than merged into `tooFar` because they are a different
 	     fact about the map: `tooFar` is candidates this search generated and
@@ -551,6 +686,12 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	     say so is asking for a hole two body-widths too big. ]]
 	local bodySize = if opts.kind then SpawnVolume.sizeFor(opts.kind) else SpawnVolume.largestSize()
 
+	--[[ Overhead cover is NOT on the ladder, and belongs with the two rules that
+	     never relax rather than with the two that do. Widening a radius does not
+	     make a roof reachable; it finds more roof. A search that rejected every
+	     candidate for this reason correctly returns nothing and says so, and the
+	     Director queues the request and tries again a moment later — which is the
+	     same thing it does for every other placement failure. ]]
 	local strictMaxSquared = maxDistanceSquared
 	local relaxedFlow = false
 	local relaxedDistance = false
@@ -593,6 +734,8 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 
 		tooClose, tooFar, outOfFlow, noGround, steep, blocked, inSight = 0, 0, 0, 0, 0, 0, 0
 		tooHigh = 0
+		uncovered = 0
+		offMap = 0
 		nodesOutOfRange = 0
 		nodeIndex = 0
 
@@ -715,13 +858,21 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			end
 
 			-- ── one raycast: is there a floor here at all ───────────────────────
-			local ground, normal = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore, GROUND_RISE)
+			local ground, normal, floor =
+				RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore, GROUND_RISE)
 			if not ground or not normal then
 				noGround += 1
 				continue
 			end
 			if normal.Y < MIN_GROUND_NORMAL_Y then
 				steep += 1
+				continue
+			end
+			--[[ Before every other test, because it is free — the ray already
+			     found this part — and because it is the one that answers "is this
+			     even in the level". ]]
+			if not belongsToMap(floor, root) then
+				offMap += 1
 				continue
 			end
 
@@ -765,6 +916,23 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			end
 			if heightGap > maxHeight then
 				tooHigh += 1
+				continue
+			end
+
+			--[[
+				── UNDER THE SAME ROOF ─────────────────────────────────────────────
+				The height rule above cannot tell a mezzanine from a roof, because
+				they are at the same height. This can: the team is indoors and this
+				candidate is not, so it is on top of the building rather than in it.
+
+				Only ever applied when the team itself is covered, so an outdoor map
+				never reaches this line. The reverse is deliberately NOT tested — a
+				covered candidate while the team is outside is a doorway, a porch or
+				an underpass, which is a perfectly good place for a zombie to come
+				from and the single most atmospheric one.
+			]]
+			if teamCovered and not isCovered(ground) then
+				uncovered += 1
 				continue
 			end
 
@@ -846,6 +1014,12 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	end
 	if nodesOutOfRange > 0 then
 		table.insert(parts, string.format("%d node visit(s) skipped as out of range", nodesOutOfRange))
+	end
+	if offMap > 0 then
+		table.insert(parts, string.format("%d standing on something that is not the map", offMap))
+	end
+	if uncovered > 0 then
+		table.insert(parts, string.format("%d out under open sky while the team is indoors", uncovered))
 	end
 	if tooHigh > 0 then
 		table.insert(parts, string.format("%d too far above or below the team", tooHigh))

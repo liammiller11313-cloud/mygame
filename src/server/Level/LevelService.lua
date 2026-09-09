@@ -712,10 +712,54 @@ local function mapSpawnPoints(): { SpawnLocation }
 
 	mapSpawnRoot = root
 	table.clear(mapSpawns)
+
+	--[[
+		ENABLED IS A PREFERENCE, NOT A FILTER, AND THAT DISTINCTION WAS A BUG.
+
+		This used to require `descendant.Enabled`, which reads as obviously
+		correct and quietly discards the pads a CAREFUL author places. Setting
+		Enabled = false on a map's SpawnLocations is the normal way to stop
+		Roblox's own automatic spawning fighting a game that positions its own
+		survivors — which is exactly what this game does, three lines later, with
+		a PivotTo. So the better the map was authored, the more likely every one
+		of its pads was skipped here.
+
+		And skipping them all is not a small failure. With no map spawns, the
+		branch below hunts Workspace for ANY SpawnLocation, finds the lobby's, and
+		starts the round with the team standing outside the level. Everything
+		downstream inherits that: the Director samples spawn candidates around the
+		survivors, so the horde and the boss are placed around wherever the team
+		actually is — which is how a Tank ends up on the roof of the Backrooms.
+		One bug, three symptoms.
+
+		So: enabled pads win if there are any, because disabling a few is how an
+		author takes them out of rotation and that intention is real. If they are
+		ALL disabled, they are still the map's spawn points and still beat
+		anything outside the map.
+	]]
+	local disabled: { SpawnLocation } = {}
 	for _, descendant in root:GetDescendants() do
-		if descendant:IsA("SpawnLocation") and descendant.Enabled then
-			table.insert(mapSpawns, descendant)
+		if descendant:IsA("SpawnLocation") then
+			if descendant.Enabled then
+				table.insert(mapSpawns, descendant)
+			else
+				table.insert(disabled, descendant)
+			end
 		end
+	end
+	if #mapSpawns == 0 and #disabled > 0 then
+		mapSpawns = disabled
+		--[[ A note rather than a warning: this is a correct way to author a map
+		     and the round is about to work. It is said once because "the team
+		     started somewhere strange" is a question somebody will ask about this
+		     map eventually, and this is the line that answers it. ]]
+		warnOnce(
+			"disabledspawns",
+			"every SpawnLocation in the loaded map has Enabled = false, so they are being used "
+				.. "anyway — this game positions survivors itself and does not need Roblox's "
+				.. "automatic spawning, which is presumably why they were switched off. Nothing to "
+				.. "fix; said once so it is not a mystery later."
+		)
 	end
 	table.sort(mapSpawns, function(a: SpawnLocation, b: SpawnLocation): boolean
 		if a.Name == b.Name then
@@ -790,6 +834,37 @@ end
 	in it and nothing tagged is a map that has answered the question, and it no
 	longer gets warned at for it.
 ]]
+--[[
+	Where survivors will actually start, in words, for the boot banner.
+
+	The banner used to print `#survivorSpawns`, which counts only TAGGED parts —
+	and no map in this build has any, so it read "0 survivor spawns" on a map
+	with six perfectly good SpawnLocations in it and told nobody anything. The
+	number was true and the sentence was useless: it looked like the thing was
+	broken when it was working, and it would have looked identical on the day it
+	genuinely was.
+
+	So it names the source that getSurvivorSpawnCFrame will actually reach, in
+	the same order that function tries them. Checking that the team starts inside
+	the level is now reading one line at boot rather than playing a round.
+]]
+local function survivorSpawnSummary(): string
+	if survivorSpawnDirty then
+		rebuildSurvivorSpawns()
+	end
+	if #survivorSpawns > 0 then
+		return string.format("%d tagged %s", #survivorSpawns, TAG_SURVIVOR_SPAWN)
+	end
+	local placed = mapSpawnPoints()
+	if #placed > 0 then
+		return string.format("%d SpawnLocation(s) in the map", #placed)
+	end
+	if Workspace:FindFirstChildWhichIsA("SpawnLocation", true) then
+		return "NONE in the map — falling back to a SpawnLocation elsewhere in Workspace"
+	end
+	return "NONE anywhere — falling back to the flow spline or the map's centre"
+end
+
 function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 	if survivorSpawnDirty then
 		rebuildSurvivorSpawns()
@@ -1123,13 +1198,13 @@ function LevelService:rebuild()
 	print(
 		string.format(
 			"[LevelService] rebuilt for the new map: %d flow nodes over %.0f studs, "
-				.. "%d spawn nodes, %d boss zones, %d survivor spawns, %d item sections",
+				.. "%d spawn nodes, %d boss zones, %d item sections; survivors start from %s",
 			#flowPoints,
 			flowTotal,
 			#spawnNodes,
 			#bossZones,
-			#survivorSpawns,
-			#sections
+			#sections,
+			survivorSpawnSummary()
 		)
 	)
 end
@@ -1148,14 +1223,14 @@ function LevelService:start()
 	print(
 		string.format(
 			"[LevelService] %d flow nodes over %.0f studs, %d spawn nodes, %d boss zones, "
-				.. "%d survivor spawns, %d item sections, %d panic triggers",
+				.. "%d item sections, %d panic triggers; survivors start from %s",
 			#flowPoints,
 			flowTotal,
 			#spawnNodes,
 			#bossZones,
-			#survivorSpawns,
 			#sections,
-			#taggedParts(TAG_PANIC)
+			#taggedParts(TAG_PANIC),
+			survivorSpawnSummary()
 		)
 	)
 

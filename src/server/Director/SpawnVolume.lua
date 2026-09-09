@@ -30,6 +30,12 @@
 	body FITS, and this will say yes. Whether the horde can walk out of it is a
 	different question, and it belongs to whatever is choosing candidate points
 	rather than to the test that keeps bodies out of walls.
+
+	For a long time nothing picked that question up, and a Tank arrived on the
+	roof of the Backrooms — a flat surface with an upward normal, inside the
+	height band because an interior ceiling is low, and with plenty of room for a
+	body. Every test in this file passed it, correctly. SpawnPlacement owns the
+	question now: see OVERHEAD COVER and belongsToMap there.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

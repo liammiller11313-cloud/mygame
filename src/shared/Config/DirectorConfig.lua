@@ -77,6 +77,20 @@ DirectorConfig.Spawning = table.freeze({
 		from here to the team". A raycast cannot answer that — the roof of a low
 		shed reads exactly like a street — and the honest fix for the rest of it is
 		FL_SpawnNode parts, which are a person answering it directly.
+
+		── AND IT IS THE WRONG SHAPE INDOORS ───────────────────────────────────
+		Every sentence above was written against a city map, where a roof is far
+		enough up that twenty-five studs excludes it. Indoors the relationship
+		inverts: a Backrooms ceiling is perhaps twelve studs over your head, so
+		its ROOF is comfortably INSIDE this band — and inside the 43.75 that pass
+		three relaxes it to. The one number written to keep bodies off roofs does
+		not see an interior roof at all.
+
+		Raising it is not the answer and neither is lowering it: a mezzanine and a
+		roof sit at the same height and this number cannot tell them apart. See
+		OVERHEAD COVER in SpawnPlacement, which asks a question that can —
+		"is the team under something, and is this candidate under it too" — and
+		costs one ray only on the maps where the answer is interesting.
 	]]
 	MaxHeightFromSurvivor = 25,
 	MinFlowAhead = -40, -- may spawn slightly behind the team

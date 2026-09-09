@@ -178,8 +178,11 @@ end
 	It still cannot tell a street from the roof of a low shed the point happens
 	to be standing on, because from a downward ray those are the same reading.
 	Nothing about a raycast can. That question is "can a body walk from here to
-	the team", and it belongs to the caller — SpawnPlacement answers a cheap
-	approximation of it with a height band against the nearest survivor.
+	the team", and it belongs to the caller. SpawnPlacement now answers it with
+	three rules rather than the one that used to be here: a height band against
+	the nearest survivor, an overhead-cover test that catches the interior roof a
+	height band cannot see, and a check that the floor is part of the loaded map
+	at all — which is what the third return value below exists for.
 
 	Reuses one params object, on the same reasoning as sightParams above: every
 	spawn attempt in the placement ladder calls this — three relaxation passes
@@ -202,15 +205,20 @@ function RaycastUtil.groundAt(
 	searchDepth: number,
 	ignoreList: { Instance },
 	riseAbove: number?
-): (Vector3?, Vector3?)
+): (Vector3?, Vector3?, BasePart?)
 	local rise = riseAbove or DEFAULT_RISE
 	local from = position + Vector3.new(0, rise, 0)
 	groundParams.FilterDescendantsInstances = ignoreList
 	local result = workspace:Raycast(from, Vector3.new(0, -(rise + searchDepth), 0), groundParams)
 	if not result then
-		return nil, nil
+		return nil, nil, nil
 	end
-	return result.Position, result.Normal
+	--[[ The INSTANCE is the third return, added for one caller and cheap for the
+	     rest: SpawnPlacement needs to know whether the floor it found belongs to
+	     the loaded map or to something else in Workspace, and re-casting the same
+	     ray to find out would be a second raycast to learn a thing this one
+	     already held. Every existing caller takes two values and is unaffected. ]]
+	return result.Position, result.Normal, result.Instance
 end
 
 return RaycastUtil
