@@ -141,6 +141,17 @@ local function snapshotFor(player: Player): any?
 		table.insert(quests, { id = quest.id, progress = stored[quest.id] or 0 })
 	end
 
+	--[[ The streak the client draws, and whether the CLAIM button is live.
+	     Derived here rather than stored, so the panel and the server can never
+	     disagree about what day it is — the same rule the quest set follows.
+
+	     `streak` is what the reward would BECOME if claimed, not what is banked:
+	     a player on a six-day streak with today unclaimed is shown day seven and
+	     the day-seven reward, because that is the one they are about to get. ]]
+	local heldStreak, claimedDay = profiles:getLoginStreak(player)
+	local pending, streak = ProgressionConfig.loginStateFor(today(), claimedDay, heldStreak)
+	local reward = ProgressionConfig.loginReward(streak)
+
 	return {
 		xp = xp,
 		level = level,
@@ -150,6 +161,13 @@ local function snapshotFor(player: Player): any?
 		passTier = profiles:getPassTier(player),
 		degraded = profiles:isDegraded(player),
 		quests = quests,
+		login = {
+			streak = streak,
+			pending = pending,
+			day = reward.day,
+			dollars = reward.dollars,
+			scrip = reward.scrip,
+		},
 	}
 end
 
@@ -405,6 +423,56 @@ local function onClaim(player: Player)
 	end
 end
 
+--[[
+	Pays today's login-streak reward, or says nothing happened.
+
+	Nothing here decides whether a claim is DUE — ProfileService:claimLogin does,
+	in one call with no yield in it, and returns nil when there was nothing owed.
+	Two requests in the same frame therefore pay once, which is the only race this
+	feature has and the reason the decision is not made in this file.
+
+	Paid in Dollars and Scrip and NOT in XP, deliberately. XP is the axis that
+	says how much of this game you have played; a streak says how many days you
+	opened it, and those are not the same claim. A level bought by logging in is
+	a level that stops meaning anything to everyone who earned theirs.
+]]
+local function onClaimLogin(player: Player)
+	local profiles = profileService()
+	if not profiles or not profiles:isReady(player) then
+		return
+	end
+
+	local streak = profiles:claimLogin(player, today())
+	if not streak then
+		--[[ Already claimed today, or a clock that went backwards. Re-synced
+		     anyway: a client that thought a claim was live and was wrong needs
+		     the truth back, or its button stays lit forever. ]]
+		sync(player)
+		return
+	end
+
+	local reward = ProgressionConfig.loginReward(streak)
+	profiles:addDollars(player, reward.dollars)
+	profiles:addScrip(player, reward.scrip)
+
+	--[[ Flushed for the same reason a round award is, and a sharper one: this
+	     wrote a counter measured in DAYS of somebody's life. A server that dies
+	     between the claim and the next periodic save would not merely lose the
+	     money, it would lose the streak and start them at day one tomorrow. ]]
+	profiles:flush(player)
+
+	sync(player)
+	if player.Parent then
+		Remotes.Event.ProgressionAwarded:FireClient(player, {
+			kind = "Login",
+			streak = streak,
+			day = reward.day,
+			dollars = reward.dollars,
+			scrip = reward.scrip,
+		})
+	end
+end
+
 local function onSetWorn(player: Player, kind: any, id: any)
 	local profiles = profileService()
 	if not profiles or not profiles:isReady(player) then
@@ -494,6 +562,22 @@ function ProgressionService:start()
 		0.35s, the same as a pass claim, because both are a button a person
 		presses and neither is something a person presses three times a second.
 	]]
+	--[[ Same throttle as the pass claim, and it wants one for the same reason:
+	     the accepted path ends in a DataStore flush, and UpdateAsync is a
+	     per-SERVER budget rather than a per-player one. A rejected claim is
+	     cheap — claimLogin returns nil without writing — but a client need not
+	     send rejectable ones, and the first accepted claim of a day would be
+	     followed by however many the throttle did not stop. ]]
+	local lastLoginAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
+	serviceTrove:connect(Remotes.Event.ClaimDailyLogin.OnServerEvent, function(player: Player)
+		local now = os.clock()
+		if lastLoginAt[player] and now - lastLoginAt[player] < CLAIM_COOLDOWN then
+			return
+		end
+		lastLoginAt[player] = now
+		onClaimLogin(player)
+	end)
+
 	local lastWornAt: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
 	serviceTrove:connect(Remotes.Event.SetWornReward.OnServerEvent, function(player: Player, ...)
 		local now = os.clock()

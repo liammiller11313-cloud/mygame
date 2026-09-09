@@ -269,6 +269,121 @@ local QUEST_POOL: { Quest } = table.freeze({
 
 ProgressionConfig.QuestPool = QUEST_POOL
 
+--[[
+	── THE LOGIN STREAK ────────────────────────────────────────────────────────
+
+	Seven rewards for seven consecutive days, and then it starts the seven again
+	with the streak number still climbing. It is the only thing in the game paid
+	for TURNING UP rather than for playing well, which is exactly what it is for:
+	the quests above ask a player to do something, and this asks them to be here.
+
+	── WHAT IT IS WORTH, AND WHY IT IS NOT WORTH MORE ──────────────────────────
+	A perfect week is $5,900 and 155 scrip. Against scripts/economy.py's won
+	round — a bit over $2,500 — that is roughly TWO won rounds for a week of
+	showing up, and that ceiling is the whole design. A streak generous enough to
+	compete with playing is a streak that pays people to open the game and close
+	it, and the weapon roster costs sixty-six won rounds precisely because
+	earning it is meant to be the thing you do in the rounds.
+
+	The scrip is deliberately the smaller half. Three dailies a day pays for the
+	whole pass in nineteen days; the streak alone would take about ten weeks. So
+	the streak pushes toward the shop and the dailies push toward the pass, and
+	neither replaces the other.
+
+	── THE CURVE CLIMBS AND DOES NOT RESET GENTLY ──────────────────────────────
+	Day seven is worth more than days one and two together, because the reason
+	anybody keeps a streak is the end of it. And a missed day drops you to day
+	one with no grace period. A forgiven day sounds kinder and is not: it has to
+	be explained somewhere or it reads as the streak silently lying, and a rule a
+	player cannot state back to you is not a rule they can play around.
+
+	── ON WHICH DAY IT IS ──────────────────────────────────────────────────────
+	The same integer the quests use — os.time() // QuestPeriod — so the streak
+	rolls over at the same instant the quests do and a player never has two
+	different "days" on one screen. That instant is UTC midnight and it is not
+	local midnight for most of the world, which is a real cost and the right one:
+	a per-player day boundary is a value that has to be stored, trusted from a
+	client, and reasoned about across servers, and every one of those is worse
+	than a rollover at an odd hour.
+]]
+export type LoginReward = {
+	day: number, -- 1-7, which rung of the cycle this is
+	dollars: number,
+	scrip: number,
+}
+
+local LOGIN_STREAK: { LoginReward } = table.freeze({
+	table.freeze({ day = 1, dollars = 250, scrip = 10 }),
+	table.freeze({ day = 2, dollars = 350, scrip = 12 }),
+	table.freeze({ day = 3, dollars = 500, scrip = 15 }),
+	table.freeze({ day = 4, dollars = 700, scrip = 18 }),
+	table.freeze({ day = 5, dollars = 900, scrip = 22 }),
+	table.freeze({ day = 6, dollars = 1200, scrip = 28 }),
+	--[[ Worth more than the first two days together. The last rung is the reason
+	     the other six get walked. ]]
+	table.freeze({ day = 7, dollars = 2000, scrip = 50 }),
+}) :: { LoginReward }
+
+ProgressionConfig.LoginStreak = LOGIN_STREAK
+
+--[[ The reward for the Nth consecutive day, cycling through the seven.
+
+     Takes the STREAK rather than a rung index, because the streak is the number
+     that keeps climbing and the rung is derived from it: day 8 is rung 1 again,
+     day 14 is rung 7 again. A streak of 0 or below is nobody's streak and reads
+     as the first rung, so a caller that has not counted yet still gets a reward
+     to draw rather than nil. ]]
+function ProgressionConfig.loginReward(streak: number): LoginReward
+	local count = #LOGIN_STREAK
+	local n = math.floor(tonumber(streak) or 1)
+	if n < 1 then
+		n = 1
+	end
+	return LOGIN_STREAK[((n - 1) % count) + 1]
+end
+
+--[[
+	What a profile's stored streak becomes today, and whether there is anything
+	to claim.
+
+	One function so the server, and anything that ever wants to preview this,
+	cannot disagree about the rules. `claimedDay` is the last day number this
+	profile actually claimed on; 0 means never.
+
+	  today == claimedDay      already claimed. Nothing pending.
+	  today == claimedDay + 1  yesterday's streak continues.
+	  today  > claimedDay + 1  the chain broke; back to day one.
+	  today  < claimedDay      a clock that went backwards, or a profile written
+	                           by a server whose clock was wrong. Nothing pending
+	                           rather than a free claim: the honest answer is
+	                           unknowable and the safe one is to wait for the day
+	                           to catch up, which costs a player one reward once
+	                           and cannot be farmed.
+]]
+function ProgressionConfig.loginStateFor(today: number, claimedDay: number, streak: number): (boolean, number)
+	local day = math.floor(tonumber(today) or 0)
+	local last = math.floor(tonumber(claimedDay) or 0)
+	local held = math.max(math.floor(tonumber(streak) or 0), 0)
+
+	if last <= 0 then
+		return true, 1
+	end
+	if day <= last then
+		return false, math.max(held, 1)
+	end
+	if day == last + 1 then
+		return true, math.max(held, 0) + 1
+	end
+	return true, 1
+end
+
+--[[ The largest streak this game will count to. Not a gameplay limit — the
+     rewards cycle every seven and nothing changes at any number above that —
+     but the same guard MaxXp is: a stored counter with no ceiling is a stored
+     counter somebody's corrupted save takes to infinity, and every clamp
+     downstream of it stops meaning anything. Ten years of perfect attendance. ]]
+ProgressionConfig.MaxLoginStreak = 3650
+
 ProgressionConfig.DailyQuests = 3
 
 --[[ Seconds in the day a quest set lives for. A real day rather than a session:

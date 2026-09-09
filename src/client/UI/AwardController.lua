@@ -31,6 +31,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local EconomyConfig = require(Shared.Config.EconomyConfig)
 local ProgressionConfig = require(Shared.Config.ProgressionConfig)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
@@ -158,6 +159,16 @@ local function detailFor(payload: any): string
 		table.insert(parts, if quests == 1 then "ORDER COMPLETE" else quests .. " ORDERS COMPLETE")
 	end
 
+	--[[ Only the login card carries this today, and it costs a round card
+	     nothing: a payload with no `dollars` reads 0 and adds no part. Put ahead
+	     of the Scrip because that is the order the streak panel lists them in
+	     and two screens describing one reward should not disagree about which
+	     currency comes first. ]]
+	local dollars = tonumber(payload.dollars) or 0
+	if dollars > 0 then
+		table.insert(parts, EconomyConfig.Symbol .. commas(dollars))
+	end
+
 	local scrip = tonumber(payload.scrip) or 0
 	if scrip > 0 then
 		table.insert(parts, ProgressionConfig.CurrencySymbol .. " " .. commas(scrip))
@@ -183,6 +194,19 @@ local function onAwarded(payload: any)
 		headline.Text = string.format("TIER %02d", tier)
 		headline.TextColor3 = COLOR.Accent
 		detail.Text = if reward then reward.label else ""
+		drawBar()
+		show()
+		return
+	end
+
+	if payload.kind == "Login" then
+		--[[ The card the whole streak is for. It says the STREAK rather than the
+		     rung, because "DAY 3" is what the panel already showed and "12 DAY
+		     STREAK" is the number a player is actually keeping. ]]
+		local streak = math.max(math.floor(tonumber(payload.streak) or 1), 1)
+		headline.Text = string.format("%d DAY STREAK", streak)
+		headline.TextColor3 = COLOR.AccentBright
+		detail.Text = detailFor(payload)
 		drawBar()
 		show()
 		return

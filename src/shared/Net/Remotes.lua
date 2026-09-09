@@ -160,7 +160,7 @@ local EVENTS: { string } = {
 	     every OTHER player's screen wants them — see Shared/Net/Attributes. These
 	     three carry what only the owner needs: today's quest counters, how far
 	     the pass has been claimed, and what a round just paid. ]]
-	"ProgressionSynced", -- {xp, level, into, cost, scrip, passTier, quests: {{id, progress}}}
+	"ProgressionSynced", -- {xp, level, into, cost, scrip, passTier, quests, login}
 	--[[ The client asking for that push, for the same reason RequestProfile
 	     exists: progression can finish loading before the client is listening. ]]
 	"RequestProgression", -- C->S ()
@@ -173,6 +173,12 @@ local EVENTS: { string } = {
 	     sequential and a tier that crosses the wire is a tier somebody sets to
 	     20. See ProfileService.claimNextPassTier. ]]
 	"ClaimPassTier", -- C->S ()
+	--[[ Claims today's login-streak reward. Carries nothing at all, for a
+	     stronger version of ClaimPassTier's reason: a day number that crossed
+	     the wire is a day number somebody sets to tomorrow, forever. The server
+	     reads its own clock and ProfileService:claimLogin decides in one
+	     unyielding call whether there was anything owed. ]]
+	"ClaimDailyLogin", -- C->S ()
 	"SetWornReward", -- C->S (kind: "Callsign"|"Accent", id: string)
 
 	-- ── Abilities ───────────────────────────────────────────────────────────

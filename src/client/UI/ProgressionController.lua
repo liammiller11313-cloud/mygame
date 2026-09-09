@@ -81,6 +81,19 @@ local state = {
 	round = {} :: { [string]: number },
 	claimPending = false,
 	claimAt = 0,
+	--[[ The login streak, exactly as the server described it. Nothing here is
+	     derived: `pending` is the server's answer to "is there anything to claim
+	     today", and a client that worked out its own day would disagree with the
+	     server twice a day for every player not on UTC. ]]
+	login = {
+		streak = 0,
+		pending = false,
+		day = 1,
+		dollars = 0,
+		scrip = 0,
+	},
+	loginPending = false,
+	loginAt = 0,
 }
 
 -- ── reading ─────────────────────────────────────────────────────────────────
@@ -145,7 +158,17 @@ function ProgressionController:summaryLine(): string
 	if not state.ready then
 		return ""
 	end
-	return string.format("LEVEL %d   %s %d", state.level, ProgressionConfig.CurrencySymbol, state.scrip)
+	local line = string.format("LEVEL %d   %s %d", state.level, ProgressionConfig.CurrencySymbol, state.scrip)
+	--[[ The only nudge the streak gets outside the panel it lives on, and it
+	     needs one: a daily reward nobody is told about is a daily reward that
+	     sits unclaimed until the streak it was counting has already broken. The
+	     menu redraws this line off `changed`, which every sync fires, so the
+	     marker appears the moment the server says there is something owed and
+	     disappears the moment it is taken. ]]
+	if state.login.pending then
+		line ..= "   •  DAILY READY"
+	end
+	return line
 end
 
 --[[ Level, XP into it, and what it costs — the three numbers a progress bar
@@ -219,6 +242,30 @@ function ProgressionController:nextTier(): (ProgressionConfig.PassTier?, number)
 	return reward, ProgressionConfig.passCost(wanted)
 end
 
+--[[ Today's login-streak row: the streak it would become, the rung of the
+     seven-day cycle, and what claiming pays. Returned as the stored table
+     rather than copied — the panel reads it and never writes it, the same
+     arrangement questView already relies on. ]]
+function ProgressionController:getLogin()
+	return state.login
+end
+
+--[[ Whether the CLAIM button on the streak card should be live. Both halves
+     matter: the server says there is something owed, and no request of ours is
+     already in flight. ]]
+function ProgressionController:canClaimLogin(): boolean
+	return state.ready and state.login.pending and not self:isLoginPending()
+end
+
+function ProgressionController:isLoginPending(): boolean
+	-- Expires for the same reason the pass claim's does: a dropped remote must
+	-- not cost the player the button for the rest of the session.
+	if state.loginPending and os.clock() - state.loginAt > CLAIM_TIMEOUT then
+		state.loginPending = false
+	end
+	return state.loginPending
+end
+
 function ProgressionController:canClaim(): boolean
 	local reward, cost = self:nextTier()
 	return reward ~= nil and not state.claimPending and state.scrip >= cost
@@ -244,6 +291,20 @@ function ProgressionController:claim(): boolean
 	state.claimPending = true
 	state.claimAt = os.clock()
 	Remotes.Event.ClaimPassTier:FireServer()
+	ProgressionController.changed:fire()
+	return true
+end
+
+--[[ Asks for today's login reward. Predicts nothing at all — not the money,
+     not the streak, not even that the button should go out — because the server
+     answers with a full sync either way, including when it refuses. ]]
+function ProgressionController:claimLogin(): boolean
+	if not self:canClaimLogin() then
+		return false
+	end
+	state.loginPending = true
+	state.loginAt = os.clock()
+	Remotes.Event.ClaimDailyLogin:FireServer()
 	ProgressionController.changed:fire()
 	return true
 end
@@ -286,6 +347,22 @@ local function onSynced(payload: any)
 	     claim. Clearing it here rather than only in the award handler means a
 	     dropped ProgressionAwarded still frees the button. ]]
 	state.claimPending = false
+	state.loginPending = false
+
+	--[[ Replaced wholesale rather than merged. A field the server stopped
+	     sending must not survive as whatever it was last set to — and `pending`
+	     is exactly the field where a stale true would light a button the server
+	     is about to refuse. ]]
+	local login = payload.login
+	if typeof(login) == "table" then
+		state.login = {
+			streak = math.max(math.floor(tonumber(login.streak) or 0), 0),
+			pending = login.pending == true,
+			day = math.max(math.floor(tonumber(login.day) or 1), 1),
+			dollars = math.max(math.floor(tonumber(login.dollars) or 0), 0),
+			scrip = math.max(math.floor(tonumber(login.scrip) or 0), 0),
+		}
+	end
 	ProgressionController.changed:fire()
 end
 
@@ -333,6 +410,7 @@ function ProgressionController:init()
 			return
 		end
 		state.claimPending = false
+		state.loginPending = false
 		if payload.kind == "Round" then
 			--[[ The round just went into the profile. The live half of every
 			     quest number is now ALSO in the committed half, and leaving it

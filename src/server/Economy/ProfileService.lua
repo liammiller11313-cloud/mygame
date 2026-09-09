@@ -160,6 +160,13 @@ export type Profile = {
 	     which rolls the day on load. ]]
 	quests: { [string]: number },
 	questDay: number,
+	--[[ The login streak, and the day number it was last claimed on. Two fields
+	     and no third: whether there is something to claim RIGHT NOW is derived
+	     from these plus today — see ProgressionConfig.loginStateFor. A stored
+	     "pending" flag would be a third thing to keep in step with a clock, and
+	     the one that goes stale is always the one that was written down. ]]
+	loginStreak: number,
+	loginClaimedDay: number,
 	passTier: number,
 	--[[ Codes this account has already redeemed, and what redeeming them handed
 	     over. Both persist — see unlockedSet for why passGrants is the one thing
@@ -225,6 +232,11 @@ local function blankProfile(): Profile
 		scrip = 0,
 		quests = {},
 		questDay = 0,
+		--[[ Zero, which loginStateFor reads as "never claimed" and answers with
+		     day one pending. A new account's first session pays immediately,
+		     which is the correct first impression of a streak. ]]
+		loginStreak = 0,
+		loginClaimedDay = 0,
 		passTier = 0,
 		--[[ Codes already redeemed, so one cannot be claimed twice, and the
 		     entitlements a code handed over. Both persist; see unlockedSet for
@@ -402,6 +414,8 @@ local function migrate(stored: any): Profile
 	     count (os.time() // 86400, about 20,700 today), and clamping it against
 	     an experience ceiling would only read as though the two were related. ]]
 	profile.questDay = storedNumber(stored.questDay, MAX_QUEST_DAY)
+	profile.loginStreak = storedNumber(stored.loginStreak, ProgressionConfig.MaxLoginStreak)
+	profile.loginClaimedDay = storedNumber(stored.loginClaimedDay, MAX_QUEST_DAY)
 
 	--[[ A worn reward is kept only if the track still has it AND the tier it
 	     sits at has actually been claimed. The second half matters: without it,
@@ -439,6 +453,8 @@ local function serialise(profile: Profile, lock: any): any
 		scrip = math.clamp(math.floor(profile.scrip), 0, ProgressionConfig.MaxScrip),
 		quests = profile.quests,
 		questDay = profile.questDay,
+		loginStreak = profile.loginStreak,
+		loginClaimedDay = profile.loginClaimedDay,
 		passTier = profile.passTier,
 		redeemed = profile.redeemed,
 		passGrants = profile.passGrants,
@@ -1013,6 +1029,56 @@ function ProfileService:rollQuests(player: Player, day: number)
 	profile.quests = {}
 	profile.questDay = clean
 	markChanged(player, profile, false)
+end
+
+--[[ The stored streak and the day it was last claimed on. Both, always: one
+     without the other cannot answer any question worth asking. ]]
+function ProfileService:getLoginStreak(player: Player): (number, number)
+	local profile = profiles[player]
+	if not profile then
+		return 0, 0
+	end
+	return profile.loginStreak, profile.loginClaimedDay
+end
+
+--[[
+	Claims today's login reward, or returns nil because there was nothing to
+	claim.
+
+	The DECISION lives here rather than in the caller, and that is the whole
+	point of the method. ProgressionService could read the two fields, ask
+	ProgressionConfig whether a claim is due, and then write them back — and two
+	claim requests arriving in the same frame would both read "yes" before either
+	wrote. Reading, deciding and writing in one call with no yield between them
+	is what makes a second request on the same day return nil instead of a second
+	reward.
+
+	Returns the NEW streak, which is what the reward is looked up from. The
+	caller pays; this file does not know what a Dollar is.
+]]
+function ProfileService:claimLogin(player: Player, day: number): number?
+	local profile = profiles[player]
+	if not profile or typeof(day) ~= "number" or day ~= day then
+		return nil
+	end
+	local clean = math.max(math.floor(day), 0)
+
+	local pending, streak =
+		ProgressionConfig.loginStateFor(clean, profile.loginClaimedDay, profile.loginStreak)
+	if not pending then
+		return nil
+	end
+
+	profile.loginStreak = math.clamp(streak, 1, ProgressionConfig.MaxLoginStreak)
+	profile.loginClaimedDay = clean
+	--[[ Structural, so the client's own copy of the profile is pushed rather
+	     than waiting for whatever redraws next — a streak that visibly does not
+	     move after a claim reads as a claim that failed. The DataStore write is
+	     the caller's: ProgressionService flushes after paying, the same as it
+	     does for a round award, because the flush belongs beside the payment and
+	     not beside the counter. ]]
+	markChanged(player, profile, true)
+	return profile.loginStreak
 end
 
 --[[

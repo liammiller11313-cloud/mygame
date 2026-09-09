@@ -32,6 +32,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AudioConfig = require(Shared.Config.AudioConfig)
+local EconomyConfig = require(Shared.Config.EconomyConfig)
 local ProgressionConfig = require(Shared.Config.ProgressionConfig)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
@@ -75,6 +76,24 @@ local COLUMN_GAP = 14
 local SECTION_LABEL_HEIGHT = 20
 
 local QUEST_ROW_HEIGHT = 62
+
+--[[
+	The streak card, above today's orders.
+
+	It sits at the top of the left column rather than on a screen of its own,
+	because it is the same sentence as the quests underneath it: here is what
+	today owes you. A separate panel would need its own button on the menu, and a
+	daily reward behind two clicks is a daily reward most people never find.
+
+	The height is fixed and every term is at an offset from the top of the card,
+	on a phone as much as on a desktop. A seven-pip row that reflowed would be a
+	row whose pips stopped reading as "seven", which is the only thing they are
+	there to say.
+]]
+local STREAK_CARD_HEIGHT = 116
+local STREAK_PIP_HEIGHT = 9
+local STREAK_PIP_GAP = 4
+local STREAK_BUTTON_HEIGHT = 38
 
 --[[
 	A pass tier row, and the same row on a phone.
@@ -128,6 +147,14 @@ local levelSub: TextLabel
 local xpFill: Frame
 local xpLabel: TextLabel
 local scripLabel: TextLabel
+local streakLabel: TextLabel
+local streakReward: TextLabel
+local streakButton: TextButton
+local streakButtonLabel: TextLabel
+--[[ The seven rungs, in order. The SET never changes the way the quest set
+     does — it is always seven — so these are written into rather than destroyed
+     and rebuilt. ]]
+local streakPips: { Frame } = {}
 local questHolder: Frame
 local tierList: ScrollingFrame
 local claimButton: TextButton
@@ -300,6 +327,67 @@ local function refreshBanner()
 	scripLabel.Text = scripText(store:getScrip())
 end
 
+--[[
+	The streak card.
+
+	Everything drawn here comes off one server-supplied row — see
+	ProgressionController.getLogin. `streak` is what today's claim would make it,
+	not what is banked, so a player on six days with today unclaimed is shown a
+	lit seventh pip and the seventh reward: the thing they are about to get,
+	rather than the thing they already have.
+]]
+local function refreshStreak()
+	local store = progression()
+	if not store then
+		return
+	end
+
+	local login = store:getLogin()
+	local rung = ProgressionConfig.loginReward(login.streak).day
+	local pending = store:canClaimLogin()
+
+	streakLabel.Text = if login.streak > 0
+		then string.format("DAY %d OF 7   ·   %d-DAY STREAK", rung, login.streak)
+		else "DAY 1 OF 7"
+
+	for index, pip in streakPips do
+		--[[ Three states, and the middle one is the point of the card: days
+		     already banked, the one on offer right now, and the ones still to
+		     come. A card that only knew "done" and "not done" would light the
+		     same pip whether the player had claimed today or merely could. ]]
+		if index < rung or (index == rung and not pending) then
+			pip.BackgroundColor3 = COLOR.Accent
+			pip.BackgroundTransparency = 0
+		elseif index == rung then
+			pip.BackgroundColor3 = COLOR.Accent
+			pip.BackgroundTransparency = 0.45
+		else
+			pip.BackgroundColor3 = COLOR.TextDim
+			pip.BackgroundTransparency = 0.6
+		end
+	end
+
+	streakReward.Text =
+		string.format("%s%s   %s", EconomyConfig.Symbol, commas(login.dollars), scripText(login.scrip))
+
+	if store:isLoginPending() then
+		streakButtonLabel.Text = "CLAIMING…"
+		streakButtonLabel.TextColor3 = COLOR.TextDim
+		streakButton.Active = false
+	elseif pending then
+		streakButtonLabel.Text = "CLAIM TODAY"
+		streakButtonLabel.TextColor3 = COLOR.TextPrimary
+		streakButton.Active = true
+	else
+		--[[ Deliberately not "COME BACK TOMORROW". The rollover is UTC midnight
+		     and for most of the world that is not tomorrow — it is later today,
+		     or it was an hour ago. Saying "claimed" is true everywhere. ]]
+		streakButtonLabel.Text = "CLAIMED"
+		streakButtonLabel.TextColor3 = COLOR.TextDim
+		streakButton.Active = false
+	end
+end
+
 local function refreshQuests()
 	local store = progression()
 	if not store then
@@ -451,6 +539,7 @@ local function refresh()
 		return
 	end
 	refreshBanner()
+	refreshStreak()
 	refreshQuests()
 	refreshTiers()
 	refreshClaim()
@@ -540,6 +629,87 @@ local function buildBanner()
 	scripLabel.Size = UDim2.fromOffset(180, TEXT.Heading)
 	scripLabel.TextXAlignment = Enum.TextXAlignment.Right
 	scripLabel.Text = scripText(0)
+end
+
+--[[ The card itself. Built once — see streakPips — and positioned at the top
+     of the left column, with the quest caption pushed down past it by the
+     caller. Returns the y the quest column may start at, so the two cannot
+     disagree about where one ends and the other begins. ]]
+local function buildStreak(top: number): number
+	local caption = Widgets.label(panel, "StreakCaption", FONT.Heading, TEXT.Small, COLOR.TextDim)
+	caption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top)
+	caption.Size = UDim2.new(QUEST_WIDTH, 0, 0, SECTION_LABEL_HEIGHT)
+	caption.Text = "DAILY STREAK"
+
+	local card = Widgets.frame(panel, "Streak", COLOR.PanelRaised, PANEL.RaisedFill)
+	card.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top + SECTION_LABEL_HEIGHT)
+	card.Size = UDim2.new(QUEST_WIDTH, -LAYOUT.PanelPadding, 0, STREAK_CARD_HEIGHT)
+	Widgets.stroke(card, COLOR.Border)
+
+	local edge = Widgets.frame(card, "Edge", COLOR.Accent, 0)
+	edge.Size = UDim2.new(0, LAYOUT.BorderThickness * 2, 1, 0)
+
+	streakLabel = Widgets.label(card, "Days", FONT.Heading, TEXT.Small, COLOR.TextPrimary)
+	streakLabel.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 8)
+	streakLabel.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Small + 2)
+	streakLabel.Text = "DAY 1 OF 7"
+
+	local pips = Widgets.frame(card, "Pips", COLOR.PanelRaised, 1)
+	pips.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 28)
+	pips.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, STREAK_PIP_HEIGHT)
+	local row = Widgets.list(pips, STREAK_PIP_GAP)
+	row.FillDirection = Enum.FillDirection.Horizontal
+
+	table.clear(streakPips)
+	local count = #ProgressionConfig.LoginStreak
+	for index = 1, count do
+		local pip = Widgets.frame(pips, "Pip" .. index, COLOR.TextDim, 0.6)
+		pip.LayoutOrder = index
+		--[[ Width by SCALE minus the gap it owes, so seven of them fill the row
+		     exactly at any panel width. An offset width would leave a ragged
+		     edge on a phone, where the panel is 0.75 of what this was drawn
+		     against. ]]
+		pip.Size = UDim2.new(1 / count, -STREAK_PIP_GAP * (count - 1) / count, 1, 0)
+		table.insert(streakPips, pip)
+	end
+
+	streakReward = Widgets.label(card, "Reward", FONT.Numeric, TEXT.Small, COLOR.Accent)
+	streakReward.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 28 + STREAK_PIP_HEIGHT + 6)
+	streakReward.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, TEXT.Small + 2)
+	streakReward.Text = ""
+
+	streakButton = Widgets.button(card, "ClaimLogin")
+	streakButton.AnchorPoint = Vector2.new(0, 1)
+	streakButton.Position = UDim2.new(0, LAYOUT.PanelPadding, 1, -8)
+	streakButton.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, STREAK_BUTTON_HEIGHT)
+	streakButton.BackgroundColor3 = COLOR.PanelRaised
+	streakButton.BackgroundTransparency = PANEL.ActionFill
+	local stroke = Widgets.stroke(streakButton, COLOR.Border)
+
+	streakButtonLabel = Widgets.label(streakButton, "Label", FONT.Heading, TEXT.Body, COLOR.TextPrimary)
+	streakButtonLabel.Size = UDim2.fromScale(1, 1)
+	streakButtonLabel.TextXAlignment = Enum.TextXAlignment.Center
+	streakButtonLabel.Text = "CLAIM TODAY"
+	Widgets.outlineHover(trove, streakButton, stroke)
+
+	trove:connect(streakButton.Activated, function()
+		local store = progression()
+		if not store then
+			return
+		end
+		--[[ Refused on the client so it says why on the client, the same as the
+		     pass claim below. The one refusal worth words is "already claimed" —
+		     a button that goes dead with no explanation reads as broken. ]]
+		if not store:claimLogin() then
+			showMessage("TODAY IS ALREADY CLAIMED.", COLOR.TextDim)
+			UiSound.play(AudioConfig.UI.MenuBack)
+			return
+		end
+		UiSound.play(AudioConfig.UI.MenuConfirm)
+		refreshStreak()
+	end)
+
+	return top + SECTION_LABEL_HEIGHT + STREAK_CARD_HEIGHT + LAYOUT.PanelPadding
 end
 
 local function buildQuestRow(index: number, quest: ProgressionConfig.Quest)
@@ -673,14 +843,21 @@ local function build()
 	local top = BODY_TOP
 	local bodyHeight = -(top + FOOTER_HEIGHT + LAYOUT.PanelPadding)
 
+	--[[ The streak takes the top of the left column and hands back where the
+	     quests may start. The pass column on the right still begins at `top`:
+	     only the left one moved, so the two captions no longer line up and that
+	     is correct — they are two lists of different lengths, not a table. ]]
+	local questTop = buildStreak(top)
+
 	local questCaption = Widgets.label(panel, "QuestCaption", FONT.Heading, TEXT.Small, COLOR.TextDim)
-	questCaption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top)
+	questCaption.Position = UDim2.fromOffset(LAYOUT.PanelPadding, questTop)
 	questCaption.Size = UDim2.new(QUEST_WIDTH, 0, 0, SECTION_LABEL_HEIGHT)
 	questCaption.Text = "TODAY'S ORDERS"
 
 	questHolder = Widgets.frame(panel, "Quests", COLOR.Panel, 1)
-	questHolder.Position = UDim2.fromOffset(LAYOUT.PanelPadding, top + SECTION_LABEL_HEIGHT)
-	questHolder.Size = UDim2.new(QUEST_WIDTH, -LAYOUT.PanelPadding, 1, bodyHeight - SECTION_LABEL_HEIGHT)
+	questHolder.Position = UDim2.fromOffset(LAYOUT.PanelPadding, questTop + SECTION_LABEL_HEIGHT)
+	questHolder.Size =
+		UDim2.new(QUEST_WIDTH, -LAYOUT.PanelPadding, 1, bodyHeight - SECTION_LABEL_HEIGHT - (questTop - top))
 	Widgets.list(questHolder, LAYOUT.ElementGap)
 
 	local passCaption = Widgets.label(panel, "PassCaption", FONT.Heading, TEXT.Small, COLOR.TextDim)
