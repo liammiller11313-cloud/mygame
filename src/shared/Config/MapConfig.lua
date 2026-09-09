@@ -160,6 +160,63 @@ function MapConfig.finaleBossFor(mapId: string?): string?
 	return nil
 end
 
+--[[
+	── SURFACES NOTHING MAY BE SPAWNED ON ──────────────────────────────────────
+
+	A raycast cannot tell a floor from a ceiling: both are flat, both have an
+	upward normal from the side you hit them, and the top of a wall is the best
+	looking floor in any map. That is how a Tank ended up on the roof of the
+	Backrooms and how bodies end up standing on top of a wall they cannot get
+	down from.
+
+	SpawnPlacement has geometric guards for this — a height band, an overhead
+	cover test, a check that the floor belongs to the loaded map — and every one
+	of them is an inference. This is the other kind of answer: a level designer
+	naming the thing. It costs nothing, it cannot be fooled by an unusual room,
+	and the names below are ones people already use.
+
+	── HOW A NAME IS MATCHED ───────────────────────────────────────────────────
+	Folded the same way a map's item folders are, so case, spaces, punctuation
+	and a single trailing "s" all stop mattering: Wall, walls, WALLS and "Wall_"
+	are one name. And it is matched against the part AND every model it sits
+	inside up to the map root — a model called Walls full of models called
+	section, which is exactly how the Backrooms is built, is answered by the one
+	entry rather than by listing everything underneath it.
+
+	── ON "CELING" ─────────────────────────────────────────────────────────────
+	Spelled both ways on purpose. A real map in this game has it with one E, and
+	a rule that only recognised the correct spelling would silently not apply to
+	the map it was written for — which is a worse outcome than a list with a typo
+	in it. The fold cannot help here: it removes punctuation and a plural, not a
+	missing letter.
+
+	── AND WHAT IT DOES NOT DO ─────────────────────────────────────────────────
+	It does not make anything non-collidable and it does not stop a body WALKING
+	onto a wall it can reach. It answers one question — may a spawn be placed
+	here — which is the question that was being answered by guessing.
+]]
+MapConfig.NeverStandOn = table.freeze({
+	"Ceiling",
+	"Celing",
+	"Roof",
+	"Wall",
+})
+
+--[[ Whether a name means "not a floor". Case, punctuation and a trailing plural
+     are folded away first; see NeverStandOn. ]]
+function MapConfig.isNeverStandOn(name: string): boolean
+	if typeof(name) ~= "string" then
+		return false
+	end
+	local folded = foldFolderName(name)
+	for _, blocked in MapConfig.NeverStandOn do
+		if folded == foldFolderName(blocked) then
+			return true
+		end
+	end
+	return false
+end
+
 function MapConfig.folderMatches(name: string, wanted: string): boolean
 	if typeof(name) ~= "string" or typeof(wanted) ~= "string" then
 		return false

@@ -30,6 +30,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local DirectorConfig = require(Shared.Config.DirectorConfig)
+local MapConfig = require(Shared.Config.MapConfig)
 local RaycastUtil = require(Shared.Util.RaycastUtil)
 local Registry = require(Shared.Util.Registry)
 local SpawnVolume = require(script.Parent.SpawnVolume)
@@ -469,6 +470,38 @@ end
 	legitimate way to work on this game, and a rule that turned it into a place
 	where nothing spawns would be a rule people delete.
 ]]
+--[[
+	May a body be placed on this surface at all.
+
+	The one guard here that is not an inference. Every other rule in this file
+	reasons about geometry — how high it is, whether there is a roof over it,
+	whether it is part of the map — and each of them can be fooled by an unusual
+	room. This asks the level designer, who named the thing.
+
+	── IT WALKS THE ANCESTORS, NOT JUST THE PART ───────────────────────────────
+	Which is the whole reason it works on a real map. The Backrooms keeps its
+	geometry in a model called Walls holding models called section, whose PARTS
+	are named whatever the artist felt like — so testing the part alone answers
+	nothing and testing the part plus everything above it answers all of them
+	from one entry. Stops at the map root: a Workspace or a folder called
+	something unlucky is not a statement about this surface.
+
+	See MapConfig.NeverStandOn for the names and why "Celing" is spelled twice.
+]]
+local function isFloorSurface(part: BasePart?, root: Instance?): boolean
+	if not part then
+		return true
+	end
+	local node: Instance? = part
+	while node and node ~= root and node ~= Workspace do
+		if MapConfig.isNeverStandOn(node.Name) then
+			return false
+		end
+		node = node.Parent
+	end
+	return true
+end
+
 local function belongsToMap(part: BasePart?, root: Instance?): boolean
 	if not root or not part then
 		return true
@@ -555,8 +588,15 @@ function SpawnPlacement.settle(point: Vector3, kind: string?): Vector3?
 	     the Infected folder — so a body standing where this one is going does not
 	     count as the floor, or as the thing blocking it. It is rebuilt by every
 	     `find`, and a scatter only ever happens moments after one. ]]
-	local ground, normal = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore, GROUND_RISE)
+	local ground, normal, floor = RaycastUtil.groundAt(point, GROUND_SEARCH_HEIGHT, ignore, GROUND_RISE)
 	if not ground or not normal or normal.Y < MIN_GROUND_NORMAL_Y then
+		return nil
+	end
+	--[[ The scatter is small — two and a half studs — and that is exactly enough
+	     to walk off the edge of a cleared point onto the top of the wall beside
+	     it. The centre was tested; this is the same test on the offset. ]]
+	local root = mapRoot()
+	if not belongsToMap(floor, root) or not isFloorSurface(floor, root) then
 		return nil
 	end
 	if not SpawnVolume.fitsKind(ground, kind, ignore) then
@@ -654,6 +694,10 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	local uncovered = 0
 	--[[ Candidates whose floor was not part of the level. See belongsToMap. ]]
 	local offMap = 0
+	--[[ Candidates standing on a ceiling or a wall, by NAME. See isFloorSurface —
+	     this is the counter that means "your map told us and we listened", which
+	     is a different and much better sentence than any of the guesses above. ]]
+	local notFloor = 0
 	--[[ Nodes the walk stepped straight past because they are outside the band.
 	     Counted rather than merged into `tooFar` because they are a different
 	     fact about the map: `tooFar` is candidates this search generated and
@@ -763,6 +807,7 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 		tooHigh = 0
 		uncovered = 0
 		offMap = 0
+		notFloor = 0
 		nodesOutOfRange = 0
 		nodeIndex = 0
 
@@ -900,6 +945,14 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 			     even in the level". ]]
 			if not belongsToMap(floor, root) then
 				offMap += 1
+				continue
+			end
+			--[[ And is it a surface anybody said may be stood on. Last of the
+			     three because it is the only one that can be answered wrong by a
+			     map rather than by this code: a designer who names nothing gets
+			     the geometric guards above and nothing worse. ]]
+			if not isFloorSurface(floor, root) then
+				notFloor += 1
 				continue
 			end
 
@@ -1044,6 +1097,9 @@ function SpawnPlacement.find(survivors: { Model }, options: SpawnOptions?): (Vec
 	end
 	if nodesOutOfRange > 0 then
 		table.insert(parts, string.format("%d node visit(s) skipped as out of range", nodesOutOfRange))
+	end
+	if notFloor > 0 then
+		table.insert(parts, string.format("%d on a ceiling or a wall", notFloor))
 	end
 	if offMap > 0 then
 		table.insert(parts, string.format("%d standing on something that is not the map", offMap))

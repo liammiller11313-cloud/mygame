@@ -74,6 +74,59 @@ event — so tag those two by hand when you want them.
 
 ---
 
+## Naming a surface nothing may spawn on
+
+A raycast cannot tell a floor from a ceiling. Both are flat, both have an upward
+normal from the side you hit them, and **the top of a wall is the best-looking
+floor in any map** — which is how a Tank ended up standing on the roof of the
+Backrooms.
+
+The Director has geometric guards for this (a height band, an overhead-cover
+test, a check that the floor belongs to the loaded map) and every one of them is
+an *inference*. Naming the thing is the answer that cannot be fooled.
+
+**Name a part, or any model it sits inside, one of these and nothing will ever be
+spawned on it:**
+
+| Name | Also matches |
+|---|---|
+| `Ceiling` | `ceilings`, `CEILING`, `Ceiling_01` |
+| `Celing` | the one-E spelling, because a real map in this game uses it |
+| `Roof` | `roofs`, `Roof 2` |
+| `Wall` | `Walls`, `wall`, `WALLS` |
+
+Case, spaces, punctuation and a single trailing `s` are all folded away first —
+the same rule item folders are matched by.
+
+### It checks the ancestors, which is the part that matters
+
+The Backrooms keeps its geometry in a model called **`Walls`** holding models
+called **`section`**, whose parts are named whatever the artist felt like.
+Testing the part alone would answer nothing. Testing the part *and every model
+above it up to the map root* answers all of them from the single `Walls` entry —
+so you do not have to rename anything inside it.
+
+```
+Backrooms
+  Floor          <- bodies stand here
+  Celing         <- nothing is spawned on top of it
+  Walls          <- and nothing on anything inside it, however deeply nested
+    section
+    sections
+  wall, wall, wall
+```
+
+### What it does not do
+
+It does not change collision and it does not stop a survivor **walking** onto
+something they can reach. It answers one question — *may a spawn be placed
+here* — which was previously being answered by guessing. Make `Floor` collidable
+and both zombies and survivors will stand on it; that half is Roblox's, not the
+game's.
+
+A map that names nothing still works. It gets the geometric guards and nothing
+worse.
+
 ## Items in the map
 
 Five folders inside **each** map, one per item:

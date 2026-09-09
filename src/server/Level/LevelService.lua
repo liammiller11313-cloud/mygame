@@ -635,6 +635,27 @@ end
 --[[ Drops a point onto whatever floor is under it and lifts it to root height.
      Falls through to the point itself when nothing is below — a spawn hanging in
      the air is recoverable, a spawn inside the floor is not. ]]
+--[[ Whether this surface, or any model it sits inside, is named as somewhere
+     nothing may be placed. Walks the ancestors for the reason SpawnPlacement's
+     copy does: a map keeps its geometry in a model called Walls holding models
+     called section, and the parts underneath are named whatever the artist
+     liked. Stops at the live map folder rather than at Workspace, so nothing
+     outside the map can accidentally answer for it. ]]
+local function blockedSurface(part: BasePart?): boolean
+	if not part then
+		return false
+	end
+	local stop = Workspace:FindFirstChild(MapConfig.LiveFolder)
+	local node: Instance? = part
+	while node and node ~= stop and node ~= Workspace do
+		if MapConfig.isNeverStandOn(node.Name) then
+			return true
+		end
+		node = node.Parent
+	end
+	return false
+end
+
 local function standOn(point: Vector3): Vector3
 	--[[ Characters and debris are excluded from the cast. A ray that lands on a
 	     teammate's head would place the next survivor standing on them, and the
@@ -650,8 +671,16 @@ local function standOn(point: Vector3): Vector3
 		table.insert(ignore, gore)
 	end
 
-	local ground = RaycastUtil.groundAt(point, GROUND_SEARCH, ignore)
-	if ground then
+	local ground, _normal, floor = RaycastUtil.groundAt(point, GROUND_SEARCH, ignore)
+	--[[ And not onto a ceiling or a wall. Survivors reach this through the ring
+	     that spreads a crew wider than the map has pads, and a ring point beside
+	     a pad in a corridor lands on top of the wall as readily as on the floor —
+	     the top of a wall being the best-looking floor in any map. The point it
+	     came from is the fallback, which is a pad somebody chose.
+
+	     By NAME, from MapConfig.NeverStandOn, which is the same answer
+	     SpawnPlacement gives the horde. Two spawners, one rule, stated once. ]]
+	if ground and not blockedSurface(floor) then
 		return Vector3.new(ground.X, ground.Y + SPAWN_ROOT_HEIGHT, ground.Z)
 	end
 	return point + Vector3.new(0, SPAWN_ROOT_HEIGHT, 0)
