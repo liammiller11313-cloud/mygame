@@ -963,6 +963,10 @@ local function buildCard(index: number, parent: Frame)
 	title.Size = UDim2.new(1, -(LAYOUT.PanelPadding * 2 + BADGE_WIDTH + CARD_GAP), 0, TEXT.Large)
 	title.Text = nameFor(index)
 	title.Parent = button
+	--[[ Renameable on a controller. The box sits inside the loadout card, so a
+	     pad could select the CARD and never the name in it — see
+	     GamepadFocus.field. ]]
+	GamepadFocus.field(title)
 
 	--[[ Committed on the way OUT of the box rather than per keystroke: the
 	     rename remote is throttled with the other loadout edits, and a field that

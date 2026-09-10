@@ -27,6 +27,7 @@
 	somewhere to get it.
 ]]
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -154,6 +155,22 @@ local function refreshButton()
 	redeemLabel.TextColor3 = if state.pending then COLOR.TextDim else COLOR.AccentBright
 	redeemButton.Active = not state.pending
 	redeemButton.Selectable = not state.pending
+	--[[
+		And the highlight survives the round trip.
+
+		REDEEM goes unselectable while an answer is in flight, which is right —
+		it cannot be pressed twice — and on a console an unselectable object that
+		is currently SELECTED drops the selection on the floor. The answer then
+		arrives, this function makes the button pressable again, and nothing is
+		highlighted: a dead panel one second after a perfectly successful
+		redemption.
+
+		Only when nothing else has taken it. A player who moved the stick to the
+		box while waiting has chosen where they want to be.
+	]]
+	if not state.pending and state.open and GuiService.SelectedObject == nil then
+		GamepadFocus.capture(redeemButton)
+	end
 	redeemButton.BackgroundTransparency = if state.pending then 0.6 else 0.15
 end
 
@@ -281,7 +298,23 @@ local function build()
 	field.TextXAlignment = Enum.TextXAlignment.Left
 	field.ClearTextOnFocus = false
 	field.TextEditable = true
+	--[[
+		Reachable by a D-pad, which it was not.
+
+		GuiService walks between SELECTABLE objects and nothing else, and a
+		TextBox is not selectable by default. So on a console this panel opened
+		with the highlight on REDEEM and exactly two things a stick could reach —
+		REDEEM and CLOSE. The text box was on screen, lit, with its placeholder
+		asking for a code, and there was no input on the controller that could
+		put the cursor in it.
+
+		Which made CODES the one screen in the game a console player could open,
+		read, and not use. The B-to-back fix earlier this month even guarded "are
+		they typing", so somebody had reasoned about the typing state on a pad —
+		there was just no way to enter it.
+	]]
 	field.Parent = box
+	GamepadFocus.field(field)
 
 	redeemButton = Widgets.button(panel, "Redeem")
 	redeemButton.AnchorPoint = Vector2.new(1, 0)
@@ -308,7 +341,26 @@ local function build()
 	--[[ Enter submits. `enterPressed` is false when the box lost focus for any
 	     other reason — clicking away, opening a menu — and submitting on those
 	     would fire a remote the player did not ask for. ]]
+	--[[
+		And the highlight comes back when the keyboard goes.
+
+		Releasing focus on a console clears GuiService.SelectedObject, and a
+		cleared selection is a panel a stick cannot move around any more — the
+		player closes the keyboard, having typed or not, and the screen is inert
+		with no indication why. Put back on the box when it is still empty and on
+		REDEEM once there is something to submit, which is where they were going
+		next either way.
+	]]
 	trove:connect(field.FocusLost, function(enterPressed: boolean)
+		--[[ On the enter path too, and that is the case that actually bites: the
+		     submit below clears the box on success, so a console player who typed
+		     a code and pressed enter would be left looking at an open panel with
+		     nothing selected. The text is still there on this line — submit has
+		     not run yet — so an entered code sends the highlight to REDEEM, which
+		     is where they were going anyway. ]]
+		if state.open then
+			GamepadFocus.capture(if field.Text == "" then field else redeemButton)
+		end
 		if enterPressed then
 			submit()
 		end
@@ -335,7 +387,11 @@ function CodesController:open()
 	messageLabel.Text = ""
 	setSuppressed(not menuIsOpen())
 	FreeCursor.take(restore)
-	GamepadFocus.capture(redeemButton)
+	--[[ The FIELD, not the button. On a pad the first thing you have to do here
+	     is type, and landing on REDEEM means the first press of A submits an
+	     empty box. Desktop is unaffected — capture does nothing unless the
+	     gamepad scheme is active. ]]
+	GamepadFocus.capture(field)
 	UiSound.play(AudioConfig.UI.MenuConfirm)
 end
 
@@ -385,6 +441,10 @@ function CodesController:start()
 			back means abandon the typing, and taking two intentions from one
 			press is how a player loses a code they were halfway through.
 		]]
+		--[[ A opening the keyboard is GamepadFocus's job, not this panel's — see
+		     GamepadFocus.field. Three screens have a text box in them and one
+		     handler for all of them is the difference between a fix and three
+		     copies of one. ]]
 		if input.KeyCode == Enum.KeyCode.ButtonB then
 			if field:IsFocused() then
 				field:ReleaseFocus(false)

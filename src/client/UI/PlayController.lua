@@ -919,6 +919,10 @@ local function build()
 	codeBox.Visible = false
 	codeBox.Parent = panel
 	Widgets.stroke(codeBox, COLOR.Border)
+	--[[ Reachable and typeable on a controller. Without it a console player can
+	     see a friend's lobby code, open this panel, and have no control that puts
+	     a cursor in the box — see GamepadFocus.field. ]]
+	GamepadFocus.field(codeBox)
 
 	--[[
 		Upper-cased and clipped as it is typed.

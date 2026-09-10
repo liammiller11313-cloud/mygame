@@ -220,6 +220,56 @@ end
 --[[ Hands selection back. Called when a screen closes — including when it closes
      because the round started, which is the case that matters: leaving selection
      on a menu button that is now invisible eats every D-pad press in the game. ]]
+--[[
+	── AND THE ONE THING A PAD COULD NOT DO AT ALL ─────────────────────────────
+
+	Type.
+
+	GuiService walks between SELECTABLE objects and nothing else, and a TextBox
+	is not selectable by default. So every text field in this game was on screen,
+	lit, with a placeholder asking for input, and unreachable by any control on a
+	controller — the redeem box in CODES, the join-code box in PLAY, and the
+	rename box on a loadout. Three screens a console player could open, read, and
+	not use.
+
+	`field` is the fix at the only sensible altitude: one call per box, and one
+	shared handler below that opens the platform's on-screen keyboard when A is
+	pressed on a selected one. Roblox usually raises that keyboard by itself for
+	a selected TextBox, and "usually" is not a thing to build a feature on when
+	the failure mode is that the feature does not exist on that platform.
+
+	The FocusLost restore is a FLOOR rather than a policy. Releasing focus on a
+	console clears the selection, and a cleared selection is a panel a stick
+	cannot move around any more — so this puts the highlight back on the box, but
+	only if nothing else has claimed it. A screen that knows where the player
+	should go next (CODES sends them to REDEEM once there is something to submit)
+	says so, and this never argues.
+]]
+function GamepadFocus.field(box: Instance?)
+	if not box or not box:IsA("TextBox") then
+		return
+	end
+	GamepadFocus.style(box)
+	box.FocusLost:Connect(function()
+		if box.Parent and box.Visible and GuiService.SelectedObject == nil then
+			GamepadFocus.capture(box)
+		end
+	end)
+end
+
+--[[ One handler for every field in the game rather than one per screen. A
+     selected TextBox is the only case it acts on, so A everywhere else still
+     means "press the thing I am pointing at". ]]
+UserInputService.InputBegan:Connect(function(input: InputObject)
+	if input.KeyCode ~= Enum.KeyCode.ButtonA then
+		return
+	end
+	local selected = GuiService.SelectedObject
+	if selected and selected:IsA("TextBox") and not selected:IsFocused() then
+		selected:CaptureFocus()
+	end
+end)
+
 function GamepadFocus.release(button: Instance?)
 	-- Only clear if the thing selected is ours. Two screens closing in the same
 	-- frame would otherwise have the second wipe the first's replacement.
