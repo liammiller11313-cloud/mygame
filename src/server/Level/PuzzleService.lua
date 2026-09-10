@@ -864,7 +864,10 @@ local BEACON_COLUMN_WIDTH = 2.4
 local BEACON_LIGHT_RANGE = 42
 
 local function setBeaconFire(model: Model, set: any, live: boolean)
-	local surface = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	--[[ Through the same helper the clue documents and the fuse numbers use, so
+	     a beacon with no PrimaryPart says so in the output instead of putting its
+	     column of light up out of a bracket somewhere near the fire. ]]
+	local surface = surfaceOf(model, "fire")
 	if not surface then
 		return
 	end
@@ -2486,6 +2489,30 @@ local function onSubmit(player: Player, payload: any)
 	local entry = record(player)
 	local now = serverNow()
 
+	--[[
+		The packet floor, before anything answers.
+
+		This handler's own comment says that "an unthrottled handler that answers
+		with FireClient is an outbound amplifier, and this one answers on every
+		path by design" — and the throttle underneath it did not cover the two
+		paths that answer most. `typedAt` is stamped only by a submit that gets
+		PAST the lockout and the cooldown, so a client sitting on a locked pad and
+		sending as fast as it liked drew one reply per packet, forever. The
+		generator's own submit handler drops silently below its floor for exactly
+		this reason; the keypad, which is the older of the two, never got it.
+
+		Silent, and it has to be: the two branches below answer because an honest
+		player is looking at an open panel waiting to be told why, and a floor
+		that replied would be the amplifier again with extra steps. The floor is
+		the same quarter-second every other puzzle remote uses, which is four
+		times faster than the pad's own attempt cooldown — so nothing an honest
+		player does can reach it, and nothing a crafted one does gets past it.
+	]]
+	if now - entry.tookAt < COLLECT_INTERVAL then
+		return
+	end
+	entry.tookAt = now
+
 	if now < entry.lockedUntil then
 		reply(player, false, "KEYPAD LOCKED", entry.lockedUntil)
 		return
@@ -3351,10 +3378,16 @@ end
 --[[ Puts out anything whose time is up. Driven from a Heartbeat rather than from
      a player's press, because going OUT is the one thing in this objective that
      happens when nobody is doing anything. ]]
-local function stepBeacons(now: number)
+local function stepBeacons()
+	--[[ The guard comes before the clock, not after. This runs on every server
+	     on every frame for the life of the game, and three maps in four will
+	     never arm a beacon — so the common case has to be two comparisons and a
+	     return, rather than two comparisons and a call into
+	     Workspace:GetServerTimeNow. ]]
 	if not beaconsArmed() then
 		return
 	end
+	local now = serverNow()
 	local set = state.definition.beacons
 	local changed = false
 
@@ -3557,9 +3590,7 @@ function PuzzleService:start()
 		watching a clock — and it is guarded on the kind, so on the other three
 		maps this costs one comparison a frame and nothing else.
 	]]
-	serviceTrove:connect(RunService.Heartbeat, function()
-		stepBeacons(serverNow())
-	end)
+	serviceTrove:connect(RunService.Heartbeat, stepBeacons)
 
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		attempts[player] = nil

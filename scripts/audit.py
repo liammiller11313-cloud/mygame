@@ -1825,6 +1825,64 @@ for _p in files:
             f"camera.ViewportSize / ScaleLayer.getFactor(), minus the screen margins"
         )
 
+# ── 38. A puzzle definition missing the block its kind needs ────────────────
+# Every arming function in PuzzleService opens the same way: check the fields
+# this kind requires, warn by name, and turn the objective off for the round.
+# That is the right runtime behaviour — a map with a half-built puzzle should
+# still be playable — and it means the failure is a line in the server log on a
+# map somebody has to actually load to see.
+#
+# Which is the worst place for it, because these are the objectives nobody plays
+# every session. A definition that lost its gate block during an edit is a loot
+# room that never opens, on one map, discovered by a tester rather than by the
+# build. The kinds and their required fields are a fixed, short list; there is
+# no reason for it to be checked only at three in the morning on Crossroads.
+_pz = read(SRC / "shared/Config/PuzzleConfig.lua")
+_pz_end = _pz.index("PuzzleConfig.Puzzles = table.freeze")
+_pz_ids = [(m.start(), m.group(1)) for m in re.finditer(r'id = "(\w+)"', _pz) if m.start() < _pz_end]
+
+# Field lists mirror the guard at the top of each arm* function, not a wish.
+_KIND_NEEDS = {
+    "Investigation": ("template", "digits", "keypad", "door", "clues",
+                      "attemptCooldown", "lockoutAfter", "lockoutSeconds"),
+    "Generators": ("generators", "gate"),
+    "Fuses": ("template", "fuses", "gate", "clues"),
+    "Beacons": ("beacons", "gate"),
+}
+
+for _n, (_at, _pid) in enumerate(_pz_ids):
+    _stop = _pz_ids[_n + 1][0] if _n + 1 < len(_pz_ids) else _pz_end
+    _block = _pz[_at:_stop]
+
+    _kind = re.search(r"kind = PuzzleConfig\.Kind\.(\w+)", _block)
+    _kind = _kind.group(1) if _kind else "Investigation"
+    _needs = _KIND_NEEDS.get(_kind)
+    if _needs is None:
+        problems.append(
+            f"puzzle {_pid!r} is kind {_kind!r}, which audit.py has no field list for — add it "
+            f"to _KIND_NEEDS beside the guard in the matching arm* function"
+        )
+        continue
+
+    for _field in _needs + ("reward",):
+        if re.search(r"^\t\t%s = " % re.escape(_field), _block, re.M) is None:
+            problems.append(
+                f"puzzle {_pid!r} is kind {_kind!r} and has no {_field!r} block — PuzzleService "
+                f"warns and turns the objective off for the round, which means a loot room that "
+                f"never opens on one map and a line in a log nobody is reading"
+            )
+
+    # The keypad kinds carry one more relationship: a pad that wants four digits
+    # from three documents is a pad nobody in the world can satisfy.
+    _digits = re.search(r"^\t\tdigits = (\d+),", _block, re.M)
+    if _digits and "clues = table.freeze" in _block:
+        _clues = len(re.findall(r"^\t\t\t\t\torder = \d+,", _block, re.M))
+        if _clues and _clues != int(_digits.group(1)):
+            problems.append(
+                f"puzzle {_pid!r} has {_clues} clue(s) against a {_digits.group(1)}-digit code — "
+                f"armInvestigation refuses to arm on exactly this mismatch"
+            )
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")
