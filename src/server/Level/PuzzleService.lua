@@ -1,12 +1,15 @@
 --!nonstrict
 --[[
-	PuzzleService — the side objective, in both of the shapes it comes in.
+	PuzzleService — the side objective, in all three of the shapes it comes in.
 
 	Clinton's is a VAULT: four documents left in a building, one keypad, and a
 	code that exists nowhere except in this process. Zombieville's is a GRID:
 	five generators walked in numerical order, each opening one of five
 	mini-puzzles dealt fresh every round, and a loot room whose gate rolls up
-	when the last one turns over.
+	when the last one turns over. The Backrooms' is a HUNT: four breaker boxes
+	thrown in an order this round invented, four objects in a maze that between
+	them say what that order is, and a loot room somewhere else entirely that two
+	doors move you in and out of.
 
 	── WHY ONE SERVICE RUNS BOTH ───────────────────────────────────────────────
 	They are different activities and the same feature. Both are armed when a
@@ -19,7 +22,13 @@
 
 	So the KIND decides which arming half runs and which handlers answer. Finding
 	props, settling them, arming the loot, opening the door, paying out and
-	clearing are one implementation with two front ends. See PuzzleConfig.Kind.
+	clearing are one implementation with three front ends. See PuzzleConfig.Kind.
+
+	The third one is the evidence that was worth it: the fuse hunt cost a
+	template file, an arming function and two handlers, and it inherited the
+	round lifecycle, the prop finder, the reach check, the rate limits, the gate,
+	the loot, the payout and the counter on everybody's screen without changing
+	any of them.
 
 	── THE VAULT ───────────────────────────────────────────────────────────────
 
@@ -64,6 +73,21 @@
 	own mini-game and is exactly as far from the loot room as one that did not.
 
 	See GeneratorConfig's header for the long version of that trade.
+
+	── THE HUNT ────────────────────────────────────────────────────────────────
+	Back to keeping everything. There is no mini-game to draw here — a breaker is
+	thrown or it is not — so nothing about the sequence has to leave this
+	process, and nothing does: it is rolled from the template's values, it is
+	compared here, and it is absent from every payload including the refusals.
+	See PuzzleConfig.wrongFuse, which is careful in a way the generators' refusal
+	never had to be, because Zombieville's order is painted on the side of five
+	machines and this one is the thing the whole puzzle is made of.
+
+	The one genuinely new mechanism is the pair of doorways, which MOVE a player
+	rather than opening — the Backrooms loot room is not behind its door, it is
+	somewhere else in the model. The server checks the door is armed and that the
+	player is standing at it; where they land is a part in the map, and no
+	position ever comes up from a client.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -101,6 +125,7 @@ local PZ = Attributes.Puzzle
 ]]
 local TEMPLATES = {
 	NumberInvestigation = require(script.Parent.Puzzles.NumberInvestigation),
+	FuseSequence = require(script.Parent.Puzzles.FuseSequence),
 }
 
 --[[ The five generator mini-puzzles, behind one door for the same reason the
@@ -209,7 +234,48 @@ local state = {
 	stockpile = nil :: Instance?,
 	stockpileClaimed = false,
 	clueOf = {} :: { [Model]: any },
+
+	--[[
+		── THE FUSE KIND ────────────────────────────────────────────────────────
+		The four boxes by their printed number, the reverse lookup that turns the
+		instance a player pressed back into "which box is this", and which of
+		them have been thrown.
+
+		`sequence` is the sensitive one and never leaves this process. It is the
+		order the boxes want, read out of the template's values — see
+		FuseSequence — and it appears in no payload, no attribute and no refusal.
+		A client that pressed all four boxes learns it the same way an honest
+		team does: by walking to all four.
+	]]
+	fuses = {} :: { [number]: Model },
+	fuseOf = {} :: { [Model]: number },
+	fuseLive = {} :: { [number]: boolean },
+	--[[ What a box's indicator part looked like before this service touched it,
+	     so OFF is the look the designer built and the map is handed back
+	     unpainted. Same job `doorLooks` does for a door's transparency. ]]
+	fuseLooks = {} :: { [BasePart]: { color: Color3, material: Enum.Material } },
+	sequence = {} :: { number },
+
+	--[[ Which documents the TEAM has read, and which each PLAYER has. The team's
+	     drives the "2 of 4" everybody hears; the player's decides whether a page
+	     opening is news or a re-read, so four survivors reading the same note do
+	     not each announce it and one survivor re-reading it is not told they
+	     found something. Neither is progress: the counter on this map is the
+	     boxes. ]]
+	clueSeen = {} :: { [number]: boolean },
+	readBy = {} :: { [Player]: { [number]: boolean } },
+
+	--[[ The doors that MOVE a player, and where each of them lands. Resolved at
+	     arm, tagged when the design says they may be used — see armDoorways. ]]
+	doorways = {} :: { [Instance]: BasePart },
+	doorwayList = {} :: { { door: Instance, target: BasePart, spec: any } },
 }
+
+--[[ Wording only. Its own Random so that picking which way a dead breaker
+     phrases itself can never consume a draw from the round's sequence — the
+     puzzle has to be reproducible from its seed, and a refusal is not part of
+     the puzzle. ]]
+local chatter = Random.new()
 
 --[[
 	Per-player, and cleared when they leave.
@@ -231,6 +297,33 @@ local attempts: {
      picking clues up is not a thing anybody spams for advantage — it exists so
      a crafted client cannot turn one socket into unlimited replies. ]]
 local COLLECT_INTERVAL = 0.25
+
+--[[
+	How long a box sulks after somebody throws it out of turn.
+
+	Short on purpose, and the shortest thing in this file that could be called a
+	punishment. The design brief was explicit that a wrong box must not damage
+	anybody, must not break anything permanently and must not reset the team's
+	progress, because this is played while the map is actively trying to kill
+	you and an objective that punishes a guess is an objective that punishes a
+	guess made because a Charger was coming.
+
+	So this is the whole of it: a couple of seconds on THAT box, for THAT player.
+	It is not there to deter brute force — see PuzzleConfig.wrongFuse for why the
+	maze is what does that — it is there so one player holding the interact key
+	cannot turn a breaker into a sixty-press-per-second oracle.
+]]
+local WRONG_FUSE_COOLDOWN = 2.5
+
+--[[ How far above a landing part a teleported survivor is placed, on top of
+     half the part's own height. Enough to clear a carpet and a doorframe lip
+     without dropping somebody through a thin platform. ]]
+local DOORWAY_RISE = 3.5
+
+--[[ Seconds the server keeps a teleported body before handing it back, and the
+     same number SurvivorService uses for a spawn. Long enough for the move to
+     replicate, short enough that nobody plays a corridor server-simulated. ]]
+local DOORWAY_OWNERSHIP_TIME = 0.5
 
 local function serverNow(): number
 	return Workspace:GetServerTimeNow()
@@ -398,6 +491,29 @@ local function faceFrom(name: string): Enum.NormalId
 	return if typeof(face) == "EnumItem" then face else Enum.NormalId.Front
 end
 
+--[[
+	The face a clue is written in, from the config's plain name, defaulting to
+	the typewriter.
+
+	Same forgiveness `faceFrom` gets and for a stronger reason: a font name is a
+	string against a list Roblox owns and occasionally grows, so a build without
+	`SpecialElite` should print the note in the wrong face rather than stop the
+	round from starting. A puzzle that refuses to arm because of a typeface is a
+	worse outcome than one that looks slightly off.
+]]
+local function fontFrom(name: string?): Enum.Font
+	if typeof(name) ~= "string" then
+		return Enum.Font.Code
+	end
+	local font = (Enum.Font :: any)[name]
+	return if typeof(font) == "EnumItem" then font else Enum.Font.Code
+end
+
+--[[ The default ink: near-black on off-white, which is right for every piece of
+     paperwork in the game and wrong for the two things in the Backrooms that
+     are not paperwork. See ClueSlot.ink. ]]
+local INK = Color3.fromRGB(28, 26, 24)
+
 -- ── painting the clues ──────────────────────────────────────────────────────
 
 --[[
@@ -441,6 +557,7 @@ local function paint(model: Model, clue: any, text: string)
 		suppliedLabel.RichText = false
 		model:SetAttribute(PZ.ClueText, text)
 		model:SetAttribute(PZ.CluePrompt, clue.prompt)
+		model:SetAttribute(PZ.ClueFont, clue.font)
 		return
 	end
 
@@ -468,9 +585,16 @@ local function paint(model: Model, clue: any, text: string)
 	label.Name = "Text"
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.Code
+	--[[ Both off the clue rather than fixed here. Clinton's four are paperwork
+	     and take the defaults; the Backrooms' are a note, a dead television, a
+	     hazmat log and something scrawled on a wall, and printing all four in
+	     one dark typewriter face would tell the player those are four printouts
+	     of the same document. A CRT glows and a wall does not, and that
+	     difference is most of what says which KIND of thing this is before a
+	     word of it has been read. ]]
+	label.Font = fontFrom(clue.font)
 	label.TextSize = clue.textSize
-	label.TextColor3 = Color3.fromRGB(28, 26, 24)
+	label.TextColor3 = if typeof(clue.ink) == "Color3" then clue.ink else INK
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextYAlignment = Enum.TextYAlignment.Top
 	label.TextWrapped = true
@@ -489,6 +613,106 @@ local function paint(model: Model, clue: any, text: string)
 
 	model:SetAttribute(PZ.ClueText, text)
 	model:SetAttribute(PZ.CluePrompt, clue.prompt)
+	--[[ And the face it is written in, so the close-up reader can print the
+	     scrawl as a scrawl instead of retyping somebody's wall in Courier. Same
+	     reason the text itself rides an attribute: the reader needs the fact,
+	     and digging it back out of a SurfaceGui by name is coupling that breaks
+	     the first time a designer renames a part. ]]
+	model:SetAttribute(PZ.ClueFont, clue.font)
+end
+
+-- ── the fuse boxes ──────────────────────────────────────────────────────────
+
+--[[
+	Prints a box's number on it, and says whether it is live.
+
+	The number is NOT optional decoration. Four identical grey boxes in a maze of
+	identical yellow corridors is the Backrooms working exactly as intended and a
+	puzzle that cannot be played: a document reading "THROW BOX 3" is worth
+	nothing to somebody with no way to tell which box they are standing at. So
+	the service prints it rather than trusting four models to have been labelled
+	by hand — one place decides, and it cannot disagree with the sequence.
+
+	Live is a colour rather than a word, on the number and on the designer's own
+	indicator part if they built one. It is the "changes visually" half of the
+	brief, and it has to be visible from down the corridor, because on this map
+	the thing a returning player needs to know from a distance is which boxes are
+	already done.
+]]
+local FUSE_DEAD = Color3.fromRGB(196, 186, 170)
+local FUSE_LIVE = Color3.fromRGB(126, 232, 160)
+
+local function markFuse(model: Model, set: any, order: number, live: boolean)
+	local surface = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	if not surface then
+		return
+	end
+
+	local colour = if live then FUSE_LIVE else FUSE_DEAD
+
+	--[[ Reused rather than replaced, unlike a clue's. A clue is re-printed with
+	     new words every round and a stale SurfaceGui underneath would leave two
+	     legible; this one only ever changes colour, and rebuilding it on every
+	     throw would flicker the number the player is looking at. ]]
+	local gui = surface:FindFirstChild("FL_Fuse") :: SurfaceGui?
+	if not gui then
+		gui = Instance.new("SurfaceGui")
+		gui.Name = "FL_Fuse"
+		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		gui.LightInfluence = 0
+		--[[ Off, like a clue's. A number that draws through the wall the box is
+		     bolted to is a HUD element wearing a prop's clothes. ]]
+		gui.AlwaysOnTop = false
+		gui.MaxDistance = 90
+
+		local label = Instance.new("TextLabel")
+		label.Name = "Number"
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.Code
+		label.TextXAlignment = Enum.TextXAlignment.Center
+		label.TextYAlignment = Enum.TextYAlignment.Center
+		label.RichText = false
+		label.Parent = gui
+		gui.Parent = surface
+	end
+
+	gui.Face = faceFrom(set.face)
+	gui.PixelsPerStud = set.pixelsPerStud
+	local label = gui:FindFirstChild("Number") :: TextLabel?
+	if label then
+		label.TextSize = set.textSize
+		label.Text = tostring(order)
+		label.TextColor3 = colour
+	end
+
+	--[[
+		And the designer's own light, if the model has one.
+
+		Optional by design — a box without one still turns its printed number
+		green, which is the change the brief actually asks for — so a map that
+		never grows an indicator part is never broken by its absence.
+
+		OFF is the look the designer built, not a look this file invented. The
+		original colour and material are remembered the first time the part is
+		seen and put back when the round clears, exactly the way `doorLooks`
+		remembers a door's transparency: a service that decided what an unlit
+		lamp should look like would be a service that quietly repaints somebody's
+		model, and it would do it permanently on a map that is not reloaded
+		between rounds.
+	]]
+	if typeof(set.indicator) == "string" then
+		for _, part in partsOf(model) do
+			if MapConfig.folderMatches(part.Name, set.indicator) then
+				if not state.fuseLooks[part] then
+					state.fuseLooks[part] = { color = part.Color, material = part.Material }
+				end
+				local was = state.fuseLooks[part]
+				part.Color = if live then colour else was.color
+				part.Material = if live then Enum.Material.Neon else was.material
+			end
+		end
+	end
 end
 
 --[[
@@ -836,6 +1060,157 @@ local function payOut()
 	end
 end
 
+-- ── the doorways ────────────────────────────────────────────────────────────
+
+--[[
+	Makes a doorway usable, and says what its prompt reads.
+
+	Separate from resolving it because the two halves happen at different
+	moments: both doors are FOUND when the round arms, and only the way out is
+	armed then. The way in is armed when the boards come off, because it is the
+	reward and a doorway that worked while the door was still boarded would make
+	the whole objective decorative.
+]]
+local function tagDoorway(entry: any)
+	local door = entry.door
+	if not door or not door.Parent then
+		return
+	end
+	door:SetAttribute(PZ.DoorwayPrompt, entry.spec.prompt)
+	CollectionService:AddTag(door, PuzzleConfig.DoorwayTag)
+end
+
+--[[
+	Finds the doors that MOVE a player, and the parts they land on.
+
+	Looked up inside the loot-room model when there is one and across the map
+	when there is not — the same split the gate gets, and for the same reason: a
+	map has any number of things that could answer to "Exit Door" and exactly two
+	of them belong to this room.
+
+	── WHY THE WAY OUT IS ARMED IMMEDIATELY ────────────────────────────────────
+	Not symmetry. It is the rule that a player can never be shut inside a room:
+	if the exit only existed once the objective completed, then any way into that
+	room the designer did not intend — a Charger, a physics fluke, a future
+	change to the map — would be a survivor stuck in a box until they died. The
+	way out costs nothing to leave armed, because the only people who can reach
+	it are already inside.
+]]
+local function resolveDoorways(definition: any, room: Instance?, root: Instance)
+	local specs = definition.doorways
+	if not specs then
+		return
+	end
+
+	for _, spec in specs do
+		local doorChild = if room then findWithin(room, spec.door) else findNamed(nil, root, spec.door)
+		local targetChild = if room then findWithin(room, spec.target) else findNamed(nil, root, spec.target)
+		local target = speakerOf(targetChild)
+		if not doorChild or not target then
+			--[[ A warning and no doorway, rather than a refusal to arm. A missing
+			     exit door is a map mistake worth shouting about and it does not
+			     make the fuse hunt unplayable — the boards still come off, the
+			     room is still open, and the one thing that does not work is
+			     named. ]]
+			warn(
+				string.format(
+					"[PuzzleService] %s: could not resolve the doorway %q -> %q. That door will "
+						.. "not move anybody this round.",
+					tostring(definition.id),
+					tostring(spec.door),
+					tostring(spec.target)
+				)
+			)
+			continue
+		end
+
+		local entry = { door = doorChild, target = target, spec = spec }
+		table.insert(state.doorwayList, entry)
+		state.doorways[doorChild] = target
+		if not spec.sealed then
+			tagDoorway(entry)
+		end
+	end
+end
+
+--[[ The sealed half, once the room is open. Called from openTheRoom beside
+     armLoot, because they are the same moment and the same promise: nothing
+     behind the boards is reachable until the boards are gone. ]]
+local function armSealedDoorways()
+	for _, entry in state.doorwayList do
+		if entry.spec.sealed then
+			tagDoorway(entry)
+		end
+	end
+end
+
+local function disarmDoorways()
+	for _, entry in state.doorwayList do
+		local door = entry.door
+		if door and door.Parent then
+			CollectionService:RemoveTag(door, PuzzleConfig.DoorwayTag)
+			door:SetAttribute(PZ.DoorwayPrompt, nil)
+		end
+	end
+end
+
+--[[
+	Puts a survivor on a part, somewhere else in the map.
+
+	The only teleport inside a map in this game, and it copies SurvivorService's
+	spawn move line for line, because that move took three goes to get right and
+	every one of the failures is available here.
+
+	Ownership is taken BEFORE the pivot, never after. An owning client that has
+	already started simulating will not accept a server CFrame — it rubber-bands
+	back and the player watches themselves fail to go through a door — and asking
+	for the body back afterwards does not retroactively make the move land. It is
+	handed straight back on a short timer, because a character the server is
+	simulating is the laggiest a player in this game can feel.
+
+	Where they land comes off the PART: the designer moves the room and nobody
+	has to remember to move a number. Facing is the part's own look direction
+	flattened, so somebody arriving in the loot room is looking into it rather
+	than at whatever the part happened to be rotated towards in three dimensions.
+]]
+local function teleportTo(player: Player, target: BasePart)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not character or not root or not root:IsA("BasePart") then
+		return false
+	end
+
+	local at = target.Position + Vector3.new(0, target.Size.Y / 2 + DOORWAY_RISE, 0)
+	local look = target.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	--[[ A part rotated to face straight up or straight down has no flat facing,
+	     and CFrame.lookAt with a zero direction throws. Whatever the designer
+	     meant, the answer is not a crash inside a door. ]]
+	if flat.Magnitude < 1e-3 then
+		flat = Vector3.new(0, 0, -1)
+	end
+
+	pcall(function()
+		root:SetNetworkOwner(nil)
+	end)
+
+	character:PivotTo(CFrame.lookAt(at, at + flat.Unit))
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+
+	task.delay(DOORWAY_OWNERSHIP_TIME, function()
+		--[[ Not while it is anchored: SurvivorService anchors a body it is
+		     holding and owns the release, and handing ownership back mid-hold
+		     would return a held body to its client. ]]
+		if root.Parent and not root.Anchored then
+			pcall(function()
+				root:SetNetworkOwnershipAuto()
+			end)
+		end
+	end)
+	return true
+end
+
 -- ── arming ──────────────────────────────────────────────────────────────────
 
 --[[ Everything this service put into the world, taken back out. Called before
@@ -851,6 +1226,10 @@ function PuzzleService:clear()
 	     setDoorOpen nothing ever reached. ]]
 	setDoorOpen(false)
 	disarmLoot()
+	--[[ And the doors stop moving anybody. A doorway left armed across a round
+	     boundary is a teleport into a room in a map that may no longer be
+	     loaded — the same failure the waypoint is taken down to avoid. ]]
+	disarmDoorways()
 	table.clear(state.doorLooks)
 
 	--[[
@@ -873,6 +1252,7 @@ function PuzzleService:clear()
 			model:SetAttribute(PZ.ClueText, nil)
 			model:SetAttribute(PZ.CluePrompt, nil)
 			model:SetAttribute(PZ.ClueOrder, nil)
+			model:SetAttribute(PZ.ClueFont, nil)
 			for _, gui in model:GetDescendants() do
 				if gui:IsA("SurfaceGui") and gui.Name == "FL_Clue" then
 					gui:Destroy()
@@ -899,6 +1279,36 @@ function PuzzleService:clear()
 		end
 	end
 
+	--[[ And the boxes, which additionally have a NUMBER printed on them.
+
+	     Destroyed rather than blanked, unlike a designer's own clue surface: this
+	     one was made here and the next round makes its own. Leaving a green 3 on
+	     a wall through a round with no puzzle in it would be last round's answer
+	     sitting legible in the map until the server restarts — the same reason
+	     the documents above go blank rather than merely quiet. ]]
+	--[[ Indicators back to the colour and material they were built with, before
+	     the models themselves are let go of. ]]
+	for part, was in state.fuseLooks do
+		if part.Parent then
+			part.Color = was.color
+			part.Material = was.material
+		end
+	end
+
+	for _, model in state.fuses do
+		if model.Parent then
+			CollectionService:RemoveTag(model, PuzzleConfig.FuseTag)
+			model:SetAttribute(PZ.FuseOrder, nil)
+			model:SetAttribute(PZ.FuseLive, nil)
+			model:SetAttribute(PZ.CluePrompt, nil)
+			for _, gui in model:GetDescendants() do
+				if gui:IsA("SurfaceGui") and gui.Name == "FL_Fuse" then
+					gui:Destroy()
+				end
+			end
+		end
+	end
+
 	state.definition = nil
 	state.answer = ""
 	state.values = nil
@@ -916,6 +1326,15 @@ function PuzzleService:clear()
 	table.clear(state.generators)
 	table.clear(state.generatorOf)
 	table.clear(state.deals)
+	table.clear(state.fuses)
+	table.clear(state.fuseOf)
+	table.clear(state.fuseLive)
+	table.clear(state.fuseLooks)
+	table.clear(state.sequence)
+	table.clear(state.clueSeen)
+	table.clear(state.readBy)
+	table.clear(state.doorways)
+	table.clear(state.doorwayList)
 	table.clear(attempts)
 
 	Workspace:SetAttribute(GA.VaultPresent, false)
@@ -985,6 +1404,54 @@ local function resolveLoot(definition: any, folder: Instance?, root: Instance)
 		     team walks into. ]]
 		settle(state.weaponDrop, true)
 	end
+end
+
+--[[
+	Finds, settles and registers the documents, for either kind that has them.
+
+	Shared because it is the same job on both maps and every line of it is about
+	somebody else's model rather than about a puzzle: wrapping a lone Part so
+	everything downstream has a Model, anchoring paperwork that a stray pellet
+	would otherwise shoot off a desk, and building the two lookups the rest of
+	the file needs — `props`, so repaint can find the model for a clue, and
+	`clueOf`, so the instance a player interacted with can be turned back into
+	which clue it is.
+
+	Nothing is PRINTED here. Every prop has to be in the maps before anything is
+	painted, because a loop that painted as it went would print only the props it
+	had already reached and leave the rest blank for the round.
+
+	── AND THE ORDER ATTRIBUTE IS THE ONE DIFFERENCE ───────────────────────────
+	Written only for the kind whose clues are a CHAIN. On Clinton the prompt
+	dims a document you have already collected, which it works out from the
+	prop's own order against the team's count — and on the Backrooms that same
+	arithmetic would compare a document's position against the number of BOXES
+	thrown, and start greying out clues nobody has read. A fact that only means
+	something on one map is a fact only that map should publish.
+]]
+local function armClues(definition: any, folder: Instance?, root: Instance): number
+	local ordered = PuzzleConfig.kindOf(definition) == PuzzleConfig.Kind.Investigation
+	local painted = 0
+	for _, clue in definition.clues do
+		local child = findNamed(folder, root, clue.object)
+		local model = child and asModel(child, child.Parent or root)
+		if model then
+			--[[ Anchored, collision left alone. A document has to still be on the
+			     desk at wave twelve, and a room sign may be part of a wall. ]]
+			settle(model, false)
+			CollectionService:AddTag(model, PuzzleConfig.ClueTag)
+			if ordered then
+				model:SetAttribute(PZ.ClueOrder, clue.order)
+			end
+			table.insert(state.clues, model)
+			state.props[clue.object] = model
+			state.clueOf[model] = clue
+			painted += 1
+		else
+			warn(string.format("[PuzzleService] no %q prop — that clue is missing this round", clue.object))
+		end
+	end
+	return painted
 end
 
 --[[
@@ -1092,24 +1559,7 @@ local function armInvestigation(definition: any, folder: Instance?, root: Instan
 		and what number is it", and without it onCollect matches nothing and the
 		counter never moves.
 	]]
-	local painted = 0
-	for _, clue in definition.clues do
-		local child = findNamed(folder, root, clue.object)
-		local model = child and asModel(child, child.Parent or root)
-		if model then
-			--[[ Anchored, collision left alone. A document has to still be on the
-			     desk at wave twelve, and a room sign may be part of a wall. ]]
-			settle(model, false)
-			CollectionService:AddTag(model, PuzzleConfig.ClueTag)
-			model:SetAttribute(PZ.ClueOrder, clue.order)
-			table.insert(state.clues, model)
-			state.props[clue.object] = model
-			state.clueOf[model] = clue
-			painted += 1
-		else
-			warn(string.format("[PuzzleService] no %q prop — that clue is missing this round", clue.object))
-		end
-	end
+	local painted = armClues(definition, folder, root)
 
 	state.definition = definition
 	state.answer = answer
@@ -1295,6 +1745,176 @@ local function armGenerators(definition: any, folder: Instance?, root: Instance,
 end
 
 --[[
+	The Backrooms' shape: four breaker boxes thrown in an order this round
+	invented, and four documents that between them say what it is.
+
+	── EVERY BOX OR NONE ───────────────────────────────────────────────────────
+	Same rule the generators follow. Three boxes against a sequence of four is a
+	round whose loot room can never open for reasons nobody can see, which is
+	strictly worse than a Backrooms with no side objective — at least that one
+	does not ask the team to walk it. So a missing box names itself and prints
+	the map's top-level folders beside it, which between them are enough to fix a
+	misnamed prop from the output alone.
+
+	A missing DOCUMENT is survivable and is only warned about, by armClues. Three
+	clues are enough to deduce the fourth position, and a puzzle that refused to
+	arm because a note fell through the world would be a harsher rule than the
+	one it is protecting.
+]]
+local function armFuses(definition: any, folder: Instance?, root: Instance, random: Random): boolean
+	local set = definition.fuses
+	local gate = definition.gate
+	if not set or not gate or not definition.clues then
+		warn(
+			string.format(
+				"[PuzzleService] %s is kind %q but has no fuses, gate or clues block — puzzle off",
+				tostring(definition.id),
+				PuzzleConfig.Kind.Fuses
+			)
+		)
+		return false
+	end
+
+	local template = TEMPLATES[definition.template]
+	if not template or typeof(template.order) ~= "function" then
+		warn(
+			string.format(
+				"[PuzzleService] no fuse template called %q in this build — puzzle off",
+				tostring(definition.template)
+			)
+		)
+		return false
+	end
+
+	--[[ The values, and the order read back out of them. One roll, one source:
+	     the documents below are printed from the same table, so there is no
+	     second place the sequence is written down and therefore no way for a
+	     clue to disagree with the boxes. See FuseSequence. ]]
+	local values = template.generate(random, definition)
+	local sequence = template.order(values)
+	if #sequence ~= set.count then
+		warn(
+			string.format(
+				"[PuzzleService] %s rolled a sequence of %d for %d boxes — puzzle off",
+				tostring(definition.id),
+				#sequence,
+				set.count
+			)
+		)
+		return false
+	end
+
+	for order = 1, set.count do
+		local wanted = PuzzleConfig.fuseName(set, order)
+		local child = findNamed(folder, root, wanted)
+		local model = child and asModel(child, child.Parent or root)
+		if not model then
+			warn(
+				string.format(
+					"[PuzzleService] no %q anywhere in %s — the fuse hunt is off for this "
+						.. "round. The map's top-level folders are: %s",
+					wanted,
+					tostring(definition.map),
+					MapConfig.folderNamesIn(root)
+				)
+			)
+			return false
+		end
+
+		--[[ Anchored, collision kept. A box bolted to a wall is part of the wall,
+		     and turning its collision off would put a hole in the building. ]]
+		settle(model, false)
+
+		state.fuses[order] = model
+		state.fuseOf[model] = order
+		state.fuseLive[order] = false
+
+		--[[ The number goes on the PROP, so a prompt can say "FUSE BOX 3"
+		     without a round trip. It is not a secret — it is printed on the front
+		     of the box by markFuse, and a box a player cannot identify is a clue
+		     they cannot act on. What IS secret is the order, and that is in
+		     `sequence` and nowhere a client can reach. ]]
+		model:SetAttribute(PZ.FuseOrder, order)
+		model:SetAttribute(PZ.FuseLive, false)
+		model:SetAttribute(PZ.CluePrompt, string.format("%s %d", set.prompt, order))
+		CollectionService:AddTag(model, PuzzleConfig.FuseTag)
+		markFuse(model, set, order, false)
+	end
+
+	--[[ The room, then the boards INSIDE it. Same split the vault's door and the
+	     gate get: a map has many things that could answer to "Wooden Boards" and
+	     exactly one of them is on the loot room's door. ]]
+	local roomChild = findNamed(folder, root, gate.room)
+	local room = roomChild and asModel(roomChild, roomChild.Parent or root)
+	local door = if room then findWithin(room, gate.door) else nil
+	if not room then
+		warn(
+			string.format(
+				"[PuzzleService] no %q in %s — the boxes will throw and nothing will open. "
+					.. "The map's top-level folders are: %s",
+				gate.room,
+				tostring(definition.map),
+				MapConfig.folderNamesIn(root)
+			)
+		)
+	elseif not door then
+		warn(
+			string.format(
+				"[PuzzleService] found %q but no %q inside it — the boxes will throw and "
+					.. "nothing will open. Put the boards inside the room model.",
+				gate.room,
+				gate.door
+			)
+		)
+	end
+
+	resolveLoot(definition, folder, root)
+	resolveDoorways(definition, room, root)
+
+	state.definition = definition
+	state.values = values
+	state.answer = template.answer(values)
+	state.sequence = sequence
+	state.found = 0
+	state.solved = false
+	state.gateRoom = room
+	state.door = door
+	if door then
+		for _, part in partsOf(door) do
+			state.doorLooks[part] = part.Transparency
+		end
+	end
+
+	local painted = armClues(definition, folder, root)
+
+	Workspace:SetAttribute(GA.VaultPresent, true)
+	Workspace:SetAttribute(GA.VaultSolved, false)
+	Workspace:SetAttribute(GA.CluesFound, 0)
+	Workspace:SetAttribute(GA.CluesTotal, set.count)
+	--[[ The counter counts BOXES, not documents. Reading is how you find out
+	     what to do and throwing is the doing, and a card that ticked up when
+	     somebody read a note would be telling the team they had made progress
+	     towards a door that had not moved. ]]
+	setTracker("FUSES", "FIND THE SEQUENCE")
+
+	--[[ Printed last, with every prop already in the maps — see armClues. Every
+	     document is legible from the first second of the round; there is nothing
+	     redacted on this map. ]]
+	repaint()
+
+	print(
+		string.format(
+			"[PuzzleService] %s armed with %d boxes and %d/%d clues",
+			definition.id,
+			set.count,
+			painted,
+			#definition.clues
+		)
+	)
+	return true
+end
+
+--[[
 	Rolls a fresh puzzle into the live map.
 
 	Called from the round starting rather than from the map loading — see the
@@ -1330,9 +1950,12 @@ function PuzzleService:arm(random: Random?)
 	local folder = findPuzzleFolder(root)
 
 	local rng = random or Random.new()
+	local kind = PuzzleConfig.kindOf(definition)
 	local armed
-	if PuzzleConfig.kindOf(definition) == PuzzleConfig.Kind.Generators then
+	if kind == PuzzleConfig.Kind.Generators then
 		armed = armGenerators(definition, folder, root, rng)
+	elseif kind == PuzzleConfig.Kind.Fuses then
+		armed = armFuses(definition, folder, root, rng)
 	else
 		armed = armInvestigation(definition, folder, root, rng)
 	end
@@ -1369,6 +1992,10 @@ local function openTheRoom(player: Player, line: string)
 
 	setDoorOpen(true)
 	armLoot()
+	--[[ And the way in, on the map where the loot room is somewhere else
+	     entirely. Beside armLoot because it is the same promise: nothing behind
+	     the boards is reachable until the boards are gone. ]]
+	armSealedDoorways()
 	payOut()
 
 	--[[ Where the room IS, by the best answer available. The door first, because
@@ -1426,9 +2053,12 @@ local function openTheRoom(player: Player, line: string)
 		one-line change whenever somebody decides it.
 	]]
 	local speaker = speakerOf(state.door) or speakerOf(state.gateRoom) or speakerOf(state.keypad)
-	local opened = if PuzzleConfig.kindOf(state.definition) == PuzzleConfig.Kind.Generators
-		then AudioConfig.Generator.Gate
-		else AudioConfig.UI.MenuConfirm
+	--[[ Anything that is a thing in a doorway gets the shutter; only the vault,
+	     whose door is a keypad assembly, keeps the confirm. Boards being pulled
+	     off a door are far closer to a gate rolling up than to a menu tick. ]]
+	local opened = if PuzzleConfig.kindOf(state.definition) == PuzzleConfig.Kind.Investigation
+		then AudioConfig.UI.MenuConfirm
+		else AudioConfig.Generator.Gate
 	local audio = Registry.find("AudioService")
 	if audio and typeof(audio.playOn) == "function" and speaker then
 		pcall(audio.playOn, audio, opened, speaker)
@@ -1540,7 +2170,8 @@ local function onCollect(player: Player, target: any)
 	     before the clueOf lookup would already have refused a generator map — but
 	     the two remotes are a pair and a reader should not have to prove that
 	     about one of them. ]]
-	if PuzzleConfig.kindOf(state.definition) ~= PuzzleConfig.Kind.Investigation then
+	local kind = PuzzleConfig.kindOf(state.definition)
+	if kind == PuzzleConfig.Kind.Generators then
 		return
 	end
 
@@ -1570,6 +2201,72 @@ local function onCollect(player: Player, target: any)
 		return
 	end
 
+	--[[
+		The Backrooms' documents are not a chain.
+
+		Everything below this is the vault's ordering — collect the clipboard
+		before the sign, refuse the note until the badge is in — and every line of
+		it is wrong here. Those four are spread through a maze with no landmarks
+		and no route a player can learn, so "find the second one first" is an
+		instruction to wander, and the digits are not hidden anyway: there is
+		nothing to reveal because everything is legible the moment you are stood
+		in front of it.
+
+		So a read is a read. It opens the page, it never refuses, and it never
+		moves the counter — because the counter on this map is the BOXES, and a
+		card that ticked up when somebody read a note would be telling the team
+		they had made progress towards a door that has not moved.
+
+		What it does do is tell everybody ONCE. Four documents in a maze is a job
+		a team splits up to do, and the other three need to know a note exists and
+		that somebody has it — the reader can say what it said.
+	]]
+	if kind == PuzzleConfig.Kind.Fuses then
+		local mine = state.readBy[player]
+		if not mine then
+			mine = {}
+			state.readBy[player] = mine
+		end
+		local first = mine[clue.order] ~= true
+		mine[clue.order] = true
+
+		Remotes.Event.ClueResult:FireClient(player, {
+			ok = true,
+			order = clue.order,
+			found = state.found,
+			total = #state.definition.clues,
+			text = target:GetAttribute(PZ.ClueText),
+			headline = clue.prompt,
+			--[[ The face it was printed in travels with it, so the reader opens a
+			     wall scrawl as a scrawl rather than retyping somebody's wall in
+			     Courier. One setting in the config, rendered twice. ]]
+			font = clue.font,
+			ink = clue.ink,
+			--[[ Only the confirm sound rides on this. A page re-opened is the same
+			     page and should not chime a second time. ]]
+			repeated = not first,
+		})
+
+		if first and state.clueSeen[clue.order] ~= true then
+			state.clueSeen[clue.order] = true
+			local seen = 0
+			for _ in state.clueSeen do
+				seen += 1
+			end
+			--[[ Counted in DOCUMENTS, which is the only number this event has
+			     ever been about. It does not touch GA.CluesFound and the card on
+			     everybody's screen keeps reading the boxes. ]]
+			Remotes.Event.ClueFound:FireAllClients({
+				player = player,
+				order = clue.order,
+				found = seen,
+				total = #state.definition.clues,
+				prompt = clue.prompt,
+			})
+		end
+		return
+	end
+
 	--[[ Already in. Silent rather than refused: walking back past a clipboard
 	     you have read is not a mistake and does not deserve a message. ]]
 	if clue.order <= state.found then
@@ -1579,6 +2276,8 @@ local function onCollect(player: Player, target: any)
 			found = state.found,
 			total = #state.definition.clues,
 			text = target:GetAttribute(PZ.ClueText),
+			font = clue.font,
+			ink = clue.ink,
 			--[[ Named, so re-reading the badge opens a page headed SECURITY BADGE
 			     rather than DOCUMENT. It is the same page either way; only the
 			     first read gets the "you just found this" line. ]]
@@ -1625,6 +2324,8 @@ local function onCollect(player: Player, target: any)
 		found = state.found,
 		total = #state.definition.clues,
 		text = target:GetAttribute(PZ.ClueText),
+		font = clue.font,
+		ink = clue.ink,
 		headline = if template and typeof(template.prompt) == "function"
 			then template.prompt(clue, state.values)
 			else clue.found,
@@ -1989,6 +2690,252 @@ local function onSubmitGenerator(player: Player, payload: any)
 	end
 end
 
+-- ── throwing a fuse ─────────────────────────────────────────────────────────
+
+local function fusesArmed(): boolean
+	return state.definition ~= nil and PuzzleConfig.kindOf(state.definition) == PuzzleConfig.Kind.Fuses
+end
+
+--[[ How many boxes there are this round. Off the definition rather than off the
+     table of models, so a box destroyed mid-round cannot quietly shorten the
+     objective. ]]
+local function fuseCount(): number
+	local set = state.definition and state.definition.fuses
+	return if set then set.count else 0
+end
+
+--[[
+	A player throwing a breaker.
+
+	The whole puzzle is decided here and nowhere else. The order is in
+	`state.sequence`, which was read out of the same values the documents were
+	printed from, and it has never been on a wire — so a crafted client can press
+	every box in the map and learns the sequence exactly the way an honest team
+	does, which is by walking to all of them.
+
+	Every branch answers, because a box that silently ignores you is a box the
+	player thinks is broken — and every branch is throttled BEFORE it answers,
+	because a handler that replies on every path is an outbound amplifier for
+	whoever is sending them.
+
+	── WHAT A WRONG BOX COSTS ──────────────────────────────────────────────────
+	A couple of seconds on that box, for that player. No damage, nothing broken,
+	and above all no reset: the brief was explicit, and it is right, because this
+	is played while the map is trying to kill you and an objective that punishes
+	a guess punishes a guess made because a Charger was coming. See
+	WRONG_FUSE_COOLDOWN, and PuzzleConfig.wrongFuse for why the refusal is
+	careful never to name the box that WOULD have worked.
+]]
+local function onPullFuse(player: Player, target: any)
+	if typeof(target) ~= "Instance" or not fusesArmed() then
+		return
+	end
+
+	local entry = record(player)
+	local now = serverNow()
+	if now - entry.tookAt < COLLECT_INTERVAL then
+		return
+	end
+
+	local order = state.fuseOf[target]
+	if not order then
+		--[[ Not one of ours. Stamped nothing, because a player looking at a wall
+		     should not be spending the budget that lets them throw the box a
+		     tenth of a second later. ]]
+		return
+	end
+	entry.tookAt = now
+
+	--[[ And you have to be standing at it, alive. A sequence answerable from the
+	     spawn point is four remote calls rather than four walks across a maze,
+	     which is not a cheat that beats the objective so much as one that deletes
+	     what the objective IS. ]]
+	if not atMachine(player, state.fuses[order]) then
+		return
+	end
+
+	local total = fuseCount()
+
+	--[[ Already thrown. Reachable even though a live box is untagged and prompts
+	     on nobody's screen: a client that had the prompt up when somebody else
+	     threw it can still send one press. ]]
+	if state.fuseLive[order] then
+		Remotes.Event.FuseResult:FireClient(player, {
+			ok = false,
+			order = order,
+			thrown = state.found,
+			total = total,
+			reason = "This one is already live.",
+			retryAt = 0,
+		})
+		return
+	end
+
+	if now < entry.lockedUntil then
+		Remotes.Event.FuseResult:FireClient(player, {
+			ok = false,
+			order = order,
+			thrown = state.found,
+			total = total,
+			reason = "The panel is still settling.",
+			retryAt = entry.lockedUntil,
+		})
+		return
+	end
+
+	local wanted = state.sequence[state.found + 1]
+	if order ~= wanted then
+		entry.lockedUntil = now + WRONG_FUSE_COOLDOWN
+		Remotes.Event.FuseResult:FireClient(player, {
+			ok = false,
+			order = order,
+			thrown = state.found,
+			total = total,
+			--[[ Says that nothing happened and never which box would have. The
+			     wording lives in PuzzleConfig, with the design, and the reason it
+			     has to be careful is that this order is the secret the whole
+			     puzzle is made of. ]]
+			reason = PuzzleConfig.wrongFuse(chatter),
+			retryAt = entry.lockedUntil,
+		})
+		return
+	end
+
+	--[[ Live. Counted first, so two players throwing in the same frame cannot
+	     both pass the check above — the server is single-threaded, so moving the
+	     counter before anything else is a complete answer rather than a narrowing
+	     of the window. ]]
+	state.found += 1
+	state.fuseLive[order] = true
+	entry.lockedUntil = 0
+	Workspace:SetAttribute(GA.CluesFound, state.found)
+
+	local set = state.definition.fuses
+	local model = state.fuses[order]
+	if model and model.Parent then
+		--[[ Untagged, so it stops offering a prompt at all — the same rule a
+		     spent ammo crate follows, because offering a press the server will
+		     refuse is worse than offering nothing. The attribute stays and turns
+		     true, because it is the box's own state rather than the prompt's. ]]
+		CollectionService:RemoveTag(model, PuzzleConfig.FuseTag)
+		model:SetAttribute(PZ.FuseLive, true)
+		markFuse(model, set, order, true)
+
+		--[[ At the BOX, not on the thrower's screen. Four boxes in a maze is a
+		     job a team splits up to do, and before this the only evidence a
+		     teammate two corridors away had was a number changing on a card.
+
+		     The turn-over only, and no hum after it. Five generators settling
+		     into a drone is Zombieville coming alive; four of them in here would
+		     be four drones over the one map whose ambience is the point of the
+		     map. ]]
+		local audio = Registry.find("AudioService")
+		local speaker = speakerOf(model)
+		if audio and typeof(audio.playOn) == "function" and speaker then
+			pcall(audio.playOn, audio, AudioConfig.Generator.Start, speaker)
+		end
+	end
+
+	Remotes.Event.FuseResult:FireClient(player, {
+		ok = true,
+		order = order,
+		thrown = state.found,
+		total = total,
+		retryAt = 0,
+	})
+
+	Remotes.Event.FusePowered:FireAllClients({
+		player = player,
+		order = order,
+		thrown = state.found,
+		total = total,
+	})
+
+	if state.found < total then
+		setTracker("FUSES", "FIND THE SEQUENCE")
+		return
+	end
+
+	--[[
+		All four. The boards come off, the room arms, the team is paid — and an
+		ARROW goes up.
+
+		The arrow matters more here than anywhere else in the game. "Get to the
+		loot room" is only useful to somebody who knows where the loot room is,
+		and this map is a maze of identical corridors specifically designed so
+		that nobody does. A team can finish the sequence in a corner they have
+		never been to, three turns from a door they have never seen.
+	]]
+	setTracker("POWER RESTORED", "GET TO THE LOOT ROOM!")
+	openTheRoom(player, "Auxiliary power restored. Get to the loot room!")
+
+	--[[
+		The DOOR, and only then the room.
+
+		The other way round from Zombieville, and it is not a preference. There
+		the loot room is a building, its centre is inside it, and pointing at the
+		building is pointing at the objective. Here `Backrooms Lootroom` is the
+		model that holds the whole side objective — the boxes, the documents, both
+		doors and the room itself — so its pivot is a centroid somewhere in the
+		middle of all of that, which is a place nobody needs to go.
+
+		What the team has to walk to is the door the boards just came off. That is
+		`state.door`, it is one object, and it is where the arrow belongs.
+	]]
+	local gate = state.definition.gate
+	local at = centreOf(state.door) or centreOf(state.gateRoom)
+	if at then
+		setWaypoint(at, if gate then gate.label else "LOOT ROOM")
+	end
+end
+
+-- ── using a doorway ─────────────────────────────────────────────────────────
+
+--[[
+	A player stepping through a door that moves them.
+
+	Deliberately thin. Nothing is granted, nothing is spent, and the only
+	question is whether this player is standing at a door the server armed —
+	which is the whole reason the tag is the gate rather than the config: the way
+	IN is not tagged until the boards come off, so a client that fires this at
+	`Exit Door 1` during wave one is aiming at an instance the server has not
+	armed and is answered with nothing at all.
+
+	Where they land is a part in the map. No position, CFrame or destination ever
+	comes up from a client, so the worst a crafted one can do is use a door it is
+	standing next to, which is what the door is for.
+]]
+local function onUseDoorway(player: Player, target: any)
+	if typeof(target) ~= "Instance" or not state.definition then
+		return
+	end
+
+	local landing = state.doorways[target]
+	if not landing or not landing.Parent then
+		return
+	end
+	--[[ Armed, not merely known. `doorways` holds both doors from the moment the
+	     round starts so the way out can never be missing; the TAG is what says a
+	     door may be used, and the sealed one does not get it until the room
+	     opens. ]]
+	if not CollectionService:HasTag(target, PuzzleConfig.DoorwayTag) then
+		return
+	end
+
+	local entry = record(player)
+	local now = serverNow()
+	if now - entry.tookAt < COLLECT_INTERVAL then
+		return
+	end
+	entry.tookAt = now
+
+	if not atMachine(player, target) then
+		return
+	end
+
+	teleportTo(player, landing)
+end
+
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function PuzzleService:init() end
@@ -1999,9 +2946,16 @@ function PuzzleService:start()
 	serviceTrove:connect(Remotes.Event.ClaimStockpile.OnServerEvent, onStockpile)
 	serviceTrove:connect(Remotes.Event.OpenGenerator.OnServerEvent, onOpenGenerator)
 	serviceTrove:connect(Remotes.Event.SubmitGenerator.OnServerEvent, onSubmitGenerator)
+	serviceTrove:connect(Remotes.Event.PullFuse.OnServerEvent, onPullFuse)
+	serviceTrove:connect(Remotes.Event.UseDoorway.OnServerEvent, onUseDoorway)
 
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		attempts[player] = nil
+		--[[ And what they had read. Held per player only to decide whether a page
+		     is news or a re-read, so it is worth nothing after they leave and
+		     would otherwise keep a Player key alive for the life of the
+		     server. ]]
+		state.readBy[player] = nil
 	end)
 
 	--[[

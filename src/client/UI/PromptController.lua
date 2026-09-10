@@ -480,15 +480,49 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 			local colour = if order == held + 1 then COLOR.Accent else COLOR.TextDim
 			return node, "POWER", label, false, colour
 		end
+		--[[
+			A fuse box, on the map that has them.
+
+			Every un-thrown box is lit the SAME, which is the one place this
+			differs from the generator above it and the difference is the whole
+			puzzle. A generator's order is public — it is painted on the side of
+			five machines — so the prompt can helpfully dim the four that are not
+			next. This order is the secret the objective is made of, and a prompt
+			that brightened the correct box would hand the sequence to anybody
+			who walked past it and hand it in a way that never reaches the server
+			at all.
+
+			A thrown box is untagged and prompts on nobody, so the only thing a
+			player learns from the prompts is which boxes are left.
+		]]
+		if CollectionService:HasTag(node, PuzzleConfig.FuseTag) then
+			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "FUSE BOX")
+			return node, "THROW", label, false, COLOR.Accent
+		end
+		--[[ A door that moves you. Tagged only while the server will honour it,
+		     so the boarded one offers nothing until the boards are off — the same
+		     rule the stockpile follows, and for the same reason: a prompt the
+		     server is going to refuse is worse than no prompt. ]]
+		if CollectionService:HasTag(node, PuzzleConfig.DoorwayTag) then
+			local label = tostring(node:GetAttribute(PUZZLE.DoorwayPrompt) or "DOOR")
+			return node, "ENTER", label, false, COLOR.Accent
+		end
 		if CollectionService:HasTag(node, PuzzleConfig.ClueTag) then
 			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "DOCUMENT")
 			--[[ A clue already in the team's hands is a document you re-read; one
 			     that is not is a thing you pick up. Same key, same remote, and the
 			     server decides which it actually was — this only changes the word,
 			     so a player can tell at a glance what they have already been to. ]]
+			--[[ Zero when the prop carries no order at all, which is how the
+			     Backrooms' documents arrive: they are not a chain, so the server
+			     deliberately does not publish a position for them. Without the
+			     first half of this test every one of them would compare 0 against
+			     a count of thrown FUSE BOXES, decide the player had already had
+			     it, and draw four unread clues dimmed from the first second of
+			     the round. ]]
 			local order = tonumber(node:GetAttribute(PUZZLE.ClueOrder)) or 0
 			local held = tonumber(Attributes.get(Workspace, GA.CluesFound, 0)) or 0
-			local colour = if order <= held then COLOR.TextDim else COLOR.Accent
+			local colour = if order > 0 and order <= held then COLOR.TextDim else COLOR.Accent
 			return node, "READ", label, false, colour
 		end
 		if CollectionService:HasTag(node, BODY_TAG) then
@@ -692,6 +726,21 @@ local function handlePuzzlePress(): boolean
 		     anything — including the refusal that names the generator they should
 		     have found first. ]]
 		Remotes.Event.OpenGenerator:FireServer(target)
+		return true
+	end
+	if state.verb == "THROW" then
+		--[[ Asked, not decided. Whether this is the next box in the sequence is
+		     a fact only the server has — see PuzzleService — and a client that
+		     worked it out locally would be a client that knows the answer. All
+		     that comes back is whether anything happened. ]]
+		Remotes.Event.PullFuse:FireServer(target)
+		return true
+	end
+	if state.verb == "ENTER" then
+		--[[ The server decides both whether the door is armed and where it lands.
+		     No position goes up from here, so the worst this can do is use a door
+		     the player is standing next to, which is what the door is for. ]]
+		Remotes.Event.UseDoorway:FireServer(target)
 		return true
 	end
 	if state.verb == "READ" then

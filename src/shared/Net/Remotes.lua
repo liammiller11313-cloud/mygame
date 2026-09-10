@@ -384,6 +384,38 @@ local EVENTS: { string } = {
 	"GeneratorResult", -- S->asker {ok, order, powered, total, reason?, challenge?}
 	"GeneratorPowered", -- S->all {player, order, powered, total}
 
+	-- ── The Backrooms fuse hunt ─────────────────────────────────────────────
+	--[[
+		Four breaker boxes thrown in an order this round invented, and four
+		objects in the maze that between them say what that order is.
+
+		Thinner than the generators' four, and the difference is the whole shape
+		of the puzzle. A generator hands back a mini-game to draw, so a panel of
+		wire colours has to come down the wire. A fuse box is thrown or it is
+		not — there is nothing to draw, so nothing is sent but the answer to
+		"did that do anything", and the thinking happened in front of four
+		documents somewhere else in the maze.
+
+		── WHAT IS NEVER IN A PAYLOAD ──────────────────────────────────────────
+		The sequence. Not the whole of it, not the next box in it, and not in a
+		refusal — see PuzzleConfig.wrongFuse, which is careful about this in a
+		way the generators' refusal never had to be, because THAT order is
+		painted on the side of five machines and this one is the secret the
+		puzzle is made of. A client that pressed every box in the map learns the
+		order the same way an honest team does: by walking to all of them.
+
+		`UseDoorway` is the other half of the reward and is not a puzzle remote
+		at all. The Backrooms loot room is somewhere else in the model rather
+		than behind its door, so the two doors that get a player in and back out
+		move them — the only teleport inside a map in this game. The server
+		checks the door is armed and that the player is standing at it; where
+		they land is a part in the map and never a position from a client.
+	]]
+	"PullFuse", -- C->S (fuse: Instance)
+	"FuseResult", -- S->asker {ok, order, thrown, total, reason?, retryAt}
+	"FusePowered", -- S->all {player, order, thrown, total}
+	"UseDoorway", -- C->S (door: Instance)
+
 	-- ── Joining a server whose round has already started ────────────────────
 	--[[
 		A player who presses PLAY while a wave is running does not interrupt it.

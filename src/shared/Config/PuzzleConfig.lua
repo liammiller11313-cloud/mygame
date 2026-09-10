@@ -85,6 +85,17 @@ PuzzleConfig.GeneratorTag = "FL_PuzzleGenerator"
      interacted with once and pays the whole team — nothing about it is a
      document. ]]
 PuzzleConfig.StockpileTag = "FL_PuzzleStockpile"
+--[[ The breaker boxes in the Backrooms. Its own tag rather than a generator's,
+     because the two answer completely differently: a generator hands back a
+     mini-game to draw, and a fuse box is thrown or it is not. A prompt that
+     opened a wire panel on a fuse box would be a prompt promising a puzzle that
+     does not exist. ]]
+PuzzleConfig.FuseTag = "FL_PuzzleFuse"
+--[[ A door that moves the player rather than opening. See DoorwaySpec: the
+     Backrooms loot room is somewhere else in the world, and the two doors that
+     get you in and out of it are the only things in this game that teleport
+     inside a map. ]]
+PuzzleConfig.DoorwayTag = "FL_PuzzleDoorway"
 
 --[[
 	The two shapes a side objective comes in.
@@ -111,6 +122,29 @@ PuzzleConfig.StockpileTag = "FL_PuzzleStockpile"
 PuzzleConfig.Kind = table.freeze({
 	Investigation = "Investigation",
 	Generators = "Generators",
+	--[[
+		The Backrooms': four breaker boxes thrown in an order the round invents,
+		and four objects in the maze that between them say what that order is.
+
+		The third kind is what the template registry was written for, and it cost
+		what the header above promised it would — a template file and a row in
+		`Puzzles`. What it did NOT cost is worth naming, because it is the whole
+		argument for having done it that way: the round lifecycle, the prop
+		finder, the reach check, the rate limit, the gate, the loot, the payout
+		and the counter on everybody's screen are the same code the other two
+		kinds run.
+
+		── AND IT IS THE FIRST ONE WHOSE ORDER IS A SECRET ─────────────────────
+		Zombieville's generators are walked 1, 2, 3, 4, 5. The number is painted
+		on the machine and the objective is the WALK. Here the boxes are numbered
+		too, and the order they want is rolled fresh every round, so the objective
+		is the READING: four documents in a maze that has no landmarks, and a
+		sequence that cannot be learned because it did not exist ten minutes ago.
+
+		Which means every refusal in this kind has to be careful in a way the
+		generators' never had to be. See wrongFuse.
+	]]
+	Fuses = "Fuses",
 })
 
 export type ClueSlot = {
@@ -156,6 +190,27 @@ export type ClueSlot = {
 	--[[ What the prompt says when a player is looking at it. It is a noun, not an
 	     instruction: the player is picking a thing up to read it. ]]
 	prompt: string,
+
+	--[[
+		What the words are written IN, and what colour they are.
+
+		Both optional, and both absent on Clinton — where all four clues are
+		paperwork and near-black on off-white is right for every one of them.
+
+		The Backrooms is where they had to exist. Its four clues are a note, a
+		dead television, a hazmat log and something scrawled on a wall, and
+		printing all four in the same dark typewriter face would say those are
+		four printouts of one document. A CRT glows and a wall does not; that
+		difference is most of what tells a player which KIND of thing they just
+		found, before they have read a word of it.
+
+		`font` is an Enum.Font name and falls back to the typewriter face if this
+		build does not have it, the same forgiveness `face` gets — a font that
+		does not exist should print the clue in the wrong face, not stop a round
+		from starting.
+	]]
+	font: string?,
+	ink: Color3?,
 }
 
 --[[
@@ -204,6 +259,61 @@ export type GateSpec = {
 	label: string,
 }
 
+--[[
+	The breaker boxes, and how they are drawn.
+
+	Numbered `Fuse Box 1` through `Fuse Box 4` in the map, exactly like the
+	generators are — the same numbered pattern every prop family in this game
+	uses, so a designer adding a fifth names it `Fuse Box 5` and raises `count`.
+
+	The number is PAINTED ON by the service rather than trusted to the model.
+	Four identical grey boxes on four identical yellow walls is the Backrooms
+	working as intended and a puzzle that cannot be played: a clue reading
+	"THROW BOX 3" is worth nothing to somebody who cannot tell which box they
+	are standing at. So the face, the resolution and the size are here, beside
+	the clue slots that need the same three settings and for the same reason.
+]]
+export type FuseSet = {
+	object: string,
+	count: number,
+	prompt: string,
+	face: string,
+	pixelsPerStud: number,
+	textSize: number,
+	--[[ A part inside the box whose colour says whether it is live — matched
+	     forgivingly, so "Light", "light" and "Indicator" all answer. Optional: a
+	     box without one still turns its printed number green, which is the
+	     visible change the design actually requires. ]]
+	indicator: string?,
+}
+
+--[[
+	A door that puts you somewhere else.
+
+	The Backrooms loot room is not on the other side of its door — it is a
+	separate room somewhere else in the model, and `Exit Door 1` moves the player
+	to the part `Lootroom Teleport` inside it. `Exit Door 2` moves them back to
+	`Lootroom Exit`, out in the maze.
+
+	── WHY `sealed` IS A FIELD AND NOT A CONSTANT ──────────────────────────────
+	The way IN is armed when the puzzle is solved, because it IS the reward and
+	a doorway that worked before the boards came off would make the fuses
+	decorative. The way OUT is armed the moment the round starts, and that is not
+	symmetry — it is the rule that a player can never be shut inside a room. If
+	the exit door only existed after the objective completed, any way into that
+	room the designer did not intend (a Charger, a physics fluke, a future
+	change) would be a player stuck in a box until they died.
+]]
+export type DoorwaySpec = {
+	door: string,
+	--[[ The part to land on, by name, looked for inside the same room the door
+	     is. A Part rather than a CFrame in the config, because the designer moves
+	     the room and nobody should have to remember to move a number. ]]
+	target: string,
+	prompt: string,
+	sealed: boolean,
+}
+
 export type PuzzleDefinition = {
 	id: string,
 	--[[ The map this puzzle belongs to, by MapConfig id. A puzzle is authored
@@ -246,6 +356,16 @@ export type PuzzleDefinition = {
 
 	--[[ ── GENERATORS ONLY ──────────────────────────────────────────────────── ]]
 	generators: GeneratorSet?,
+
+	--[[ ── FUSES ONLY ───────────────────────────────────────────────────────── ]]
+	fuses: FuseSet?,
+	--[[ Optional even on the kind that has them: a map whose loot room is
+	     BEHIND its door rather than somewhere else needs none, and the gate
+	     opening is the whole mechanism. ]]
+	doorways: { DoorwaySpec }?,
+
+	--[[ Shared by the two kinds that seal a room with something in the doorway
+	     rather than with a keypad. ]]
 	gate: GateSpec?,
 
 	--[[ The physical contents of the vault, armed when the door opens. Optional:
@@ -314,6 +434,54 @@ PuzzleConfig.Notes = table.freeze({
 	"THE FREEZER HOLDS. THE FREEZER IS THE ONLY THING THAT HOLDS.",
 	"IF YOU ARE READING THIS AND WE ARE NOT HERE, TAKE WHAT YOU NEED.",
 	"NOBODY GOES OUT ALONE. NOT FOR ANYTHING.",
+})
+
+--[[
+	── THE BACKROOMS ───────────────────────────────────────────────────────────
+	The people who were down here before the lights went, and where they were
+	working. Same job as Clinton's Officers and Areas: the maintenance note and
+	the hazmat log name the SAME technician every round, so a player who notices
+	that the scrawl on the wall and the log on the floor are the same person's
+	has learned something true about the place rather than spotting a pattern in
+	a puzzle generator.
+]]
+PuzzleConfig.Technicians = table.freeze({
+	table.freeze({ first = "DALE", last = "MERRICK" }),
+	table.freeze({ first = "PRIYA", last = "NANDA" }),
+	table.freeze({ first = "OSCAR", last = "REYNA" }),
+	table.freeze({ first = "JUNE", last = "HOLLIS" }),
+	table.freeze({ first = "STEVIE", last = "ABARA" }),
+	table.freeze({ first = "MARTIN", last = "KRUSE" }),
+})
+
+--[[ Where the paperwork says it was filed. Flavour only — no box number ever
+     hides in here, because a number in a field the player has been taught to
+     skip is a number they will never find. ]]
+PuzzleConfig.Sublevels = table.freeze({
+	"SUBLEVEL 2",
+	"SUBLEVEL 7",
+	"WING C",
+	"THE LONG HALL",
+	"SECTOR 12",
+	"STAIRWELL 4",
+})
+
+--[[
+	One line of somebody having been here, on the paperwork.
+
+	Short for the same reason Clinton's are: a paragraph on a wall is a paragraph
+	nobody reads with a horde coming, and the lore's job is to make four objects
+	feel like the residue of people rather than the furniture of a puzzle. These
+	answer smaller questions than Clinton's do — nobody down here knows what
+	happened, and that is the map's whole idea.
+]]
+PuzzleConfig.MaintenanceNotes = table.freeze({
+	"THE HALLS ARE NOT THE SAME LENGTH TWICE. STOP MEASURING THEM.",
+	"WE COUNTED DOORS FOR SIX HOURS AND GOT A DIFFERENT NUMBER EVERY TIME.",
+	"IF THE HUM STOPS, GET TO THE BOXES. THE HUM IS THE ONLY CLOCK WE HAVE.",
+	"DO NOT SLEEP IN THE OPEN. DO NOT SLEEP ALONE. PREFERABLY DO NOT SLEEP.",
+	"SOMEONE KEEPS MOVING THE CHAIR. THERE IS NOBODY ELSE DOWN HERE.",
+	"THE WALLPAPER IS DRY. EVERYTHING IS DRY. THE CARPET IS NOT.",
 })
 
 --[[
@@ -600,6 +768,236 @@ local DEFINITIONS: { PuzzleDefinition } = {
 			}),
 		}),
 	}),
+
+	--[[
+		── THE BACKROOMS ────────────────────────────────────────────────────────
+		Four breaker boxes, thrown in an order this round invented, and four
+		objects in the maze that between them say what that order is.
+
+		── WHY THIS MAP GETS THIS PUZZLE ───────────────────────────────────────
+		The other two objectives are answered by knowing the building. Clinton's
+		clipboard is always on the same desk; Zombieville's generators are always
+		walked 1 to 5. Both are learnable, both are meant to be, and neither
+		works here — the Backrooms is one continuous maze of identical yellow
+		corridors with no landmarks, so "remember where the thing was" is not a
+		skill this map lets a player have.
+
+		So the thing that is not learnable is the ORDER. The boxes never move,
+		the documents never move, and the sequence is rolled fresh every round —
+		which means a team that has played this map fifty times still has to
+		read, and a team on its first round is not at a disadvantage for it.
+
+		── AND THE ANSWER IS STILL NEVER GENERATED ─────────────────────────────
+		Same rule as the vault, and it is the reason this is a template rather
+		than a handful of code in the service: the SEQUENCE is rolled, and every
+		document is printed FROM that sequence. There is no second place where
+		the order is written down and therefore no way for a clue to disagree
+		with the boxes. See Server/Level/Puzzles/FuseSequence.
+	]]
+	table.freeze({
+		id = "BackroomsFuses",
+		map = "Backrooms",
+		kind = PuzzleConfig.Kind.Fuses,
+		template = "FuseSequence",
+
+		--[[ The four boxes the designer built, by the names they carry. The
+		     number is printed onto each one by the service — see FuseSet, and
+		     the reason is that four unlabelled grey boxes in this map is a puzzle
+		     nobody can play. ]]
+		fuses = table.freeze({
+			object = "Fuse Box",
+			count = 4,
+			prompt = "FUSE BOX",
+			face = "Front",
+			pixelsPerStud = 60,
+			textSize = 40,
+			indicator = "Light",
+		}),
+
+		--[[
+			The four objects, and what each of them knows.
+
+			One position each, in the order they are listed: the note says which
+			box is FIRST, the television says which is SECOND, the hazmat log says
+			THIRD and the scrawl says LAST. Deliberately one fact per object and
+			no overlap, which buys two things worth having.
+
+			The first is that three clues are enough. A team that finds any three
+			can work the fourth out by elimination, and a document that fell
+			through the world or sits behind a locked Charger is not a round
+			nobody can finish.
+
+			The second is that no two of them can ever contradict each other,
+			because no two of them are talking about the same position. A clue set
+			where two objects both describe the third box is a clue set that has
+			to be checked for agreement, and a check like that is a thing that
+			works until the day it does not.
+
+			── AND THEY ARE READ IN ANY ORDER ──────────────────────────────────
+			Unlike the vault's, which are a CHAIN. That was right there — the
+			ordering is what stops a player reading the fourth digit off a wall
+			without walking the building — and it is wrong here, because these
+			four are spread through a maze with no landmarks and being told
+			"find the second one first" in a place where you cannot navigate is
+			being told to wander. Everything here is legible the moment you stand
+			in front of it. The maze is the difficulty; it does not need help.
+		]]
+		clues = table.freeze({
+			table.freeze({
+				order = 1,
+				object = "Clue 1",
+				face = "Front",
+				pixelsPerStud = 110,
+				textSize = 20,
+				font = "SpecialElite",
+				prompt = "MAINTENANCE NOTE",
+				found = "RESTART PROCEDURE",
+				texts = table.freeze({
+					"AUX POWER \226\128\148 RESTART PROCEDURE\n\n"
+						.. "FILED: {date}   {sector}\n\n"
+						.. "STEP ONE. THROW BOX {first}.\n\n"
+						.. "START ANYWHERE ELSE AND THE\n"
+						.. "LOOP TRIPS AND YOU WAIT.\n\n"
+						.. "{tech}, MAINTENANCE",
+					"IF YOU ARE READING THIS THE\n"
+						.. "LIGHTS ARE OUT AGAIN.\n\n"
+						.. "{sector} \226\128\148 {date}\n\n"
+						.. "IT STARTS AT BOX {first}. ALWAYS.\n"
+						.. "I HAVE WRITTEN IT DOWN BECAUSE\n"
+						.. "I KEEP FORGETTING.\n\n"
+						.. "{tech}",
+					"POSTED FOR THE NEXT SHIFT\n\n"
+						.. "{date}\n\n"
+						.. "FIRST BREAKER IN THE SEQUENCE\n"
+						.. "IS NUMBER {first}.\n\n"
+						.. "THE REST IS ON THE OTHER\n"
+						.. "PAPERWORK. GOOD LUCK.\n\n"
+						.. "{tech}, {sector}",
+				}),
+			}),
+			table.freeze({
+				order = 2,
+				object = "Clue 2",
+				face = "Front",
+				pixelsPerStud = 70,
+				textSize = 22,
+				font = "Code",
+				--[[ A CRT with nothing behind it. Pale on dark rather than the
+				     paperwork's ink, because the one thing a player has to be able
+				     to tell about this object at a glance is that it is a SCREEN. ]]
+				ink = Color3.fromRGB(126, 232, 160),
+				prompt = "BROKEN TV",
+				found = "SIGNAL FRAGMENT",
+				texts = table.freeze({
+					">> SIGNAL DEGRADED <<\n\n"
+						.. "...AND THE SECOND IS\n"
+						.. "BREAKER {second}. REPEAT.\n"
+						.. "SECOND IS {second}...\n\n"
+						.. ">> NO CARRIER <<",
+					">> REC \226\151\143 {date} <<\n\n"
+						.. "SOMEBODY WRITE THIS DOWN.\n"
+						.. "AFTER THE FIRST ONE YOU\n"
+						.. "WANT BOX {second}.\n\n"
+						.. ">> TAPE ENDS <<",
+					">> STANDBY <<\n\n"
+						.. "SEQUENCE POSITION TWO\n"
+						.. "= BOX {second}\n\n"
+						.. "THIS LOOP HAS BEEN PLAYING\n"
+						.. "FOR A VERY LONG TIME.\n\n"
+						.. ">> STANDBY <<",
+				}),
+			}),
+			table.freeze({
+				order = 3,
+				object = "Clue 3",
+				face = "Front",
+				pixelsPerStud = 110,
+				textSize = 20,
+				font = "SpecialElite",
+				prompt = "HAZMAT LOG",
+				found = "CONTAINMENT LOG",
+				texts = table.freeze({
+					"CONTAINMENT LOG \226\128\148 {sector}\n\n"
+						.. "DATE: {date}\n\n"
+						.. "THIRD BREAKER: BOX {third}\n\n"
+						.. "SUIT ON BEFORE YOU GO PAST\n"
+						.. "THE CARPET. NO EXCEPTIONS.\n\n"
+						.. "{note}\n\n"
+						.. "SIGNED: {techInitial}",
+					"HAZARD SWEEP \226\128\148 {date}\n\n"
+						.. "AREA: {sector}\n\n"
+						.. "WE GOT AS FAR AS THE THIRD\n"
+						.. "BOX. THAT IS NUMBER {third}.\n\n"
+						.. "{note}\n\n"
+						.. "{techInitial}",
+					"DECON RECORD\n\n"
+						.. "{sector} \226\128\148 {date}\n\n"
+						.. "POSITION THREE IN THE\n"
+						.. "RESTART IS BOX {third}.\n\n"
+						.. "IF THE SUIT TEARS, TURN\n"
+						.. "AROUND. {note}\n\n"
+						.. "{techInitial}",
+				}),
+			}),
+			table.freeze({
+				order = 4,
+				object = "Clue 4",
+				face = "Front",
+				pixelsPerStud = 60,
+				textSize = 34,
+				--[[ Scrawled rather than filed. The one clue in the set that was
+				     not written by somebody doing their job. ]]
+				font = "PermanentMarker",
+				ink = Color3.fromRGB(58, 46, 40),
+				prompt = "WALL MARKING",
+				found = "SOMEBODY WROTE ON THE WALL",
+				texts = table.freeze({
+					"LAST ONE IS {fourth}\n\nTHEN THE DOOR OPENS\n\nDONT STOP MOVING",
+					"{fourth} GOES LAST\n\nI AM NOT WRITING IT\nANYWHERE ELSE\n\nFIND ME",
+					"FINISH ON {fourth}\n\nIF YOU ARE READING THIS\nI DIDNT MAKE IT BACK",
+				}),
+			}),
+		}),
+
+		--[[ The boards on the exit door, by the name the model carries. Gone
+		     rather than ghosted — boards somebody pulled off a door are boards
+		     on the floor, and half-transparent planks still filling a doorway
+		     would read as a door that is somehow both barricaded and open. ]]
+		gate = table.freeze({
+			room = "Backrooms Lootroom",
+			door = "Wooden Boards",
+			vanish = true,
+			label = "LOOT ROOM",
+		}),
+
+		--[[ In through door one, back out through door two. See DoorwaySpec for
+		     why only the first of them is sealed. ]]
+		doorways = table.freeze({
+			table.freeze({
+				door = "Exit Door 1",
+				target = "Lootroom Teleport",
+				prompt = "EXIT DOOR",
+				sealed = true,
+			}),
+			table.freeze({
+				door = "Exit Door 2",
+				target = "Lootroom Exit",
+				prompt = "RETURN TO THE MAZE",
+				sealed = false,
+			}),
+		}),
+
+		--[[ Between the other two, because the work is. Clinton is four
+		     documents in a building you can navigate and one code; Zombieville is
+		     five machines on a route you can learn. This is four documents in a
+		     maze with no landmarks AND a walk to four boxes in an order that did
+		     not exist ten minutes ago, and paying it Zombieville's rate would
+		     make the hardest of the three objectives the least worth doing.
+
+		     Still Dollars, still split across the team, still capped by the
+		     round's own earnings ceiling. Nothing here is a new currency. ]]
+		reward = table.freeze({ dollars = 2_500, restockItems = true }),
+	}),
 }
 
 PuzzleConfig.Puzzles = table.freeze(DEFINITIONS) :: { PuzzleDefinition }
@@ -670,11 +1068,61 @@ function PuzzleConfig.kindOf(definition: PuzzleDefinition?): string
 	return definition.kind or PuzzleConfig.Kind.Investigation
 end
 
---[[ The nth generator's model name: "Generator 3". One function so the name the
-     service LOOKS for and the name a warning PRINTS are the same string, which
-     is what makes a missing prop diagnosable from the output. ]]
-function PuzzleConfig.generatorName(set: GeneratorSet, order: number): string
+--[[ The nth prop in a numbered family: "Generator 3", "Fuse Box 2". One
+     function so the name the service LOOKS for and the name a warning PRINTS
+     are the same string, which is what makes a missing prop diagnosable from
+     the output — and one function for both families, because two copies of a
+     naming rule is how a map ends up with a `Fuse Box 2` nothing can find. ]]
+function PuzzleConfig.numberedName(set: { object: string }, order: number): string
 	return string.format("%s %d", set.object, order)
+end
+
+function PuzzleConfig.generatorName(set: GeneratorSet, order: number): string
+	return PuzzleConfig.numberedName(set, order)
+end
+
+function PuzzleConfig.fuseName(set: FuseSet, order: number): string
+	return PuzzleConfig.numberedName(set, order)
+end
+
+--[[
+	What a player is told when they throw the wrong breaker.
+
+	And, more importantly, what they are NOT told.
+
+	The generators' refusal names the machine they should have found instead,
+	because that order is public — it is painted on the side of five machines and
+	the objective is the walking. This order is the SECRET, and a refusal reading
+	"try box 3" would hand the sequence to anybody willing to press four things,
+	which is the entire puzzle given away by its own error message.
+
+	So it says that nothing happened, and it says it in the map's voice. The
+	player learns exactly one true thing — not this one — which is the same thing
+	they would learn from a real breaker that was not next in the loop.
+
+	── AND THAT IS ALL THAT HAPPENS ────────────────────────────────────────────
+	No damage, no reset, nothing broken. A wrong box costs a couple of seconds on
+	that box and nothing else, deliberately: this is played while the map is
+	trying to kill you, and an objective that punishes a guess is an objective
+	that punishes a guess made because a Charger was coming.
+
+	Which does leave brute force on the table, and it is worth being honest about
+	the arithmetic: four boxes, then three, then two, then one is ten presses at
+	worst. What makes that a bad plan is not a rule, it is the map — those ten
+	presses are ten walks across a maze with no landmarks and a horde in it,
+	against four walks for a team that read the paperwork. The clues are a
+	shortcut through the Backrooms, and the Backrooms is the deterrent.
+]]
+local DEAD_FUSE = table.freeze({
+	"Nothing. The box is dead.",
+	"The switch throws and nothing answers.",
+	"Dust, a click, and no power.",
+	"Not this one. Somewhere in the dark, nothing changes.",
+})
+
+function PuzzleConfig.wrongFuse(random: Random?): string
+	local index = if random then random:NextInteger(1, #DEAD_FUSE) else 1
+	return DEAD_FUSE[index]
 end
 
 --[[

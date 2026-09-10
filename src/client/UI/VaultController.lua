@@ -101,6 +101,21 @@ local INK = Color3.fromRGB(32, 28, 24)
 local INK_FADED = Color3.fromRGB(104, 93, 78)
 
 --[[
+	And the other thing a clue can be, which is a screen.
+
+	One of the Backrooms' four documents is a dead television, and opening a CRT
+	message as a sheet of cream paper would undo on this panel exactly the
+	distinction the prop makes in the world. A clue that names its own ink is
+	saying it is not paperwork; the page follows it.
+
+	Two colours rather than one for the same reason the paper has two: a flat
+	rectangle is a UI surface, and a tube is darker at its edges than at its
+	centre.
+]]
+local SCREEN = Color3.fromRGB(17, 21, 19)
+local SCREEN_SHADE = Color3.fromRGB(9, 12, 11)
+
+--[[
 	How far out of focus the world goes behind an open page.
 
 	Below the main menu's 26 on purpose. The menu is a place you have LEFT the
@@ -109,6 +124,23 @@ local INK_FADED = Color3.fromRGB(104, 93, 78)
 	reading into a moment of blindness. Enough that the eye stops trying to track
 	movement out there, not so much that the room stops existing.
 ]]
+--[[
+	The face a document is written in, from the name the server sent, defaulting
+	to the typewriter.
+
+	Forgiving on purpose, the same way the server's own copy is: a font name is a
+	string against a list Roblox owns and occasionally grows, and a build that
+	does not have SpecialElite should open the note in the wrong face rather than
+	leave the player looking at a blank page.
+]]
+local function fontFrom(name: any): Enum.Font
+	if typeof(name) ~= "string" then
+		return Enum.Font.Code
+	end
+	local font = (Enum.Font :: any)[name]
+	return if typeof(font) == "EnumItem" then font else Enum.Font.Code
+end
+
 local READER_BLUR = 18
 local BLUR_INFO = TweenInfo.new(UITheme.Motion.Normal, UITheme.Motion.Easing, UITheme.Motion.EasingDirection)
 
@@ -201,6 +233,10 @@ local docBody: Frame
 local readout: TextLabel
 local statusLabel: TextLabel
 local docText: TextLabel
+--[[ The sheet's own tone, kept because it is what actually carries the colour:
+     the body is white and this gradient tints it, so switching a page between
+     paper and screen is one assignment rather than three. ]]
+local docAge: UIGradient
 
 --[[ In Lighting rather than in the ScreenGui, because that is where a
      post-process effect goes. Owned by the trove so a client teardown cannot
@@ -531,7 +567,10 @@ local function buildKeypad(parent: Instance)
 end
 
 local function buildDocument(parent: Instance)
-	docBody = Widgets.frame(parent, "Document", PAPER, 0)
+	--[[ White, and coloured entirely by the gradient below. A UIGradient
+	     multiplies the background it sits on, so leaving the body at full
+	     brightness is what lets one assignment repaint the whole sheet. ]]
+	docBody = Widgets.frame(parent, "Document", Color3.new(1, 1, 1), 0)
 	docBody.Position = UDim2.fromOffset(LAYOUT.PanelPadding, PANEL.HeaderHeight + LAYOUT.PanelPadding)
 	docBody.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 1, -(PANEL.HeaderHeight + LAYOUT.PanelPadding * 2))
 	docBody.Visible = false
@@ -542,10 +581,10 @@ local function buildDocument(parent: Instance)
 	     been somewhere. Parented to the sheet, so it tones the sheet and not the
 	     words — a UIGradient colours the object it sits on and never its
 	     children. ]]
-	local age = Instance.new("UIGradient")
-	age.Color = ColorSequence.new(PAPER, PAPER_SHADE)
-	age.Rotation = 90
-	age.Parent = docBody
+	docAge = Instance.new("UIGradient")
+	docAge.Color = ColorSequence.new(PAPER, PAPER_SHADE)
+	docAge.Rotation = 90
+	docAge.Parent = docBody
 
 	local scroller = Widgets.scroller(docBody, "Page")
 	scroller.Position = UDim2.fromOffset(DOC_MARGIN, DOC_MARGIN)
@@ -663,6 +702,27 @@ function VaultController:isOpen(): boolean
 end
 
 --[[
+	Paper, or a screen.
+
+	Driven by whether the clue named its own ink — see PuzzleConfig's ClueSlot.
+	Paperwork does not, and gets the default page; the one clue in the game that
+	is a dead television does, and gets a dark tube with its own glow on it.
+
+	Both halves are set on every open rather than only on the change, because the
+	panel is shared and the last thing it drew is not something this call should
+	have to know.
+]]
+local function setPage(ink: any)
+	local screen = typeof(ink) == "Color3"
+	if docAge then
+		docAge.Color = if screen
+			then ColorSequence.new(SCREEN, SCREEN_SHADE)
+			else ColorSequence.new(PAPER, PAPER_SHADE)
+	end
+	docText.TextColor3 = if screen then ink else INK
+end
+
+--[[
 	The world going out of focus behind the page.
 
 	Asked for by name, and it is also the honest signal for what this screen
@@ -770,6 +830,8 @@ function VaultController:openDocument(clue: Instance?)
 		return
 	end
 	docText.Text = text
+	docText.Font = fontFrom(clue:GetAttribute(PUZZLE.ClueFont))
+	setPage(nil)
 	show("document", DOC_WIDTH, DOC_HEIGHT, tostring(clue:GetAttribute(PUZZLE.CluePrompt) or "DOCUMENT"))
 end
 
@@ -937,6 +999,12 @@ function VaultController:start()
 
 		if typeof(payload.text) == "string" and payload.text ~= "" and not state.open then
 			docText.Text = payload.text
+			--[[ A hazmat log and something scrawled on a wall are not the same
+			     document, and opening both in one typeface is the reader quietly
+			     saying they are. The face comes down with the text because the
+			     config decides it and this screen only renders. ]]
+			docText.Font = fontFrom(payload.font)
+			setPage(payload.ink)
 			show("document", DOC_WIDTH, DOC_HEIGHT, tostring(payload.headline or "DOCUMENT"))
 		end
 		if payload.repeated ~= true then
@@ -978,6 +1046,57 @@ function VaultController:start()
 	     team standing at the door. ]]
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.TrackerLabel), refreshTracker)
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.TrackerHint), refreshTracker)
+
+	--[[
+		A breaker the player just threw, or failed to.
+
+		A refusal goes on the counter card rather than into a panel, because
+		there is no panel — a fuse box is thrown or it is not, and the card is
+		already on screen, already about this objective and already the thing the
+		player glances at. It is also the ONLY thing they are told: the server is
+		careful never to name the box that would have worked, and this screen has
+		no way of knowing it either.
+	]]
+	trove:connect(Remotes.Event.FuseResult.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refreshTracker()
+		flashTracker()
+		if payload.ok ~= true then
+			VaultController:sayRefusal(tostring(payload.reason or "NOTHING HAPPENS"))
+			UiSound.play(AudioConfig.UI.MenuBack)
+			return
+		end
+		UiSound.play(AudioConfig.UI.MenuConfirm)
+	end)
+
+	--[[ And somebody else's. Four boxes in a maze of identical corridors is a
+	     job a team splits up to do, and the counter moving is the only way the
+	     other three learn that the sequence advanced — and, more usefully, that
+	     the box they are standing at is no longer the one to try. ]]
+	trove:connect(Remotes.Event.FusePowered.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refreshTracker()
+		flashTracker()
+		local who = payload.player
+		if typeof(who) == "Instance" and who:IsA("Player") and who ~= player then
+			callController(
+				"SubtitleController",
+				"say",
+				who.DisplayName,
+				string.format(
+					"Fuse box %s is live. %s of %s.",
+					tostring(payload.order),
+					tostring(payload.thrown),
+					tostring(payload.total)
+				),
+				CLUE_LINE_SECONDS
+			)
+		end
+	end)
 
 	--[[ A generator powering is the same event as a clue landing, on the other
 	     map: the team's counter moved, and everybody's card should say so and

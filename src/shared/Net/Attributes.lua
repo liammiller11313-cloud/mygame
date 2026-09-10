@@ -246,6 +246,11 @@ Attributes.Puzzle = table.freeze({
 	CluePrompt = "FL_CluePrompt", -- string, what the interact prompt calls it
 	Digits = "FL_PuzzleDigits", -- number, how long the keypad's code is
 	ClueOrder = "FL_ClueOrder", -- number, where this prop sits in the chain
+	--[[ The Enum.Font name the clue is printed in, or nil for the typewriter.
+	     The close-up reader reads it so a wall scrawl opens as a scrawl rather
+	     than as somebody's wall retyped in Courier — one setting, in the config,
+	     rendered twice. ]]
+	ClueFont = "FL_ClueFont", -- string?
 	--[[
 		Which generator this is, 1 through 5, and whether it is running.
 
@@ -263,6 +268,27 @@ Attributes.Puzzle = table.freeze({
 	]]
 	GeneratorOrder = "FL_GeneratorOrder", -- number, 1..5
 	GeneratorLive = "FL_GeneratorLive", -- boolean, true once it is powered
+
+	--[[
+		Which fuse box this is, and whether it has been thrown.
+
+		The NUMBER is the box's identity and not a secret — it is printed on the
+		front of the box by the service, because four unlabelled grey boxes in a
+		maze of identical corridors is a puzzle nobody can play. What IS secret
+		is the order they want, and that is on the server and appears in no
+		attribute and no payload.
+
+		`FuseLive` is what stops a thrown box offering to be thrown again, and it
+		is also the hook a designer's own light or animation can bind to.
+	]]
+	FuseOrder = "FL_FuseOrder", -- number, 1..4
+	FuseLive = "FL_FuseLive", -- boolean, true once it is thrown
+
+	--[[ What a doorway that MOVES the player says on its prompt. Written by the
+	     service when the door is armed and cleared when it is not, so a door
+	     that is still boarded offers nothing at all rather than offering a trip
+	     the server will refuse. ]]
+	DoorwayPrompt = "FL_DoorwayPrompt", -- string
 })
 
 --[[
