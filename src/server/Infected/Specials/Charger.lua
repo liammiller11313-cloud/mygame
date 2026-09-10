@@ -98,10 +98,32 @@ local OWNERSHIP_RESTORE_TIME = 0.8
 -- forward in object space, so this is the arm's length ahead of the chest.
 local CARRY_OFFSET = CFrame.new(0, 0.6, -3.4)
 
--- The slam is where a charge's damage actually is. Twice attack.damage — the
+--[[
+	── WHAT STOPPED IT DECIDES WHAT IT COSTS ───────────────────────────────────
+	A charge ends one of two ways, and until now both paid the same.
+
+	`blocked` is a wall: the stall check or the forward probe, a body driven into
+	brick at forty-four studs a second. `spent` is the lane running out — three
+	seconds or a hundred and twenty studs of open ground, and the Charger simply
+	stops running with somebody still in its arms. Charging those identically
+	flattens the map, which is the one thing this creature is supposed to make
+	you read: a corridor is where a Charger is terrifying and a plaza is where
+	you fight it, and that was true of the DODGE and not of the consequence.
+
+	So the wall is the full two times, and running out of lane is well under it —
+	a put-down rather than an impact. It changes nothing for a team that dodges
+	and everything for a team choosing where to stand.
+]]
+-- Twice attack.damage against a wall — the
 -- carry itself deals nothing, so this is the whole cost of being collected, and
 -- it is survivable from full health on purpose.
 local SLAM_MULTIPLIER = 2.0
+--[[ And what it is worth with nothing to hit. Not a third of the wall's, which
+     would make an open-ground carry free and the whole phase a formality: it is
+     still being carried off and put on the floor away from the team, and the
+     pummel that follows is identical. It is the IMPACT that is missing, so it is
+     the impact's share that goes. ]]
+local SLAM_OPEN_MULTIPLIER = 1.1
 
 -- Wall detection. The forward probe covers the ground about to be crossed plus a
 -- margin, and the stall check catches the walls a ray slides along instead of
@@ -591,7 +613,7 @@ end
      and the Charger settles in to pummel. This is where a collected survivor
      actually loses health, so it is loud, it is a camera event, and it is
      survivable from full. ]]
-local function slam(model: Model, brain: any, state: State, root: BasePart)
+local function slam(model: Model, brain: any, state: State, root: BasePart, intoWall: boolean)
 	local victim = state.victim
 	local character, victimRoot = Support.rootOf(victim)
 	if not victim or not character or not victimRoot then
@@ -624,7 +646,8 @@ local function slam(model: Model, brain: any, state: State, root: BasePart)
 		character,
 		victimRoot,
 		root.Position,
-		Support.scaledDamage(model, ATTACK.damage) * SLAM_MULTIPLIER
+		Support.scaledDamage(model, ATTACK.damage)
+			* (if intoWall then SLAM_MULTIPLIER else SLAM_OPEN_MULTIPLIER)
 	)
 	Remotes.Event.CameraImpulse:FireClient(victim, SLAM_CAMERA_IMPULSE)
 	Support.playSound("ChargerCharge", root)
@@ -759,9 +782,11 @@ local function stepCharge(model: Model, brain: any, state: State, root: BasePart
 	end
 
 	if state.carrying then
-		-- Anything that ends the charge with somebody in its arms is a slam,
-		-- including running out of lane: they get put down hard either way.
-		slam(model, brain, state, root)
+		--[[ Anything that ends the charge with somebody in its arms is a slam;
+		     what it COSTS depends on which of the two ended it. `blocked` is a
+		     wall and pays the full multiplier; running out of lane in the open is
+		     a put-down. See SLAM_MULTIPLIER. ]]
+		slam(model, brain, state, root, blocked)
 		return
 	end
 

@@ -79,6 +79,30 @@ local BURST_CALL_RADIUS = 170
      has to still mean something afterwards. ]]
 local BURST_CALL_MAX = 18
 
+--[[
+	And the vomit's own call, which did not exist.
+
+	This file's header says the horde call is "the other half" of what a Boomer
+	does — "a team that gets biled and stays put dies; a team that moves lives.
+	That is the lesson, and the call is what teaches it." Only the burst was
+	teaching it. A survivor who took a vomit to the face went blind and nothing
+	came, which makes the ranged attack a blindfold rather than a Boomer's
+	attack: the whole reason being covered is frightening is what it brings.
+
+	Smaller than the burst at every end, because the burst is the one you earned
+	by shooting the wrong thing at the wrong range and this is the one it landed
+	on you fairly. It reaches less far, pulls fewer, and holds them for less
+	time — enough that standing still is punished, not enough that being vomited
+	on is the same sentence as popping one in your own face.
+
+	The origin is the VICTIM rather than the Boomer, which is the difference that
+	matters: the horde walks at the person who is covered, and they are the one
+	who has to move.
+]]
+local VOMIT_CALL_RADIUS = 110
+local VOMIT_CALL_MAX = 9
+local VOMIT_CALL_SECONDS = 7
+
 --[[ How long the called Commons keep walking at the spot. Long enough to
      actually arrive from 170 studs at a shamble, short enough that a team which
      moved is not still being followed a minute later. ]]
@@ -333,6 +357,16 @@ local function stepVomit(model: Model, brain: any, state: State, root: BasePart,
 	if landed then
 		Support.playSound("BoomerIdle", root)
 		bile(Registry.find("SurvivorService"), landed, BILE_SECONDS_VOMIT)
+
+		--[[ And they come. Called from where the VICTIM is standing rather than
+		     from the Boomer: the horde is walking at the person who is covered,
+		     and that person is the one who has to move. See VOMIT_CALL_RADIUS for
+		     why it is smaller than the burst's at every end. ]]
+		local _, landedRoot = Support.rootOf(landed)
+		local infected: any = Registry.find("InfectedService")
+		if landedRoot and infected and typeof(infected.lureCapped) == "function" then
+			infected:lureCapped(landedRoot.Position, VOMIT_CALL_RADIUS, VOMIT_CALL_SECONDS, VOMIT_CALL_MAX)
+		end
 	end
 	endVomit(model, brain, state, now)
 end

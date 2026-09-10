@@ -97,6 +97,28 @@ export type InfectedDefinition = {
 
 local InfectedConfig = {}
 
+--[[
+	What the infected themselves treat as dangerous ground.
+
+	Worn by anything an infected should be able to REASON about rather than
+	merely be hurt by — today the Spitter's acid, and nothing else. It exists
+	because the Jockey steers, and steering had a special case for the Witch and
+	no idea that a pool of acid was any different from carpet: it would drive a
+	survivor past one and out the other side, which is the one place on the map
+	the ride was already worth taking them.
+
+	A tag rather than a service call, deliberately. The pools live in a table
+	private to Spitter.lua and there is no sensible way for a second creature's
+	module to ask that table a question — and there should not be one, because
+	the next hazard will not be a Spitter's either. Anything that wants to be
+	steered into wears this and needs to know nothing about who is steering.
+
+	It is NOT a damage marker and nothing reads it to hurt anybody. The acid
+	burns through its own sweep exactly as it always did; this only says "an
+	infected would consider this a good place to leave you".
+]]
+InfectedConfig.HazardTag = "FL_InfectedHazard"
+
 InfectedConfig.Definitions = {
 
 	--[[ The horde. Individually trivial and that is the design: a Common exists

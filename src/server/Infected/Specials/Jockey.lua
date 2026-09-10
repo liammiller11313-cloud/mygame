@@ -39,6 +39,7 @@
 	sitting on the victim's shoulders — for the whole ride.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -139,6 +140,20 @@ local STEER_LEDGE_BONUS = 3.0
 local STEER_AWAY_WEIGHT = 2.0
 local STEER_WITCH_WEIGHT = 4.0
 local STEER_WITCH_RANGE = 200
+--[[
+	Ground that hurts, and what it is worth aiming at.
+
+	Between "away from the team" and the Witch, which is where it belongs: a
+	Spitter's pool is a real cost and it is not a fight-ender, so it should beat
+	open floor and lose to the one creature that removes a survivor outright.
+
+	The range is short next to the Witch's two hundred, and deliberately. A Witch
+	is worth crossing a map for; acid has nine seconds to live and a ride does
+	not last long enough to reach one two rooms away. Steering at something the
+	pair will never arrive at is a heading wasted on nothing.
+]]
+local STEER_HAZARD_WEIGHT = 2.5
+local STEER_HAZARD_RANGE = 70
 local STEER_MOMENTUM = 0.8
 
 local MOUNT_CAMERA_IMPULSE = table.freeze({
@@ -307,6 +322,37 @@ end
 --[[ Unit vector at a live Witch, if one is close enough to be worth the trip.
      Driving somebody into her is the best thing a Jockey can do with a ride, and
      it is free to check: bosses are at most one alive at a time. ]]
+--[[
+	The nearest ground an infected considers dangerous, as a direction.
+
+	Nearest rather than first, unlike the Witch above — there is only ever one
+	Witch worth steering at and there can easily be three pools, and picking
+	whichever the tag list happened to return first would have a Jockey aim past
+	the acid at its feet toward one across the room.
+
+	Reads a tag rather than asking the Spitter, because the pools are private to
+	that module and the next hazard will not be a Spitter's. See
+	InfectedConfig.HazardTag.
+]]
+local function towardHazard(position: Vector3): Vector3
+	local best: Vector3? = nil
+	local bestDistance = STEER_HAZARD_RANGE
+
+	for _, part in CollectionService:GetTagged(InfectedConfig.HazardTag) do
+		if not part:IsA("BasePart") or not part.Parent then
+			continue
+		end
+		local delta = part.Position - position
+		local flat = Vector3.new(delta.X, 0, delta.Z)
+		local distance = flat.Magnitude
+		if distance > 0.05 and distance < bestDistance then
+			bestDistance = distance
+			best = flat.Unit
+		end
+	end
+	return best or Vector3.zero
+end
+
 local function towardWitch(model: Model, position: Vector3): Vector3
 	local infected: any = Registry.find("InfectedService")
 	if not infected or typeof(infected.getAlive) ~= "function" then
@@ -351,6 +397,7 @@ local function chooseHeading(model: Model, state: State, victimCharacter: Model,
 	local origin = victimRoot.Position + Vector3.new(0, STEER_PROBE_LIFT, 0)
 	local away = awayFromTeam(victim, origin)
 	local witch = towardWitch(model, origin)
+	local hazard = towardHazard(origin)
 
 	local best = state.heading
 	local bestScore = -math.huge
@@ -365,6 +412,7 @@ local function chooseHeading(model: Model, state: State, victimCharacter: Model,
 		local score = direction:Dot(state.heading) * STEER_MOMENTUM
 			+ direction:Dot(away) * STEER_AWAY_WEIGHT
 			+ direction:Dot(witch) * STEER_WITCH_WEIGHT
+			+ direction:Dot(hazard) * STEER_HAZARD_WEIGHT
 
 		-- No floor found at all is a void, which is the best ledge there is.
 		local ground = RaycastUtil.groundAt(ahead, STEER_GROUND_SEARCH, state.ignore)

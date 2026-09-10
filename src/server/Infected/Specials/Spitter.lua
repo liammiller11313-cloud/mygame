@@ -32,6 +32,7 @@
 	you see is precisely what hurts.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -228,6 +229,11 @@ local function placePool(origin: Vector3, attacker: Model)
 	part.Color = POOL_COLOR
 	part.Transparency = 0.35
 	part.Parent = Workspace
+
+	--[[ So other creatures can see it as ground worth putting somebody on. The
+	     Jockey steers into these; see InfectedConfig.HazardTag. Nothing has to be
+	     removed when the pool goes — the tag dies with the part. ]]
+	CollectionService:AddTag(part, InfectedConfig.HazardTag)
 
 	--[[ Debris as well as the sweep below. If this module ever stops ticking —
 	     the service errors, the round ends mid-spit — a permanent acid puddle in
