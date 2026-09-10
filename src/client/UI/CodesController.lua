@@ -89,6 +89,11 @@ local state = {
 	open = false,
 	pending = false,
 	messageUntil = 0,
+	--[[ Whether the world is currently handed over to this panel. Memoised so
+	     the five suppression calls are made on the EDGE rather than on every
+	     open — and so a second open cannot double-suppress a round that a single
+	     close then hands back. ]]
+	suppressed = false,
 }
 
 local function callController(name: string, method: string, ...: any)
@@ -103,8 +108,28 @@ local function menuIsOpen(): boolean
 	return menu ~= nil and typeof(menu.isOpen) == "function" and menu:isOpen()
 end
 
+--[[
+	Everything the world takes back while this panel is up.
+
+	The same five calls every other modal in this folder makes, in the same
+	order. This one used to make ONE — to a method that does not exist — and
+	`callController` is deliberately silent when a name does not resolve, which
+	is what let a typo sit here doing nothing at all rather than erroring on the
+	first open.
+
+	`setMuted(nil)` is not optional on the way out: setMuted REPLACES the muted
+	set, so a panel that closed without clearing it would leave the trigger dead.
+]]
 local function setSuppressed(value: boolean)
-	callController("MainMenuController", "setSuppressed", value)
+	if state.suppressed == value then
+		return
+	end
+	state.suppressed = value
+	callController("InputController", "setMuted", nil)
+	callController("InputController", "setEnabled", not value)
+	callController("CrosshairController", "setVisible", not value)
+	callController("PromptController", "setEnabled", not value)
+	callController("TouchController", "setVisible", not value)
 end
 
 local function restore()

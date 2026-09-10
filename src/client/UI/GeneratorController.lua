@@ -215,13 +215,28 @@ local function callController(name: string, method: string, ...: any)
 	end
 end
 
+--[[
+	Everything the world takes back while this panel is up.
+
+	The same five calls every other modal in this folder makes, in the same
+	order. This one used to make ONE — to a method that does not exist — and
+	`callController` is deliberately silent when a name does not resolve, which
+	is what let a typo sit here doing nothing at all rather than erroring on the
+	first open.
+
+	`setMuted(nil)` is not optional on the way out: setMuted REPLACES the muted
+	set, so a panel that closed without clearing it would leave the trigger dead.
+]]
 local function setSuppressed(value: boolean)
 	if state.suppressed == value then
 		return
 	end
 	state.suppressed = value
-	callController("InputController", "setSuppressed", value)
+	callController("InputController", "setMuted", nil)
+	callController("InputController", "setEnabled", not value)
+	callController("CrosshairController", "setVisible", not value)
 	callController("PromptController", "setEnabled", not value)
+	callController("TouchController", "setVisible", not value)
 end
 
 local function serverNow(): number

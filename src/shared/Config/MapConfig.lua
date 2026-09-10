@@ -375,6 +375,20 @@ export type MapItemFamily = {
 	     folder is missing. Nothing enforces the count — nine or three or twenty
 	     all work, and a model with no trailing number keeps discovery order. ]]
 	modelName: string,
+	--[[
+		A number for the WARNING to quote, and nothing else.
+
+		MapItemService walks `folder:GetChildren()` — it never counts up to this
+		and never stops at it — so a designer who adds three more medkits to a map
+		gets three more medkits with no code change, which is the behaviour you
+		want from a build that is edited far more often than this file is.
+
+		Which means these numbers drift, and are allowed to: they are here so the
+		message a missing folder prints can say "no Medkit 1 through Medkit 11"
+		instead of "no medkits", and being a couple out makes that sentence
+		slightly less precise rather than wrong. The maps currently carry a few
+		more of everything than the figures below. Do not treat this as a budget.
+	]]
 	expectedCount: number,
 	slot: string,
 	itemId: string,

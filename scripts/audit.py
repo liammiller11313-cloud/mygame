@@ -1700,6 +1700,102 @@ if _earned and _paid_dps:
                 f"roster, and this one is on top of it"
             )
 
+# ── 35. A clue that asks for a value its template never rolls ───────────────
+# PuzzleConfig.fill is deliberately dumb: it swaps `{key}` for the value the
+# template supplied and leaves anything it does not recognise exactly as
+# written. That is the right failure mode — a typo shows up on the prop as
+# `{squd}` rather than as a crash in front of a player — and it is only the
+# right failure mode if somebody is looking. Nobody is: the round arms, the
+# document prints, and the one field the puzzle is carried by reads as a piece
+# of punctuation until a tester happens to walk past that exact prop.
+#
+# So the pairing is checked here instead. Every placeholder in every clue's
+# `texts` has to be a key the definition's own template actually writes —
+# either into the table `generate` returns, or into `filled` inside `surfaces`,
+# or from a list of names the template indexes by (FuseSequence hands each
+# document only the position it owns, and those names live in a frozen list).
+_pz = read(SRC / "shared/Config/PuzzleConfig.lua")
+_pz_end = _pz.index("PuzzleConfig.Puzzles = table.freeze")
+_pz_ids = [(m.start(), m.group(1)) for m in re.finditer(r'id = "(\w+)"', _pz) if m.start() < _pz_end]
+
+for _n, (_at, _pid) in enumerate(_pz_ids):
+    _stop = _pz_ids[_n + 1][0] if _n + 1 < len(_pz_ids) else _pz_end
+    _block = _pz[_at:_stop]
+    _tname = re.search(r'template = "(\w+)"', _block)
+    if not _tname:
+        # The generator kind has no template and no documents; nothing to pair.
+        continue
+
+    _used = set()
+    for _m in re.finditer(r"texts = table\.freeze\(\{(.*?)\}\),", _block, re.S):
+        _used |= set(re.findall(r"\{(\w+)\}", _m.group(1)))
+    if not _used:
+        continue
+
+    _tpath = SRC / ("server/Level/Puzzles/%s.lua" % _tname.group(1))
+    if not _tpath.exists():
+        problems.append(
+            f"puzzle {_pid!r} names the template {_tname.group(1)!r}, and there is no "
+            f"Server/Level/Puzzles module by that name — the round will refuse to arm"
+        )
+        continue
+
+    _tsrc = read(_tpath)
+    # What `generate` returns, what `surfaces` fills in by name, and any frozen
+    # list of key names the template indexes `filled` by.
+    _supplied = set(re.findall(r"^\t\t(\w+) = ", _tsrc, re.M))
+    _supplied |= set(re.findall(r"filled\.(\w+)\s*=", _tsrc))
+    for _lit in re.finditer(r"local [A-Z_]+ = table\.freeze\(\{(.*?)\}\)", _tsrc, re.S):
+        _supplied |= set(re.findall(r'"(\w+)"', _lit.group(1)))
+
+    for _key in sorted(_used - _supplied):
+        problems.append(
+            f"puzzle {_pid!r} prints {{{_key}}} on a clue and {_tname.group(1)} never supplies "
+            f"it — PuzzleConfig.fill leaves an unknown placeholder exactly as written, so that "
+            f"document goes into the world with {{{_key}}} where the answer should be"
+        )
+
+# ── 36. A cross-controller call to a method nobody wrote ────────────────────
+# The bug this exists for: three of them, found in one sweep, all invisible.
+#
+# Every UI controller carries the same tiny helper — find the controller by
+# name, check the method is a function, call it — and the check is there for
+# ORDERING, because a panel can be built before the controller it talks to has
+# registered. What it also does, silently, is swallow a method that was never
+# written at all. GeneratorController asked InputController to `setSuppressed`,
+# which does not exist, so opening a generator's mini-puzzle left the player
+# free to walk, shoot and be shot at through a full-screen panel. CodesController
+# and LeaderboardController asked the same of MainMenuController, so their
+# suppression was a no-op too.
+#
+# Nothing errored, nothing warned, and every one of them had been shipped.
+_ctrl_src = {}
+for _p in files:
+    if "client" in _p.parts:
+        _ctrl_src[_p.stem] = read(_p)
+
+for _p in files:
+    if "client" not in _p.parts:
+        continue
+    _here = read(_p)
+    for _m in re.finditer(r'callController\(\s*"([A-Za-z_]+)"\s*,\s*"([A-Za-z_]+)"', _here):
+        _target, _method = _m.group(1), _m.group(2)
+        _src = _ctrl_src.get(_target)
+        if _src is None:
+            problems.append(
+                f"{_p.name} calls {_target}:{_method}() and there is no {_target}.lua under "
+                f"src/client — callController is silent when a name does not resolve, so this "
+                f"call has never done anything"
+            )
+            continue
+        if re.search(r"function %s[:.]%s\b" % (re.escape(_target), re.escape(_method)), _src) is None:
+            problems.append(
+                f"{_p.name} calls {_target}:{_method}() and {_target}.lua defines no such "
+                f"method — the typeof guard in callController exists for ORDERING and cannot "
+                f"tell a controller that is not registered yet from a method that was never "
+                f"written, so this call silently does nothing"
+            )
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

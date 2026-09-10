@@ -1004,6 +1004,24 @@ local DEFINITIONS: { PuzzleDefinition } = {
 				itemId = "FlintLock",
 				slot = "Primary",
 			}),
+			--[[ Spelled the way the MAP spells it, with an A — the same spelling
+			     Zombieville's carries and for the same reason. The forgiving
+			     matcher folds case, spacing and punctuation but NOT letters, so a
+			     config that quietly corrected this to "Stockpile" would find
+			     nothing and the pile would be scenery for the life of the map.
+			     The config follows the build.
+
+			     Three hundred and fifty, the same as the other two rooms. The
+			     objectives are priced differently — that is what `reward` is for
+			     — and the PILE is one object that means one thing wherever it is
+			     found: a fixed find, claimed once, paid to everybody. A pile
+			     worth more in one room than another would be asking the player to
+			     remember which room they were in. ]]
+			stockpile = table.freeze({
+				object = "Dollar Stackpile",
+				dollars = 350,
+				prompt = "DOLLAR STACKPILE",
+			}),
 		}),
 
 		--[[ Between the other two, because the work is. Clinton is four

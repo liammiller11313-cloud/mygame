@@ -754,7 +754,14 @@ local function setBlur(on: boolean)
 	     BlurEffect is a full-screen pass whether or not it is blurring anything.
 	     Only on a tween that RAN to the end: cancelled means something else has
 	     taken this over and must be allowed to own Enabled. ]]
-	tween.Completed:Connect(function(playback: Enum.PlaybackState)
+	local finished: RBXScriptConnection
+	finished = tween.Completed:Connect(function(playback: Enum.PlaybackState)
+		--[[ Its own connection, dropped as soon as it fires. A tween is
+		     collectable once it has finished and nothing references it, and a
+		     connection is a reference — this panel is opened and closed all round
+		     and a handler left hanging off every tween it ever made is a slow
+		     leak with no symptom until it has one. ]]
+		finished:Disconnect()
 		if blurTween == tween then
 			blurTween = nil
 		end

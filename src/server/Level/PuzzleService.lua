@@ -1845,11 +1845,12 @@ local function armFuses(definition: any, folder: Instance?, root: Instance, rand
 		state.fuseOf[model] = order
 		state.fuseLive[order] = false
 
-		--[[ The number goes on the PROP, so a prompt can say "FUSE BOX 3"
-		     without a round trip. It is not a secret — it is printed on the front
-		     of the box by markFuse, and a box a player cannot identify is a clue
-		     they cannot act on. What IS secret is the order, and that is in
-		     `sequence` and nowhere a client can reach. ]]
+		--[[ The box's identity, in three places that cannot disagree because one
+		     line writes all three: the attribute a designer can bind a light to,
+		     the words the interact prompt says, and the number markFuse prints on
+		     the front. None of it is secret — a box a player cannot identify is a
+		     clue they cannot act on. What IS secret is the ORDER, and that lives
+		     in `sequence` and nowhere a client can reach. ]]
 		model:SetAttribute(PZ.FuseOrder, order)
 		model:SetAttribute(PZ.FuseLive, false)
 		model:SetAttribute(PZ.CluePrompt, string.format("%s %d", set.prompt, order))
