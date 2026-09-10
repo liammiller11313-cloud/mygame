@@ -144,6 +144,30 @@ end
 local READER_BLUR = 18
 local BLUR_INFO = TweenInfo.new(UITheme.Motion.Normal, UITheme.Motion.Easing, UITheme.Motion.EasingDirection)
 
+--[[
+	The smallest this panel is allowed to be, and why it is allowed to shrink at
+	all.
+
+	Every other modal in this folder clamps itself to the viewport — the shop,
+	settings, career, codes, the leaderboard, the loadout, play, requisition —
+	and these two, the keypad and the generator panel, were the only ones that
+	did not. They set a fixed 460x520, or 560x560 for a document, and on a screen
+	shorter than that the header and the CLOSE go off the top and the bottom of
+	it.
+
+	Which is not a hypothetical shape of screen. Reference pixels are real pixels
+	divided by the scale factor, the factor floors at 0.75, and a phone held
+	sideways is about 390 real pixels tall — 520 reference — against a keypad
+	that asks for 576 with the touch row added. These are the two panels a player
+	opens WHILE PLAYING, on the platform least able to spare the pixels, and they
+	were the two that never checked.
+
+	The floor is the chrome plus a body worth having rather than a round number,
+	so it cannot be lowered into a panel whose contents have negative height.
+]]
+local PANEL_MIN_WIDTH = 300
+local PANEL_MIN_HEIGHT = 340
+
 --[[ How long the vault line stays up. Longer than a callout because it is the
      payoff for ten minutes of reading, and shorter than an announcement because
      the horde has not stopped for it. ]]
@@ -271,6 +295,11 @@ local state = {
 	     the rest of the time: a permanent panel at the top of the screen for a
 	     side objective is a panel in the way of the horde. ]]
 	flashUntil = 0,
+	--[[ The size the panel ASKED for, kept so a rotation or a window resize can
+	     re-clamp against the new viewport rather than against whatever it was
+	     shrunk to last time. ]]
+	wantWidth = 0,
+	wantHeight = 0,
 }
 
 -- ── helpers ─────────────────────────────────────────────────────────────────
@@ -475,7 +504,43 @@ end
      every frame: it ends a flash, and it keeps the card under the one above it.
      A tween cannot schedule its own reversal without a second tween that would
      fight the first when two clues are picked up a second apart. ]]
+--[[ The size this panel can actually have, given the screen it is on. The same
+     clamp every other modal in this folder makes, against the same reference
+     viewport — real pixels over the scale factor, because everything inside a
+     ScaleLayer is authored in reference space and mixing the two is its own
+     bug. ]]
+local function fitPanel(width: number, height: number): (number, number)
+	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+	local viewport = if camera and factor > 0 then camera.ViewportSize / factor else nil
+	local room = LAYOUT.ScreenMargin * 2
+	local w = math.min(width, math.max((if viewport then viewport.X else width) - room, PANEL_MIN_WIDTH))
+	local h = math.min(height, math.max((if viewport then viewport.Y else height) - room, PANEL_MIN_HEIGHT))
+	return w, h
+end
+
+--[[ Re-applied rather than set once, because a phone rotates and a window
+     resizes while a panel is open. Compared before assigning, so the frames
+     where nothing moved cost two math.min calls. ]]
+local function applyPanelSize()
+	if not panel or not state.open then
+		return
+	end
+	local w, h = fitPanel(state.wantWidth, state.wantHeight)
+	local wanted = UDim2.fromOffset(w, h)
+	if panel.Size ~= wanted then
+		panel.Size = wanted
+	end
+end
+
 local function stepTracker()
+	--[[ Cheap, and it is the only place that notices a phone being turned
+	     sideways with the keypad open. Same argument the tracker's own
+	     re-placement below makes: recomputing costs nothing on a frame where
+	     nothing moved, and it is correct for every cause including the ones
+	     nobody has thought of. ]]
+	applyPanelSize()
+
 	--[[
 		Follow the orders card, by comparing rather than by listening.
 
@@ -779,7 +844,10 @@ local function show(mode: string, width: number, height: number, heading: string
 	state.mode = mode
 	state.open = true
 	title.Text = heading
-	panel.Size = UDim2.fromOffset(width, height)
+	state.wantWidth = width
+	state.wantHeight = height
+	local fitWidth, fitHeight = fitPanel(width, height)
+	panel.Size = UDim2.fromOffset(fitWidth, fitHeight)
 	keypadBody.Visible = mode == "keypad"
 	docBody.Visible = mode == "document"
 	gui.Enabled = true

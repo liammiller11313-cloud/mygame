@@ -186,8 +186,62 @@ local gaugeStep: ((number) -> ())? = nil
 	that frame AbsoluteSize is still whatever it was before, or zero. A wire loom
 	whose four rows were divided out of zero is a wire loom nobody can press.
 ]]
+--[[
+	The chrome this panel wears above and below its puzzle, and the smallest body
+	worth drawing one into.
+
+	Written as a sum rather than as a round number because it is the FLOOR the
+	clamp below is allowed to shrink to, and a floor picked by eye is a floor
+	that can be set under the height of the panel's own furniture — at which
+	point `bodyHeight` goes negative and the wire loom is divided out of a
+	negative number.
+]]
+local PANEL_CHROME = PANEL.HeaderHeight
+	+ INSTRUCTION_HEIGHT
+	+ FOOTER_HEIGHT
+	+ LAYOUT.ElementGap * 2
+	+ LAYOUT.PanelPadding
+local PANEL_MIN_BODY = 200
+local PANEL_MIN_WIDTH = 320
+
+--[[
+	The size this panel can actually have, given the screen it is on.
+
+	It never asked before. Every other modal in this folder clamps itself to the
+	viewport, and this one and the vault keypad were the two that did not — they
+	set a fixed 500x440 and went off the top and the bottom of anything shorter.
+
+	Which is not a hypothetical screen. Reference pixels are real pixels over the
+	scale factor, the factor floors at 0.75, and a phone held sideways is about
+	390 real pixels tall — 520 reference — against a panel asking for 496 with
+	the touch row added, plus margins. This is a panel a player opens WHILE
+	PLAYING, on the platform least able to spare the pixels.
+]]
+local function panelSize(): (number, number)
+	local wantWidth = PANEL_WIDTH
+	local wantHeight = PANEL_HEIGHT + (if isTouch() then PANEL.RowHeightTouch else 0)
+
+	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+	local viewport = if camera and factor > 0 then camera.ViewportSize / factor else nil
+	local room = LAYOUT.ScreenMargin * 2
+
+	local width =
+		math.min(wantWidth, math.max((if viewport then viewport.X else wantWidth) - room, PANEL_MIN_WIDTH))
+	local height = math.min(
+		wantHeight,
+		math.max((if viewport then viewport.Y else wantHeight) - room, PANEL_CHROME + PANEL_MIN_BODY)
+	)
+	return width, height
+end
+
 local function bodyHeight(): number
-	local height = PANEL_HEIGHT + (if isTouch() then PANEL.RowHeightTouch else 0)
+	--[[ Off the CLAMPED height, so the rows a puzzle lays out and the panel they
+	     are laid out in cannot disagree about how much room there is. Reading
+	     AbsoluteSize instead is what the comment above warns against: the layout
+	     is built in the same frame the panel is resized, and on that frame
+	     AbsoluteSize is still whatever it was before, or zero. ]]
+	local _, height = panelSize()
 	return height
 		- PANEL.HeaderHeight
 		- INSTRUCTION_HEIGHT
@@ -983,7 +1037,7 @@ function GeneratorController:open(payload: any)
 	--[[ Taller on a phone by one row's worth, the same allowance the keypad
 	     makes. A finger is not a cursor, and five breakers across a 0.75-scaled
 	     panel is where that stops being a slogan. ]]
-	panel.Size = UDim2.fromOffset(PANEL_WIDTH, PANEL_HEIGHT + (if isTouch() then PANEL.RowHeightTouch else 0))
+	panel.Size = UDim2.fromOffset(panelSize())
 	gui.Enabled = true
 	redraw()
 
@@ -1124,6 +1178,19 @@ function GeneratorController:start()
 	trove:connect(RunService.Heartbeat, function(dt: number)
 		if state.running and gaugeStep then
 			gaugeStep(dt)
+		end
+
+		--[[ A phone turned sideways with a wire panel open, or a window dragged
+		     narrower. Compared before assigning, so a frame where nothing moved
+		     costs two math.min calls — and redrawn only on the frames it did,
+		     because every row in the body was sized against the height that just
+		     changed. ]]
+		if state.open and panel then
+			local wanted = UDim2.fromOffset(panelSize())
+			if panel.Size ~= wanted then
+				panel.Size = wanted
+				redraw()
+			end
 		end
 	end)
 end

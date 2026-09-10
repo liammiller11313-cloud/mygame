@@ -1796,6 +1796,35 @@ for _p in files:
                 f"written, so this call silently does nothing"
             )
 
+# ── 37. A modal that never asks how big the screen is ───────────────────────
+# The bug this exists for: the keypad and the generator panel, the only two
+# modals in the game a player opens WHILE PLAYING, were the only two that set a
+# fixed size and never clamped it. 460x520 and 500x440 — 576 and 496 once the
+# touch row is added — against a phone held sideways, which is about 390 real
+# pixels tall and therefore 520 reference pixels, because the scale factor
+# floors at 0.75. Both went off the top and the bottom of the screen, taking
+# the header and the CLOSE with them.
+#
+# Every other modal in that folder already worked it out: real pixels over the
+# scale factor is the reference viewport, and the panel is min(want, that minus
+# margins). So the rule is simply that a file which builds one of these panels
+# has to have asked the question.
+_modal_ok = ("ScaleLayer.getFactor", "ViewportSize")
+for _p in files:
+    if "client" not in _p.parts or _p.stem == "Widgets":
+        continue
+    _src = read(_p)
+    if "Widgets.panel(" not in _src:
+        continue
+    if not all(_needle in _src for _needle in _modal_ok):
+        problems.append(
+            f"{_p.name} builds a Widgets.panel and never measures the viewport — a modal "
+            f"that sets a fixed size draws off the top and the bottom of any screen shorter "
+            f"than it, and the scale factor floors at 0.75 so a phone held sideways is only "
+            f"about 520 reference pixels tall. Clamp it the way every other panel does: "
+            f"camera.ViewportSize / ScaleLayer.getFactor(), minus the screen margins"
+        )
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

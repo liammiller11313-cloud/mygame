@@ -420,8 +420,12 @@ local function build()
 	end)
 
 	panel = Widgets.frame(layer, "Panel", COLOR.Background, 1)
-	panel.AnchorPoint = Vector2.new(0.5, 0.5)
-	panel.Position = UDim2.fromScale(0.5, 0.5)
+	--[[ Top-anchored, and placed by layoutStack below rather than pinned to the
+	     middle. The panel is not the only thing on this screen — PAUSED and its
+	     line sit above it — and centring the panel alone is what pushed those two
+	     into the top of it on anything short. ]]
+	panel.AnchorPoint = Vector2.new(0.5, 0)
+	panel.Position = UDim2.fromScale(0.5, 0)
 	panel.Size = UDim2.fromOffset(PANEL_WIDTH, #ENTRIES * (ENTRY_HEIGHT + ENTRY_GAP) - ENTRY_GAP)
 
 	--[[
@@ -455,27 +459,68 @@ local function build()
 		the one screen whose entire job is to be reachable is the wrong thing to
 		get lazy about.
 	]]
-	local function layoutTitles()
+	local function layoutStack()
 		local camera = Workspace.CurrentCamera
 		local factor = ScaleLayer.getFactor()
 		local referenceY = if camera and factor > 0 then camera.ViewportSize.Y / factor else 0
-		local half = panel.Size.Y.Offset * 0.5
 
-		local subtitleBottom = referenceY * 0.5 - (half + LAYOUT.ScreenMargin)
-		local titleBottom = subtitleBottom - (TEXT.Body + LAYOUT.ElementGap)
+		local titleHeight = TEXT.Display + 6
+		local subtitleHeight = TEXT.Body
+		local gap = LAYOUT.ElementGap
+		local margin = LAYOUT.ScreenMargin
+		local panelHeight = panel.Size.Y.Offset
 
-		--[[ The floors are each label's own height plus the screen margin: the
-		     anchor is the BOTTOM edge, so a label at the margin would still have
-		     its text above the top of the screen. Clamped rather than re-laid
-		     out, because the stacked position is right on every screen tall
-		     enough for it and only needs somewhere to stop. ]]
-		subtitle.Position = UDim2.new(
-			0.5,
-			0,
-			0,
-			math.max(subtitleBottom, LAYOUT.ScreenMargin + TEXT.Body + TEXT.Display + LAYOUT.ElementGap)
-		)
-		title.Position = UDim2.new(0.5, 0, 0, math.max(titleBottom, LAYOUT.ScreenMargin + TEXT.Display + 6))
+		--[[
+			What fits, dropped in order of how little it says.
+
+			The clamp this replaces pushed each label DOWN to a floor of its own
+			height plus the margin, which is right about the top of the screen and
+			says nothing about the panel: on a phone held sideways the menu is 376
+			tall in a 520-tall reference viewport, leaving 72 above it, and PAUSED
+			needs 82. So both labels were floored into the top of the menu they
+			label, and the screenshot is the title printed through RESUME.
+
+			The subtitle goes first because it is a mood line. PAUSED is what the
+			screen IS, and it is the last thing to go — after which the menu is
+			still a menu with RESUME at the top of it, which is legible on its
+			own.
+		]]
+		local showSubtitle = true
+		local showTitle = true
+		local stack = titleHeight + gap + subtitleHeight + margin + panelHeight
+		if referenceY > 0 and stack + margin * 2 > referenceY then
+			showSubtitle = false
+			stack = titleHeight + margin + panelHeight
+		end
+		if referenceY > 0 and stack + margin * 2 > referenceY then
+			showTitle = false
+			stack = panelHeight
+		end
+
+		--[[ The whole stack is centred, not the panel. Two things that are drawn
+		     as one composition should be balanced as one — and it is also what
+		     makes the arithmetic above true, because a panel centred on its own
+		     leaves less room above it than the stack needs and no way to say so. ]]
+		local y = math.max((referenceY - stack) * 0.5, margin)
+
+		title.Visible = showTitle
+		subtitle.Visible = showSubtitle
+
+		if showTitle then
+			--[[ The anchor is the BOTTOM edge of each label, which is why every
+			     position here is the running total AFTER its own height. ]]
+			title.Position = UDim2.new(0.5, 0, 0, y + titleHeight)
+			y += titleHeight
+		end
+		if showSubtitle then
+			y += gap
+			subtitle.Position = UDim2.new(0.5, 0, 0, y + subtitleHeight)
+			y += subtitleHeight
+		end
+		if showTitle or showSubtitle then
+			y += margin
+		end
+		panel.Position = UDim2.new(0.5, 0, 0, y)
 	end
 
 	title = Widgets.label(layer, "Title", FONT.Stencil, TEXT.Display, COLOR.TextPrimary)
@@ -489,12 +534,12 @@ local function build()
 	subtitle.Size = UDim2.new(0.8, 0, 0, TEXT.Body)
 	subtitle.TextXAlignment = Enum.TextXAlignment.Center
 
-	layoutTitles()
+	layoutStack()
 	--[[ A window is resized about as often as it is created, so this is a signal
 	     rather than a frame loop. ]]
 	local camera = Workspace.CurrentCamera
 	if camera then
-		trove:connect(camera:GetPropertyChangedSignal("ViewportSize"), layoutTitles)
+		trove:connect(camera:GetPropertyChangedSignal("ViewportSize"), layoutStack)
 	end
 
 	for index, definition in ENTRIES do
