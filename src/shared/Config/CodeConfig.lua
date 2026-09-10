@@ -53,14 +53,25 @@ CodeConfig.Codes = table.freeze({
 		code = "OG-BRICKBATTLE",
 		displayName = "OG BRICKBATTLE",
 		blurb = "Brickbattler's Pack, free, for anybody who was there.",
-		--[[ 2026-09-10, 16:00–18:00 US Central (CDT, UTC-5).
-		     Which is 21:00–23:00 UTC, which is the two numbers below.
+		--[[
+			2026-09-10, 17:00–19:00 US Central (CDT, UTC-5).
+			Which is 22:00 UTC on the 10th to 00:00 UTC on the 11th — and that
+			is the two numbers below.
 
-		     If the launch moves, these are the only two things to change, and
-		     the arithmetic is: (local hour + 5) on the same day, in September,
-		     while CDT is in effect. In November it is +6. ]]
-		startsAt = 1789074000,
-		endsAt = 1789081200,
+			── THE WINDOW CROSSES MIDNIGHT UTC, AND THAT IS NOT A TYPO ─────────
+			This comment used to say the arithmetic was "(local hour + 5) on the
+			same day", which was true of a window that closed at 18:00 local and
+			is false of this one: 19:00 + 5 is 24, so the close is 00:00 on the
+			ELEVENTH. A future editor following the old rule would write the
+			10th, and the code would have expired an hour before anybody could
+			type it — on the one night it exists.
+
+			So: convert BOTH ends to UTC independently and let the date fall
+			where it falls. Add 5 in September while CDT is in effect, 6 once
+			CST returns in November, and never assume the two ends share a day.
+		]]
+		startsAt = 1789077600,
+		endsAt = 1789084800,
 		reward = {
 			passes = { "BrickbattlersPack" },
 			dollars = 250,
