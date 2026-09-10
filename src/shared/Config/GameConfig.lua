@@ -37,8 +37,15 @@ GameConfig.BuildStamp = "2026-09-07b-alpha02"
 	main menu and its whole job is to set an expectation before anybody presses
 	PLAY. Somebody who knows they are in an alpha reports a bug; somebody who
 	thinks they are in a finished game leaves.
+
+	── AND THE ROUND NUMBER EARNS ITS PLACE ────────────────────────────────────
+	The trailing number is not decoration. A tester who played the last one and
+	sees the same string in the corner has no way to tell whether the thing they
+	reported was ever looked at, and the commonest report an alpha gets is one
+	somebody already sent. Bumping it is how the menu says "this is not the build
+	you played".
 ]]
-GameConfig.Version = "0.9 ALPHA TESTING"
+GameConfig.Version = "0.9 ALPHA TESTING 4"
 
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true
