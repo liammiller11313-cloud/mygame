@@ -19,6 +19,36 @@ local MapConfig = {}
 MapConfig.StorageFolder = "Maps" -- ServerStorage.Maps
 MapConfig.LiveFolder = "CurrentMap" -- Workspace.CurrentMap
 
+--[[
+	The two halves of the map handshake, in one place because their ORDER is the
+	whole point.
+
+	A joining body is anchored until its client says it can see the map. The
+	client gives up waiting after `ClientWait` and confirms anyway — an honest "I
+	tried" — and the server gives up holding after ClientWait + ServerGrace.
+
+	Those two numbers used to live in two files, one at twelve and one at twenty,
+	which is the wrong way round: the server stopped holding eight seconds BEFORE
+	the client stopped waiting. A player on a slow connection — the only kind
+	that ever needed the hold — was released onto a map they were still
+	downloading, which is the exact fall the whole mechanism exists to prevent,
+	arriving twelve seconds later than it used to.
+
+	So the server's patience is derived from the client's rather than written
+	beside it. The grace is a round trip and a little slack: the client's
+	confirmation has to be able to LAND while the server is still listening, or
+	the hold ends on a timeout instead of on an answer and the difference is
+	invisible until somebody falls.
+]]
+MapConfig.Handshake = table.freeze({
+	ClientWait = 20,
+	ServerGrace = 4,
+})
+
+function MapConfig.serverHoldSeconds(): number
+	return MapConfig.Handshake.ClientWait + MapConfig.Handshake.ServerGrace
+end
+
 --[[ Set by MapService on a map's own Sound once it has been adopted into
      SoundService, and read by MusicController so it can duck it. Here rather
      than in either of them because it is the one string they have to agree on,

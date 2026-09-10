@@ -349,15 +349,63 @@ end
 	server has its own timeout under the hold; this one exists so a client that
 	waited too long still says something, and says it about the right map.
 ]]
-local MAP_WAIT_TIMEOUT = 20
+--[[ Shared with the server's hold, which is derived from it. See
+     MapConfig.Handshake for why the order of the two matters. ]]
+local MAP_WAIT_TIMEOUT = MapConfig.Handshake.ClientWait
+local MAP_POLL = 0.15
+--[[ Consecutive polls with the part count unmoved that mean replication has
+     stopped. The count is the primary test; this is the fallback for the case
+     where it can never be reached — a part destroyed by a round that started
+     while the map was still arriving, say — so that a map which HAS finished
+     coming across is not held against a target that moved. ]]
+local MAP_STABLE_POLLS = 6
 
 local mapWatch = 0
 
+--[[ BaseParts under the live map, on THIS machine. The one number that answers
+     "can I see the floor yet". ]]
+local function localParts(map: Instance): number
+	local count = 0
+	for _, descendant in map:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			count += 1
+		end
+	end
+	return count
+end
+
+--[[
+	── WHAT THIS USED TO CONFIRM, AND WHY IT WAS THE BUG ───────────────────────
+
+	It waited for `CurrentMap` to contain a child named for the map, and then
+	said "ready". A Model replicates to a client as an INSTANCE first and fills
+	in afterwards — so that child appears within a frame or two of the event,
+	while the thing it is named after is still an empty shell with no floor in
+	it.
+
+	The server took that at its word. The hold on a joining body checks whether
+	the client has the map before it anchors anything at all, so a client that
+	confirmed early was not merely released early — it was never held. The body
+	was placed on a floor the server could see and the client could not, and on
+	the client it fell through where the floor had not arrived: standing outside
+	the world on their own screen, in the map on everybody else's, and being
+	attacked the whole time because the server was right about where they were.
+
+	Three attempts at this fixed the wrong halves — which SpawnLocations to use,
+	who owns the physics, and which map generation a confirmation belongs to.
+	All three were real and none of them touched this line, because the
+	handshake was not failing. It was succeeding, about the wrong question.
+
+	So now it counts. The server publishes how many BaseParts the live map has —
+	see Attributes.Game.MapParts — and this waits until it has that many, which
+	is the smallest fact that actually means "there is a map here".
+]]
 local function confirmMap(mapId: string)
 	mapWatch += 1
 	local ticket = mapWatch
 	task.spawn(function()
 		local deadline = os.clock() + MAP_WAIT_TIMEOUT
+		local seen, stable = -1, 0
 		while os.clock() < deadline do
 			--[[ Superseded. Another map started loading while this one was still
 			     being waited for, and confirming the old id now would be worse
@@ -367,10 +415,26 @@ local function confirmMap(mapId: string)
 				return
 			end
 			local folder = Workspace:FindFirstChild(MapConfig.LiveFolder)
-			if folder and folder:FindFirstChild(mapId) then
-				break
+			local map = folder and folder:FindFirstChild(mapId)
+			if map then
+				local expected = tonumber(Workspace:GetAttribute(Attributes.Game.MapParts)) or 0
+				local have = localParts(map)
+				if expected > 0 and have >= expected then
+					break
+				end
+				--[[ Still arriving, or arrived and short of a target that moved.
+				     Only counted once something is actually here, so an empty
+				     shell can never be mistaken for a finished one. ]]
+				if have > 0 and have == seen then
+					stable += 1
+					if stable >= MAP_STABLE_POLLS then
+						break
+					end
+				else
+					seen, stable = have, 0
+				end
 			end
-			task.wait(0.1)
+			task.wait(MAP_POLL)
 		end
 		if ticket == mapWatch then
 			Remotes.Event.MapReady:FireServer(mapId)

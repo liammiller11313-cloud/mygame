@@ -189,10 +189,15 @@ end
 local function clientHasMap(player: Player): boolean
 	return clientMap[player] == currentMapToken()
 end
---[[ How long a joining character waits before it is released anyway. Generous:
-     the cost of being early is the bug above, and the cost of being late is a
-     second of standing still on a screen that is still showing a loading map. ]]
-local READY_TIMEOUT = 12
+--[[ How long a joining character waits before it is released anyway.
+
+     DERIVED from the client's own wait rather than written here, because the
+     two only work in one order and they used to be in the other — see
+     MapConfig.Handshake. Generous either way: the cost of being early is a
+     player standing outside the world, and the cost of being late is a few
+     seconds of standing still on a screen that is still showing a loading
+     map. ]]
+local READY_TIMEOUT = MapConfig.serverHoldSeconds()
 
 --[[
 	How long the SERVER keeps hold of a freshly spawned body before handing it

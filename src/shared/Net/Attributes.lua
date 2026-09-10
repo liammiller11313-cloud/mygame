@@ -429,6 +429,22 @@ Attributes.Game = table.freeze({
 	Difficulty = "FL_Difficulty", -- string, DirectorConfig.Difficulty key
 	CurrentMap = "FL_CurrentMap", -- string, MapConfig map id
 	MapPhase = "FL_MapPhase", -- string, "Ready" | "Unload" | "Load"
+	--[[
+		How many BaseParts the live map has, published so a client can tell
+		whether it has actually RECEIVED one.
+
+		The distinction this exists for is the whole reason a joining player used
+		to end up under the world. A Model replicates to a client as an instance
+		first and fills in afterwards, so `CurrentMap` being set and the model
+		being findable are both true long before there is a floor in it — and a
+		client that answered "I have the map" on either of those was answering a
+		question nobody asked.
+
+		A count is the smallest fact that means the right thing, and it works for
+		a mid-round joiner as well as for a round start, which is why it is an
+		attribute rather than a field in the load event.
+	]]
+	MapParts = "FL_MapParts", -- number, BaseParts in the live map, 0 in the lobby
 
 	--[[
 		Requisitions: what the team has bought into this round.

@@ -361,6 +361,10 @@ function MapService:unload()
 		return
 	end
 
+	--[[ Cleared with the map, before the phase changes. A stale count against no
+	     map is a client waiting to receive parts of something that is being
+	     destroyed. ]]
+	Workspace:SetAttribute(Attributes.Game.MapParts, 0)
 	Workspace:SetAttribute(Attributes.Game.MapPhase, "Unload")
 	Remotes.Event.MapLoading:FireAllClients({ mapId = currentId, phase = "Unload" })
 
@@ -413,7 +417,26 @@ function MapService:load(mapId: string): boolean
 	currentRoot = clone
 	currentId = mapId
 
+	--[[
+		Counted once, here, and published for the clients to measure themselves
+		against.
+
+		This is the number a joining player's client waits to reach before it says
+		it can see the map — see Attributes.Game.MapParts and the confirmation in
+		the client boot. Counted AFTER sanitise and installAmbience have run, so
+		it describes the map that actually exists rather than the one that was
+		cloned: a count taken a moment earlier would be a target the client can
+		never quite hit and a wait that always runs to its timeout.
+	]]
+	local partCount = 0
+	for _, descendant in clone:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			partCount += 1
+		end
+	end
+
 	Workspace:SetAttribute(Attributes.Game.CurrentMap, mapId)
+	Workspace:SetAttribute(Attributes.Game.MapParts, partCount)
 	Workspace:SetAttribute(Attributes.Game.MapPhase, "Ready")
 	Remotes.Event.MapLoading:FireAllClients({ mapId = mapId, phase = "Ready" })
 
