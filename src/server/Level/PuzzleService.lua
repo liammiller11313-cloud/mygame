@@ -517,6 +517,44 @@ local INK = Color3.fromRGB(28, 26, 24)
 -- ── painting the clues ──────────────────────────────────────────────────────
 
 --[[
+	Which part of a prop the text goes on, and a warning when nobody said.
+
+	PrimaryPart or the first BasePart the tree happens to return — and that
+	second half is a coin toss. A designer's fuse box has a front panel, a
+	bracket, four screws and a hinge, and `FindFirstChildWhichIsA` returns
+	whichever of them comes first in the instance tree, which is an ordering
+	nobody authored and nobody can see. The number ends up on the back of the
+	box, or on a screw.
+
+	It still falls back rather than refusing, because a number on the wrong face
+	is a puzzle you can play badly and no number at all is a puzzle you cannot
+	play. But it says so, once, naming the model AND the part it guessed, which
+	between them are enough to fix it from the output without hunting.
+]]
+local warnedSurface: { [Instance]: boolean } = {}
+
+local function surfaceOf(model: Model, what: string): BasePart?
+	if model.PrimaryPart then
+		return model.PrimaryPart
+	end
+	local guess = model:FindFirstChildWhichIsA("BasePart", true)
+	if guess and not warnedSurface[model] then
+		warnedSurface[model] = true
+		warn(
+			string.format(
+				"[PuzzleService] %q has no PrimaryPart, so its %s was drawn on %q — whichever "
+					.. "part the tree returned first. Set the model's PrimaryPart to the face "
+					.. "you want it on.",
+				model.Name,
+				what,
+				guess.Name
+			)
+		)
+	end
+	return guess
+end
+
+--[[
 	Puts a document's text onto the prop itself.
 
 	The whole design of this feature rests on the information being ON the
@@ -533,7 +571,7 @@ local INK = Color3.fromRGB(28, 26, 24)
 	of coupling that breaks the first time a designer renames a part.
 ]]
 local function paint(model: Model, clue: any, text: string)
-	local surface = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	local surface = surfaceOf(model, "document")
 	if not surface then
 		return
 	end
@@ -643,7 +681,7 @@ local FUSE_DEAD = Color3.fromRGB(196, 186, 170)
 local FUSE_LIVE = Color3.fromRGB(126, 232, 160)
 
 local function markFuse(model: Model, set: any, order: number, live: boolean)
-	local surface = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	local surface = surfaceOf(model, "number")
 	if not surface then
 		return
 	end
@@ -1347,6 +1385,7 @@ function PuzzleService:clear()
 	table.clear(state.fuseLive)
 	table.clear(state.fuseLooks)
 	table.clear(state.sequence)
+	table.clear(warnedSurface)
 	table.clear(state.clueSeen)
 	table.clear(state.readBy)
 	table.clear(state.doorways)
