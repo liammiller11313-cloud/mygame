@@ -345,6 +345,10 @@ AmmoConfig.Weapons = {
 	     muzzleloader has no cartridge to eject and no magazine to drop, because
 	     the ball and the powder go in the front. ]]
 	[Enums.Weapon.FlintLock] = { casing = "", magazine = "" },
+	--[[ A real shotgun with real shells, unlike the three loot weapons above it.
+	     It ejects 12-gauge and drops nothing on reload, because it does not
+	     reload — see WeaponConfig. ]]
+	[Enums.Weapon.NostalgicPump] = { casing = "12ga", magazine = "" },
 
 	[Enums.Weapon.ScopedMk18] = { casing = "556", magazine = "StanagMag" },
 	[Enums.Weapon.M1AEBR] = { casing = "762", magazine = "MarksmanMag" },

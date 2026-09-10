@@ -284,6 +284,20 @@ Attributes.Puzzle = table.freeze({
 	FuseOrder = "FL_FuseOrder", -- number, 1..4
 	FuseLive = "FL_FuseLive", -- boolean, true once it is thrown
 
+	--[[
+		Which beacon this is, whether it is burning, and when it goes out.
+
+		`BeaconUntil` is a server-time stamp rather than a remaining count, the
+		same rule every other deadline in this game follows: the client subtracts
+		its own clock, so it cannot drift and cannot arrive stale. It is on the
+		PROP rather than in a payload because a beacon's state is a fact about
+		the world — somebody who joins mid-round, respawns, or looks across the
+		field at a fire two hundred studs away reads it for free.
+	]]
+	BeaconOrder = "FL_BeaconOrder", -- number, 1..4
+	BeaconLit = "FL_BeaconLit", -- boolean, true while it burns
+	BeaconUntil = "FL_BeaconUntil", -- number, server time it goes out
+
 	--[[ What a doorway that MOVES the player says on its prompt. Written by the
 	     service when the door is armed and cleared when it is not, so a door
 	     that is still boarded offers nothing at all rather than offering a trip

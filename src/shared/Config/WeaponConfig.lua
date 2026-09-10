@@ -3008,6 +3008,133 @@ WeaponConfig.Definitions = {
 	},
 
 	--[[
+		── THE NOSTALGIC PUMP ───────────────────────────────────────────────────
+		Crossroads' loot-room special, the fourth weapon you can only find, and
+		the only one of the four that is a joke the player is in on.
+
+		The flamethrower, the Tesla Rifle and the flintlock are all exotic — a
+		cone, a chain, a hand cannon. This is the shotgun anybody who played
+		Roblox in 2008 can already hear, sitting behind an objective on the map
+		that is made of the same nostalgia, and the design brief for it is
+		basically "make it feel like that".
+
+		── WHICH MEANS THE WIDEST SPREAD IN THE GAME ───────────────────────────
+		Fourteen pellets, more than anything else in the roster, at twelve damage
+		each and a hip spread of nine degrees. Point blank that is a wall — over
+		a hundred and fifty into one body, three Commons at once if they are
+		stacked in a doorway. At twenty studs it is a scattering of chip damage,
+		and that gap IS the weapon: it does not reward aim, it rewards letting
+		them come.
+
+		── AND IT IS SLOW, WHICH IS THE OTHER HALF ─────────────────────────────
+		Seventy-five rounds a minute is a real pump between shots, against the
+		DAO-12's two hundred and forty. Nothing else in this game makes you wait
+		that long after committing to a shot, and a wall of pellets you could
+		send twice a second would just be the DAO-12 with better numbers. The
+		pause is what stops it being that.
+
+		Twenty shells and no reserve, the same bargain the other three strike: an
+		ammo crate tops up to reserveMax and nothing else does, so a zero there is
+		what makes a found weapon genuinely finite.
+	]]
+	[Enums.Weapon.NostalgicPump] = {
+		id = Enums.Weapon.NostalgicPump,
+		displayName = "Nostalgic Pump",
+		modelName = "NostalgicPump",
+		slot = Enums.Slot.Primary,
+		--[[ Shotgun rather than Special, unlike the other three loot weapons. The
+		     class picks the viewmodel pose and this is a shoulder-fired long gun
+		     with a barrel, not a tank on a strap. It is kept out of the shop by
+		     floorOnly, which is a separate question from how it is held. ]]
+		class = "Shotgun",
+		fireMode = "Single",
+
+		--[[ Twelve a pellet against the DAO-12's fifteen, and six more pellets to
+		     put it with. Lower per hit and far higher in total, which is the
+		     whole trade: everything lands at contact range and almost nothing
+		     lands past twenty studs. ]]
+		damage = 12,
+		pellets = 14,
+		rpm = 75,
+		--[[ Twenty shells and nowhere to get a twenty-first. ]]
+		magSize = 20,
+		reserveMax = 0,
+		--[[ The shotgun family's two, unchanged. This weapon's identity is the
+		     cone and the pause; giving it more penetration than the guns it sits
+		     beside would make it strictly better than them as well as different,
+		     which is exactly what a found weapon must not be. ]]
+		penetration = 2,
+		penetrationFalloff = 0.7,
+
+		--[[ Falls off harder and stops sooner than any other shotgun. The DAO-12
+		     reaches three hundred studs at fifteen percent; this keeps almost
+		     nothing past sixty and is finished at a hundred and twenty. It is a
+		     doorway weapon and the numbers should say so before the player has
+		     to find out. ]]
+		falloffStart = 16,
+		falloffEnd = 60,
+		falloffMin = 0.12,
+		maxRange = 120,
+
+		--[[ The widest hip spread in the game, and aiming barely tightens it. A
+		     pump shotgun that could be aimed into a slug would be a sniper with
+		     fourteen bullets; what aiming buys here is the difference between
+		     hitting a doorway and hitting a corridor. ]]
+		spreadHip = 9.0,
+		spreadAim = 6.4,
+		spreadMoving = 10.5,
+		spreadMax = 12.0,
+		--[[ Bloom is almost irrelevant at 75rpm — there is nearly a second to
+		     settle between shots — so it is set high and recovers fast, which
+		     only ever punishes somebody trying to click through the pump. ]]
+		bloomPerShot = 1.0,
+		bloomRecovery = 5.5,
+
+		--[[ A heavy single kick with time to come back down, the same shape the
+		     flintlock has and for the same reason: no burst to control means the
+		     recoil can be what the weapon deserves rather than what a burst can
+		     survive. ]]
+		recoilVertical = 3.0,
+		recoilHorizontal = 0.5,
+		recoilRecovery = 8.0,
+		kickback = 1.5,
+
+		--[[ Never runs, since there is no reserve to reload from, but it is a
+		     real number rather than a zero so a future round handing one out with
+		     spare shells does not inherit an instant reload nobody chose. ]]
+		reloadTime = 3.4,
+		reloadPerShell = 0,
+		drawTime = 1.0,
+		aimTime = 0.4,
+
+		walkSpeedScale = 0.94,
+		aimWalkSpeedScale = 0.62,
+		aimFov = 65,
+
+		shakeMagnitude = 0.6,
+		shakeRoughness = 8,
+		tracerWidth = 0.1,
+		tracerColor = Color3.fromRGB(255, 226, 176),
+		muzzleFlashSize = 2.0,
+		shellEject = true,
+
+		--[[ It tears, at contact range, harder than either shop shotgun. Fourteen
+		     pellets arriving together is the most literally destructive thing in
+		     the roster inside ten studs, and the gore is most of why a player
+		     lets a Common get close enough to use it properly. ]]
+		gibPower = 0.9,
+		dismemberPower = 0.9,
+		knockback = 34,
+
+		--[[ Never on a shelf, never on a pad, never in the shop. It is behind
+		     four fires that will not stay lit, and every round the team wants one
+		     they run the crossroads again. ]]
+		placeable = false,
+		floorOnly = true,
+		price = 0,
+	},
+
+	--[[
 		── BRICKBATTLER'S PACK ──────────────────────────────────────────────────
 		Four of the seven classic tools, translated rather than transplanted.
 

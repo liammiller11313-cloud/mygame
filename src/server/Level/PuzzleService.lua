@@ -92,6 +92,7 @@
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
@@ -264,6 +265,27 @@ local state = {
 	     boxes. ]]
 	clueSeen = {} :: { [number]: boolean },
 	readBy = {} :: { [Player]: { [number]: boolean } },
+
+	--[[
+		── THE BEACON KIND ──────────────────────────────────────────────────────
+		The four fires by number, the reverse lookup that turns a pressed prop
+		back into "which one is this", and the server-time stamp each of them
+		goes out at.
+
+		`burn` is this round's window, taken once at arm from the headcount — see
+		PuzzleConfig.beaconBurn. Sampled at arm rather than read live, because a
+		player leaving mid-objective must not shorten a fire that is already
+		burning, and one joining must not lengthen it.
+
+		Nothing here is a secret. Every one of these is published on the prop as
+		an attribute, because a beacon's state is a fact about the world that a
+		player two hundred studs away is meant to be able to read.
+	]]
+	beacons = {} :: { [number]: Model },
+	beaconOf = {} :: { [Model]: number },
+	beaconUntil = {} :: { [number]: number },
+	beaconLooks = {} :: { [BasePart]: { color: Color3, material: Enum.Material } },
+	burn = 0,
 
 	--[[ The doors that MOVE a player, and where each of them lands. Resolved at
 	     arm, tagged when the design says they may be used — see armDoorways. ]]
@@ -815,6 +837,89 @@ local function repaint()
 		local text = surfaces[clue.object]
 		if model and model.Parent and text then
 			paint(model, clue, text)
+		end
+	end
+end
+
+-- ── the beacons ─────────────────────────────────────────────────────────────
+
+--[[
+	Sets a beacon burning, or puts it out.
+
+	The column is the whole point of this creature of a puzzle. Crossroads is
+	four corners around an open middle with sightlines the whole way across, and
+	a team splitting up to light four fires needs to know which of them are still
+	going WITHOUT anybody reading a card — so what a lit beacon gets is a shaft of
+	light tall enough and bright enough to be read from the far corner. That is
+	the objective's entire user interface, and the map draws it.
+
+	Built here rather than left to the designer for the same reason the fuse
+	number is: four props that might or might not have been given a light is four
+	ways for this objective to be unplayable, and one place that decides is one
+	place that cannot disagree with the state.
+]]
+local BEACON_LIT = Color3.fromRGB(255, 170, 74)
+local BEACON_COLUMN_HEIGHT = 220
+local BEACON_COLUMN_WIDTH = 2.4
+local BEACON_LIGHT_RANGE = 42
+
+local function setBeaconFire(model: Model, set: any, live: boolean)
+	local surface = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	if not surface then
+		return
+	end
+
+	local column = surface:FindFirstChild("FL_BeaconColumn") :: BasePart?
+	if live and not column then
+		column = Instance.new("Part")
+		local part = column :: BasePart
+		part.Name = "FL_BeaconColumn"
+		part.Size = Vector3.new(BEACON_COLUMN_WIDTH, BEACON_COLUMN_HEIGHT, BEACON_COLUMN_WIDTH)
+		--[[ Rising FROM the beacon rather than centred on it, so the shaft starts
+		     at the fire and goes up instead of burying half of itself in the
+		     ground. ]]
+		part.CFrame = surface.CFrame * CFrame.new(0, BEACON_COLUMN_HEIGHT * 0.5, 0)
+		part.Anchored = true
+		part.CanCollide = false
+		--[[ Invisible to raycasts, and that is not tidiness. hasLineOfSight is
+		     what every special's grab and every burst is played against, and a
+		     two-hundred-stud pillar that answered a raycast would cut four
+		     creatures' sightlines across the middle of the map. ]]
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Material = Enum.Material.Neon
+		part.Color = BEACON_LIT
+		part.Transparency = 0.72
+		part.Parent = surface
+
+		local glow = Instance.new("PointLight")
+		glow.Name = "FL_BeaconGlow"
+		glow.Color = BEACON_LIT
+		glow.Range = BEACON_LIGHT_RANGE
+		glow.Brightness = 2.2
+		glow.Parent = surface
+	elseif not live and column then
+		column:Destroy()
+		local glow = surface:FindFirstChild("FL_BeaconGlow")
+		if glow then
+			glow:Destroy()
+		end
+	end
+
+	--[[ And the designer's own lamp, if the model has one. OFF is the look they
+	     built rather than one this file invented — remembered the first time it
+	     is seen and put back when the round clears, the same way the fuse boxes'
+	     indicators and a door's transparency are. ]]
+	if typeof(set.light) == "string" then
+		for _, part in partsOf(model) do
+			if MapConfig.folderMatches(part.Name, set.light) then
+				if not state.beaconLooks[part] then
+					state.beaconLooks[part] = { color = part.Color, material = part.Material }
+				end
+				local was = state.beaconLooks[part]
+				part.Color = if live then BEACON_LIT else was.color
+				part.Material = if live then Enum.Material.Neon else was.material
+			end
 		end
 	end
 end
@@ -1391,6 +1496,31 @@ function PuzzleService:clear()
 		end
 	end
 
+	--[[ The beacons go out and hand their lamps back, before the models are let
+	     go of. Same contract the fuse indicators have: OFF is the look the
+	     designer built, and a map that is not reloaded between rounds would
+	     otherwise keep this file's orange forever. ]]
+	for part, was in state.beaconLooks do
+		if part.Parent then
+			part.Color = was.color
+			part.Material = was.material
+		end
+	end
+
+	local beaconSet = state.definition and state.definition.beacons
+	for _, model in state.beacons do
+		if model.Parent then
+			CollectionService:RemoveTag(model, PuzzleConfig.BeaconTag)
+			model:SetAttribute(PZ.BeaconOrder, nil)
+			model:SetAttribute(PZ.BeaconLit, nil)
+			model:SetAttribute(PZ.BeaconUntil, nil)
+			model:SetAttribute(PZ.CluePrompt, nil)
+			if beaconSet then
+				setBeaconFire(model, beaconSet, false)
+			end
+		end
+	end
+
 	for _, model in state.fuses do
 		if model.Parent then
 			CollectionService:RemoveTag(model, PuzzleConfig.FuseTag)
@@ -1426,6 +1556,11 @@ function PuzzleService:clear()
 	table.clear(state.fuseOf)
 	table.clear(state.fuseLive)
 	table.clear(state.fuseLooks)
+	table.clear(state.beacons)
+	table.clear(state.beaconOf)
+	table.clear(state.beaconUntil)
+	table.clear(state.beaconLooks)
+	state.burn = 0
 	table.clear(state.sequence)
 	table.clear(warnedSurface)
 	table.clear(state.clueSeen)
@@ -2013,6 +2148,156 @@ local function armFuses(definition: any, folder: Instance?, root: Instance, rand
 end
 
 --[[
+	Crossroads' shape: four fires that will not stay lit.
+
+	Nothing is generated here and there is no template, which makes this the
+	shortest arming function in the file. The other three roll a code, an order or
+	a sequence because KNOWING is their difficulty; this one's difficulty is a
+	clock and the distance between four corners, and a team that has run it fifty
+	times still has to run it.
+
+	── EVERY BEACON OR NONE ────────────────────────────────────────────────────
+	Same rule the generators and the fuse boxes follow, and it bites harder here
+	than anywhere: three beacons against a gate that wants four is a round whose
+	loot room can never open, and unlike a missing document there is nothing to
+	deduce and no way for a player to tell. So a missing prop names itself and
+	prints the map's top-level folders beside it.
+]]
+local function armBeacons(definition: any, folder: Instance?, root: Instance): boolean
+	local set = definition.beacons
+	local gate = definition.gate
+	if not set or not gate then
+		warn(
+			string.format(
+				"[PuzzleService] %s is kind %q but has no beacons or gate block — puzzle off",
+				tostring(definition.id),
+				PuzzleConfig.Kind.Beacons
+			)
+		)
+		return false
+	end
+
+	for order = 1, set.count do
+		local wanted = PuzzleConfig.beaconName(set, order)
+		local child = findNamed(folder, root, wanted)
+		local model = child and asModel(child, child.Parent or root)
+		if not model then
+			warn(
+				string.format(
+					"[PuzzleService] no %q anywhere in %s — the beacon objective is off for "
+						.. "this round. The map's top-level folders are: %s",
+					wanted,
+					tostring(definition.map),
+					MapConfig.folderNamesIn(root)
+				)
+			)
+			return false
+		end
+
+		--[[ Anchored, collision kept. A beacon on a hilltop is something a
+		     survivor can put their back to, and one that had lost its collision
+		     would be a hole in the cover on the one map made of open ground. ]]
+		settle(model, false)
+
+		state.beacons[order] = model
+		state.beaconOf[model] = order
+		state.beaconUntil[order] = 0
+
+		model:SetAttribute(PZ.BeaconOrder, order)
+		model:SetAttribute(PZ.BeaconLit, false)
+		model:SetAttribute(PZ.BeaconUntil, 0)
+		model:SetAttribute(PZ.CluePrompt, string.format("%s %d", set.prompt, order))
+		CollectionService:AddTag(model, PuzzleConfig.BeaconTag)
+		setBeaconFire(model, set, false)
+	end
+
+	--[[ The room, then the gate INSIDE it. Same split every sealed room in this
+	     file gets: a map has any number of things that could answer to "Gate" and
+	     exactly one of them is in the loot room. ]]
+	local roomChild = findNamed(folder, root, gate.room)
+	local room = roomChild and asModel(roomChild, roomChild.Parent or root)
+	local door = if room then findWithin(room, gate.door) else nil
+	if not room then
+		warn(
+			string.format(
+				"[PuzzleService] no %q in %s — the beacons will light and nothing will open. "
+					.. "The map's top-level folders are: %s",
+				gate.room,
+				tostring(definition.map),
+				MapConfig.folderNamesIn(root)
+			)
+		)
+	elseif not door then
+		warn(
+			string.format(
+				"[PuzzleService] found %q but no %q inside it — the beacons will light and "
+					.. "nothing will open. Put the gate inside the room model.",
+				gate.room,
+				gate.door
+			)
+		)
+	end
+
+	resolveLoot(definition, folder, root)
+
+	state.definition = definition
+	state.found = 0
+	state.solved = false
+	state.gateRoom = room
+	state.door = door
+	if door then
+		for _, part in partsOf(door) do
+			state.doorLooks[part] = part.Transparency
+		end
+	end
+
+	--[[
+		This round's window, taken ONCE.
+
+		Read live it would be a fire that got longer when somebody joined and
+		shorter when somebody left — including mid-run, which on an objective
+		whose whole content is a clock is the one thing that must not move. The
+		crew that starts the round owns the difficulty of it.
+	]]
+	--[[
+		Counted off the SERVER, not off the survivors.
+
+		`arm` runs when the round state reaches Starting, which is before bodies
+		exist — getAliveSurvivors is empty at that moment, so reading it here
+		would hand a full team of four the fifty-second solo window every single
+		round. Nothing about that would look broken; the objective would just be
+		free, and the one number the whole puzzle is made of would silently be
+		the wrong one.
+
+		Everybody connected when a round starts is in that round, so the player
+		list is the honest measure. beaconBurn clamps it, so a fifth watching from
+		the lobby cannot shrink the window below what four were tuned against.
+	]]
+	local crew = math.max(#Players:GetPlayers(), 1)
+	state.burn = PuzzleConfig.beaconBurn(set, crew)
+
+	Workspace:SetAttribute(GA.VaultPresent, true)
+	Workspace:SetAttribute(GA.VaultSolved, false)
+	Workspace:SetAttribute(GA.CluesFound, 0)
+	Workspace:SetAttribute(GA.CluesTotal, set.count)
+	--[[ The instruction is the whole puzzle and it fits on one line, which is
+	     rarer than it sounds: nothing about this objective has to be explained
+	     twice. ]]
+	setTracker("BEACONS", "LIGHT ALL FOUR AT ONCE")
+
+	print(
+		string.format(
+			"[PuzzleService] %s armed with %d beacons, %ds burn for a crew of %d",
+			definition.id,
+			set.count,
+			math.floor(state.burn),
+			crew
+		)
+	)
+	return true
+end
+
+--[[
 	Rolls a fresh puzzle into the live map.
 
 	Called from the round starting rather than from the map loading — see the
@@ -2054,6 +2339,11 @@ function PuzzleService:arm(random: Random?)
 		armed = armGenerators(definition, folder, root, rng)
 	elseif kind == PuzzleConfig.Kind.Fuses then
 		armed = armFuses(definition, folder, root, rng)
+	elseif kind == PuzzleConfig.Kind.Beacons then
+		--[[ No Random. Nothing about this objective is rolled — see armBeacons,
+		     and see the Kind's own note for why that is the design rather than a
+		     gap. ]]
+		armed = armBeacons(definition, folder, root)
 	else
 		armed = armInvestigation(definition, folder, root, rng)
 	end
@@ -3015,6 +3305,187 @@ local function onPullFuse(player: Player, target: any)
 	end
 end
 
+-- ── the beacons ─────────────────────────────────────────────────────────────
+
+local function beaconsArmed(): boolean
+	return state.definition ~= nil and PuzzleConfig.kindOf(state.definition) == PuzzleConfig.Kind.Beacons
+end
+
+local function beaconCount(): number
+	local set = state.definition and state.definition.beacons
+	return if set then set.count else 0
+end
+
+--[[
+	How many are burning right now.
+
+	Counted from the STAMPS rather than kept as a running total, and that is the
+	one decision this objective's correctness rests on. A tally would have to be
+	incremented when a fire is lit and decremented when it expires, and the two
+	events do not happen in the same place — so a missed decrement anywhere leaves
+	a gate that opens on three beacons and a bug nobody could reproduce. Four
+	comparisons against a clock cannot drift.
+]]
+local function litCount(now: number): number
+	local total = beaconCount()
+	local lit = 0
+	for order = 1, total do
+		if (state.beaconUntil[order] or 0) > now then
+			lit += 1
+		end
+	end
+	return lit
+end
+
+--[[ Publishes the count to everybody's card. Skipped once the room is open: the
+     fires burn down afterwards like any others, and a counter that fell back to
+     zero behind a solved objective would be telling the team they had lost
+     something they had already spent. ]]
+local function publishLit(now: number)
+	if state.solved then
+		return
+	end
+	Workspace:SetAttribute(GA.CluesFound, litCount(now))
+end
+
+--[[ Puts out anything whose time is up. Driven from a Heartbeat rather than from
+     a player's press, because going OUT is the one thing in this objective that
+     happens when nobody is doing anything. ]]
+local function stepBeacons(now: number)
+	if not beaconsArmed() then
+		return
+	end
+	local set = state.definition.beacons
+	local changed = false
+
+	for order = 1, beaconCount() do
+		local until_ = state.beaconUntil[order] or 0
+		if until_ > 0 and now >= until_ then
+			state.beaconUntil[order] = 0
+			changed = true
+			local model = state.beacons[order]
+			if model and model.Parent then
+				model:SetAttribute(PZ.BeaconLit, false)
+				model:SetAttribute(PZ.BeaconUntil, 0)
+				setBeaconFire(model, set, false)
+			end
+		end
+	end
+
+	if changed then
+		publishLit(now)
+	end
+end
+
+--[[
+	A player lighting one.
+
+	The thinnest handler in the file, because there is nothing to check that is
+	not physical: no order, no code, no answer. What the server owns is the CLOCK
+	— when this fire goes out, and whether four of them happened to be burning at
+	the same instant — and neither of those is a number a client could send.
+
+	Re-lighting one that is already going is allowed and is not an oversight. A
+	player who runs back to top up the first beacon while the fourth is still
+	being walked to is playing the objective exactly as intended, and refusing
+	that would make the puzzle harder in a way that reads as broken.
+]]
+local function onLightBeacon(player: Player, target: any)
+	if typeof(target) ~= "Instance" or not beaconsArmed() then
+		return
+	end
+
+	local entry = record(player)
+	local now = serverNow()
+	if now - entry.tookAt < COLLECT_INTERVAL then
+		return
+	end
+
+	local order = state.beaconOf[target]
+	if not order then
+		--[[ Not one of ours. Stamped nothing, because looking at a tree should
+		     not spend the budget that lights the beacon behind it. ]]
+		return
+	end
+	entry.tookAt = now
+
+	if not atMachine(player, state.beacons[order]) then
+		return
+	end
+
+	local total = beaconCount()
+	if state.solved then
+		Remotes.Event.BeaconResult:FireClient(player, {
+			ok = false,
+			order = order,
+			lit = total,
+			total = total,
+			reason = "The gate is already open.",
+		})
+		return
+	end
+
+	--[[ Lit, and the stamp is the state. Written to the prop as well as held
+	     here, so a survivor across the field and one who joined thirty seconds
+	     ago read the same fire. ]]
+	local set = state.definition.beacons
+	local until_ = now + state.burn
+	state.beaconUntil[order] = until_
+
+	local model = state.beacons[order]
+	if model and model.Parent then
+		model:SetAttribute(PZ.BeaconLit, true)
+		model:SetAttribute(PZ.BeaconUntil, until_)
+		setBeaconFire(model, set, true)
+
+		local audio = Registry.find("AudioService")
+		local speaker = speakerOf(model)
+		if audio and typeof(audio.playOn) == "function" and speaker then
+			pcall(audio.playOn, audio, AudioConfig.Generator.Start, speaker)
+		end
+	end
+
+	local lit = litCount(now)
+	publishLit(now)
+
+	Remotes.Event.BeaconResult:FireClient(player, {
+		ok = true,
+		order = order,
+		lit = lit,
+		total = total,
+		until_ = until_,
+	})
+
+	--[[ And everybody is told, which matters more here than on any other
+	     objective. Four players spread across a map are making a timing decision
+	     together, and the count moving is the only way three of them learn that
+	     the fourth is in position. ]]
+	Remotes.Event.BeaconLit:FireAllClients({
+		player = player,
+		order = order,
+		lit = lit,
+		total = total,
+	})
+
+	if lit < total then
+		setTracker("BEACONS", "LIGHT ALL FOUR AT ONCE")
+		return
+	end
+
+	--[[ All four, at the same instant. The gate goes, the room arms, the team is
+	     paid, and the arrow goes up — which on a map this open is less about
+	     finding the room than about telling four people who are standing in four
+	     different corners that they can stop running. ]]
+	setTracker("ALL LIT", "GET TO THE LOOT ROOM!")
+	openTheRoom(player, "Crossroads access granted. Get to the loot room!")
+
+	local gate = state.definition.gate
+	local at = centreOf(state.door) or centreOf(state.gateRoom)
+	if at then
+		setWaypoint(at, if gate then gate.label else "LOOT ROOM")
+	end
+end
+
 -- ── using a doorway ─────────────────────────────────────────────────────────
 
 --[[
@@ -3074,6 +3545,21 @@ function PuzzleService:start()
 	serviceTrove:connect(Remotes.Event.SubmitGenerator.OnServerEvent, onSubmitGenerator)
 	serviceTrove:connect(Remotes.Event.PullFuse.OnServerEvent, onPullFuse)
 	serviceTrove:connect(Remotes.Event.UseDoorway.OnServerEvent, onUseDoorway)
+	serviceTrove:connect(Remotes.Event.LightBeacon.OnServerEvent, onLightBeacon)
+
+	--[[
+		The only per-frame work this service does, and the only objective that
+		needs any.
+
+		Three of the four are answered entirely by a player pressing something:
+		nothing about a code, an order or a sequence changes while everybody
+		stands still. A beacon goes OUT on its own, so something has to be
+		watching a clock — and it is guarded on the kind, so on the other three
+		maps this costs one comparison a frame and nothing else.
+	]]
+	serviceTrove:connect(RunService.Heartbeat, function()
+		stepBeacons(serverNow())
+	end)
 
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		attempts[player] = nil

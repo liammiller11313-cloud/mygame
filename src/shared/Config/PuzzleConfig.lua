@@ -96,6 +96,11 @@ PuzzleConfig.FuseTag = "FL_PuzzleFuse"
      get you in and out of it are the only things in this game that teleport
      inside a map. ]]
 PuzzleConfig.DoorwayTag = "FL_PuzzleDoorway"
+--[[ The four fires on Crossroads. Its own tag for the same reason the fuse
+     boxes have one: a beacon is lit or it is not, and a prompt that offered to
+     READ one or to open a wire panel on it would be promising something that
+     does not exist. ]]
+PuzzleConfig.BeaconTag = "FL_PuzzleBeacon"
 
 --[[
 	The two shapes a side objective comes in.
@@ -145,6 +150,33 @@ PuzzleConfig.Kind = table.freeze({
 		generators' never had to be. See wrongFuse.
 	]]
 	Fuses = "Fuses",
+
+	--[[
+		Crossroads': four fires that will not stay lit, and a room that opens the
+		moment all four are burning at once.
+
+		── THE FIRST ONE THAT IS ABOUT WHERE THE TEAM IS ───────────────────────
+		The other three are about what one player knows. Clinton is four
+		documents and a code; the Backrooms is four documents and an order;
+		Zombieville is a route walked in sequence. Every one of them can be
+		solved by one person while the other three shoot, and every one of them
+		is a thing you READ or a thing you WALK.
+
+		This one cannot. A beacon burns down and goes out, so lighting the fourth
+		is worth nothing if the first has died — which means four players split
+		up and count down, and one player runs a circuit against a clock. It is
+		the only objective in the game where the answer is "be in four places",
+		and Crossroads is the only map whose geometry makes that legible: you can
+		see the other three corners from any of them, so a team knows it is late
+		without anybody saying so.
+
+		── AND IT NEEDS NO CLUES AT ALL ────────────────────────────────────────
+		Nothing is generated, nothing is written on a prop, and there is no code.
+		The whole difficulty is distance and a horde, which is what this map has
+		and the other three do not. That also makes it the cheapest of the four
+		to build: four props, a room, a gate.
+	]]
+	Beacons = "Beacons",
 })
 
 export type ClueSlot = {
@@ -304,6 +336,35 @@ export type FuseSet = {
 	room the designer did not intend (a Charger, a physics fluke, a future
 	change) would be a player stuck in a box until they died.
 ]]
+--[[
+	The four fires, and how long one stays lit.
+
+	`burnBase` is the window at a full crew of four and `burnPerMissing` is what
+	each empty slot adds to it. Fewer players is EASIER here, the same rule the
+	rest of the game follows — and it is load-bearing rather than generous,
+	because this is the one objective whose difficulty is being in several places
+	and a solo player is only ever in one.
+
+	The arithmetic, so the numbers can be argued with: four corners of Crossroads
+	is three legs after the first, and a survivor covers a leg in something like
+	ten seconds when nothing is in the way. Twenty-six seconds is a comfortable
+	relay for four people who split up and a flat impossibility alone; fifty is a
+	hard, unbroken sprint for one person who knows the route. Both are meant to
+	feel like exactly that.
+]]
+export type BeaconSpec = {
+	object: string,
+	count: number,
+	prompt: string,
+	burnBase: number,
+	burnPerMissing: number,
+	--[[ A part inside the beacon whose colour and material say it is burning —
+	     matched forgivingly. Optional: a beacon without one still gets the fire
+	     and the column of light the service builds, which is what a player
+	     actually reads from across a field. ]]
+	light: string?,
+}
+
 export type DoorwaySpec = {
 	door: string,
 	--[[ The part to land on, by name, looked for inside the same room the door
@@ -359,6 +420,9 @@ export type PuzzleDefinition = {
 
 	--[[ ── FUSES ONLY ───────────────────────────────────────────────────────── ]]
 	fuses: FuseSet?,
+
+	--[[ ── BEACONS ONLY ─────────────────────────────────────────────────────── ]]
+	beacons: BeaconSpec?,
 	--[[ Optional even on the kind that has them: a map whose loot room is
 	     BEHIND its door rather than somewhere else needs none, and the gate
 	     opening is the whole mechanism. ]]
@@ -1035,6 +1099,80 @@ local DEFINITIONS: { PuzzleDefinition } = {
 		     round's own earnings ceiling. Nothing here is a new currency. ]]
 		reward = table.freeze({ dollars = 2_500, restockItems = true }),
 	}),
+
+	--[[
+		── CROSSROADS ───────────────────────────────────────────────────────────
+		Four fires that will not stay lit, and a gate that goes the moment all
+		four are burning together.
+
+		── WHY THIS MAP GETS THIS OBJECTIVE ────────────────────────────────────
+		Because it is the only one that can hold it. Clinton is a building and
+		the Backrooms is a maze, and in both of those you cannot see where your
+		team is — which is exactly why both of them are objectives about reading.
+		Crossroads is four corners around an open middle with sightlines the
+		whole way across, so a burning beacon two hundred studs away is a piece
+		of information the map delivers for free and no card has to.
+
+		Nothing here is randomised, and that is not a gap. The other three
+		objectives roll a code, an order or a sequence because knowing is their
+		difficulty; this one’s difficulty is a clock and a distance, and a
+		team that has played it fifty times still has to run it.
+	]]
+	table.freeze({
+		id = "CrossroadsBeacons",
+		map = "Crossroads",
+		kind = PuzzleConfig.Kind.Beacons,
+
+		--[[ The four the designer built, by the names they carry. See BeaconSpec
+		     for where the two burn numbers come from. ]]
+		beacons = table.freeze({
+			object = "Beacon",
+			count = 4,
+			prompt = "BEACON",
+			burnBase = 26,
+			burnPerMissing = 8,
+			light = "Light",
+		}),
+
+		--[[ `Gate` is a Part sitting inside `Crossroads Lootroom`, which is the
+		     shape findNamed-then-findWithin was written for. Gone rather than
+		     ghosted, like Zombieville's: a gate is a thing in a doorway, and half
+		     a gate still filling one reads as a gate that is somehow both shut
+		     and walk-through-able. ]]
+		gate = table.freeze({
+			room = "Crossroads Lootroom",
+			door = "Gate",
+			vanish = true,
+			label = "LOOT ROOM",
+		}),
+
+		loot = table.freeze({
+			--[[ The room's own special, and the fourth of them. Lies on the floor,
+			     taken through the ordinary pickup path, no reserve and no way to
+			     get one, gone at the end of the round — the same deal the
+			     flamethrower, the Tesla Rifle and the flintlock strike. ]]
+			weapon = table.freeze({
+				object = "NostalgicPump",
+				itemId = "NostalgicPump",
+				slot = "Primary",
+			}),
+			--[[ Spelled with an A, the way this map's model spells it and the way
+			     Zombieville's and the Backrooms' do. The matcher folds case and
+			     spacing and not letters; the config follows the build. ]]
+			stockpile = table.freeze({
+				object = "Dollar Stackpile",
+				dollars = 350,
+				prompt = "DOLLAR STACKPILE",
+			}),
+		}),
+
+		--[[ Between Zombieville's fifteen hundred and the Backrooms' twenty-five.
+		     It is less reading than either investigation and more running than
+		     the generators, and unlike any of them it can fail on a clock — a
+		     team that lights three and loses the first has spent the walk and got
+		     nothing, which is a cost the other three cannot charge. ]]
+		reward = table.freeze({ dollars = 2_000, restockItems = true }),
+	}),
 }
 
 PuzzleConfig.Puzzles = table.freeze(DEFINITIONS) :: { PuzzleDefinition }
@@ -1120,6 +1258,23 @@ end
 
 function PuzzleConfig.fuseName(set: FuseSet, order: number): string
 	return PuzzleConfig.numberedName(set, order)
+end
+
+function PuzzleConfig.beaconName(set: BeaconSpec, order: number): string
+	return PuzzleConfig.numberedName(set, order)
+end
+
+--[[
+	How long a beacon burns, for the crew that is actually playing.
+
+	Clamped at both ends rather than trusted: an empty server and a five-player
+	future both get an answer instead of a window of nil seconds, and the floor is
+	the full-crew number so a hypothetical sixth player cannot shrink it below
+	what the objective was tuned against.
+]]
+function PuzzleConfig.beaconBurn(set: BeaconSpec, headcount: number?): number
+	local crew = math.clamp(math.floor(tonumber(headcount) or 1), 1, 4)
+	return set.burnBase + set.burnPerMissing * (4 - crew)
 end
 
 --[[

@@ -1122,6 +1122,55 @@ function VaultController:start()
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.TrackerLabel), refreshTracker)
 	trove:connect(Workspace:GetAttributeChangedSignal(GA.TrackerHint), refreshTracker)
 
+	--[[ A beacon the player just lit, or could not. There is only one refusal it
+	     can carry — the gate is already open — so this is mostly here for the
+	     confirm, which on an objective played by four people in four corners is
+	     the one piece of feedback that is theirs alone. ]]
+	trove:connect(Remotes.Event.BeaconResult.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refreshTracker()
+		flashTracker()
+		if payload.ok ~= true then
+			VaultController:sayRefusal(tostring(payload.reason or "NOT NOW"))
+			UiSound.play(AudioConfig.UI.MenuBack)
+			return
+		end
+		UiSound.play(AudioConfig.UI.MenuConfirm)
+	end)
+
+	--[[
+		And somebody else's, which on this objective is the whole game.
+
+		Four survivors spread across Crossroads are making a timing decision
+		together and cannot see each other. They CAN see the fires — that is what
+		the map is for — but a fire tells you a beacon is lit and not who lit it
+		or how many are up. This line is the callout nobody has to make.
+	]]
+	trove:connect(Remotes.Event.BeaconLit.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		refreshTracker()
+		flashTracker()
+		local who = payload.player
+		if typeof(who) == "Instance" and who:IsA("Player") and who ~= player then
+			callController(
+				"SubtitleController",
+				"say",
+				who.DisplayName,
+				string.format(
+					"Beacon %s is up. %s of %s burning.",
+					tostring(payload.order),
+					tostring(payload.lit),
+					tostring(payload.total)
+				),
+				CLUE_LINE_SECONDS
+			)
+		end
+	end)
+
 	--[[
 		A breaker the player just threw, or failed to.
 

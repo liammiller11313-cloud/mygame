@@ -263,6 +263,13 @@ AudioConfig.WeaponFire = {
 	     this in a maze of identical corridors should be a thing the other three
 	     hear and can walk towards. ]]
 	[Enums.Weapon.FlintLock] = sound(ID.ShotgunBlast, 1.0, 0.72, 0.8, 620, 5),
+	--[[ The same sample the modern shotguns fire, dropped a little and thrown
+	     further. Not as far down as the flintlock's — this is a 12-gauge and not
+	     a charge in a tube — but heavier than the DAO-12's, because a pump that
+	     sounded identical to the automatic beside it would waste the one thing
+	     this weapon has that the others do not, which is that you already know
+	     what it sounds like. ]]
+	[Enums.Weapon.NostalgicPump] = sound(ID.ShotgunBlast, 1.0, 0.86, 0.94, 560, 5),
 	[Enums.Weapon.M1911A1] = sound(ID.PistolShot, 0.72, 0.97, 1.05, 320, 4),
 	[Enums.Weapon.Magnum357] = sound(ID.RevolverShot, 1.0, 0.94, 1.02, 560, 5),
 	--[[ These four shipped with no row and this table is indexed directly — no

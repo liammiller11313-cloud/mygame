@@ -111,6 +111,12 @@ Enums.Weapon = table.freeze({
 	     one you took the time to line up. ]]
 	FlintLock = "FlintLock",
 
+	--[[ Crossroads', and the one that is a JOKE the player is in on. The other
+	     three loot weapons are exotic; this is the shotgun everybody who played
+	     Roblox in 2008 already knows the sound of, and finding it behind an
+	     objective is the reward for a map made of the same nostalgia. ]]
+	NostalgicPump = "NostalgicPump",
+
 	-- Primary: marksman
 	ScopedMk18 = "ScopedMk18",
 	M1AEBR = "M1AEBR",

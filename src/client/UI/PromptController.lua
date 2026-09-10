@@ -499,6 +499,21 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "FUSE BOX")
 			return node, "THROW", label, false, COLOR.Accent
 		end
+		--[[
+			A beacon, on the map that has them.
+
+			Lit ones are DIMMED rather than untagged, which is the opposite of
+			what a fuse box or a generator does — and the difference is that those
+			are finished when they are done and this one is not. A burning beacon
+			is going to go out, and running back to top it up is the objective
+			being played correctly, so the prompt has to stay. What the colour
+			says is "this one is handled, for now".
+		]]
+		if CollectionService:HasTag(node, PuzzleConfig.BeaconTag) then
+			local label = tostring(node:GetAttribute(PUZZLE.CluePrompt) or "BEACON")
+			local lit = node:GetAttribute(PUZZLE.BeaconLit) == true
+			return node, "LIGHT", label, false, if lit then COLOR.TextDim else COLOR.Accent
+		end
 		--[[ A door that moves you. Tagged only while the server will honour it,
 		     so the boarded one offers nothing until the boards are off — the same
 		     rule the stockpile follows, and for the same reason: a prompt the
@@ -734,6 +749,13 @@ local function handlePuzzlePress(): boolean
 		     worked it out locally would be a client that knows the answer. All
 		     that comes back is whether anything happened. ]]
 		Remotes.Event.PullFuse:FireServer(target)
+		return true
+	end
+	if state.verb == "LIGHT" then
+		--[[ Asked, not decided. The clock is the server's — when this fire goes
+		     out, and whether four of them were burning at the same instant — and
+		     neither is a number this side could be trusted with. ]]
+		Remotes.Event.LightBeacon:FireServer(target)
 		return true
 	end
 	if state.verb == "ENTER" then

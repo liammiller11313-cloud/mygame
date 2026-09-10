@@ -416,6 +416,28 @@ local EVENTS: { string } = {
 	"FusePowered", -- S->all {player, order, thrown, total}
 	"UseDoorway", -- C->S (door: Instance)
 
+	-- ── The Crossroads beacons ──────────────────────────────────────────────
+	--[[
+		Four fires that will not stay lit, and a room that opens the moment all
+		four burn together.
+
+		Thinner even than the fuses' three, because there is nothing to know.
+		No code, no order, no clue: a beacon is lit or it is not, the whole
+		difficulty is a clock and the distance between four corners, and there is
+		consequently nothing here a client could learn that would help it. What
+		goes up is which beacon was pressed; what comes back is whether it took.
+
+		`BeaconLit` goes to everybody, and on this objective that matters more
+		than it does on any of the others: four players spread across a map are
+		making a timing decision together, and the count moving is how three of
+		them know the fourth is in position. The BURN is on the props themselves
+		as attributes, so a fire is legible from across the field and to anybody
+		who joined thirty seconds ago.
+	]]
+	"LightBeacon", -- C->S (beacon: Instance)
+	"BeaconResult", -- S->asker {ok, order, lit, total, reason?, until?}
+	"BeaconLit", -- S->all {player, order, lit, total}
+
 	-- ── Joining a server whose round has already started ────────────────────
 	--[[
 		A player who presses PLAY while a wave is running does not interrupt it.
