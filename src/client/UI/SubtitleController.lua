@@ -19,6 +19,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Registry = require(Shared.Util.Registry)
@@ -38,7 +39,29 @@ local TEXT = UITheme.TextSize
 -- one part of the HUD a player checks under pressure.
 local BOTTOM_OFFSET = LAYOUT.ScreenMargin + LAYOUT.ItemSlotSize + LAYOUT.ElementGap * 3
 
+--[[
+	How wide a caption is allowed to get, and why it is not simply 720.
+
+	The line is centred, and the bottom corners of the HUD are not: survivor
+	panels sit in the left one at 214 wide and the ammo readout in the right at
+	190 plus its margin. On a desktop a 720-wide line is nowhere near either of
+	them. On a landscape phone it is — reference pixels are real pixels over the
+	scale factor and the factor floors at 0.75, so a 844-wide screen is 1125
+	reference pixels, and a centred 720 reaches into both columns by about ten
+	pixels in the one band where their heights overlap.
+
+	Ten pixels of a caption clipping the corner of the ammo count is not a
+	disaster. It is also the kind of thing that is invisible in every screenshot
+	taken on a monitor and obvious in the one taken on a phone, which is the
+	worst way for it to be found.
+
+	So the cap is the room BETWEEN the columns rather than a number: whatever is
+	left of the viewport once the wider of the two side panels is subtracted from
+	each edge. On anything desktop-shaped that arithmetic is larger than 720 and
+	nothing changes at all.
+]]
 local LINE_WIDTH = 720
+local LINE_MIN_WIDTH = 260
 local LINE_HEIGHT = 52
 
 local MIN_DWELL = 1.1
@@ -112,6 +135,23 @@ local function compose(speaker: string, text: string): string
 	)
 end
 
+--[[ Re-measured whenever a caption is drawn rather than fixed at build. A phone
+     rotates and a window resizes, and this costs two divisions on the frames
+     something is being said. ]]
+local function lineWidth(): number
+	local camera = Workspace.CurrentCamera
+	local factor = ScaleLayer.getFactor()
+	if not camera or factor <= 0 then
+		return LINE_WIDTH
+	end
+	local room = camera.ViewportSize.X / factor
+	--[[ The wider of the two columns, applied to BOTH edges, because the line is
+	     centred and cannot be kept off one side without being kept off the
+	     other. ]]
+	local side = math.max(LAYOUT.SurvivorPanelWidth, LAYOUT.AmmoPanelWidth + LAYOUT.ScreenMargin)
+	return math.max(math.min(LINE_WIDTH, room - side * 2), LINE_MIN_WIDTH)
+end
+
 local function advance()
 	local entry = table.remove(queue, 1)
 	state.current = entry
@@ -126,6 +166,8 @@ local function advance()
 	local pressure = math.min(#queue, MAX_QUEUE) / MAX_QUEUE
 	state.remaining = entry.dwell - (entry.dwell - MIN_DWELL) * pressure
 	line.Text = compose(entry.speaker, entry.text)
+	-- Sized per caption; see lineWidth for why it is not a constant.
+	line.Size = UDim2.fromOffset(lineWidth(), LINE_HEIGHT)
 	state.target = 1
 end
 
@@ -179,7 +221,7 @@ local function build()
 	line.Name = "Line"
 	line.AnchorPoint = Vector2.new(0.5, 1)
 	line.Position = UDim2.new(0.5, 0, 1, -BOTTOM_OFFSET)
-	line.Size = UDim2.fromOffset(LINE_WIDTH, LINE_HEIGHT)
+	line.Size = UDim2.fromOffset(lineWidth(), LINE_HEIGHT)
 	line.BackgroundTransparency = 1
 	line.Font = FONT.Body
 	line.TextSize = TEXT.Body
