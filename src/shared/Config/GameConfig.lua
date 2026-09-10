@@ -26,7 +26,7 @@ local GameConfig = {}
 	none. If it is stale, the log says so honestly: the code in Studio is at least
 	as new as this date, and no newer than the push that set it.
 ]]
-GameConfig.BuildStamp = "2026-09-07b-alpha02"
+GameConfig.BuildStamp = "2026-09-10-alpha09"
 
 --[[
 	What the game calls itself, on screen.
@@ -38,14 +38,24 @@ GameConfig.BuildStamp = "2026-09-07b-alpha02"
 	PLAY. Somebody who knows they are in an alpha reports a bug; somebody who
 	thinks they are in a finished game leaves.
 
-	── AND THE ROUND NUMBER EARNS ITS PLACE ────────────────────────────────────
-	The trailing number is not decoration. A tester who played the last one and
-	sees the same string in the corner has no way to tell whether the thing they
-	reported was ever looked at, and the commonest report an alpha gets is one
-	somebody already sent. Bumping it is how the menu says "this is not the build
-	you played".
+	── AND THE TESTING NUMBER IS GONE ──────────────────────────────────────────
+	Four builds carried "ALPHA TESTING 1" through "4", and that trailing number
+	was doing a real job: a tester who played the last one and saw the same
+	string had no way to tell whether the thing they reported was ever looked at.
+	It was a number for a closed room.
+
+	This build leaves the room. "0.9 ALPHA" says the two things a player walking
+	in now actually needs — this is not finished, and it is not a private test
+	they were let into. Somebody who knows they are in an alpha reports a bug;
+	somebody who thinks they are in a finished game leaves; and somebody who
+	thinks they are in a test that ended in September wonders why the servers are
+	up.
+
+	BuildStamp above keeps the build identity, which is where it belonged all
+	along: it is the developer's answer to "how new is the code in this server",
+	and it never needed to be on a menu.
 ]]
-GameConfig.Version = "0.9 ALPHA TESTING 4"
+GameConfig.Version = "0.9 ALPHA"
 
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true

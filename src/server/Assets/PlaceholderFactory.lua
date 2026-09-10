@@ -3002,7 +3002,36 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 		of anything the client can otherwise find: it is the only copy of that
 		model prepared for a hand rather than for the world.
 	]]
-	local reachable = not borrowed and supplied ~= nil and supplied:IsDescendantOf(ReplicatedStorage)
+	--[[
+		── AND A TOOL IS NOT REACHABLE EITHER ──────────────────────────────────
+		The same bug as `borrowed`, one class along, and it had the whole
+		Brickbattler's Pack in it.
+
+		Those four are supplied as TOOLS, which is what a classic Roblox gear
+		item is and exactly what `isSupplyContainer` was widened to accept —
+		everything on the server side handles them, because `cloneAsModel` lifts
+		a Tool's parts into a fresh Model before anything downstream sees it. So
+		the world model works, the grip works, and the boot report counts them as
+		real.
+
+		The shortcut below then said: it lives in ReplicatedStorage, so don't
+		publish a second copy, the client can already reach it. It can reach it.
+		It cannot READ it. Both client-side lookups — ViewmodelController's
+		asModel and WeaponPreview's findTemplate — resolve a Model or a Folder of
+		variants and return nil for anything else, because until these four
+		arrived nothing else was ever anything else.
+
+		The visible half is the shop, which is the reader this whole publishing
+		branch exists for: four weapons somebody paid Robux for, with an empty
+		rotating preview and no warning anywhere. So `reachable` means what it
+		always meant to mean, which is "the client can find AND use this", and a
+		Tool gets its prepared Model published like anything else the client
+		could not have read.
+	]]
+	local reachable = not borrowed
+		and supplied ~= nil
+		and supplied:IsA("Model")
+		and supplied:IsDescendantOf(ReplicatedStorage)
 	cache[definition.id] = park(category, definition.id, prepared, not reachable)
 	return prepared
 end
