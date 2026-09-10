@@ -199,6 +199,123 @@ end
      map. ]]
 local READY_TIMEOUT = MapConfig.serverHoldSeconds()
 
+--[[ When the current map went Ready, so every line can say how long AFTER the
+     announcement it happened. Roblox stamps output lines with a wall clock and
+     this log is about tenths of a second, which a wall clock does not resolve —
+     and the whole question is one of ORDER: did the body get placed before the
+     client had the floor under it, or after. Zero until the first map, which
+     reads as "0.0s" in the lobby and is the truth there. ]]
+local mapReadyAt = 0
+
+local function sinceMapReady(): number
+	if mapReadyAt == 0 then
+		return 0
+	end
+	return os.clock() - mapReadyAt
+end
+
+--[[
+	── THE HANDSHAKE, NARRATED ─────────────────────────────────────────────────
+
+	Three fixes have been aimed at the spawn fall and the last one cannot be
+	proved from this side: it needs a real client on a real connection, and the
+	only thing that survives that trip is the log. So the handshake says what it
+	did, once per player per map, and answers in the output the four things a
+	fourth blind guess would have to guess at:
+
+	  · how long the client waited, and how it stopped waiting
+	  · how much of the map it actually had when it stopped
+	  · whether the body was HELD at all, or waved straight through
+	  · which of the two paths — the answer or the timeout — let it go
+
+	The third is the one worth the whole exercise. The last bug was not a hold
+	that ended early; it was a hold that never engaged, and from the outside
+	those two look the same.
+
+	Every line is one grep away: "[MapHandshake]". Gated on
+	MapConfig.Handshake.Trace, which is the single switch to turn all of it off
+	once a live round reads clean. Nothing branches on it except the printing.
+]]
+local function trace(format: string, ...): ()
+	if not MapConfig.Handshake.Trace then
+		return
+	end
+	print(string.format("[MapHandshake +%.2fs] ", sinceMapReady()) .. string.format(format, ...))
+end
+
+--[[ A client can fire MapReady as fast as it likes, and a log that can be
+     buried is a log that answers nothing on the round it was added for. Legit
+     confirmations are bounded another way — one per player per map, see
+     markClientReady — so this throttle only ever covers the lines a client
+     could otherwise repeat without limit. ]]
+local TRACE_INTERVAL = 1
+local lastTrace: { [Player]: number } = {}
+
+local function traceThrottled(player: Player, format: string, ...): ()
+	if not MapConfig.Handshake.Trace then
+		return
+	end
+	local now = os.clock()
+	if now - (lastTrace[player] or -math.huge) < TRACE_INTERVAL then
+		return
+	end
+	lastTrace[player] = now
+	trace(format, ...)
+end
+
+--[[
+	Numbers and strings that came off the wire, made safe to print.
+
+	Not paranoia for its own sake: string.format("%d", 5.5) THROWS, and this runs
+	inside the MapReady handler, so a client reporting a fraction would take down
+	its OWN confirmation — a diagnostic that causes the failure it is watching
+	for. Floored and bounded here, infinities and NaN folded into the same -1 a
+	missing field gets, and strings cut to a length that cannot flood a line.
+]]
+local function traceCount(value: any): number
+	local number = tonumber(value)
+	if not number or number ~= number then
+		return -1
+	end
+	return math.floor(math.clamp(number, -1, 1_000_000))
+end
+
+local function traceSeconds(value: any): number
+	local number = tonumber(value)
+	if not number or number ~= number then
+		return -1
+	end
+	return math.clamp(number, -1, 1_000)
+end
+
+local function traceText(value: any): string
+	return string.sub(tostring(value), 1, 24)
+end
+
+--[[ What a client said about its own wait, printed beside what the server
+     thought was happening. The report is shaped by the CLIENT — see
+     init.client.lua's MapReport — so every field goes through the guards above
+     rather than being trusted. A client that sends nothing, or sends nonsense,
+     still confirms its map; it just says less about how. ]]
+local function traceConfirm(player: Player, mapId: string, report: any): ()
+	if not MapConfig.Handshake.Trace then
+		return
+	end
+	if typeof(report) ~= "table" then
+		trace('%s confirmed "%s" with no report', player.Name, traceText(mapId))
+		return
+	end
+	trace(
+		'%s confirmed "%s": %s after %.2fs, %d of %d parts',
+		player.Name,
+		traceText(mapId),
+		traceText(report.reason),
+		traceSeconds(report.waited),
+		traceCount(report.have),
+		traceCount(report.expected)
+	)
+end
+
 --[[
 	How long the SERVER keeps hold of a freshly spawned body before handing it
 	back to the client that plays it.
@@ -374,6 +491,7 @@ function SurvivorService:_destroyRecord(player: Player)
 	record.trove:destroy()
 	records[player] = nil
 	clientMap[player] = nil
+	lastTrace[player] = nil
 
 	local index = table.find(awaitingRescue, player)
 	if index then
@@ -878,30 +996,42 @@ end
 ]]
 function SurvivorService:_holdUntilReady(player: Player, record)
 	if clientHasMap(player) then
+		--[[ THE LINE TO LOOK FOR. Every version of this bug ends with a body
+		     that was never held, and this is the only place that decides that.
+		     Seeing it for a player who then falls through the floor means the
+		     confirmation came in before the map did — which is the failure the
+		     part count was added to close, arriving anyway. ]]
+		trace('%s spawned with "%s" already confirmed — not held', player.Name, currentMapId())
 		return
 	end
 	local root = record.root
 	if not root then
+		trace("%s spawned with no root to hold", player.Name)
 		return
 	end
 
 	root.Anchored = true
 	root.AssemblyLinearVelocity = Vector3.zero
 	root.AssemblyAngularVelocity = Vector3.zero
+	trace('%s held at spawn, waiting for "%s"', player.Name, currentMapId())
 
+	local heldAt = os.clock()
 	local released = false
-	local function release()
+	local function release(via: string?)
 		if released then
 			return
 		end
 		released = true
+		local reason = via or "unknown"
 		--[[ Only ever OUR anchor. Between the hold and the release the player can
 		     have been caught on a ledge, which anchors the root for its own
 		     reasons and owns the unanchoring — releasing that here would drop
 		     somebody mid-hang. ]]
 		if record.state == STATE.LedgeHanging then
+			trace("%s released via %s while ledge-hanging — that anchor is not ours", player.Name, reason)
 			return
 		end
+		trace("%s released via %s after %.2fs held", player.Name, reason, os.clock() - heldAt)
 		if root.Parent and root.Anchored then
 			root.Anchored = false
 			root.AssemblyLinearVelocity = Vector3.zero
@@ -936,7 +1066,7 @@ function SurvivorService:_holdUntilReady(player: Player, record)
 				)
 			)
 		end
-		release()
+		release("timeout")
 	end))
 end
 
@@ -958,7 +1088,7 @@ end
 	release a body onto a map that client has not received — which is the whole
 	failure this exists to prevent, arriving by a slower route.
 ]]
-function SurvivorService:markClientReady(player: Player, mapId: string?)
+function SurvivorService:markClientReady(player: Player, mapId: string?, report: any)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return
 	end
@@ -968,12 +1098,26 @@ function SurvivorService:markClientReady(player: Player, mapId: string?)
 	     is, this is the generation it is about. ]]
 	local id = if typeof(mapId) == "string" then mapId else currentMapId()
 	if id ~= currentMapId() then
+		traceThrottled(
+			player,
+			'%s confirmed "%s" but the round is on "%s" — ignored',
+			player.Name,
+			traceText(id),
+			currentMapId()
+		)
 		return
+	end
+	--[[ Traced only when it is NEWS. A repeat for a map this client has already
+	     confirmed says nothing the first line did not, and bounding it here is
+	     what lets the line itself go unthrottled: at most one per player per
+	     map, however hard the remote is pushed. ]]
+	if clientMap[player] ~= currentMapToken() then
+		traceConfirm(player, id, report)
 	end
 	clientMap[player] = currentMapToken()
 	local record = records[player]
 	if record and typeof(record.releaseHold) == "function" then
-		record.releaseHold()
+		record.releaseHold("confirm")
 		record.releaseHold = nil
 	end
 end
@@ -2692,9 +2836,12 @@ function SurvivorService:start()
 	     clone is parented on the SERVER; this is a client saying the model has
 	     actually reached it, which is the only version that makes putting a body
 	     on that map safe. ]]
-	serviceTrove:connect(Remotes.Event.MapReady.OnServerEvent, function(player: Player, mapId: any)
-		SurvivorService:markClientReady(player, if typeof(mapId) == "string" then mapId else nil)
-	end)
+	serviceTrove:connect(
+		Remotes.Event.MapReady.OnServerEvent,
+		function(player: Player, mapId: any, report: any)
+			SurvivorService:markClientReady(player, if typeof(mapId) == "string" then mapId else nil, report)
+		end
+	)
 
 	--[[ Every swap invalidates every confirmation. Watched as a PHASE rather
 	     than as the map id, because the id does not change when a team replays
@@ -2703,6 +2850,11 @@ function SurvivorService:start()
 		local phase = Workspace:GetAttribute(Attributes.Game.MapPhase)
 		if phase == "Unload" or phase == "Load" then
 			mapGeneration += 1
+		elseif phase == "Ready" then
+			--[[ The zero every handshake line is measured from. Set here rather
+			     than in MapService because this is the side that has to read it,
+			     and "Ready" is the same edge the clients were told about. ]]
+			mapReadyAt = os.clock()
 		end
 	end)
 

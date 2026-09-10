@@ -43,6 +43,21 @@ MapConfig.LiveFolder = "CurrentMap" -- Workspace.CurrentMap
 MapConfig.Handshake = table.freeze({
 	ClientWait = 20,
 	ServerGrace = 4,
+	--[[
+		Whether the handshake narrates itself into the output.
+
+		On because three fixes have been aimed at this and the last one cannot be
+		proved from here: it needs a real client on a real connection, and the
+		only thing that survives that trip is the log. Each side prints one line
+		per player per map — how long the client waited, how many parts it had
+		against how many it should have, whether the body was held at all, and
+		which of the two paths let it go.
+
+		Turn OFF once a live round reads clean. Nothing branches on this except
+		the printing, so flipping it changes no behaviour, only how much the
+		output says.
+	]]
+	Trace = true,
 })
 
 function MapConfig.serverHoldSeconds(): number

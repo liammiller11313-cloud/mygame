@@ -375,6 +375,26 @@ local function localParts(map: Instance): number
 end
 
 --[[
+	What a confirmation says about ITSELF, alongside the map it is about.
+
+	Three fixes have been aimed at this handshake and the last one cannot be
+	proved from here — it needs a real client on a real connection, and the only
+	thing that survives that trip is the log. So every confirmation carries the
+	four numbers that separate "the map arrived and I said so" from "I gave up
+	and said so anyway", which look identical on the server without them.
+
+	Built only when MapConfig.Handshake.Trace is on, and nil when it is off. The
+	server reads it as optional and holds nothing against a client that sends
+	nothing.
+]]
+type MapReport = {
+	reason: string, -- "counted" | "stalled" | "timeout"
+	waited: number, -- seconds between the map being announced and this being sent
+	expected: number, -- parts the server says the map has, 0 if it never published
+	have: number, -- parts this machine could actually see when it stopped waiting
+}
+
+--[[
 	── WHAT THIS USED TO CONFIRM, AND WHY IT WAS THE BUG ───────────────────────
 
 	It waited for `CurrentMap` to contain a child named for the map, and then
@@ -404,8 +424,14 @@ local function confirmMap(mapId: string)
 	mapWatch += 1
 	local ticket = mapWatch
 	task.spawn(function()
-		local deadline = os.clock() + MAP_WAIT_TIMEOUT
+		local startedAt = os.clock()
+		local deadline = startedAt + MAP_WAIT_TIMEOUT
 		local seen, stable = -1, 0
+		--[[ Filled in AS the wait goes rather than reconstructed after it, so the
+		     numbers reported are the ones the loop actually decided on. The
+		     pessimistic reason is the starting one: a wait that falls out of the
+		     bottom without deciding anything timed out, by definition. ]]
+		local reason, expected, have = "timeout", 0, 0
 		while os.clock() < deadline do
 			--[[ Superseded. Another map started loading while this one was still
 			     being waited for, and confirming the old id now would be worse
@@ -417,9 +443,10 @@ local function confirmMap(mapId: string)
 			local folder = Workspace:FindFirstChild(MapConfig.LiveFolder)
 			local map = folder and folder:FindFirstChild(mapId)
 			if map then
-				local expected = tonumber(Workspace:GetAttribute(Attributes.Game.MapParts)) or 0
-				local have = localParts(map)
+				expected = tonumber(Workspace:GetAttribute(Attributes.Game.MapParts)) or 0
+				have = localParts(map)
 				if expected > 0 and have >= expected then
+					reason = "counted"
 					break
 				end
 				--[[ Still arriving, or arrived and short of a target that moved.
@@ -428,6 +455,7 @@ local function confirmMap(mapId: string)
 				if have > 0 and have == seen then
 					stable += 1
 					if stable >= MAP_STABLE_POLLS then
+						reason = "stalled"
 						break
 					end
 				else
@@ -436,9 +464,34 @@ local function confirmMap(mapId: string)
 			end
 			task.wait(MAP_POLL)
 		end
-		if ticket == mapWatch then
-			Remotes.Event.MapReady:FireServer(mapId)
+		if ticket ~= mapWatch then
+			return
 		end
+		local waited = os.clock() - startedAt
+		local report: MapReport? = nil
+		if MapConfig.Handshake.Trace then
+			report = {
+				reason = reason,
+				waited = waited,
+				expected = expected,
+				have = have,
+			}
+			--[[ Printed on the client as well as sent, because the server's copy
+			     is only visible to whoever owns the game. A tester who is not
+			     the owner can read this one out of their own F9 and it says the
+			     same thing. ]]
+			print(
+				string.format(
+					"[MapHandshake] client %s: %s after %.2fs (%d/%d parts)",
+					mapId,
+					reason,
+					waited,
+					have,
+					expected
+				)
+			)
+		end
+		Remotes.Event.MapReady:FireServer(mapId, report)
 	end)
 end
 

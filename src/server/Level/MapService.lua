@@ -440,6 +440,14 @@ function MapService:load(mapId: string): boolean
 	Workspace:SetAttribute(Attributes.Game.MapPhase, "Ready")
 	Remotes.Event.MapLoading:FireAllClients({ mapId = mapId, phase = "Ready" })
 
+	--[[ The first line of the handshake's story, and the one every later line is
+	     measured against: this is the moment the clients were told, and this is
+	     the number they are trying to reach. Same tag as the hold's own lines in
+	     SurvivorService, so one grep gets the whole round. ]]
+	if MapConfig.Handshake.Trace then
+		print(string.format('[MapHandshake] server published "%s" with %d parts', mapId, partCount))
+	end
+
 	--[[ Everything downstream rebuilds from tags rather than being told what
 	     changed: the flow spline, the spawn nodes, the item spots and the ammo
 	     crates all rediscover themselves. That is what lets a hand-built map drop

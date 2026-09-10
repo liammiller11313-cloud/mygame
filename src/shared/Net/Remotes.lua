@@ -274,7 +274,7 @@ local EVENTS: { string } = {
 		Carries the id so a slow acknowledgement for the map before last cannot be
 		mistaken for one about the map now. See SurvivorService's hold.
 	]]
-	"MapReady", -- C->S (mapId: string)
+	"MapReady", -- C->S (mapId: string, report: table?) — report only when Handshake.Trace
 	"AmmoCrateUsed", -- {player, crate: Instance, index, respawnAt: number, given: number}
 
 	-- ── Requisitions ────────────────────────────────────────────────────────
