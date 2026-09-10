@@ -679,6 +679,10 @@ end
 ]]
 local FUSE_DEAD = Color3.fromRGB(196, 186, 170)
 local FUSE_LIVE = Color3.fromRGB(126, 232, 160)
+--[[ What the number turns once it has a lit panel behind it. Near-black rather
+     than the dead grey: this is ink on a light surface now, and grey on green
+     is the one combination that would be less legible than before. ]]
+local FUSE_PLATE = Color3.fromRGB(18, 26, 20)
 
 local function markFuse(model: Model, set: any, order: number, live: boolean)
 	local surface = surfaceOf(model, "number")
@@ -703,6 +707,30 @@ local function markFuse(model: Model, set: any, order: number, live: boolean)
 		gui.AlwaysOnTop = false
 		gui.MaxDistance = 90
 
+		--[[
+			A plate behind the number, and the reason it exists.
+
+			The optional indicator part is the good version of "this box is live",
+			and a fuse box that is one mesh grouped into a model has nowhere to put
+			one — which is the commonest way a designer builds a prop. On those, a
+			digit changing from grey to green is the entire state change, and a
+			digit is a few strokes of colour at twenty studs in a corridor with no
+			landmarks.
+
+			So the panel lights up as well. Invisible while the box is dead, so a
+			cold box is a number printed on a mesh and nothing else; a dark plate
+			with the live colour on it once it is thrown, which is a shape rather
+			than a glyph and reads from the far end of a hall. Inside the
+			SurfaceGui, so it costs the map no parts and works on a prop built any
+			way at all.
+		]]
+		local plate = Instance.new("Frame")
+		plate.Name = "Plate"
+		plate.Size = UDim2.fromScale(1, 1)
+		plate.BorderSizePixel = 0
+		plate.BackgroundTransparency = 1
+		plate.Parent = gui
+
 		local label = Instance.new("TextLabel")
 		label.Name = "Number"
 		label.Size = UDim2.fromScale(1, 1)
@@ -711,6 +739,11 @@ local function markFuse(model: Model, set: any, order: number, live: boolean)
 		label.TextXAlignment = Enum.TextXAlignment.Center
 		label.TextYAlignment = Enum.TextYAlignment.Center
 		label.RichText = false
+		--[[ Above the plate. Both are children of the same SurfaceGui and Roblox
+		     draws siblings in tree order, so this would be true anyway — said
+		     explicitly because "anyway" is the kind of thing that stops being
+		     true when somebody reorders two lines. ]]
+		label.ZIndex = 2
 		label.Parent = gui
 		gui.Parent = surface
 	end
@@ -721,7 +754,16 @@ local function markFuse(model: Model, set: any, order: number, live: boolean)
 	if label then
 		label.TextSize = set.textSize
 		label.Text = tostring(order)
-		label.TextColor3 = colour
+		--[[ Dark on a lit plate, bright on nothing. A green digit on a green
+		     panel is a digit nobody can read, and the number is still the thing
+		     that says WHICH box this is after it has been thrown. ]]
+		label.TextColor3 = if live then FUSE_PLATE else colour
+	end
+
+	local plate = gui:FindFirstChild("Plate") :: Frame?
+	if plate then
+		plate.BackgroundColor3 = colour
+		plate.BackgroundTransparency = if live then 0.25 else 1
 	end
 
 	--[[
