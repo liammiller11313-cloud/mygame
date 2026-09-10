@@ -490,13 +490,30 @@ function Spitter.onSpawn(model: Model, brain: any)
 	Support.resumeBrain(brain)
 end
 
+--[[
+	The pools, ticked whether or not a Spitter is alive to tick them.
+
+	This used to run at the top of onUpdate, ahead of that function's own
+	`isAlive` return, with a comment explaining that pools outlive the Spitter
+	that made them. The comment was right about the intent and wrong about the
+	mechanism: InfectedService skips every record marked dead, so onUpdate is not
+	called for a dead Spitter, so the pools of the last one to die simply stopped
+	burning people. They kept their glow — the Debris backstop in placePool still
+	took the part away on time — which makes the symptom worse than litter would
+	have been: a hazard that looks exactly as dangerous as it did a second
+	earlier, and is not.
+
+	`onWorldStep` is called once a frame per special KIND, alive or not, which is
+	the shape this always needed. The once-per-frame guard inside sweepPools is
+	kept: it is now guaranteed by the caller rather than by luck, and a guarantee
+	somebody can read at both ends is worth two lines.
+]]
+function Spitter.onWorldStep(now: number)
+	sweepPools(now)
+end
+
 function Spitter.onUpdate(model: Model, brain: any, dt: number)
 	local now = os.clock()
-	--[[ Pools first and unconditionally, before any early return. They outlive
-	     the Spitter that made them, so a body that has just died or been
-	     staggered must not take its acid with it. ]]
-	sweepPools(now)
-
 	local root = RigUtil.getRoot(model)
 	if not root or not RigUtil.isAlive(model) then
 		return

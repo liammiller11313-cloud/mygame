@@ -26,7 +26,9 @@
 	counter never depends on the Tongue agreeing to let go.
 ]]
 
+local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Enums = require(Shared.Enums)
@@ -76,6 +78,65 @@ local RASP_INTERVAL = 3.5
      tells a teammate which way to turn, and 1.6s is close enough together to
      track a Tongue that is walking backwards with its meal. ]]
 local RATTLE_INTERVAL = 1.6
+
+--[[
+	── THE CLOUD ───────────────────────────────────────────────────────────────
+	What it leaves when you kill it, and the reason the range matters.
+
+	Everything above is about a creature that never comes to you: it grabs from
+	sixty studs, and the whole fight is finding it before it finds somebody.
+	Which left one thing unsaid — that killing it up close should COST something.
+	Without that, the answer to a Tongue is to walk at it, and a special whose
+	counter is "approach it" is not a ranged threat, it is a slow common.
+
+	So it ruptures. Whoever is standing in the cloud loses the far half of the
+	room for a few seconds, and the horde does not stop while they cannot see.
+	The Boomer already owns "you are covered and they are coming"; this is the
+	quieter version — nothing is chasing you because of it, you just cannot see
+	what already was.
+
+	── WHAT IT DELIBERATELY DOES NOT DO ────────────────────────────────────────
+	It does not block bullets, raycasts or line of sight. `CanQuery = false` is
+	load-bearing: hasLineOfSight is what every grab, every burst and every
+	targeting decision in this game is played against, and a cloud that broke
+	those would silently rewrite the rules of four other creatures the frame it
+	appeared. The smoke is in the survivor's EYES, not in the world's geometry.
+]]
+local SMOKE_SECONDS = 7
+local SMOKE_RADIUS = 17
+--[[ How far above and below the burst a body is still in it. A ceiling's worth
+     up and a little down, the same asymmetric band the acid pools use and for
+     the same reason: somebody on the floor above is not standing in this. ]]
+local SMOKE_ABOVE = 9
+local SMOKE_BELOW = -4
+--[[ How often the cloud looks to see who is in it. Four times a second is
+     often enough that walking in is immediate and cheap enough to run with
+     nothing alive to pay for it. ]]
+local SMOKE_TICK = 0.25
+--[[
+	How long each refresh is worth, and the one number here with arithmetic
+	behind it rather than feel.
+
+	It has to exceed the tick PLUS the client's fade, or the wash pulses. The
+	client draws its strength as (remaining / fade) clamped to one, so a refresh
+	worth less than tick + fade leaves the ratio dipping under one between two
+	ticks — which at four ticks a second is a strobe rather than a cloud.
+
+	0.9 against a 0.25 tick and a 0.5 fade keeps the remaining time between 0.65
+	and 0.9 for anybody standing in it: comfortably over the fade, so the screen
+	sits still. Step out and the last refresh runs down, which puts the room back
+	about nine tenths of a second later.
+]]
+local SMOKE_EFFECT = 0.9
+--[[ Emission stops before the cloud does, so it thins out instead of vanishing
+     between two frames while somebody is looking at it. ]]
+local SMOKE_SETTLE = 2.2
+--[[ A ceiling across every Tongue on the server, the same shape the acid pools
+     have. Four dead Tongues in one room is a wall of particles and a frame
+     budget nobody agreed to spend. ]]
+local MAX_CLOUDS = 4
+
+local SMOKE_COLOR = Color3.fromRGB(96, 104, 96)
 
 -- The tongue itself. Wet red, thick enough to read across a street.
 local LINE_COLOR = Color3.fromRGB(150, 41, 44)
@@ -516,7 +577,173 @@ local function stepHold(model: Model, brain: any, state: State, root: BasePart, 
 	end
 end
 
+-- ── the cloud ───────────────────────────────────────────────────────────────
+
+type Cloud = {
+	part: BasePart,
+	emitter: ParticleEmitter,
+	expiresAt: number,
+	stopEmitAt: number,
+	nextTick: number,
+}
+
+--[[ Shared across every Tongue on the server, because the clouds are, and
+     because they have to be swept by something that is not a living creature.
+     See Tongue.onWorldStep. ]]
+local clouds: { Cloud } = {}
+
+--[[
+	Ruptures, where it died.
+
+	FIFO past the ceiling and a Debris backstop on the part, both copied from the
+	acid pools and both for the same reason: if this module ever stops ticking —
+	the service errors, the round ends mid-burst — a permanent cloud in the
+	middle of a map is far worse than one that clears early.
+]]
+local function burst(root: BasePart)
+	while #clouds >= MAX_CLOUDS do
+		local oldest = table.remove(clouds, 1)
+		if oldest then
+			oldest.part:Destroy()
+		end
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "FL_TongueSmoke"
+	part.Size = Vector3.new(1, 1, 1)
+	part.CFrame = CFrame.new(root.Position + Vector3.new(0, 2, 0))
+	part.Anchored = true
+	part.CanCollide = false
+	--[[ The load-bearing line. hasLineOfSight is what every grab, burst and
+	     targeting decision in this game is played against; a cloud that answered
+	     a raycast would rewrite the rules of four other creatures. ]]
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Transparency = 1
+	part.Parent = Workspace
+
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Name = "FL_Smoke"
+	emitter.Color = ColorSequence.new(SMOKE_COLOR)
+	--[[ Grows as it drifts, the way a released gas does, and it is also what
+	     makes a cloud with a 17-stud reach look like it has one — a puff that
+	     stayed small would read as decoration on a corpse rather than as
+	     something with an edge you can step out of. ]]
+	emitter.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 6),
+		NumberSequenceKeypoint.new(1, 22),
+	})
+	--[[ In at both ends. A particle that appears at full opacity pops, and one
+	     that vanishes at full opacity leaves a hole in the cloud. ]]
+	emitter.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.25, 0.45),
+		NumberSequenceKeypoint.new(0.75, 0.5),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	emitter.Lifetime = NumberRange.new(2.4, 3.4)
+	emitter.Rate = 26
+	emitter.Speed = NumberRange.new(1.5, 4)
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Rotation = NumberRange.new(0, 360)
+	emitter.RotSpeed = NumberRange.new(-18, 18)
+	--[[ It sinks, slowly. Smoke from a body on the ground pools at knee height
+	     before it lifts, and a cloud that climbed away immediately would be one
+	     nobody is ever standing in. ]]
+	emitter.Acceleration = Vector3.new(0, -0.6, 0)
+	emitter.LightEmission = 0
+	emitter.LightInfluence = 1
+	emitter.Parent = part
+
+	Debris:AddItem(part, SMOKE_SECONDS + 1)
+
+	local now = os.clock()
+	table.insert(clouds, {
+		part = part,
+		emitter = emitter,
+		expiresAt = now + SMOKE_SECONDS,
+		stopEmitAt = now + SMOKE_SECONDS - SMOKE_SETTLE,
+		nextTick = now,
+	})
+end
+
+--[[
+	One tick of every live cloud.
+
+	Guarded to run once a frame no matter what calls it, the same way the acid
+	pools are: the clouds are shared, so ticking them per creature would refresh
+	the effect several times over the moment a second Tongue existed.
+]]
+local lastSweepAt = 0
+
+local function sweepClouds(now: number)
+	if now <= lastSweepAt then
+		return
+	end
+	lastSweepAt = now
+	if #clouds == 0 then
+		return
+	end
+
+	local survivors: any = Registry.find("SurvivorService")
+	local alive = if survivors and typeof(survivors.getAliveSurvivors) == "function"
+		then survivors:getAliveSurvivors()
+		else {}
+
+	for index = #clouds, 1, -1 do
+		local cloud = clouds[index]
+		if not cloud.part.Parent or now >= cloud.expiresAt then
+			table.remove(clouds, index)
+			cloud.part:Destroy()
+			continue
+		end
+
+		--[[ Stops emitting before it stops existing, so the cloud thins out
+		     instead of disappearing between two frames while somebody is looking
+		     straight at it. ]]
+		if cloud.emitter.Enabled and now >= cloud.stopEmitAt then
+			cloud.emitter.Enabled = false
+		end
+
+		if now < cloud.nextTick then
+			continue
+		end
+		cloud.nextTick = now + SMOKE_TICK
+
+		if not survivors or typeof(survivors.applySmoke) ~= "function" then
+			continue
+		end
+
+		local centre = cloud.part.Position
+		for _, player in alive do
+			local _, victimRoot = Support.rootOf(player)
+			if not victimRoot then
+				continue
+			end
+			--[[ The same asymmetric band the acid uses. A survivor on the floor
+			     above a burst is not standing in it, and neither is one in the
+			     stairwell below. ]]
+			local delta = victimRoot.Position - centre
+			if delta.Y < SMOKE_BELOW or delta.Y > SMOKE_ABOVE then
+				continue
+			end
+			if Vector3.new(delta.X, 0, delta.Z).Magnitude > SMOKE_RADIUS then
+				continue
+			end
+			pcall(survivors.applySmoke, survivors, player, SMOKE_EFFECT)
+		end
+	end
+end
+
 local Tongue = {}
+
+--[[ The clouds outlive the creature that made them, so they are swept from the
+     hook that runs whether or not a Tongue is alive rather than from onUpdate,
+     which InfectedService does not call for a dead body. The acid pools learned
+     this the hard way; see InfectedService._step. ]]
+function Tongue.onWorldStep(now: number)
+	sweepClouds(now)
+end
 
 function Tongue.onSpawn(model: Model, brain: any)
 	local state = ensure(model)
@@ -585,6 +812,17 @@ function Tongue.onDeath(model: Model, brain: any, _ctx: any)
 	if state then
 		release(model, brain, state, os.clock(), 0)
 	end
+
+	--[[ And it ruptures. AFTER the release, deliberately: the cloud is the thing
+	     the team has to walk out of, and putting it up before the victim is free
+	     would mean the one person who cannot move yet is the one standing in
+	     it. ]]
+	local root = RigUtil.getRoot(model)
+	if root then
+		burst(root)
+		Support.playSound("TongueBurst", root)
+	end
+
 	Support.resumeBrain(brain)
 	Support.unclaim(model)
 	states[model] = nil

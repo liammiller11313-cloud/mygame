@@ -1542,6 +1542,44 @@ function InfectedService:_step()
 	local now = os.clock()
 	self:_refreshSnapshot(now)
 
+	--[[
+		What a special left BEHIND, which nothing else was ticking.
+
+		Every other hook in this file is about a body: onSpawn, onUpdate, onDeath
+		all take a model, and `_tick` returns on the first line when that model is
+		dead. Which is correct for a creature and wrong for the things two of
+		these creatures leave in the world and mean to outlive them — a Spitter's
+		acid, a Tongue's smoke.
+
+		── THE BUG THIS FIXES ──────────────────────────────────────────────────
+		Spitter.onUpdate swept its pools before its own `isAlive` return, with a
+		comment saying they "outlive the Spitter that made them, so a body that
+		has just died must not take its acid with it". That guarded against the
+		module's own early return and not against this file's: the scheduler skips
+		every record marked dead and `_tick` refuses one on its first line, so
+		onUpdate is never called for a dead Spitter at all.
+
+		So the moment the LAST Spitter died, every pool it had laid froze. It kept
+		its glow and stopped burning anybody: acid you can stand in, for as long
+		as it had left. The part does still go — placePool hands it to Debris as a
+		backstop precisely because this module might stop ticking — so the
+		symptom is not litter, it is a hazard that looks exactly as dangerous as
+		it did a second earlier and is not. The one case the module said it cared
+		about was the one case that did not work.
+
+		This hook is per KIND rather than per body, runs whether or not any of
+		that kind is alive, and is why it sits above both record loops: a pool
+		burning somebody is not something to spend the horde's frame budget on.
+	]]
+	for kind, special in self._specials do
+		if special and typeof(special.onWorldStep) == "function" then
+			local ok, err = pcall(special.onWorldStep, now)
+			if not ok then
+				warnOnce("world:" .. kind, string.format("%s.onWorldStep failed: %s", kind, tostring(err)))
+			end
+		end
+	end
+
 	-- Specials and bosses first and unconditionally. There are at most four of
 	-- them and their modules drive pounces, charges and tongues — physics that
 	-- must not be sampled at 4 Hz.

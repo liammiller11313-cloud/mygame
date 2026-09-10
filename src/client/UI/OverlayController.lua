@@ -84,6 +84,11 @@ local EFFECT = table.freeze({
 	Bile = "Bile",
 	Adrenaline = "Adrenaline",
 	Blood = "Blood",
+	--[[ A dead Tongue's cloud, topped up four times a second for as long as the
+	     player is standing in it — so unlike the other three this one arrives as
+	     a stream of short effects rather than as one long one, and clears on its
+	     own when they walk out. ]]
+	Smoke = "Smoke",
 })
 
 -- How fast the full-frame values chase their targets. Fast enough to feel like
@@ -99,6 +104,26 @@ local CARD_HOLD = 2.6
 local CARD_SLIDE = 26 -- pixels the card title drifts as it fades in
 
 local BILE_BLOBS = 9
+
+--[[
+	How a lungful of smoke reads, and why it is a GRADE rather than a layer.
+
+	Bile is a substance ON the lens: a green wash and nine blobs, drawn over
+	everything, and the player is meant to want it off. Smoke is not on you, it
+	is between you and the room — so it lifts the blacks, pulls the colour out
+	and washes everything a flat grey, which is what air full of particulate
+	actually does to a view. Nothing is stuck to the camera and nothing needs
+	wiping; the far half of the room has simply stopped being readable.
+
+	Kept well short of bile's strength on purpose. Bile is a punishment you
+	survive; this is a few seconds of "back out of it", and a screen you cannot
+	fight through would make the answer to a dead Tongue "stand still until it
+	clears", which is the worst thing a player can do in a horde.
+]]
+local SMOKE_FADE = 0.5
+local SMOKE_TINT = Color3.fromRGB(188, 194, 190)
+local SMOKE_LIFT = 0.05
+local SMOKE_DRAIN = 0.4
 
 --[[
 	Standing in black and white.
@@ -194,6 +219,11 @@ local state = {
 
 	bileUntil = 0,
 	bileDuration = SCREEN_BLOOD.BoomerBileFadeTime,
+	--[[ Its own pair rather than borrowing bile's. They can overlap — a Boomer
+	     and a Tongue dying in the same doorway is a normal Tuesday — and one
+	     timer for two effects would have the shorter one cancel the longer. ]]
+	smokeUntil = 0,
+	smokeDuration = SMOKE_FADE,
 	adrenalineUntil = 0,
 	adrenalineDuration = 1,
 
@@ -661,6 +691,18 @@ local function updateGrade(dt: number, now: number)
 		saturation -= 0.25 * bile
 	end
 
+	--[[ Under the adrenaline read below rather than over it, so a shot survivor
+	     running through a cloud still gets the warm sharpening the item promises
+	     — half of what adrenaline is for is being able to see. ]]
+	local smoke = if now < state.smokeUntil
+		then math.clamp((state.smokeUntil - now) / state.smokeDuration, 0, 1)
+		else 0
+	if smoke > 0 then
+		tint = tint:Lerp(SMOKE_TINT, 0.5 * smoke)
+		saturation -= SMOKE_DRAIN * smoke
+		brightness += SMOKE_LIFT * smoke
+	end
+
 	local adrenaline = if now < state.adrenalineUntil
 		then math.clamp((state.adrenalineUntil - now) / state.adrenalineDuration, 0, 1)
 		else 0
@@ -941,6 +983,14 @@ local function onScreenEffect(payload: any)
 	elseif effect == EFFECT.Adrenaline then
 		state.adrenalineDuration = duration or GameConfig.Survivor.AdrenalineDuration
 		state.adrenalineUntil = os.clock() + state.adrenalineDuration
+	elseif effect == EFFECT.Smoke then
+		--[[ Extended rather than replaced, and the fade is a constant rather than
+		     the payload's duration. Each refresh is worth under half a second, so
+		     driving the fade off it would make the wash flicker at the tick rate;
+		     what the payload decides is how long it stays UP, and SMOKE_FADE
+		     decides how long it takes to go once the refreshes stop. ]]
+		state.smokeDuration = SMOKE_FADE
+		state.smokeUntil = math.max(state.smokeUntil, os.clock() + (duration or SMOKE_FADE))
 	elseif effect == EFFECT.Blood then
 		spawnDroplets(SCREEN_BLOOD.DropletsPerHit)
 	end

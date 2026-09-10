@@ -727,6 +727,13 @@ AudioConfig.Infected = {
 	     can answer, and hearing it IS the counter. ]]
 	TongueIdle = sound(ID.CreatureGrowl, 0.7, 0.82, 0.9, 420, 6),
 	TongueGrab = sound(ID.CreatureGrowl, 0.95, 0.74, 0.82, 460, 8),
+	--[[ It ruptures. The Boomer's burst is this same bellow pitched UP into a wet
+	     pop; dropped to two thirds it is a lungful of gas leaving something that
+	     had been holding it, which is the other half of what makes a player
+	     hesitate before shooting one at arm's length. Carries as far as the
+	     Boomer's for the same reason — everybody near it needs to know the cloud
+	     is there before they walk into it. ]]
+	TongueBurst = sound(ID.MonsterBellow, 0.95, 0.62, 0.72, 420, 9),
 
 	BoomerIdle = sound(ID.ZombieGroan, 0.75, 0.7, 0.78, 300, 6),
 	BoomerBurst = sound(ID.MonsterBellow, 1.0, 1.3, 1.42, 420, 9),

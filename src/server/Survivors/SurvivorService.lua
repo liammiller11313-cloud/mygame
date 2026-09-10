@@ -1654,6 +1654,45 @@ function SurvivorService:applyBile(player: Player, seconds: number): boolean
 	return true
 end
 
+--[[
+	Smoke in the eyes, for as long as they stand in it.
+
+	Bile's smaller, quieter cousin, and deliberately built the other way round.
+	Bile is a STATE: it lasts a fixed time, it survives walking away from where
+	it happened, it has an attribute the Director reads as a team in trouble, and
+	the horde comes. This is none of that. It is a place — a dead Tongue's cloud
+	— and the only thing that decides whether you have it is whether you are
+	standing in one right now.
+
+	So there is no attribute and no flag. The cloud tops this up four times a
+	second while a body is inside it and stops the moment they leave, and half a
+	second later the screen is clear. The counter is "move", which is the counter
+	a cloud should have, and a state nobody can read is a state nothing can drift
+	out of sync with.
+
+	Refused for the dead and the spectating for the same reason bile is: there is
+	no screen to fog.
+]]
+function SurvivorService:applySmoke(player: Player, seconds: number): boolean
+	if typeof(player) ~= "Instance" or not player:IsA("Player") or not player.Parent then
+		return false
+	end
+	if typeof(seconds) ~= "number" or seconds <= 0 then
+		return false
+	end
+	local state = self:getState(player)
+	if state == STATE.Dead or state == STATE.Spectating then
+		return false
+	end
+
+	Remotes.Event.ScreenEffect:FireClient(player, {
+		effect = "Smoke",
+		duration = seconds,
+		intensity = 1,
+	})
+	return true
+end
+
 --[[ True while a survivor is still covered. For anything that wants to know
      rather than to change it — the Director reads it as a team in trouble. ]]
 function SurvivorService:isBiled(player: Player): boolean
