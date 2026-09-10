@@ -341,6 +341,10 @@ AmmoConfig.Weapons = {
 	     "has none" stays distinguishable from "was forgotten" — which is the
 	     whole point of this table having empty rows in it at all. ]]
 	[Enums.Weapon.TeslaRifle] = { casing = "", magazine = "" },
+	--[[ Nothing a third time, and this one is the most literal of the three: a
+	     muzzleloader has no cartridge to eject and no magazine to drop, because
+	     the ball and the powder go in the front. ]]
+	[Enums.Weapon.FlintLock] = { casing = "", magazine = "" },
 
 	[Enums.Weapon.ScopedMk18] = { casing = "556", magazine = "StanagMag" },
 	[Enums.Weapon.M1AEBR] = { casing = "762", magazine = "MarksmanMag" },

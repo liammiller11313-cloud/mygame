@@ -987,6 +987,25 @@ local DEFINITIONS: { PuzzleDefinition } = {
 			}),
 		}),
 
+		--[[
+			The room's own special, and the counterpart to Clinton's flamethrower
+			and Zombieville's Tesla Rifle. Same distribution as both: it lies on
+			the floor, it is taken through the ordinary pickup path, it has no
+			reserve and no way to get one, and it does not survive the round.
+
+			Also the same DEAL, which is the part worth saying out loud. Eight
+			shots that each kill what they are pointed at, found once, spent on
+			the wave the team chooses. See WeaponConfig — the flintlock is the
+			only weapon in the game you cannot fire twice in a hurry.
+		]]
+		loot = table.freeze({
+			weapon = table.freeze({
+				object = "FlintLock",
+				itemId = "FlintLock",
+				slot = "Primary",
+			}),
+		}),
+
 		--[[ Between the other two, because the work is. Clinton is four
 		     documents in a building you can navigate and one code; Zombieville is
 		     five machines on a route you can learn. This is four documents in a

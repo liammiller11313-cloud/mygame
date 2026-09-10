@@ -222,6 +222,31 @@ local WEAPON_POSE: { [string]: Pose } = {
 		tilt = math.rad(-4),
 		length = 1.15,
 	},
+	--[[
+		The flintlock is in the Special class with the flamethrower and the Tesla
+		Rifle, and it is not carried like either of them.
+
+		That class pose is a fuel tank on a shoulder: well right of centre, held
+		low, tilted hard, because what pokes forward is a nozzle. A flintlock is
+		pointed — the whole weapon is one long barrel and an eye behind it — so
+		it comes up towards the centre line and levels off, which is also what
+		makes the four degrees of recoil read as a barrel jumping rather than as
+		a tank shifting.
+
+		`length` deliberately matches the class exactly. It is not a hold, it is
+		a SCALE: a supplied model whose longest axis is more than 1.45x away from
+		it gets resized to fit, so changing this number changes the size of
+		somebody's model rather than where it sits. Leaving it alone means this
+		override cannot make the gun bigger or smaller than the class already
+		would — it only moves it. If the barrel looks stubby in the hand, this
+		one field is the thing to raise.
+	]]
+	[Enums.Weapon.FlintLock] = {
+		hip = Vector3.new(0.76, -0.66, -1.35),
+		aim = Vector3.new(0, -0.28, -0.95),
+		tilt = math.rad(-4),
+		length = 1.35,
+	},
 }
 
 --[[

@@ -217,8 +217,9 @@ function LoadoutConfig.candidates(slot: string): { string }
 			anyway and the row would sit permanently greyed among things the
 			player is saving up for.
 
-			A greyed row is a PROMISE that saving will unlock it. Two of them now
-			— the flamethrower and the Tesla Rifle — and neither is ever coming.
+			A greyed row is a PROMISE that saving will unlock it. Three of them
+			now — the flamethrower, the Tesla Rifle and the flintlock — and not
+			one of them is ever coming.
 
 			Pass weapons are the opposite case and stay: they have no catalogue
 			row either, and appending them here is exactly what makes a hundred

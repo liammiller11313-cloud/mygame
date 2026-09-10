@@ -101,6 +101,16 @@ Enums.Weapon = table.freeze({
 	     Zombieville's, the way the Flamethrower is Clinton's. ]]
 	TeslaRifle = "TeslaRifle",
 
+	--[[ And the Backrooms', which is the third of them and the odd one out.
+
+	     The flamethrower and the Tesla Rifle are both weapons you hold down.
+	     This one you cannot: it fires once, hard, and then you are standing in
+	     a corridor waiting a second and a half for the next one. That is not a
+	     handicap bolted on for balance, it is the map — long identical halls
+	     where you hear a thing before you see it, and the shot you get is the
+	     one you took the time to line up. ]]
+	FlintLock = "FlintLock",
+
 	-- Primary: marksman
 	ScopedMk18 = "ScopedMk18",
 	M1AEBR = "M1AEBR",

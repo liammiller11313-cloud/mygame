@@ -254,6 +254,15 @@ AudioConfig.WeaponFire = {
 	     rather than none, because two cracks a second at exactly one pitch is a
 	     machine rather than a weapon. ]]
 	[Enums.Weapon.TeslaRifle] = sound(ID.TeslaArc, 0.85, 0.95, 1.06, 520, 5),
+	--[[ The shotgun sample, pitched a long way down and thrown a long way out.
+
+	     Black powder is the loudest thing in this game and the sample nearest to
+	     it is the 12-gauge; dropped into the 0.72-0.80 window it stops reading as
+	     buckshot and starts reading as a charge going off in a tube. 620 studs
+	     is further than anything else fires, deliberately — one player firing
+	     this in a maze of identical corridors should be a thing the other three
+	     hear and can walk towards. ]]
+	[Enums.Weapon.FlintLock] = sound(ID.ShotgunBlast, 1.0, 0.72, 0.8, 620, 5),
 	[Enums.Weapon.M1911A1] = sound(ID.PistolShot, 0.72, 0.97, 1.05, 320, 4),
 	[Enums.Weapon.Magnum357] = sound(ID.RevolverShot, 1.0, 0.94, 1.02, 560, 5),
 	--[[ These four shipped with no row and this table is indexed directly — no
@@ -433,6 +442,24 @@ AudioConfig.WeaponLoop = {
 	deliberately does not make every slot switch a noise.
 ]]
 AudioConfig.WeaponVoice = {
+	--[[
+		The flintlock, which names one key and is therefore silent for the rest.
+
+		It cannot reload — eight balls, no reserve, and an ammo crate tops up to
+		`reserveMax` which is zero — so MagOut and MagIn would never fire today
+		anyway. The row is here because of what this table is FOR: the failure it
+		exists to prevent is a weapon with no magazine dropping one because
+		nobody remembered to override the key that does it, and a muzzleloader is
+		the most literal example of that weapon the game will ever have. Saying
+		so now means a future round that hands one out with spare shot inherits
+		the silence rather than a magazine clacking out of a wooden stock.
+
+		DryFire stays, and is the one cue this weapon genuinely wants: a click on
+		an empty pan is exactly the sound a flintlock makes when it is out.
+	]]
+	[Enums.Weapon.FlintLock] = {
+		DryFire = sound(ID.DryFire, 0.6, 0.9, 0.96, 40, 3),
+	},
 	[Enums.Weapon.TeslaRifle] = {
 		--[[ The capacitor spooling, on the first shot of a burst. See
 		     WeaponConfig's spinUp: this plays at the instant the trigger goes

@@ -2867,6 +2867,147 @@ WeaponConfig.Definitions = {
 	},
 
 	--[[
+		── THE FLINTLOCK ────────────────────────────────────────────────────────
+		The Backrooms' loot-room special, and the third weapon in the game you
+		can only find.
+
+		── IT IS THE OPPOSITE OF THE OTHER TWO ─────────────────────────────────
+		The flamethrower is a cone you sweep and the Tesla Rifle is a line you
+		hold down; both are weapons whose skill is in where you point a stream.
+		This one has no stream. It fires once, enormously, and then you stand in
+		a corridor for a second and a half.
+
+		That is the map, not a handicap. The Backrooms is long identical halls
+		where you hear a thing before you see it, and the interesting question
+		here is not "where do I sweep" but "do I take this shot or the next one".
+		Nothing else in the roster asks it: every other weapon in the game
+		answers a mistake by firing again.
+
+		── AND IT DOES NOT RELOAD ──────────────────────────────────────────────
+		Eight balls, `reserveMax = 0`, and that is the whole of it — the same
+		bargain the other two loot weapons strike, and the reason all three say
+		it the same way. An ammo crate tops a reserve up to `reserveMax` and
+		nothing else does, so a zero there is the one setting that makes a weapon
+		genuinely finite. A found weapon that a crate could refill is a found
+		weapon you keep, and then the loot room is a shop.
+
+		So there is no reload animation and there never will be. What sells the
+		muzzleloading is `rpm`: 40 is a shot every 1.5 seconds, which is a
+		deliberate pause between every trigger pull rather than a magazine you
+		swap at the end of eight.
+	]]
+	[Enums.Weapon.FlintLock] = {
+		id = Enums.Weapon.FlintLock,
+		displayName = "FlintLock",
+		modelName = "FlintLock",
+		slot = Enums.Slot.Primary,
+		class = "Special",
+		--[[ Single, and it is the only one of the three loot weapons that is.
+		     Auto on a weapon that fires every 1.5 seconds would be a held
+		     trigger emptying the whole thing into the first body, which is the
+		     one outcome this design is against. ]]
+		fireMode = "Single",
+
+		--[[ Three Commons, or two thirds of a Hunter, in one ball.
+
+		     150 against fifty health is not overkill for its own sake — it is
+		     what makes the shot worth the wait, and it is the only number in the
+		     roster that kills a Rare-tier special in two. Set against eight
+		     shots and no refill, the whole weapon is 1,200 points of damage that
+		     have to be aimed. ]]
+		damage = 150,
+		--[[ One ball. A blunderbuss firing shot would be a third shotgun and the
+		     game already has five; everything interesting here is in the fact
+		     that it is one projectile that has to be pointed. ]]
+		pellets = 1,
+		rpm = 40,
+		--[[ Eight, and nowhere to get a ninth. See the header. ]]
+		magSize = 8,
+		reserveMax = 0,
+		--[[ Three bodies, at the roster's ceiling for anything that is not the
+		     Tesla Rifle — a lead ball through a queue in a corridor. It taper
+		     harder than the Tesla's does, because six-deep with a gentle taper
+		     is that weapon's whole identity and this one should not be a slower
+		     version of it. ]]
+		penetration = 3,
+		penetrationFalloff = 0.8,
+
+		--[[ A smoothbore reaches and then stops being accurate rather than
+		     stopping dead. Longer than the flamethrower by a corridor and
+		     shorter than a rifle, which on this map is exactly the length of a
+		     hall you can see down. ]]
+		falloffStart = 30,
+		falloffEnd = 110,
+		falloffMin = 0.5,
+		maxRange = 170,
+
+		--[[ Wide from the hip and nearly true when aimed, which is the widest
+		     gap in the roster. It is a two-hundred-year-old barrel: pointed
+		     casually it is a suggestion, and braced it goes where you put it.
+		     One shot per 1.5 seconds means a player has the time to aim, so the
+		     weapon is allowed to insist that they do. ]]
+		spreadHip = 3.2,
+		spreadAim = 0.25,
+		spreadMoving = 4.0,
+		spreadMax = 5.5,
+		--[[ Bloom is nearly irrelevant at this rate — the barrel has 1.5 seconds
+		     to settle between shots — so it is set high and recovers fast, which
+		     punishes only the player who tries to click through the cooldown. ]]
+		bloomPerShot = 1.2,
+		bloomRecovery = 5.0,
+
+		--[[ The hardest kick in the game, and it has a second and a half to come
+		     back down. Everything else in the roster tunes recoil so a burst
+		     stays controllable; this one has no burst, so the kick can be what a
+		     hand cannon's kick should be. ]]
+		recoilVertical = 4.2,
+		recoilHorizontal = 0.6,
+		recoilRecovery = 7.0,
+		kickback = 2.0,
+
+		--[[ Never runs — there is no reserve to reload from — but it is a real
+		     number rather than a zero, so a future round that hands one out with
+		     spare shot does not inherit an instant reload nobody chose. ]]
+		reloadTime = 4.2,
+		reloadPerShell = 0,
+		drawTime = 1.15,
+		aimTime = 0.45,
+
+		walkSpeedScale = 0.93,
+		aimWalkSpeedScale = 0.6,
+		aimFov = 62,
+
+		--[[ The biggest muzzle flash and the heaviest shake in the game, because
+		     the one thing this weapon has to sell in the moment it goes off is
+		     that it went off. ]]
+		shakeMagnitude = 0.8,
+		shakeRoughness = 9,
+		tracerWidth = 0.16,
+		tracerColor = Color3.fromRGB(255, 236, 190),
+		muzzleFlashSize = 2.6,
+		--[[ Nothing is ejected. The ball and the powder went in the front. ]]
+		shellEject = false,
+
+		--[[ It tears. A heavy slow ball is the most literally destructive thing
+		     in the roster at contact range, and the dismemberment is most of why
+		     a player takes the shot at the front of a queue rather than the back
+		     of it. ]]
+		gibPower = 1.4,
+		dismemberPower = 1.5,
+		--[[ The hardest shove in the game, and the tactical point of the weapon
+		     on this map: a corridor you cannot back out of becomes a corridor
+		     with four studs of space in it. ]]
+		knockback = 26,
+
+		--[[ Never on a shelf, never on a pad, never in the shop. It is behind
+		     four breaker boxes thrown in an order that did not exist ten minutes
+		     ago, and every round the team wants one they read the maze again. ]]
+		placeable = false,
+		floorOnly = true,
+		price = 0,
+	},
+
+	--[[
 		── BRICKBATTLER'S PACK ──────────────────────────────────────────────────
 		Four of the seven classic tools, translated rather than transplanted.
 

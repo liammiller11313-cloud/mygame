@@ -1190,6 +1190,22 @@ local function teleportTo(player: Player, target: BasePart)
 		flat = Vector3.new(0, 0, -1)
 	end
 
+	--[[ Out of the seat first, if they are in one. A seated character is welded
+	     to the seat, and PivotTo on a welded assembly either drags the turret
+	     through the map or does nothing at all — neither of which is what a
+	     player pressing a door expects. ]]
+	local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+	if humanoid and humanoid.SeatPart then
+		humanoid.Sit = false
+		--[[ One frame for the weld to actually go. Jumping the character in the
+		     same frame the seat is released moves a body that is still attached
+		     to it. ]]
+		task.wait()
+		if not character.Parent or not root.Parent then
+			return false
+		end
+	end
+
 	pcall(function()
 		root:SetNetworkOwner(nil)
 	end)
@@ -2107,6 +2123,34 @@ local function onSubmit(player: Player, payload: any)
 		return
 	end
 	entry.typedAt = now
+
+	--[[
+		And you have to be standing at the pad.
+
+		This was the one handler in the file that never asked. Every other one
+		does — collecting a clue, claiming the stockpile, opening a generator,
+		answering one, throwing a fuse, using a doorway — and Remotes.lua says of
+		the generators that a crafted client "cannot power a generator out of
+		turn, or from across the map". The keypad was the counter-example: the
+		panel only OPENS from a prompt that needs range, but the submit is its
+		own remote and nothing stopped one arriving from the spawn point.
+
+		What that bought an exploiter was not the loot, which is inside the room
+		either way. It was `payOut` — the vault's three thousand dollars, split
+		across the whole team, for a door nobody walked to. The clues still have
+		to be read at arm's length, so this closes the last leg of the walk
+		rather than the puzzle.
+
+		Answered rather than dropped, unlike the generators' silent refusal, and
+		the difference is the screen: a generator press with no reply is a press
+		that did nothing, while the keypad panel is sat open waiting for one and
+		would hang. The reach is already doubled against lag, so an honest player
+		standing at the pad never sees this.
+	]]
+	if not atMachine(player, state.keypad) then
+		reply(player, false, "STEP UP TO THE PANEL", 0)
+		return
+	end
 
 	if state.solved then
 		reply(player, true, "ALREADY OPEN", 0)
