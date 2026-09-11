@@ -124,6 +124,17 @@ local function pay(player: Player, reward: any): string
 			profiles:grantWeapon(player, weaponId)
 		end
 	end
+	--[[ Abilities go through the SAME grant a purchase uses. There is no separate
+	     code-granted set for them the way there is for weapons, and there does not
+	     need to be: `profile.abilities` is filtered against AbilityConfig at load
+	     rather than against a shop catalogue, so an ability with no price survives
+	     a rejoin exactly as one that was bought does. That asymmetry is a fact
+	     about the two stored sets, not a decision made here. ]]
+	if reward.abilities and typeof(profiles.grantAbility) == "function" then
+		for _, abilityId in reward.abilities do
+			profiles:grantAbility(player, abilityId)
+		end
+	end
 	if reward.dollars and reward.dollars > 0 then
 		profiles:addDollars(player, reward.dollars)
 	end

@@ -186,6 +186,9 @@ Enums.Ability = table.freeze({
 	FieldMedic = "FieldMedic",
 	CryoBlast = "CryoBlast",
 	Airstrike = "Airstrike",
+	--[[ The sixth, and the only one that is not for sale. Comes with the same
+	     birthday code the Walrus Spec does — see CodeConfig's DAVIS-13TH. ]]
+	BecomeWalrus = "BecomeWalrus",
 })
 
 Enums.PillItem = table.freeze({

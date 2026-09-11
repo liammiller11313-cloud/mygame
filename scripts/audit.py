@@ -1308,6 +1308,29 @@ if _weapons:
     for _m in re.finditer(r"weapons\s*=\s*\{(.*?)\}", _cc, re.S):
         _code_granted.update(re.findall(r"Enums\.Weapon\.(\w+)", _m.group(1)))
 
+    # And the same two-way check for ABILITIES, which have their own codeOnly and
+    # their own grant list. Read here rather than in the ability section because
+    # this is where CodeConfig is already parsed.
+    _ac = read(SRC / "shared/Config/AbilityConfig.lua")
+    _ability_code_only = set()
+    for _m in re.finditer(r"id = Enums\.Ability\.(\w+),(.*?)\n\t\}\),", _ac, re.S):
+        if re.search(r"^\s*codeOnly\s*=\s*true", _m.group(2), re.M):
+            _ability_code_only.add(_m.group(1))
+    _ability_granted = set()
+    for _m in re.finditer(r"abilities\s*=\s*\{(.*?)\}", _cc, re.S):
+        _ability_granted.update(re.findall(r"Enums\.Ability\.(\w+)", _m.group(1)))
+
+    for _id in sorted(_ability_code_only - _ability_granted):
+        problems.append(
+            f"ability {_id} says codeOnly = true but no CodeConfig code lists it in abilities — "
+            f"nothing grants it, and the purchase path refuses it, so it is unreachable"
+        )
+    for _id in sorted(_ability_granted - _ability_code_only):
+        problems.append(
+            f"a CodeConfig code grants ability {_id!r}, which is not marked codeOnly = true in "
+            f"AbilityConfig — a code handing over something the shop also sells"
+        )
+
     for _id in sorted(_code_only - _code_granted):
         problems.append(
             f"{_id} says codeOnly = true but no CodeConfig code lists it in weapons — "

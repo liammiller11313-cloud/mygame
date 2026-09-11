@@ -67,6 +67,12 @@ export type Ability = {
 	displayName: string,
 	blurb: string, -- one line, what it DOES; read on a shop row
 	price: number, -- Dollars
+	--[[ Granted by a CODE and never sold. The ability twin of WeaponConfig's
+	     codeOnly, and it does the same three jobs: the purchase path refuses it,
+	     the shop does not list it, and the ability panel shows it only to
+	     somebody who actually holds it. A greyed row for something that can
+	     never be bought is a promise that cannot come true. ]]
+	codeOnly: boolean?,
 	--[[ Seconds, and the server owns the clock.
 
 	     Five minutes for all five, which against a 1020-second round is three or
@@ -348,6 +354,105 @@ local DEFINITIONS: { Ability } = {
 			     how long they fall — so none of it has to be re-tuned when the
 			     warning changes. See AbilityEffects.flyover. ]]
 			JetCrossSeconds = 3.4,
+		}),
+	}),
+	table.freeze({
+		--[[
+			── BECOME WALRUS ───────────────────────────────────────────────────
+			A birthday present, and the only ability in this game that is not for
+			sale. It arrives with the same code the Walrus Spec does — see
+			CodeConfig's DAVIS-13TH — and `codeOnly` is what keeps it out of the
+			shop, off everybody else's ability panel, and out of reach of the
+			purchase path.
+
+			── IT IS A SHIELD THAT FIGHTS BACK ─────────────────────────────────
+			Three minutes in which nothing can reach the player at all: every hit
+			lands on the walrus's own five thousand, and the survivor inside comes
+			back out at exactly the health they went in with. Five thousand is
+			more than three minutes of anything short of a finale, so the clock is
+			what usually ends it — which is deliberate. A defensive button whose
+			interesting question is "how long can I survive" is a health bar; this
+			one's question is WHEN, like every other ability here.
+
+			── AND WHY THE COOLDOWN LOOKS LONG ─────────────────────────────────
+			480 is the three minutes of walrus plus the five of waiting, because
+			the service stamps the cooldown at ACTIVATION and the five minutes are
+			meant to start when the walrus ends. Written as one number rather than
+			taught to the service as a new concept, and the module pulls it
+			EARLIER if the walrus ends early — so the only way this is ever wrong
+			is in the player's favour. See BecomeWalrus.
+		]]
+		id = Enums.Ability.BecomeWalrus,
+		displayName = "BECOME WALRUS",
+		blurb = "You are the walrus. Bonk things. Breathe fire.",
+		--[[ Zero, and unreachable anyway: codeOnly refuses the purchase path
+		     before a price is ever read. Written as 0 rather than a fake number
+		     so nothing that totals the ability ladder counts a gift as revenue —
+		     see scripts/economy.py, which prints that total. ]]
+		price = 0,
+		codeOnly = true,
+		cooldown = 480,
+		targeted = false,
+		range = 0,
+		tuning = table.freeze({
+			Duration = 180,
+			--[[ The pool the walrus soaks up for you. Not health: nothing here
+			     touches the survivor's own, which is the whole point of the
+			     answer this was built to — you come back out untouched. ]]
+			Pool = 5_000,
+
+			--[[
+				── THE BONK ────────────────────────────────────────────────────
+				Speed-gated, so charging flattens a horde and standing in one does
+				nothing. That is what makes it a verb rather than an aura, and it
+				is the rule the Charger already plays by.
+
+				The threshold is below the walrus's own top speed and well above a
+				shuffle, so committing to a direction is the whole input.
+			]]
+			BonkSpeed = 14,
+			BonkRadius = 9,
+			BonkDamage = 260,
+			BonkKnockback = 90,
+			--[[ Per TARGET, not global. A walrus crossing a crowd should hit
+			     every zombie in it once rather than hitting the first one eight
+			     times on its way past. ]]
+			BonkCooldown = 0.8,
+			--[[ How long a bonked body is off its feet, through the same stagger a
+			     shove uses. A zombie that is thrown and keeps walking the instant
+			     it lands has not been bonked, it has been nudged. ]]
+			BonkStumble = 1.1,
+
+			--[[
+				── THE BREATH ──────────────────────────────────────────────────
+				Held on the fire button, resolved by the server on a tick. A cone
+				rather than the Flamethrower's pellet spray, because this is not a
+				weapon going through BallisticsService and a cone is the honest
+				shape for something breathed.
+
+				Deliberately hotter than the shop Flamethrower, which is 42 studs
+				and about 160 a second into one line of bodies. This reaches 60,
+				hits EVERYTHING in the cone, and lights it — which is a lot, and
+				is the gift.
+			]]
+			FlameRange = 60,
+			FlameAngle = 26, -- degrees, half-angle
+			FlameTick = 0.15,
+			FlameDamage = 40, -- per target per tick, so ~265 a second
+			--[[ Through InfectedService:ignite, the same burn the molotov and the
+			     incendiary requisition use. The breath lights what it touches and
+			     the fire finishes it. ]]
+			FlameIgnites = true,
+
+			--[[ A walrus is heavy. Slower than a sprint and faster than a walk,
+			     so charging one down a street is a commitment rather than a
+			     dodge. ]]
+			WalkSpeed = 22,
+			--[[ Five minutes, and it is the number the module re-stamps with when
+			     a walrus ends EARLY. The definition's `cooldown` is this plus the
+			     duration, because the service stamps at activation — see the
+			     block above the definition. ]]
+			CooldownAfter = 300,
 		}),
 	}),
 }

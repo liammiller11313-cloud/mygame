@@ -77,6 +77,19 @@ Attributes.Player = table.freeze({
 	]]
 	IsReady = "FL_LobbyReady", -- boolean
 	IsCrouching = "FL_IsCrouching", -- boolean; the server owns it, the client asks
+	--[[
+		The walrus, published so every client can see one rather than only the
+		player inside it.
+
+		Three attributes and not one, because three different things read them:
+		anybody near the walrus needs to know it IS one (the model is welded on
+		by the server, but the nameplate and the footsteps change too), the
+		walrus's own client needs the health to draw a bar, and it needs the
+		deadline to draw a clock. See BecomeWalrus.
+	]]
+	IsWalrus = "FL_IsWalrus", -- boolean
+	WalrusHealth = "FL_WalrusHealth", -- number, what is left of the pool
+	WalrusUntil = "FL_WalrusUntil", -- Workspace:GetServerTimeNow() deadline
 	--[[ boolean, whether this survivor is actually running rather than merely
 	     asking to. Published because the FOOTSTEPS need it and the client cannot
 	     work it out: WalkSpeed is the sprint speed multiplied by whatever the

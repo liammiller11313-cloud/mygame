@@ -170,6 +170,10 @@ local CONTROLLERS = {
 	     down — by registry name at tick time rather than at load, so the ordering
 	     is tidiness rather than need. ]]
 	"UI/TurretController",
+	--[[ After TurretController because it is the same shape and reads better
+	     beside it: both take the fire button away from the gun for as long as the
+	     player is doing something else with it. ]]
+	"UI/WalrusController",
 	--[[ Following a teammate once you are dead. After InputController, whose Fire
 	     and Aim signals it cycles on, and after TopStack's other claimants so the
 	     card it draws lands under them rather than over the clock. ]]

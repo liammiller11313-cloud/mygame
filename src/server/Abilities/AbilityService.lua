@@ -263,6 +263,10 @@ local function onRequest(player: Player, payload: any)
 		tuning = definition.tuning,
 		origin = origin,
 		target = target,
+		--[[ Which of the two slots this came from. Only an ability that needs to
+		     talk to its own cooldown later has any use for it — see
+		     holdCooldown — and the module is the only thing that knows it might. ]]
+		slot = slot,
 	})
 	if not ok then
 		warn(string.format("[AbilityService] %s:activate failed: %s", id, tostring(fired)))
@@ -294,6 +298,12 @@ local function onPurchase(player: Player, id: any)
 		return
 	end
 	if profiles:ownsAbility(player, definition.id) then
+		return
+	end
+	--[[ Not for sale, at any price. The shop does not draw a row for one of these
+	     and the panel does not list it, but neither of those is a gate — this is,
+	     because the request carries an id and a client can send any id it likes. ]]
+	if definition.codeOnly then
 		return
 	end
 
@@ -353,13 +363,58 @@ end
 	lets 30 through. An all-or-nothing block would make the last point of a
 	shield worth as much as the first hundred.
 ]]
+--[[ In order, outermost first. A walrus is a thing the player is INSIDE, so it
+     takes the hit before a bubble they are also carrying — and because both
+     return the remainder rather than a boolean, the two compose: a walrus with
+     fifty left against a five-hundred hit eats fifty and the shield sees four
+     hundred and fifty. ]]
+local ABSORBERS: { string } = {
+	Enums.Ability.BecomeWalrus,
+	Enums.Ability.Shield,
+}
+
 function AbilityService:absorb(player: Player, amount: number): number
-	local shield = modules[Enums.Ability.Shield]
-	if not shield or typeof(shield.absorb) ~= "function" then
-		return amount
+	local remaining = amount
+	for _, id in ABSORBERS do
+		if remaining <= 0 then
+			return 0
+		end
+		local module = modules[id]
+		if module and typeof(module.absorb) == "function" then
+			local ok, left = pcall(module.absorb, player, remaining)
+			if ok and typeof(left) == "number" then
+				remaining = left
+			end
+		end
 	end
-	local ok, remaining = pcall(shield.absorb, player, amount)
-	return if ok and typeof(remaining) == "number" then remaining else amount
+	return remaining
+end
+
+--[[
+	Pulls a cooldown EARLIER, for an ability that ended sooner than its stamp
+	assumed.
+
+	Only ever earlier, and the clamp is the whole contract: an ability that could
+	push its own cooldown out would be an ability that punishes its user for
+	something that happened to them. BECOME WALRUS is the one caller — its stamp
+	covers three minutes of walrus plus five of waiting, and a walrus cut short by
+	damage is owed the difference.
+]]
+function AbilityService:holdCooldown(player: Player, slot: number, seconds: number)
+	local perSlot = cooldowns[player]
+	if not perSlot or typeof(seconds) ~= "number" or seconds < 0 then
+		return
+	end
+	local current = perSlot[slot]
+	if not current then
+		return
+	end
+	local wanted = now() + seconds
+	if wanted >= current then
+		return
+	end
+	perSlot[slot] = wanted
+	publishCooldown(player, slot, wanted)
 end
 
 --[[
@@ -449,6 +504,18 @@ function AbilityService:start()
 		local turret = modules[Enums.Ability.Turret]
 		if turret and typeof(turret.input) == "function" then
 			pcall(turret.input, player, payload)
+		end
+	end)
+
+	--[[ The walrus breathing, on exactly the same terms as the turret above and
+	     for the same reason: the tick rate is the SERVER's, so a client sending
+	     this every frame gets precisely the fire a client sending it fifteen
+	     times a second gets. The module refuses anybody who is not a walrus, so
+	     there is nothing here for a client to claim by sending it. ]]
+	trove:connect(Remotes.Event.WalrusInput.OnServerEvent, function(player: Player, payload: any)
+		local walrus = modules[Enums.Ability.BecomeWalrus]
+		if walrus and typeof(walrus.input) == "function" and typeof(payload) == "table" then
+			pcall(walrus.input, player, payload.aim, payload.firing)
 		end
 	end)
 

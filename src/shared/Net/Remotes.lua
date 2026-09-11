@@ -251,6 +251,20 @@ local EVENTS: { string } = {
 		exactly the same number of bullets as one sending it fifteen.
 	]]
 	"TurretInput", -- C->S {point: Vector3, firing: boolean}
+	--[[
+		The walrus breathing, and the same shape as TurretInput above for the same
+		reason.
+
+		`firing` is a HELD flag rather than a shot: the server owns the flame's
+		tick rate and its cone, so this says "the trigger is down and I am facing
+		there" at a fixed low rate and nothing more. A client that stops sending
+		stops breathing, which is also what happens if it disconnects mid-breath.
+
+		There is no ability id in it. A player is a walrus or they are not, and
+		the server knows which — a payload that named the ability would be a
+		payload a client could use to breathe fire without having become one.
+	]]
+	"WalrusInput", -- C->S {aim: Vector3, firing: boolean}
 	--[[ Broadcast so every client can draw the effect. Nothing here is
 	     authoritative: the damage, the healing and the spawning have already
 	     happened on the server by the time this goes out. ]]

@@ -21,6 +21,7 @@
 	decides whether a redemption is allowed — see CodeService.
 ]]
 
+local AbilityConfig = require(script.Parent.AbilityConfig)
 local Enums = require(script.Parent.Parent.Enums)
 local PassConfig = require(script.Parent.PassConfig)
 local WeaponConfig = require(script.Parent.WeaponConfig)
@@ -48,6 +49,11 @@ export type Reward = {
 		that is not codeOnly, and a codeOnly weapon no code grants.
 	]]
 	weapons: { string }?,
+	--[[ ABILITY ids, on the same terms as `weapons` above and for the same
+	     reason: a one-off ability is not a bundle either. Every id here must be
+	     an AbilityConfig ability marked `codeOnly = true`, and audit.py fails the
+	     build both ways round. ]]
+	abilities: { string }?,
 }
 
 export type Code = {
@@ -142,6 +148,7 @@ CodeConfig.Codes = table.freeze({
 		allowedUserIds = { 3170573678 },
 		reward = {
 			weapons = { Enums.Weapon.RPG7WalrusSpec },
+			abilities = { Enums.Ability.BecomeWalrus },
 		},
 	},
 } :: { Code })
@@ -237,6 +244,15 @@ function CodeConfig.describe(reward: Reward): string
 			table.insert(
 				parts,
 				if definition then string.upper(definition.displayName) else string.upper(weaponId)
+			)
+		end
+	end
+	if reward.abilities then
+		for _, abilityId in reward.abilities do
+			local definition = AbilityConfig.get(abilityId)
+			table.insert(
+				parts,
+				if definition then string.upper(definition.displayName) else string.upper(abilityId)
 			)
 		end
 	end

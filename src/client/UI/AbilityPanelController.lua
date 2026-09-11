@@ -221,6 +221,26 @@ local function refresh()
 		local owned = ownsAbility(id)
 		local slot = slotOf(id)
 
+		--[[
+			A code-only ability is drawn only for somebody who holds it.
+
+			The same rule the loadout picker follows for a code-only weapon, and
+			the same reasoning: every other greyed row here is a PRICE, and a price
+			is a promise that saving will reach it. An ability that cannot be
+			bought at any figure has no promise to make, and a row reading $0
+			forever beside five that read like a ladder is worse than no row.
+
+			Visibility rather than never building it, because ownership arrives
+			with the profile and can arrive after this panel was built. The row is
+			ready the instant the sync lands.
+		]]
+		if row.entry.codeOnly then
+			row.frame.Visible = owned
+			if not owned then
+				continue
+			end
+		end
+
 		if not owned then
 			local affordable = balance >= row.entry.price
 			row.action.Text = EconomyConfig.format(row.entry.price)
