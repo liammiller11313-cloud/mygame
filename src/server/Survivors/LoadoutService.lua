@@ -175,22 +175,34 @@ function LoadoutService:start()
 	end
 
 	--[[
-		And so can a game pass, one step later still.
+		And so can the ENTITLEMENT, one step later still, by either of the two
+		roads it can arrive on.
 
-		The profile arriving late is a DataStore read; the pass arriving late is
-		a web call to Roblox that is usually slower. A player who owns
-		Brickbattler's Pack and has a paintball gun in their active loadout gets
-		the default instead if they spawn before that answer lands — the loadout
-		names a weapon the unlock set does not contain yet, so sanitise falls back
-		on the way to their hands.
+		The profile arriving late is a DataStore read. A game pass arriving late is
+		a web call to Roblox that is usually slower. A code being redeemed is not
+		late at all — it happens whenever the player types it, which is very often
+		while they are stood in the lobby looking at the menu.
 
-		It corrects itself at the next round start, which is the point at which it
-		matters. It should not have to: standing in the lobby holding the wrong
-		gun is how somebody concludes the thing they paid for does not work.
+		All three end the same way: the active loadout names a weapon the unlock
+		set did not contain when the body was armed, sanitise fell back on the way
+		to their hands, and they are holding a UMP-45 while their own loadout
+		screen says paintball gun. It corrects itself at the next round start,
+		which is the point at which it matters. It should not have to — standing in
+		the lobby holding the wrong gun is how somebody concludes the thing they
+		just paid for, or just redeemed, does not work.
+
+		Two signals because the two grants are different facts from different
+		places, and this does not care which: whatever made the set bigger, the
+		answer is to re-arm them.
 	]]
 	local passes = Registry.find("PassService")
 	if passes and passes.unlocked then
 		serviceTrove:add(passes.unlocked:connect(function(player: Player)
+			reapply(player)
+		end))
+	end
+	if profiles and profiles.passGranted then
+		serviceTrove:add(profiles.passGranted:connect(function(player: Player)
 			reapply(player)
 		end))
 	end

@@ -139,6 +139,25 @@ ProfileService.loaded = Signal.new()
      the client is re-synced from. ]]
 ProfileService.changed = Signal.new()
 
+--[[
+	(player: Player, passId: string) — a pass this profile now holds because a
+	CODE handed it over, rather than because Roblox sold it.
+
+	The twin of PassService.unlocked, and it exists for the same reason: owning a
+	pass unlocks weapons, and a player who gains one while standing in the lobby
+	is still holding whatever they spawned with until something re-arms them.
+
+	Two signals rather than one because the two grants are genuinely different
+	facts arriving from different places — Roblox answering a web call, and this
+	profile reading a code it wrote down — and neither service should have to know
+	the other exists. LoadoutService listens to both and does the same thing with
+	each, which is the honest shape: it does not care WHY the set got bigger.
+
+	Fired only on the transition. grantPass already refuses a pass the profile
+	holds, so a second redemption of the same code announces nothing.
+]]
+ProfileService.passGranted = Signal.new()
+
 export type Profile = {
 	version: number,
 	dollars: number,
@@ -1417,6 +1436,10 @@ function ProfileService:grantPass(player: Player, passId: string): boolean
 	end
 	profile.passGrants[passId] = true
 	markChanged(player, profile, true)
+	--[[ After markChanged, so the client has the new unlock set before anything
+	     acts on it, and the weapon it is about to be handed is one its own screens
+	     already agree it owns. ]]
+	ProfileService.passGranted:fire(player, passId)
 	return true
 end
 
