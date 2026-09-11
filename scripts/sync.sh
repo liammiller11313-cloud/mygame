@@ -221,21 +221,27 @@ SERVING_WRONG=0
 PIDS="$(pgrep -x rojo 2>/dev/null || true)"
 if [ -z "$PIDS" ]; then
   say "  No Rojo server is running. Nothing is being served to Studio at all."
-  say "  (Step 5 below starts one.)"
+  say "  (This script starts one at the end, unless --no-serve.)"
 else
   for pid in $PIDS; do
     CWD=""
     if command -v lsof >/dev/null 2>&1; then
       CWD="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
     fi
+    # The port matters as much as the folder: the plugin's Connect dialog has
+    # its own remembered port, and a mismatch there fails in a way that reads
+    # as "Rojo is broken" rather than "these two numbers differ".
+    PORT="$(ps -o command= -p "$pid" 2>/dev/null | grep -oE '\-\-port +[0-9]+' | grep -oE '[0-9]+' | head -1)"
+    PORT="${PORT:-34872 (default)}"
     if [ -z "$CWD" ]; then
-      say "  pid $pid — could not read its folder (lsof unavailable)."
+      say "  pid $pid — port $PORT — could not read its folder (lsof unavailable)."
     elif [ "$CWD" = "$HERE_DIR" ]; then
-      say "  pid $pid — serving THIS checkout. ✓"
+      say "  pid $pid — port $PORT — serving THIS checkout. ✓"
+      say "             The plugin's Connect dialog must say port $PORT too."
     else
       note_problem
       SERVING_WRONG=1
-      say "  pid $pid — serving a DIFFERENT folder:"
+      say "  pid $pid — port $PORT — serving a DIFFERENT folder:"
       say "      $CWD"
     fi
   done
