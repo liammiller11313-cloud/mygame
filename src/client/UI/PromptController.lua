@@ -30,6 +30,7 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -106,6 +107,12 @@ local FLOOR_CONE = math.cos(math.rad(55))
      nearest handful is all that can plausibly be the answer, and an unbounded
      query is how a spatial call becomes the thing you are optimising. ]]
 local NEAR_SWEEP_MAX = 24
+
+--[[ Set by build(), called by update(). A forward declaration rather than a
+     second Heartbeat connection: the stale-touch check below belongs to the
+     tap button, which build() owns, and the frame loop that has to run it is
+     already connected further down. ]]
+local dropStaleTouch: (() -> ())? = nil
 
 local PROMPT_WIDTH = 460
 local PROMPT_HEIGHT = 46
@@ -325,23 +332,79 @@ local function build()
 	tapButton.Visible = false
 	tapButton.Parent = panel
 
-	--[[ Down and up rather than Activated, so a HOLD works: Activated only fires
-	     on release and would turn a five-second revive into a tap that does
-	     nothing. The release is answered on three signals, not one — a finger
-	     that slides off the button never sends MouseButton1Up, and an interact
-	     left held down is a revive the server never hears the end of. ]]
-	trove:connect(tapButton.MouseButton1Down, function()
-		if input and typeof(input.raise) == "function" then
-			input:raise(input.Action.Interact, true)
-		end
-	end)
+	--[[
+		Down and up rather than Activated, so a HOLD works: Activated only fires on
+		release and would turn a five-second revive into a tap that does nothing.
+
+		── AND THE FINGER OWNS IT, NOT THE BUTTON ──────────────────────────────
+		The release used to be answered on MouseLeave as well, reaching for it as
+		a safety net because a finger that slides off the button never sends
+		MouseButton1Up. It is the wrong net, and it is the same one TouchController
+		took out of the pad: a GuiObject raises MouseLeave when the touch LEAVES
+		ITS BOUNDS, not when the finger lifts.
+
+		This button is 460 x 46 in the MIDDLE of the screen — which is exactly
+		where the thumb that steers the camera lives. So on a phone, holding it
+		for the several seconds a revive takes meant holding a thumb inside a
+		46-pixel band while not moving it, and every drift out of that band sent
+		CancelInteract. A player could stand over a downed teammate with the
+		prompt on screen, hold USE, and simply never revive them.
+
+		So the touch is remembered and released from UserInputService.InputEnded,
+		which fires for that exact InputObject when the finger actually lifts,
+		wherever it has wandered to by then. Identical to the pad's fix, for the
+		identical reason — see newButton's note there.
+	]]
+	local heldInput: InputObject? = nil
+
 	local function releaseTap()
+		heldInput = nil
 		if input and typeof(input.raise) == "function" then
 			input:raise(input.Action.Interact, false)
 		end
 	end
-	trove:connect(tapButton.MouseButton1Up, releaseTap)
-	trove:connect(tapButton.MouseLeave, releaseTap)
+
+	trove:connect(tapButton.InputBegan, function(inputObject: InputObject)
+		if
+			inputObject.UserInputType ~= Enum.UserInputType.Touch
+			and inputObject.UserInputType ~= Enum.UserInputType.MouseButton1
+		then
+			return
+		end
+		--[[ One finger at a time. A second touch landing on the prompt would
+		     overwrite the InputObject being watched for, and the first finger's
+		     lift would then never release the hold. ]]
+		if heldInput then
+			return
+		end
+		if input and typeof(input.raise) == "function" and input:raise(input.Action.Interact, true) then
+			heldInput = inputObject
+		end
+	end)
+
+	trove:connect(UserInputService.InputEnded, function(inputObject: InputObject)
+		if heldInput == inputObject then
+			releaseTap()
+		end
+	end)
+
+	--[[ And the case InputEnded cannot cover: an InputObject that has already
+	     finished without delivering one — a touch cancelled by the OS, a window
+	     losing focus mid-hold. Checked from the frame loop this file already
+	     runs rather than from a second one, because the cost of missing it is an
+	     interact held for the rest of the round. ]]
+	dropStaleTouch = function()
+		local current = heldInput
+		if
+			current
+			and (
+				current.UserInputState == Enum.UserInputState.End
+				or current.UserInputState == Enum.UserInputState.Cancel
+			)
+		then
+			releaseTap()
+		end
+	end
 	--[[ And when the prompt goes away under the finger — the teammate got up,
 	     the crate emptied, somebody else took the gun. Nothing else would ever
 	     send the release in that case. ]]
@@ -872,6 +935,12 @@ local function composeText(): string
 end
 
 local function update(dt: number)
+	--[[ Before anything else: a touch holding USE that has already ended without
+	     delivering an InputEnded. See build's note on the tap button. ]]
+	if dropStaleTouch then
+		dropStaleTouch()
+	end
+
 	state.scanClock -= dt
 	if state.scanClock <= 0 then
 		state.scanClock = SCAN_INTERVAL

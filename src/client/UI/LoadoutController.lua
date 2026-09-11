@@ -671,6 +671,30 @@ local function buildPickRow(slot: string, weaponId: string, index: number)
 	rowTrove:connect(button.MouseEnter, function()
 		showPreviewFor(weaponId)
 	end)
+	--[[
+		And on the PRESS, which is the half a finger has.
+
+		The preview above is hover, and hover is a thing a mouse does. Whether
+		Roblox synthesises MouseEnter from a tap is not something this code should
+		be resting on either way — so the press says it outright, and a phone gets
+		the same 3D model a desktop gets by pointing at the row.
+
+		It also gives touch a way to LOOK without committing, which it did not
+		have: press a row to see the weapon, slide the thumb off to cancel, lift
+		on it to equip. Activated only fires when the finger comes up inside the
+		button, so the escape is real.
+
+		Harmless on a mouse, where hover has already drawn this exact weapon by
+		the time a button goes down on it.
+	]]
+	rowTrove:connect(button.InputBegan, function(input: InputObject)
+		if
+			input.UserInputType == Enum.UserInputType.Touch
+			or input.UserInputType == Enum.UserInputType.MouseButton1
+		then
+			showPreviewFor(weaponId)
+		end
+	end)
 end
 
 function LoadoutController:_openPicker(slot: string)
