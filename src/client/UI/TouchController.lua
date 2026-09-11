@@ -188,11 +188,54 @@ local STATE_INTERVAL = 1 / 15
 
 local LATCHED: { [string]: boolean } = {
 	Crouch = true,
+	Aim = true,
 }
 
+--[[
+	Verbs that a TAP switches on and the next tap switches off, rather than ones
+	that follow the finger.
+
+	── AIM, BECAUSE HOLDING IT IS NOT POSSIBLE ─────────────────────────────────
+	On a mouse, aim is held: the hand that holds it is not the hand that moves or
+	shoots. On a phone the same thumb does all three. Aiming down the sights
+	meant pinning a thumb to a 64-pixel circle in the bottom-right corner — which
+	is the thumb that also steers the camera — so a mobile player could aim, or
+	they could look at what they were aiming at, and not both. The sights were
+	effectively unavailable on the platform.
+
+	Crouch is here too, but it arrives by a different road and keeps it: crouch
+	is a toggle in the SETTINGS and InputController owns that. This table is only
+	about the touch pad, so crouch is not in it — its button already latches
+	because the setting makes the verb behave that way underneath.
+]]
+local TOGGLE: { [string]: boolean } = {
+	Aim = true,
+}
+
+--[[
+	Whether a latched verb is currently ON, asked of whoever actually knows.
+
+	Never of anything this file remembers, and that is the whole design. The
+	server drops crouch by itself the moment the body stops being upright, and
+	WeaponController drops the sights by itself when the player sprints or goes
+	down — neither of them tells the input layer, and neither of them should have
+	to. A button mirroring its own last press would be lying within seconds.
+
+	Asking the truth instead makes the button self-heal: it unlights when the
+	verb ends for a reason nobody pressed, and the next tap does the right thing
+	because it is reading the same answer.
+]]
 local function latchedState(action: string): boolean
 	if action == "Crouch" then
 		return Attributes.get(player, Attributes.Player.IsCrouching, false) == true
+	end
+	if action == "Aim" then
+		local weapon = Registry.find("WeaponController")
+		if not weapon or typeof(weapon.isAiming) ~= "function" then
+			return false
+		end
+		local ok, aiming = pcall(weapon.isAiming, weapon)
+		return ok and aiming == true
 	end
 	return false
 end
@@ -267,11 +310,22 @@ end
 	cleared `held`, so the next InputBegan on that button would have seen it as
 	still occupied and refused to press it at all.
 ]]
-local function releaseEntry(entry)
+local function releaseEntry(entry, force: boolean?)
 	entry.held = nil
-	local input = Registry.find("InputController")
-	if input then
-		input:raise(entry.action, false)
+	--[[ A toggled verb does not follow the finger. Lifting off AIM says nothing
+	     about whether the player still wants the sights — that is what the next
+	     tap is for — so an ordinary release leaves the verb alone.
+
+	     `force` is the pad going AWAY, and that is different in kind: the button
+	     that would switch the verb back off is about to stop existing. A player
+	     who opens a menu mid-aim and comes back to find the sights still up and
+	     nothing on screen saying so is the crouch bug this file already fixed
+	     once, wearing the other verb. ]]
+	if force or not TOGGLE[entry.action] then
+		local input = Registry.find("InputController")
+		if input then
+			input:raise(entry.action, false)
+		end
 	end
 	--[[ A latched button is left alone: the finger coming off crouch says nothing
 	     about whether the player is crouched, and the state sweep owns it.
@@ -384,9 +438,57 @@ local function newButton(action: string, label: string, size: number, prominent:
 			return
 		end
 		local input_ = Registry.find("InputController")
+		if not input_ then
+			return
+		end
 		--[[ entry.action, not the captured `action`: the contextual button changes
 		     which verb it is at runtime. See CONTEXTUAL below. ]]
-		if input_ and input_:raise(entry.action, true) then
+		if TOGGLE[entry.action] then
+			--[[
+				A tap switches the verb, and which way is decided by what is
+				actually true rather than by what was last asked for. See
+				latchedState.
+
+				The re-press is not belt and braces. InputController's `down` is
+				edge-gated — raise(true) against an input it already believes is
+				down returns having done nothing — and the two DO come apart:
+				sprinting cancels the sights and being knocked down cancels them,
+				neither of which goes anywhere near the input layer. That is
+				correct for a mouse, where letting go and pressing again is the
+				fix and costs nothing. On a toggle it would be permanent: the
+				button would stop aiming for the rest of the round, and no amount
+				of tapping would bring it back. Clearing first makes the press an
+				edge again.
+			]]
+			local wasOn = latchedState(entry.action)
+			input_:raise(entry.action, false)
+			if not wasOn then
+				input_:raise(entry.action, true)
+			end
+			--[[ Remembered so the finger lifting still clears the button's own
+			     state, and so a second finger cannot land on it mid-press. The
+			     verb itself is not released with it — see releaseEntry. ]]
+			entry.held = input
+			--[[
+				Painted to the state the tap just ASKED for, not to the state
+				re-read from the verb.
+
+				Re-reading would answer the old value: raise fires its signal
+				through Signal, which spawns each handler on its own thread, so
+				setAiming has not run by the time raise returns. And waiting for
+				the state sweep instead is a fifteenth of a second of a button
+				that looks like it ignored a tap.
+
+				`lit` moves with it so the sweep agrees rather than immediately
+				repainting, and if the verb was refused — a menu is open, the
+				input is muted — the sweep corrects this a tick later from the
+				truth.
+			]]
+			entry.lit = not wasOn
+			paint(entry, entry.lit)
+			return
+		end
+		if input_:raise(entry.action, true) then
 			entry.held = input
 			paint(entry, true)
 		end
@@ -560,7 +662,7 @@ local function refresh()
 		     the button that would have raised the release is gone. Everything is
 		     let go on the way out. ]]
 		for _, entry in buttons do
-			releaseEntry(entry)
+			releaseEntry(entry, true)
 			--[[ Cleared with the paint, or the state sweep would compare against a
 			     lit it no longer matches and decline to light crouch again when the
 			     pad comes back. ]]
