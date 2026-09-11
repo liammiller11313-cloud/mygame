@@ -829,13 +829,24 @@ do
 	for _, id in { "ClassicPaintballGun", "ClassicRocketLauncher", "ClassicSlingshot" } do
 		local definition = WeaponConfig.get(id)
 		if definition then
-			parts[#parts + 1] = string.format(
-				"%s %s",
-				string.gsub(id, "^Classic", ""),
-				if definition.projectile
-					then string.format("%d/s", definition.projectile.speed)
-					else "HITSCAN"
-			)
+			--[[ The speed, and then whatever else the round does that a plain
+			     velocity does not — the rocket's servo, the pellet's bounces.
+			     Same reason the speed is here: these are the behaviours that get
+			     reported as "it feels the same as before", and reading them off
+			     the live config at boot is the only way to tell a weapon that
+			     has not changed from a Studio that is not running the change. ]]
+			local flight = "HITSCAN"
+			local round = definition.projectile
+			if round then
+				flight = string.format("%d/s", round.speed)
+				if round.servo then
+					flight ..= string.format(" servo%d", round.servo.gain)
+				end
+				if round.bounce then
+					flight ..= string.format(" bounce%d", round.bounce.left)
+				end
+			end
+			parts[#parts + 1] = string.format("%s %s", string.gsub(id, "^Classic", ""), flight)
 		end
 	end
 	local sword = WeaponConfig.get("ClassicSword")

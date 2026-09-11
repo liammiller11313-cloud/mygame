@@ -638,6 +638,22 @@ function BallisticsService:resolveShot(
 							floor = 1,
 						}
 						else nil,
+					--[[ The same rule spent on WALLS. PelletScript halves on every
+					     surface, and a surface is a surface — the original does not
+					     distinguish a Common's arm from a corridor wall, it just
+					     divides. Per shot and mutable for the same reason `pierce`
+					     is: two pellets in the air must not share a counter.
+
+					     The falloff is read from the same definition field, so the
+					     two chains cannot drift apart into a pellet that loses half
+					     through a body and a third off a wall. ]]
+					bounce = if definition.projectile.bounce
+						then {
+							left = definition.projectile.bounce.left,
+							falloff = definition.penetrationFalloff,
+							floor = 1,
+						}
+						else nil,
 				}
 			end
 			projectiles:launch(

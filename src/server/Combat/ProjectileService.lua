@@ -321,6 +321,12 @@ local GROUND_SEARCH = 24 -- how far down a shatter looks for a floor to sit on
 
 local EPSILON = 1e-4
 
+--[[ How far clear of a surface a bouncing round is placed before it flies on.
+     The impact point handed to _detonate is already a fifth of a stud off the
+     wall along its normal; this is on top of that, and it is what stops a
+     pellet reflecting inside the geometry it just left on a glancing hit. ]]
+local BOUNCE_CLEARANCE = 0.5
+
 --[[
 	The bank has no explosion, no glass-shatter and no beep sample yet. Rather
 	than stay silent, each of these borrows the closest thing in AudioConfig.Id
@@ -721,7 +727,19 @@ function ProjectileService:launch(
 		lift.Parent = body
 	end
 
-	body.AssemblyLinearVelocity = unit * spec.speed
+	--[[
+		── A SERVO ROUND LEAVES THE TUBE STOPPED ────────────────────────────────
+		RocketScript sets no launch velocity at all. Its servo target starts ON
+		the rocket, so the first frame's drift is zero, so the first frame's
+		velocity is zero, and the round accelerates into its cruise over roughly
+		3/gain seconds instead of being handed its top speed on frame one.
+
+		That is the whole feel of the classic launcher and it is not reachable by
+		tuning `speed`: it is the shape of the acceleration rather than its
+		ceiling. Handing this round `unit * spec.speed` here would delete it on
+		the very first step, before the servo ever ran.
+	]]
+	body.AssemblyLinearVelocity = if spec.servo then Vector3.zero else unit * spec.speed
 	body.AssemblyAngularVelocity = Vector3.new(
 		random:NextNumber(-1, 1),
 		random:NextNumber(-1, 1),
@@ -764,6 +782,13 @@ function ProjectileService:launch(
 		     contact round's travel direction: the live reading is the step it
 		     just took, and a step of zero length has no direction to normalise. ]]
 		heading = unit,
+		--[[ RocketScript's `target` and SERVO_GAIN, or nil for a round that is
+		     simply given a velocity and keeps it. The target starts on the round
+		     — `local target = shaft.Position` — which is what makes it start from
+		     rest. See ProjectileProfile.servo. ]]
+		servo = spec.servo,
+		servoTarget = muzzle,
+		servoSpeed = spec.speed,
 		spawnedAt = os.clock(),
 		endsAt = os.clock() + spec.lifetime,
 		lureAt = 0,
@@ -982,7 +1007,7 @@ function ProjectileService:_step(deltaTime: number)
 
 	local live = self._live
 	for index = #live, 1, -1 do
-		self:_stepProjectile(live[index], index, now)
+		self:_stepProjectile(live[index], index, now, deltaTime)
 	end
 
 	self._zoneAccumulator += deltaTime
@@ -993,7 +1018,7 @@ function ProjectileService:_step(deltaTime: number)
 	end
 end
 
-function ProjectileService:_stepProjectile(record: any, index: number, now: number)
+function ProjectileService:_stepProjectile(record: any, index: number, now: number, deltaTime: number)
 	local body = record.body
 	if not body or not body.Parent then
 		self:_retireProjectile(index)
@@ -1001,6 +1026,28 @@ function ProjectileService:_stepProjectile(record: any, index: number, now: numb
 	end
 
 	local position = body.Position
+
+	--[[
+		── THE CLASSIC ROCKET'S SERVO ───────────────────────────────────────────
+		    local direction = shaft.CFrame.LookVector
+		    target += direction
+		    shaft.AssemblyLinearVelocity = (target - shaft.Position) * SERVO_GAIN
+
+		Line for line, with one change: the original advances the target ONE STUD
+		PER FRAME, which makes the cruise speed a function of the server's frame
+		rate — sixty studs a second at 60Hz and thirty at 30Hz. Advancing it by
+		`speed * deltaTime` instead settles the same servo at the speed the
+		weapon actually asks for, on any frame rate, and leaves the acceleration
+		curve — the part worth having — exactly as it was.
+
+		Steady state is `speed / gain` studs behind the target, which for the
+		rocket is about ten and a half. It never catches up, and it is not
+		supposed to.
+	]]
+	if record.servo then
+		record.servoTarget += body.CFrame.LookVector * (record.servoSpeed * deltaTime)
+		body.AssemblyLinearVelocity = (record.servoTarget - position) * record.servo.gain
+	end
 
 	if record.kind == THROWABLE.PipeBomb then
 		self:_stepPipeBomb(record, position, now)
@@ -1245,6 +1292,39 @@ function ProjectileService:_impactRound(
 			Nil for the paintball and every launcher, which resolve on the first
 			thing they touch.
 		]]
+		--[[
+			── AND IT PAINTS PEOPLE ─────────────────────────────────────────────
+			    if hit:GetMass() < 1.2 * 200 then
+			        hit.BrickColor = ball.BrickColor
+			    end
+
+			Paintball.lua asks one question and it is about mass. A limb is far
+			under two hundred and forty, so the classic paints players, and being
+			covered in somebody else's colour is most of what a paintball gun is
+			for. This was left out entirely; it is back, for survivors.
+
+			Not for infected, and that half of the old decision was right. A
+			special is told apart from a Common at six paces by its colour, and a
+			team that cannot tell a Boomer from a Common has already lost the
+			fight that colour was warning them about. Friendly fire is a fair
+			trade; friendly fire on the horde's silhouette is not.
+
+			Straight onto the part rather than through PaintService, because
+			PaintService's `paintable` gate begins with `inLiveMap` and a limb is
+			not in the map. Going through it would mean either refusing every
+			survivor or loosening the gate that keeps the paint off puzzle props —
+			and it would also cache a verdict per limb, keyed by parts that are
+			destroyed and rebuilt on every respawn.
+
+			It wears off when they do: a character that dies is replaced, and the
+			replacement is the colour it was born. The original never reverted at
+			all, and a permanent mark on a thing that is permanent is a different
+			proposition from one on a thing that respawns.
+		]]
+		if contact.tint and contact.paint and not RigUtil.isInfected(model) then
+			part.Color = contact.tint
+		end
+
 		if pierce and pierce.left > 0 and contact.damage > pierce.floor then
 			pierce.left -= 1
 			pierce.spent += 1
@@ -1276,11 +1356,63 @@ function ProjectileService:_impactRound(
 		damageType = Enums.DamageType.Bullet,
 		paint = splat,
 	})
-	--[[ Scenery always spends the round, however many bodies it had left in it.
-	     The original pellet bounces off a wall and halves; modelling that would
-	     mean a reflection solver for a weapon nobody aims at walls on purpose,
-	     and the alternative — carrying on through the wall — is worse than not
-	     modelling it at all. ]]
+	--[[
+		── THE PELLET BOUNCES ───────────────────────────────────────────────────
+		This used to read "a reflection solver for a weapon nobody aims at walls
+		on purpose", and declined. That has the weapon backwards: bouncing a
+		pellet round a corner IS aiming at a wall on purpose, and it is the one
+		thing the classic slingshot does that nothing else in this game can.
+
+		`damage /= 2` in PelletScript does not ask what it hit. A wall halves the
+		pellet exactly as a body does, which is why this spends the same falloff
+		the pierce chain spends and shares its floor: a pellet already through a
+		Common has less left to carry round the corner.
+
+		Mirror the step about the surface normal — r = d - 2(d·n)n — and move the
+		round to the impact point, nudged clear along that normal so the next
+		sweep starts outside the wall rather than inside it. lastPosition moves
+		with it for the same reason: leaving it behind would have the very next
+		sweep re-resolve against the wall this bounce just left.
+
+		A servo round is never given a bounce, and must not be: its velocity is
+		rewritten from its nose every step, so a reflection would be erased on
+		the following frame and the round would fly on into the wall.
+	]]
+	local bounce = contact.bounce
+	if bounce and bounce.left > 0 and contact.damage > bounce.floor and not record.servo then
+		local body = record.body
+		local speed = if body then body.AssemblyLinearVelocity.Magnitude else 0
+		--[[ The round must actually be going INTO the face it hit. A raycast
+		     normal points back along the ray for a front face, so this is
+		     negative for every ordinary impact — but a graze that resolves
+		     against a back face, or a round that started inside geometry, can
+		     hand back a normal on the same side as the travel. Reflecting about
+		     that drives the pellet INTO the wall rather than off it, and it then
+		     bounces again from inside on the next step. Verified by working the
+		     reflection through by hand for four incidences; this is the one that
+		     misbehaves, so it spends the round instead. ]]
+		local approach = travel:Dot(normal)
+		if body and body.Parent and speed > EPSILON and approach < 0 then
+			bounce.left -= 1
+			contact.damage *= bounce.falloff
+
+			local reflected = (travel - 2 * approach * normal).Unit
+			local clear = position + normal * BOUNCE_CLEARANCE
+			body.CFrame = CFrame.lookAt(clear, clear + reflected)
+			body.AssemblyLinearVelocity = reflected * speed
+			record.heading = reflected
+			--[[ lastPosition is deliberately NOT set here. _detonate sets it to
+			     the impact point on every survived impact — the pierce chain
+			     needs exactly that — and a second write here would be dead code
+			     that reads as load-bearing. The body sits further out along the
+			     normal than that point and is travelling away from the wall, so
+			     the next sweep runs outward and cannot re-resolve against it. ]]
+			return false
+		end
+	end
+
+	-- Out of bounces, too weak to carry on, or moving too slowly to reflect
+	-- meaningfully: scenery spends it.
 	return true
 end
 

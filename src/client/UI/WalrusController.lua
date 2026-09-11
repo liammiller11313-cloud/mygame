@@ -34,7 +34,7 @@ local UITheme = require(Shared.Config.UITheme)
 
 local COLOR = UITheme.Color
 local FONT = UITheme.Font
-local TEXT = UITheme.Text
+local TEXT = UITheme.TextSize
 local LAYOUT = UITheme.Layout
 local PA = Attributes.Player
 
