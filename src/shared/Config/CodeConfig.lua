@@ -97,24 +97,25 @@ CodeConfig.Codes = table.freeze({
 		displayName = "OG BRICKBATTLE",
 		blurb = "Brickbattler's Pack, free, for anybody who was there.",
 		--[[
-			2026-09-10, 17:00–19:00 US Central (CDT, UTC-5).
-			Which is 22:00 UTC on the 10th to 00:00 UTC on the 11th — and that
-			is the two numbers below.
+			2026-09-11, 16:25–17:00 US Central (CDT, UTC-5).
+			Which is 21:25–22:00 UTC on the 11th — and that is the two numbers
+			below. Thirty-five minutes, which is short on purpose: this reopens a
+			window that had already closed, and is not a second launch.
 
-			── THE WINDOW CROSSES MIDNIGHT UTC, AND THAT IS NOT A TYPO ─────────
-			This comment used to say the arithmetic was "(local hour + 5) on the
-			same day", which was true of a window that closed at 18:00 local and
-			is false of this one: 19:00 + 5 is 24, so the close is 00:00 on the
-			ELEVENTH. A future editor following the old rule would write the
-			10th, and the code would have expired an hour before anybody could
-			type it — on the one night it exists.
+			── CONVERT BOTH ENDS INDEPENDENTLY ─────────────────────────────
+			The rule is not "(local hour + 5) on the same day". The window this
+			one replaces ran 17:00–19:00 local, and 19:00 + 5 is 24 — so its
+			close landed at 00:00 on the NEXT day. An editor who assumed both
+			ends shared a date would have written the 10th and expired the code
+			an hour before anybody could type it, on the one night it existed.
 
-			So: convert BOTH ends to UTC independently and let the date fall
-			where it falls. Add 5 in September while CDT is in effect, 6 once
-			CST returns in November, and never assume the two ends share a day.
+			This window happens not to cross midnight. Do not read that as the
+			rule relaxing. Convert each end on its own and let the date fall
+			where it falls; add 5 in September while CDT is in effect, 6 once
+			CST returns in November.
 		]]
-		startsAt = 1789077600,
-		endsAt = 1789084800,
+		startsAt = 1789161900,
+		endsAt = 1789164000,
 		reward = {
 			passes = { "BrickbattlersPack" },
 			dollars = 250,
