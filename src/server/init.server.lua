@@ -810,6 +810,42 @@ line("modules", string.format("%d of %d loaded", #loaded, #MODULES), loadMs)
 line("init", string.format("%d ran, %d failed", initRan, initFailed), initMs)
 line("start", string.format("%d ran, %d failed", startRan, startFailed), startMs)
 line("assets", assetSummary)
+--[[
+	── THE LINE THAT SAYS WHETHER STUDIO IS RUNNING THE CODE YOU THINK ─────────
+	Read off WeaponConfig at boot rather than written down, so it cannot say one
+	thing while the roster says another. It exists because "the guns behave
+	exactly as they did before" is indistinguishable from "Rojo is not serving
+	this tree", and there was no way to tell the two apart from inside Studio.
+
+	Now there is: if this line says HITSCAN for the paintball or the rocket, the
+	code in front of you predates the change and the problem is the sync, not the
+	weapon. If it says travelling and they still behave the old way, the problem
+	is real and worth reporting.
+
+	Four weapons and a string compare, once, at boot.
+]]
+do
+	local parts: { string } = {}
+	for _, id in { "ClassicPaintballGun", "ClassicRocketLauncher", "ClassicSlingshot" } do
+		local definition = WeaponConfig.get(id)
+		if definition then
+			parts[#parts + 1] = string.format(
+				"%s %s",
+				string.gsub(id, "^Classic", ""),
+				if definition.projectile
+					then string.format("%d/s", definition.projectile.speed)
+					else "HITSCAN"
+			)
+		end
+	end
+	local sword = WeaponConfig.get("ClassicSword")
+	if sword and sword.lunge then
+		parts[#parts + 1] = string.format("Sword lunge %.2fs", sword.lunge.window)
+	end
+	if #parts > 0 then
+		line("pack", table.concat(parts, " · "))
+	end
+end
 line("joining", joiningSummary)
 if #slowModules > 0 then
 	line("slow", table.concat(slowModules, ", "))
