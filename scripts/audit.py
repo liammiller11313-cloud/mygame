@@ -1934,6 +1934,72 @@ for _n, (_at, _pid) in enumerate(_pz_ids):
                 f"armInvestigation refuses to arm on exactly this mismatch"
             )
 
+# ── 38. An entitlement gate reading the stored set instead of the held one ──
+#
+# ProfileService keeps two tables of things a player was GRANTED — profile.owned
+# for weapons, profile.abilities for abilities — and neither is the whole answer
+# to "do they hold this". A pass is asked of Roblox, a code writes a third table,
+# and the game's owner holds everything without any of them. unlockedSet and
+# abilitySet are where those roads merge, and every gate has to read one of them.
+#
+# For a year the two halves were not symmetrical. Weapons went through
+# unlockedSet/editableSet everywhere; abilities were gated on profile.abilities
+# directly — which is the same table for everybody except an owner, so it was
+# correct until the day it wasn't. The owner grant landed, the loadout picker
+# drew BECOME WALRUS live because the payload is built from abilitySet, and
+# setLoadout dropped it on the way back in because that path read the stored
+# table. The row worked, the click did nothing, and nothing anywhere said why.
+#
+# Both sanitisers take (loadout, owned, abilitiesOwned). Every call in this file
+# must pass a merged set or an explicit nil for each — nil meaning "shape only,
+# ownership is checked at the point of use", which deserialise deliberately does.
+_ps = read(SRC / "server/Economy/ProfileService.lua")
+_MERGED = ("nil", "unlockedSet(", "editableSet(", "abilitySet(")
+
+for _m in re.finditer(r"LoadoutConfig\.sanitise(?:All)?\(", _ps):
+    # Walk the call's parens so a wrapped argument list reads the same as one line.
+    _i, _depth, _args, _cur = _m.end(), 1, [], ""
+    while _i < len(_ps) and _depth > 0:
+        _c = _ps[_i]
+        if _c in "([{":
+            _depth += 1
+        elif _c in ")]}":
+            _depth -= 1
+            if _depth == 0:
+                break
+        if _c == "," and _depth == 1:
+            _args.append(_cur)
+            _cur = ""
+        else:
+            _cur += _c
+        _i += 1
+    _args.append(_cur)
+    _args = [" ".join(a.split()) for a in _args]
+    _line = _ps[:_m.start()].count("\n") + 1
+
+    for _n, _what in ((1, "weapon"), (2, "ability")):
+        if _n >= len(_args):
+            continue
+        _arg = _args[_n]
+        if not any(_arg.startswith(_ok) for _ok in _MERGED):
+            problems.append(
+                f"ProfileService.lua:{_line} sanitises the {_what} half against {_arg!r} — "
+                f"that is a stored grant table, not what the player holds. Pass "
+                f"{'unlockedSet/editableSet' if _n == 1 else 'abilitySet'}(player, profile), or "
+                f"an explicit nil to check ownership at the point of use"
+            )
+
+# And the one gate that is not a sanitise call: setAbilitySlot's early refusal.
+# To "\nend" at column zero, not the first "\n\tend" — the nested one closes the
+# profile-missing guard two lines ABOVE the gate this is here to read.
+_gate = re.search(r"function ProfileService:setAbilitySlot.*?\nend$", _ps, re.S | re.M)
+if _gate and "profile.abilities[id]" in _gate.group(0):
+    problems.append(
+        "ProfileService:setAbilitySlot refuses on profile.abilities[id] — the stored grant "
+        "table, which does not include what an owner holds. Read abilitySet(player, profile)"
+    )
+
+
 print(f"audited {len(files)} Luau files\n")
 if problems:
     print(f"── {len(problems)} PROBLEM(S) ──")

@@ -382,9 +382,12 @@ local function migrate(stored: any): Profile
 			end
 		end
 	end
-	--[[ Filtered against what survived above, so a profile cannot come back with
-	     an ability equipped that it no longer owns. ]]
-	profile.abilitySlots = AbilityConfig.sanitiseSlots(stored.abilitySlots, profile.abilities)
+	--[[ Shape only, and `nil` for the same reason the loadout sanitise below
+	     passes nil: the set this function can see is the stored one, and the
+	     stored one is not the whole answer for an owner. Overwritten outright by
+	     syncAbilityMirror at the end of this function anyway — it exists between
+	     here and there only to seed the migration below. ]]
+	profile.abilitySlots = AbilityConfig.sanitiseSlots(stored.abilitySlots, nil)
 
 	--[[
 		── STRUCTURE HERE, OWNERSHIP AT THE POINT OF USE ───────────────────────
@@ -415,7 +418,7 @@ local function migrate(stored: any): Profile
 		the right way round: the loadout is a preference, and a preference should
 		survive losing the thing it points at.
 	]]
-	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, nil, profile.abilities)
+	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, nil, nil)
 	--[[ Names are sanitised the same way and separately from the slots, because
 	     a profile saved before naming existed has loadouts and no names — see
 	     sanitiseNames, which answers a default for every one it does not find. ]]
@@ -452,8 +455,8 @@ local function migrate(stored: any): Profile
 					seeded = LoadoutConfig.withAbility(seeded, slot, id)
 				end
 			end
-			-- nil for the same reason the sanitise above passes nil.
-			profile.loadouts[index] = LoadoutConfig.sanitise(seeded, nil, profile.abilities)
+			-- nil for the same reason the sanitise above passes nil, both halves.
+			profile.loadouts[index] = LoadoutConfig.sanitise(seeded, nil, nil)
 		end
 	end
 	syncAbilityMirror(profile)
@@ -730,8 +733,13 @@ local function unlockedSet(player: Player, profile: Profile): { [string]: boolea
 end
 
 --[[
-	The ability set as the CLIENT should see it, which is the stored one for
-	everybody but an owner.
+	The ability set, which is the stored one for everybody but an owner.
+
+	unlockedSet's opposite number, and it has to be used in the same places:
+	every read of a player's abilities goes through here, not through
+	profile.abilities. The stored table is what they were GRANTED; this is what
+	they hold. For everybody but an owner the two are the same table, which is
+	why reading the stored one directly worked for a year and then did not.
 
 	Built rather than returned by reference for an owner, because the stored table
 	is the thing that gets written to a DataStore — handing out a copy with six
@@ -1568,11 +1576,12 @@ function ProfileService:ownsAbility(player: Player, id: string): boolean
 	return profile ~= nil and profile.abilities[id] == true
 end
 
---[[ The unlocked set, by reference. Callers on the server read it to filter or
-     to sanitise; nothing mutates it except grantAbility. ]]
+--[[ The unlocked set. Callers on the server read it to filter or to sanitise;
+     nothing mutates it except grantAbility, and an owner is handed a fresh table
+     that grantAbility is not holding. See abilitySet. ]]
 function ProfileService:getAbilities(player: Player): { [string]: boolean }
 	local profile = profiles[player]
-	return if profile then profile.abilities else {}
+	return if profile then abilitySet(player, profile) else {}
 end
 
 --[[ Unlocks one permanently. False when the profile is missing, the id is not
@@ -1610,7 +1619,7 @@ function ProfileService:setAbilitySlot(player: Player, slot: number, id: string)
 	if not profile or not AbilityConfig.isSlot(slot) then
 		return false
 	end
-	if id ~= "" and not profile.abilities[id] then
+	if id ~= "" and not abilitySet(player, profile)[id] then
 		return false
 	end
 
@@ -1625,7 +1634,8 @@ function ProfileService:setAbilitySlot(player: Player, slot: number, id: string)
 	local next_ = LoadoutConfig.withAbility(profile.loadouts[index], slot, id)
 	--[[ editableSet, not unlockedSet: this edits an ABILITY, and it must not be
 	     able to change a weapon as a side effect. See editableSet. ]]
-	local cleaned = LoadoutConfig.sanitise(next_, editableSet(player, profile, index), profile.abilities)
+	local cleaned =
+		LoadoutConfig.sanitise(next_, editableSet(player, profile, index), abilitySet(player, profile))
 	if LoadoutConfig.equal(profile.loadouts[index], cleaned) then
 		return false
 	end
@@ -1653,7 +1663,7 @@ function ProfileService:activeLoadout(player: Player): LoadoutConfig.Loadout
 	return LoadoutConfig.sanitise(
 		profile.loadouts[profile.active],
 		unlockedSet(player, profile),
-		profile.abilities
+		abilitySet(player, profile)
 	)
 end
 
@@ -1667,7 +1677,8 @@ function ProfileService:setLoadout(player: Player, index: number, loadout: any):
 	     which is what the picker does on every edit, one slot changed and the
 	     other two carried over — must not lose the other two because a pass has
 	     not resolved yet. A weapon it does NOT already hold is still refused. ]]
-	local cleaned = LoadoutConfig.sanitise(loadout, editableSet(player, profile, slot), profile.abilities)
+	local cleaned =
+		LoadoutConfig.sanitise(loadout, editableSet(player, profile, slot), abilitySet(player, profile))
 	if LoadoutConfig.equal(profile.loadouts[slot], cleaned) then
 		return false
 	end

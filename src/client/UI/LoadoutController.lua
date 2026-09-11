@@ -703,6 +703,10 @@ function LoadoutController:_openPicker(slot: string)
 
 	local entry = rowFor(slot)
 	local count = 0
+	--[[ Read once for both branches. Nil while the profile is still loading,
+	     which correctly lists nothing code-only rather than guessing — see the
+	     weapon branch below, which has always said so. ]]
+	local store = profile()
 	if entry and entry.ability then
 		--[[ Empty first, because it is the only row that is always available and
 		     because a player opening this to UNequip something should not have to
@@ -710,6 +714,19 @@ function LoadoutController:_openPicker(slot: string)
 		buildAbilityPickRow(entry.ability, LoadoutConfig.NoAbility, 1)
 		count = 1
 		for _, definition in AbilityConfig.Definitions do
+			--[[ A code-only ability is drawn only to somebody who holds it, which
+			     is the rule LoadoutConfig.candidates already follows for a
+			     code-only weapon and the one AbilityPanelController follows for
+			     this same row.
+
+			     Without it a stranger reads "BECOME WALRUS — LOCKED · $0", taps
+			     it, and is sent to the ability panel to buy a thing that panel
+			     deliberately does not list. Every other locked row here is a
+			     PRICE and a price is a promise; this one had no promise to make
+			     and was quoting zero. ]]
+			if definition.codeOnly and not (store ~= nil and store:ownsAbility(definition.id)) then
+				continue
+			end
 			count += 1
 			buildAbilityPickRow(entry.ability, definition.id, count)
 		end
@@ -718,7 +735,6 @@ function LoadoutController:_openPicker(slot: string)
 		     account that holds it — see LoadoutConfig.candidates. Nil while the
 		     profile is still loading, which correctly lists nothing code-only
 		     rather than guessing. ]]
-		local store = profile()
 		local candidates = LoadoutConfig.candidates(slot, if store then store:getOwned() else nil)
 		for index, weaponId in candidates do
 			buildPickRow(slot, weaponId, index)
