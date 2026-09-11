@@ -1315,19 +1315,35 @@ WeaponConfig.Definitions = {
 		kickback = 0.36,
 
 		--[[
-			UNSET, and deliberately, after two wrong guesses.
+			── STILL UNSET, AND NOW THERE IS A REASON TO EXPECT IT NOT TO MATTER ─
+			Two wrong guesses are recorded here. This model was drawn standing on
+			end, so the pipeline's longest-axis reading takes a VERTICAL axis for
+			the barrel — which throws the facing and, with it, both viewmodel
+			hands, because ViewmodelArms places them as fractions of the model's
+			length along exactly that axis. That is the reported "arms look a bit
+			weird", and it is one cause with two symptoms.
 
-			This model was drawn standing on end. A quarter turn about Z was the
-			first fix, which spun it about an axis that was itself vertical and
-			turned its profile edge-on — a thinner wrong answer. Both attempts
-			were made without being able to see the model, which is not a way to
-			converge.
+			A quarter turn about Z was the first attempt; it spun the model about
+			an axis that was itself vertical and turned its profile edge-on — a
+			thinner wrong answer. Both attempts were made without being able to
+			see the model, which is not a way to converge, and a third would be
+			the same mistake.
 
-			The boot report now prints what the pipeline decided about this gun
-			and on what evidence. Read that line first, then set the rotation
-			this needs — or better, put a Muzzle attachment at the end of its
-			barrel in Studio and delete this comment, because that makes the
-			measurement exact and no rotation is needed at all.
+			What IS new: PlaceholderFactory no longer throws away a Tool's Grip.
+			A model drawn standing on end is precisely the case an artist fixes
+			by posing the Tool's Grip property, and that property used to be
+			discarded on the way in — the pipeline was not correcting an
+			uncorrected model, it was overriding an authored answer with a guess.
+			If this gun is supplied as a Tool with a posed Grip, it is now held
+			the way its author meant and this field stays empty for good.
+
+			How to tell, in one line: the boot report prints what was decided for
+			every supplied weapon. "its own Grip attachment, nothing inferred"
+			means the authored answer won and nothing here is needed. "ASSUMED"
+			or "STRAIGHTENED" means it is still being guessed at, and then the
+			fix is one Attachment called Muzzle at the end of the barrel in
+			Studio — which makes the measurement exact — rather than a number
+			here. See docs/WEAPON_MODELS.md.
 		]]
 
 		reloadTime = 0.75,

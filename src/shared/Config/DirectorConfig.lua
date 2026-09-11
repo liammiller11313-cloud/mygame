@@ -56,6 +56,23 @@ DirectorConfig.Population = table.freeze({
      a Director feel fair: enemies must arrive from somewhere plausible, never
      materialise in your field of view. ]]
 DirectorConfig.Spawning = table.freeze({
+	--[[
+		One line in the server log per wave, saying what that wave asked for, what
+		it got, and what stopped the rest.
+
+		On by default while the game is in testing, and it is one print per wave
+		rather than one per body — a whole seventeen-minute round is about twenty
+		lines. The expensive diagnostics in this system are already conditional;
+		this one is cheap enough not to be.
+
+		It exists because "the zombie spawning is a bit bugged" is not something
+		anybody can act on, and every part of the answer is already being counted
+		— the placement search names the rule that rejected each candidate, the
+		Director tallies starvation and crowding — and then thrown away at the
+		next warning interval without ever being lined up against the wave it
+		belonged to. See DirectorService:_reportWave.
+	]]
+	Trace = true,
 	MinDistanceFromSurvivor = 45,
 	MaxDistanceFromSurvivor = 190,
 	--[[

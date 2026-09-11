@@ -464,6 +464,13 @@ function DirectorService:init()
 
 	self._starved = 0
 	self._starvedReason = ""
+	--[[ The wave ledger. Counted separately from the warning tallies above,
+	     which reset on their own interval and would otherwise straddle two
+	     waves — the whole point of these is that they line up with one. ]]
+	self._waveSpawned = 0
+	self._waveStarved = 0
+	self._waveCrowded = 0
+	self._waveReasons = {} :: { [string]: number }
 	--[[ Scatter offsets that landed somewhere a body does not fit. Not a failure
 	     — the spawn still happens, at the centre — but a MAP reading: a level
 	     whose only clear placements are single body-widths is one where the
@@ -812,6 +819,15 @@ function DirectorService:setWaveBudget(budget: WaveBudget?)
 	local previous = self._budget
 	local isBreather = budget.isBreather == true
 	local waveIndex = math.floor(positive(budget.waveIndex, previous.waveIndex, 0))
+
+	--[[ The wave that just ended, before the budget that ended it is applied —
+	     so the line reports the target the finished wave was working to rather
+	     than the one the next wave is about to get. RoundService calls this on
+	     every phase change, which makes it the only place that knows a wave
+	     boundary has happened. See _reportWave. ]]
+	if waveIndex ~= previous.waveIndex or isBreather ~= previous.isBreather then
+		self:_reportWave(previous.waveIndex, previous.isBreather == true)
+	end
 
 	self._budget = {
 		populationScale = positive(budget.populationScale, previous.populationScale, 0),
@@ -1734,6 +1750,7 @@ function DirectorService:releaseBoss(kind: string, elite: string?): Model?
 		-- this one goes to the ordinary queue and the boss still arrives.
 		self._starved += 1
 		self._starvedReason = failure or "unknown"
+		self:_tallyStarve(failure)
 		self:_enqueue(SOURCE_BOSS, kind, anchor, radius, nil, elite)
 		return nil
 	end
@@ -1951,6 +1968,7 @@ function DirectorService:_placeFor(request, now: number): (Vector3?, string?)
 		local settled = SpawnPlacement.settle(scattered, request.kind)
 		if not settled then
 			self._crowded += 1
+			self._waveCrowded += 1
 		end
 		return settled or cached.position, nil
 	end
@@ -1999,6 +2017,7 @@ function DirectorService:_drainQueue(now: number)
 			-- whole spawn budget re-running a search that just failed.
 			self._starved += 1
 			self._starvedReason = failure or "unknown"
+			self:_tallyStarve(failure)
 			--[[
 				A BOSS GOES BACK IN THE QUEUE. Everything else is dropped, and
 				that is right: the population deficit is recomputed every
@@ -2038,6 +2057,11 @@ function DirectorService:_drainQueue(now: number)
 		end
 
 		local model = infected:spawn(request.kind, position, nil, request.elite)
+		-- Counted where the body actually exists, not where one was asked for:
+		-- a request InfectedService refuses below is not a spawn.
+		if model then
+			self._waveSpawned += 1
+		end
 		if not model then
 			if request.source == SOURCE_BOSS then
 				self._bossRetryAt = now + BOSS_RETRY_INTERVAL
@@ -2057,6 +2081,79 @@ function DirectorService:_drainQueue(now: number)
 			end
 		end
 	end
+end
+
+--[[ One reason, tallied. The strings come from SpawnPlacement and name the
+     rule that did the rejecting — "18 in sight, 4 too close" — so the tally is
+     over whole sentences rather than categories. That is deliberate: the
+     sentence is what tells you WHICH rule is starving the map, and bucketing it
+     would throw away the only part worth reading. ]]
+function DirectorService:_tallyStarve(failure: string?)
+	if not DirectorConfig.Spawning.Trace then
+		return
+	end
+	self._waveStarved += 1
+	local key = failure or "unknown"
+	self._waveReasons[key] = (self._waveReasons[key] or 0) + 1
+end
+
+--[[
+	What one wave actually did, in one line, at the moment the next one is set.
+
+	Read this when the spawning "feels" wrong. It answers the three questions
+	that separate the possible causes from each other and that nothing else in
+	this system lines up against a single wave:
+
+	  * spawned vs the wave's own population target — a wave that wanted forty
+	    bodies and placed nine is starving, not mis-paced;
+	  * starved, with the placement rule that did the rejecting — "in sight"
+	    means the team is standing in the open and the Director has nowhere legal
+	    to work; "too close" means the map's spawn room is tighter than the
+	    distance band; "no floor" or "does not fit" means the map geometry;
+	  * crowded, which is not a failure at all — it is the scatter landing
+	    somewhere a body does not fit and falling back to the centre, which is a
+	    horde arriving in a stack rather than through a doorway.
+
+	Reset after printing, so every line covers exactly one wave.
+]]
+function DirectorService:_reportWave(finishedIndex: number, wasBreather: boolean)
+	if not DirectorConfig.Spawning.Trace then
+		return
+	end
+	if self._waveSpawned == 0 and self._waveStarved == 0 then
+		return
+	end
+
+	local reasons: { string } = {}
+	for reason, count in self._waveReasons do
+		table.insert(reasons, string.format("%dx %s", count, reason))
+	end
+	table.sort(reasons)
+
+	--[[ A breather is its own phase and is labelled as one. It follows a wave
+	     and shares its index, so calling it by that index would file the calm's
+	     trickle under the wave before it — and a breather that spawns forty
+	     bodies is exactly the kind of thing this line is for. ]]
+	local phase = if wasBreather
+		then string.format("breather after %d", finishedIndex)
+		else string.format("wave %d", finishedIndex)
+
+	print(
+		string.format(
+			"[Director %s] spawned %d · starved %d · crowded %d · target was %d%s",
+			phase,
+			self._waveSpawned,
+			self._waveStarved,
+			self._waveCrowded,
+			self:_populationTarget(),
+			if #reasons > 0 then "  ·  " .. table.concat(reasons, " · ") else ""
+		)
+	)
+
+	self._waveSpawned = 0
+	self._waveStarved = 0
+	self._waveCrowded = 0
+	table.clear(self._waveReasons)
 end
 
 function DirectorService:_reportStarvation(now: number)
