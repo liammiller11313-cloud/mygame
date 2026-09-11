@@ -483,8 +483,30 @@ end
 	geometry in a model called Walls holding models called section, whose PARTS
 	are named whatever the artist felt like — so testing the part alone answers
 	nothing and testing the part plus everything above it answers all of them
-	from one entry. Stops at the map root: a Workspace or a folder called
-	something unlucky is not a statement about this surface.
+	from one entry.
+
+	── AND THE WALK IS WHY THAT MAP SPAWNED NOTHING AT ALL ─────────────────────
+	"Walls" folds to "wall", which is in NeverStandOn. The whole map lives under
+	that model, so the walk reached it from every part on the level and answered
+	false for EVERY surface on the Backrooms. No candidate could pass, so `find`
+	could never return a position, so the Director could never place an infected.
+	A map with no zombies in it, in any wave, silently — and the walk that did it
+	is the one written to make this map work.
+
+	A DIRECT CHILD OF THE MAP ROOT IS A CATEGORY, NOT A SURFACE. "Walls",
+	"Props", "Lights" are how a designer files a level; they are not a claim
+	about what any one face inside them is. So the walk tests the part and every
+	model between it and the top level, and stops one short of the root.
+
+	What that gives up: a top-level container genuinely called Ceiling or Roof no
+	longer vetoes its own contents by name. It is a real cost and a small one —
+	a vertical face is still refused by MIN_GROUND_NORMAL_Y, and the horizontal
+	top of a wall inside a ceilinged map has no headroom, so SpawnVolume's
+	clearance test refuses it on geometry. What it buys is that no single folder
+	name can ever again turn a whole map into one that spawns nothing.
+
+	It says so out loud, once, when it skips one. A rule quietly not applying is
+	how this got here.
 
 	See MapConfig.NeverStandOn for the names and why "Celing" is spelled twice.
 ]]
@@ -494,6 +516,27 @@ local function isFloorSurface(part: BasePart?, root: Instance?): boolean
 	end
 	local node: Instance? = part
 	while node and node ~= root and node ~= Workspace do
+		--[[ One short of the root. See the header: the top level is where a
+		     designer's categories live, and a category is not a surface. ]]
+		if root and node.Parent == root then
+			if MapConfig.isNeverStandOn(node.Name) then
+				--[[ Through warnOnce, which this file already has: isFloorSurface
+				     runs thousands of times a search and a plain warn here would
+				     be the loudest thing in the log. ]]
+				warnOnce(
+					"container:" .. node.Name,
+					string.format(
+						"%q is a top-level container in this map and its name is in "
+							.. "MapConfig.NeverStandOn — ignoring it there, because a category folder is "
+							.. "not a claim about any one surface inside it. Parts and models BELOW it "
+							.. "are still tested by name. If this really is one solid roof, rename the "
+							.. "parts under it rather than the folder",
+						node.Name
+					)
+				)
+			end
+			break
+		end
 		if MapConfig.isNeverStandOn(node.Name) then
 			return false
 		end
