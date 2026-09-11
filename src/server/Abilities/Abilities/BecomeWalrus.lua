@@ -177,6 +177,29 @@ local function dress(walrus: Walrus): Model?
 	model:PivotTo(walrus.root.CFrame)
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
+			--[[
+				── ANCHORED WAS THE WHOLE BUG, AND IT WAS AN OMISSION ────────────
+				A weld does nothing to an anchored part. Anchored means "the engine
+				does not move this", and it outranks every constraint attached to
+				it — so a model built in Studio, where anchoring everything is the
+				default habit, was nailed to the spot PivotTo had just put it.
+
+				What that looked like: the player became a walrus, walked away, and
+				left the walrus behind. Everybody else saw a motionless animal in an
+				empty corridor. The player themselves saw nothing wrong, because
+				they were in first person looking out of a rig that was still
+				moving — which is why this survived being tested.
+
+				It also explains the ghost. OutlineController adorns a Highlight to
+				the character MODEL, the abandoned parts are still descendants of
+				it, and the fill switches on when the teammate is occluded. The
+				teammate genuinely was occluded: they were in the next room. So the
+				engine drew a filled silhouette of a walrus that was not there.
+
+				Unanchored FIRST, before the weld, so there is never a frame where
+				a constraint is attached to something that cannot honour it.
+			]]
+			part.Anchored = false
 			--[[ Massless and non-collidable, for the same reason a dressed
 			     projectile's parts are: the rig underneath is still the physics,
 			     and a walrus whose handling changed with its model would be a

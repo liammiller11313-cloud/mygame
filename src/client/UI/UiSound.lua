@@ -92,7 +92,12 @@ function UiSound.play(definition: any)
 	--[[ Volume is set per play, not once at creation: two definitions can share
 	     an asset and want different volumes — the kill cue and the hit tick did
 	     exactly that before they had separate samples. ]]
-	sound.Volume = definition.volume * AudioConfig.Mix.MasterVolume
+	--[[ The definition's own volume and nothing else. The trim used to be
+	     applied here as well, which was harmless only while it was 1.0 -- every
+	     one of these sounds is in the master SoundGroup, which now carries it, so
+	     multiplying here too would trim the interface twice and leave the UI
+	     quieter than the world it sits over. ]]
+	sound.Volume = definition.volume
 	sound.PlaybackSpeed = random:NextNumber(definition.pitchMin, definition.pitchMax)
 	--[[ Rewound rather than left to finish. A cue re-triggered past the throttle
 	     is a NEW event and has to sound like one; letting it run on from where it

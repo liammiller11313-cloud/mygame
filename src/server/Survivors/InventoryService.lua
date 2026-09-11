@@ -161,18 +161,68 @@ function InventoryService:_ensureRecord(player: Player)
 	}
 	records[player] = record
 
+	--[[
+		── YOU COME BACK WITH YOUR LOADOUT, NOT WITH WHAT KILLED YOU ───────────
+		This used to re-give the loadout only when `record.slots` was EMPTY, and
+		nothing anywhere emptied it. Death does not clear this record; no death
+		handler exists. So the table a player respawned with was the one they died
+		holding: the floor weapon they picked up in the last room, the magazine
+		with three rounds left in it, the medkit they had already used, the
+		reload that was half finished, and the pistol the incap swap had stashed.
+
+		Every one of those came back with them and their actual loadout did not.
+
+		Now a respawn rebuilds from LoadoutService:getSpawnLoadout, which reads
+		the player's ACTIVE loadout at the moment they come back. That is both
+		halves of what this needed to do: the default is the kit they started the
+		round with, and a player who switches loadouts while waiting in a closet
+		comes back with the one they switched to.
+
+		The first spawn takes the same path — it always did, because slots were
+		empty then — so there is now one way into a body and not two.
+	]]
 	record.trove:connect(player.CharacterAdded, function()
-		-- Respawning with nothing is a bug the player cannot fix; a survivor who
-		-- comes back from a closet or a defib always has something to shoot with.
-		if next(record.slots) == nil then
-			self:giveStartingLoadout(player)
-		else
-			self:_publish(record)
-		end
+		self:_resetForSpawn(record)
+		self:giveStartingLoadout(player)
 	end)
 
 	self:_publish(record)
 	return record
+end
+
+--[[
+	Everything about the last life, forgotten.
+
+	Called on the way INTO a body rather than on the way out of one, and
+	deliberately: a death is not the only way a character ends, the server does
+	not always get told about the ones that are, and a reset that runs on spawn
+	cannot be missed by any of them.
+
+	The slots are announced empty before they are refilled, so a client whose
+	mirror still holds the throwable and the medkit from the last life is told
+	they are gone. Without that the HUD keeps drawing a molotov the server has
+	no record of, and pressing it does nothing at all.
+]]
+function InventoryService:_resetForSpawn(record)
+	for _, slot in Enums.Slot do
+		if record.slots[slot] then
+			record.slots[slot] = nil
+			self:_announce(record, slot)
+		end
+	end
+
+	--[[ The session state that outlived the body with it. `stashedSecondary` and
+	     `restoreSlot` are the incap pistol's bookkeeping and would otherwise
+	     restore a weapon from a life that has ended; `reload` and `use` are
+	     half-finished actions whose timers no longer have anything to finish. ]]
+	record.activeSlot = Enums.Slot.Secondary
+	record.reload = nil
+	record.use = nil
+	record.stashedSecondary = nil
+	record.restoreSlot = nil
+	table.clear(record.lastRequest)
+
+	self:_publish(record)
 end
 
 function InventoryService:_destroyRecord(player: Player)

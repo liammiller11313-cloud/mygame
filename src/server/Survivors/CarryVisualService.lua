@@ -312,6 +312,13 @@ local function consolidate(model: Model): BasePart?
 
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") and part ~= root then
+			--[[ Belt and braces, and one line. Every caller does reach here with
+			     an unanchored model today -- AmmoFactory builds its own parts and
+			     CarryVisualService tames before it places -- but that is a
+			     contract held three functions away and written down nowhere. An
+			     anchored part silently ignores the weld below, so the invariant
+			     belongs where the weld is made. audit.py check 39 agrees. ]]
+			part.Anchored = false
 			local weld = Instance.new("WeldConstraint")
 			weld.Part0 = root
 			weld.Part1 = part

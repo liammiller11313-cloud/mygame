@@ -1507,6 +1507,43 @@ if _input.exists():
                     )
                 _seen[_key] = _action
 
+        # ── AND THE ABILITY KEYS, WHICH ARE NOT IN THIS TABLE ───────────────
+        # InputController keeps the ability hotkeys in a separate ABILITY_KEYS
+        # list, indexed by slot and bound only as far as AbilityConfig.MaxSlots.
+        # This check could not see them, which is a blind spot in exactly the
+        # place it was written for: the list is a second set of literals that a
+        # feature can append to, and it is longer than the number of slots that
+        # are live.
+        #
+        # Live keys are a collision now and a problem. Keys past MaxSlots are
+        # reserved rather than bound, so they are a NOTE — the walrus SPECIAL is
+        # on F, which is ABILITY_KEYS[3] against a MaxSlots of 2. Nothing is
+        # wrong today and something will be the day somebody grants a third slot.
+        _keys_m = re.search(r"local ABILITY_KEYS = \{([^}]*)\}", _text)
+        _slots_m = re.search(
+            r"^AbilityConfig\.MaxSlots = (\d+)",
+            read(SRC / "shared/Config/AbilityConfig.lua"),
+            re.M,
+        )
+        if _keys_m and _slots_m:
+            _ability_keys = re.findall(r"Enum\.KeyCode\.(\w+)", _keys_m.group(1))
+            _live = int(_slots_m.group(1))
+            for _slot, _key in enumerate(_ability_keys, start=1):
+                if _key not in _seen:
+                    continue
+                if _slot <= _live:
+                    problems.append(
+                        f"InputController binds {_key} to {_seen[_key]!r} in BINDINGS and to "
+                        f"ability slot {_slot} in ABILITY_KEYS — both are live at "
+                        f"AbilityConfig.MaxSlots = {_live}, so one of them never fires"
+                    )
+                else:
+                    notes.append(
+                        f"InputController binds {_key} to {_seen[_key]!r}, and it is also "
+                        f"ABILITY_KEYS[{_slot}] — unbound while AbilityConfig.MaxSlots is "
+                        f"{_live}, and a collision the moment somebody raises it to {_slot}"
+                    )
+
         # And the verbs a player cannot finish a round without. A console build
         # that cannot pick a gun up is not a console build.
         _pad = {k for k in _seen if k.startswith("Button") or k.startswith("DPad")}
@@ -1998,6 +2035,82 @@ if _gate and "profile.abilities[id]" in _gate.group(0):
         "ProfileService:setAbilitySlot refuses on profile.abilities[id] — the stored grant "
         "table, which does not include what an owner holds. Read abilitySet(player, profile)"
     )
+
+
+# ── 39. A part welded to something, still anchored ──────────────────────────
+#
+# Anchored outranks every constraint attached to a part. A WeldConstraint onto
+# an anchored part is not a weld that loses an argument with physics — it is a
+# weld that does nothing at all, silently, with no warning and no error.
+#
+# This cost BECOME WALRUS an entire release. `dress` set Massless, CanCollide,
+# CanQuery, CanTouch and the CollisionGroup on every part of the supplied model,
+# welded each one to the character root, and never unanchored them. A model
+# built in Studio — where anchoring everything is the default habit — was
+# therefore nailed to the spot it was cloned at. The player walked away and left
+# the walrus standing in an empty corridor.
+#
+# It survived testing because the player who becomes the walrus is in first
+# person and cannot see their own body. Only other people could see it, and only
+# by looking. The same omission was sitting in both of ProjectileService's
+# dressing loops, unfound.
+#
+# The pattern is narrow on purpose: a loop over GetDescendants that builds a
+# WeldConstraint is adopting somebody else's model, which is exactly when the
+# parts are not yours and their Anchored state is not yours to assume.
+#
+# Two things this gets right that the first version did not. The loop body is
+# bounded by INDENTATION — walk to the `end` at the for's own depth — rather
+# than by the first `end` at any depth, which stopped at a nested if and would
+# have missed a weld in a later branch. And comments are stripped before the
+# body is read, because the first version was satisfied by the word "Anchored"
+# appearing in a comment ABOUT the missing line. It passed on code that had the
+# bug, which is the one failure mode a check like this must not have.
+_COMMENT_BLOCK = re.compile(r"--\[\[.*?\]\]", re.S)
+_COMMENT_LINE = re.compile(r"--[^\n]*")
+_ANCHOR_SET = re.compile(r"\.Anchored\s*=\s*false\b")
+
+
+def _loop_body(lines, start: int) -> str:
+    """From the `for` at lines[start] to the `end` at its own indentation."""
+    depth = len(lines[start]) - len(lines[start].lstrip("\t"))
+    out = []
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and len(line) - len(line.lstrip("\t")) <= depth:
+            if line.strip() == "end" or line.strip().startswith("end"):
+                break
+        out.append(line)
+    return "\n".join(out)
+
+
+# RAW text, not `sources`. strip_comments blanks string LITERALS as well as
+# comments -- deliberately, so a warn() mentioning "spawn(" is not read as a
+# call -- which erases the very literal this check looks for. Reading `sources`
+# here meant `"WeldConstraint" not in body` was true of every file in the game
+# and the check could not fire at all. Found by putting the walrus bug back and
+# watching nothing happen; a check that cannot fail is not a check.
+for _path in files:
+    _text = read(_path)
+    _lines = _text.split("\n")
+    for _index, _line in enumerate(_lines):
+        if "GetDescendants()" not in _line or not re.search(r"^\t*for\s", _line):
+            continue
+        _body = _loop_body(_lines, _index)
+        _body = _COMMENT_LINE.sub("", _COMMENT_BLOCK.sub("", _body))
+        # CREATING a weld, not mentioning one. ViewmodelArms walks its
+        # descendants to DESTROY every WeldConstraint it finds and then anchors
+        # the part on purpose, which the bare literal read as the bug it is the
+        # opposite of. Instance.new is the thing that means "I am adopting this".
+        if 'Instance.new("WeldConstraint")' not in _body and 'Instance.new("Weld")' not in _body:
+            continue
+        if _ANCHOR_SET.search(_body):
+            continue
+        problems.append(
+            f"{_path.name}:{_index + 1} welds parts of a model it did not build without setting "
+            f"Anchored = false — an anchored part ignores its weld completely, so the model "
+            f"stays where it was cloned while the thing it was welded to moves away"
+        )
 
 
 print(f"audited {len(files)} Luau files\n")

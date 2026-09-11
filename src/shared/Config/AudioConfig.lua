@@ -1036,7 +1036,21 @@ AudioConfig.Mix = table.freeze({
 	MaxConcurrentPerCategory = 14,
 	MinRetriggerInterval = 0.035,
 	DuckMusicOnTank = 0.4,
-	MasterVolume = 1.0,
+	--[[
+		The game's OUTPUT TRIM, and not the player's volume setting.
+
+		Two different numbers that were the same number. The slider is the
+		player's fraction; this is the ceiling that fraction is a fraction OF, and
+		MainMenuController multiplies them. Dropping it here quietens the game for
+		everybody at once -- including players who already have a slider position
+		saved, which changing the slider's default cannot do.
+
+		0.55 rather than 1.0 because the game was mixed loud: every cue was
+		authored to sit right against the others, and nothing was ever asked
+		whether the whole bus was too hot against everything else on the machine.
+		It was. A player who wants it back has a slider.
+	]]
+	MasterVolume = 0.55,
 })
 
 --[[ True when a definition has a usable id. Every play path checks this so a

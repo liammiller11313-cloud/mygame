@@ -125,6 +125,20 @@ local PAD_LAYOUT: { [string]: { x: number, y: number, size: number, prominent: b
 	]]
 	Ability1 = { x = 94, y = 188, size = BUTTON },
 	Ability2 = { x = 166, y = 188, size = BUTTON },
+
+	--[[
+		SPECIAL — the verb an ability gives you while it is running.
+
+		On the same top row as the two abilities and for the same reason: it is a
+		deliberate press, not a reflex, and it must not sit in the arc a thumb
+		rests in. Left of them, on its own, because it is not a third ability —
+		it belongs to whichever one is currently up.
+
+		Drawn only while the player IS something. A survivor sees the pad exactly
+		as it was; a walrus grows one button. That is the same rule the two
+		ability buttons follow, with a different question asked.
+	]]
+	Special = { x = 22, y = 188, size = BUTTON },
 }
 
 --[[ The pad is as wide as its leftmost button reaches. Jump is 76 at x=232, so
@@ -268,6 +282,14 @@ end
      the only thing that knows — an ability is equipped in the menu and the pad
      has no memory of it. A button for an empty slot is a button that refuses
      every press, and on the platform with the least room to spare. ]]
+--[[ Whether the SPECIAL button has anything to do, which today means "are you
+     a walrus". Read off the server's own attribute rather than from anything
+     local — the same one WalrusController draws its panel from, so the button
+     and the panel can never disagree about whether you are an animal. ]]
+local function specialAvailable(): boolean
+	return Players.LocalPlayer:GetAttribute(Attributes.Player.IsWalrus) == true
+end
+
 local function slotFilled(slot: number): boolean
 	local store = Registry.find("ProfileController")
 	if not store or typeof(store.getAbilitySlots) ~= "function" then
@@ -595,7 +617,7 @@ local function build()
 			--[[ Hidden until the state sweep says otherwise, a fifteenth of a
 			     second from now. The alternative is two dead buttons on screen for
 			     the first frame of every round. ]]
-			if abilitySlotOf(binding.action) then
+			if abilitySlotOf(binding.action) or binding.action == "Special" then
 				entry.frame.Visible = false
 			end
 			entry.contextual = CONTEXTUAL[binding.action] == true
@@ -675,8 +697,8 @@ local function refreshState()
 		     finger would otherwise leave the verb held with no button left to
 		     raise it. ]]
 		local slot = abilitySlotOf(entry.action)
-		if slot then
-			local wanted = slotFilled(slot)
+		if slot or entry.action == "Special" then
+			local wanted = if slot then slotFilled(slot) else specialAvailable()
 			if entry.frame.Visible ~= wanted then
 				if not wanted then
 					releaseEntry(entry)

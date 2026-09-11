@@ -388,8 +388,12 @@ function MainMenuController:setMasterVolume(value: number)
 	if not masterGroup then
 		return
 	end
+	--[[ The setting times the trim. `value` is the player's fraction and
+	     AudioConfig.Mix.MasterVolume is what it is a fraction of -- see there.
+	     Multiplied rather than either one winning, so lowering the game's output
+	     reaches a player who has already moved the slider. ]]
 	local wanted = if typeof(value) == "number" and value == value then math.clamp(value, 0, 1) else 1
-	masterGroup.Volume = wanted
+	masterGroup.Volume = wanted * AudioConfig.Mix.MasterVolume
 end
 
 -- ── suppression: what the menu does to the rest of the client ───────────────

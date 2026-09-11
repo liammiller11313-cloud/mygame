@@ -1015,6 +1015,24 @@ WeaponConfig.Definitions = {
 		class = "Launcher",
 		fireMode = "Semi",
 		codeOnly = true,
+		--[[
+			Turned end for end, because it came out of the hand pointing behind
+			the player.
+
+			This is the escape hatch working as designed rather than a patch over
+			it. ensureGrip measures which way a model points from its longest
+			axis when the artist left no Muzzle attachment, and a launcher tube is
+			longest along the barrel in BOTH directions -- the measurement is
+			exact about the axis and has a coin-flip left in it about the sign.
+			This model lost the flip.
+
+			The permanent fix is one Attachment called Muzzle at the business end,
+			which makes the reading exact and lets this line be deleted. See
+			docs/WEAPON_MODELS.md. Until then, half a turn about the model's own
+			up axis, applied in both hands so the viewmodel and the world model
+			cannot disagree about which way the rocket leaves.
+		]]
+		modelRotation = Vector3.new(0, 180, 0),
 		--[[ Never left on a shelf, for the same reason the RPG-7 is not: a
 		     Director that hands out a weapon one person redeemed has not made it
 		     rarer, it has made the code meaningless. ]]

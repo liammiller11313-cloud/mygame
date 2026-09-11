@@ -687,6 +687,12 @@ function ProjectileService:launch(
 		dressing:PivotTo(body.CFrame)
 		for _, part in dressing:GetDescendants() do
 			if part:IsA("BasePart") then
+				--[[ Anchored outranks the weld below it: an anchored part is one
+				     the engine does not move, constraint or no constraint. A
+				     supplied model built in Studio, where anchoring everything is
+				     the habit, would otherwise stay at the muzzle while the
+				     invisible physics body flew on without it. ]]
+				part.Anchored = false
 				part.Massless = true
 				part.CanCollide = false
 				part.CanQuery = false
@@ -886,6 +892,12 @@ function ProjectileService:_spawnProjectile(
 		dressing:PivotTo(body.CFrame)
 		for _, part in dressing:GetDescendants() do
 			if part:IsA("BasePart") then
+				--[[ Anchored outranks the weld below it: an anchored part is one
+				     the engine does not move, constraint or no constraint. A
+				     supplied model built in Studio, where anchoring everything is
+				     the habit, would otherwise stay at the muzzle while the
+				     invisible physics body flew on without it. ]]
+				part.Anchored = false
 				part.Massless = true
 				part.CanCollide = false
 				part.CanQuery = false

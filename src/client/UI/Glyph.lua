@@ -54,6 +54,17 @@ local GAMEPAD: { [string]: string } = {
 	ButtonR2 = "R2",
 	ButtonL3 = "L3",
 	ButtonR3 = "R3",
+	--[[ "VIEW", which is the Xbox name. A Roblox game cannot know whether it is
+	     on an Xbox or a PlayStation pad — the same reason every other entry here
+	     is a letter or an arrow rather than a symbol — and AbilityController
+	     already says VIEW for the layer button, so this is the word this game
+	     has settled on for it.
+
+	     Absent until now, which was not an oversight so much as an unused row:
+	     nothing was bound to Select. The walrus SPECIAL is, and without this
+	     forKeys would have fallen through the gamepad branch, found nothing, and
+	     told a controller player to press F. ]]
+	ButtonSelect = "VIEW",
 }
 
 function Glyph.isGamepadKey(key: any): boolean

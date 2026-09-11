@@ -26,6 +26,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local Glyph = require(script.Parent.Glyph)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Trove = require(Shared.Util.Trove)
@@ -44,8 +45,11 @@ local PA = Attributes.Player
 local INPUT_PERIOD = 1 / 15
 
 local PANEL_WIDTH = 260
-local PANEL_HEIGHT = 54
+--[[ Grown by a row for the keybind hint. See drawHint: a verb on a key nobody
+     was told about is a verb nobody presses. ]]
+local PANEL_HEIGHT = 78
 local BAR_HEIGHT = 8
+local HINT_HEIGHT = 16
 
 local WalrusController = {}
 
@@ -56,7 +60,12 @@ local gui: ScreenGui
 local panel: Frame
 local title: TextLabel
 local clock: TextLabel
+local hint: TextLabel
 local barFill: Frame
+
+--[[ What the hint last said, so the label is written only when the answer
+     changes — a scheme change or a rebind, not on every heartbeat. ]]
+local hintShown = ""
 
 local nextSendAt = 0
 local wasFiring = false
@@ -133,6 +142,28 @@ local function build()
 	clock.Text = "3:00"
 	clock.Parent = panel
 
+	--[[
+		Which button breathes fire, on the device actually being held.
+
+		Through Glyph, which reads InputController's live bindings — so a player
+		who rebinds Special sees the new key here without this file knowing a
+		rebind happened. Keyboard gets "F", a pad gets "VIEW", and a touchscreen
+		gets nothing at all because Glyph correctly answers "" for a device with
+		no keys: the phone has a SPECIAL button on the pad instead, which is a
+		label you can read by looking at your own thumb.
+	]]
+	hint = Instance.new("TextLabel")
+	hint.Name = "Hint"
+	hint.BackgroundTransparency = 1
+	hint.Position = UDim2.fromOffset(LAYOUT.PanelPadding, 26)
+	hint.Size = UDim2.new(1, -LAYOUT.PanelPadding * 2, 0, HINT_HEIGHT)
+	hint.Font = FONT.Body
+	hint.TextSize = TEXT.Small
+	hint.TextColor3 = COLOR.AccentBright
+	hint.TextXAlignment = Enum.TextXAlignment.Left
+	hint.Text = ""
+	hint.Parent = panel
+
 	local track = Instance.new("Frame")
 	track.Name = "Track"
 	track.AnchorPoint = Vector2.new(0.5, 1)
@@ -151,16 +182,51 @@ local function build()
 	barFill.Parent = track
 end
 
---[[ The trigger, wherever it lives on this device. Through InputController so a
-     gamepad trigger and a phone's FIRE button both count — the walrus is exactly
-     as playable on a thumb as the gun it replaces. ]]
-local function firingNow(): boolean
+--[[
+	SPECIAL, wherever it lives on this device. Through InputController so a key,
+	a pad button and a thumb all count.
+
+	── IT USED TO READ FIRE, AND THAT COST THE PLAYER THEIR LOADOUT ────────────
+	One trigger cannot mean two things. While this read Action.Fire, pulling it
+	breathed fire AND told BallisticsService to shoot — so for three minutes a
+	walrus carried a primary, a secondary and a melee it could not use, because
+	the only button that fires them also spat flame every time.
+
+	Two verbs, two buttons: Fire is still the gun, Special is the flame. See
+	InputController's Action.Special for what it is bound to on each device.
+]]
+local function specialDown(): boolean
 	local input = Registry.find("InputController")
 	if not input or typeof(input.isDown) ~= "function" then
 		return false
 	end
-	local ok, down = pcall(input.isDown, input, (input :: any).Action.Fire)
+	local ok, down = pcall(input.isDown, input, (input :: any).Action.Special)
 	return ok and down == true
+end
+
+--[[ The scheme name, for the hint. Asked per draw rather than cached off a
+     signal, because a player can put a keyboard down and pick a controller up
+     mid-round and the line has to follow them. One string compare, on a panel
+     that is only drawn while somebody is a walrus. ]]
+local function schemeName(): string
+	local input = Registry.find("InputController")
+	if not input or typeof(input.getScheme) ~= "function" then
+		return ""
+	end
+	local ok, scheme = pcall(input.getScheme, input)
+	return if ok and typeof(scheme) == "string" then scheme else ""
+end
+
+local function drawHint()
+	local glyph = Glyph.forAction("Special", schemeName())
+	--[[ Nothing on a phone. Glyph answers "" for a touchscreen, and the pad's own
+	     SPECIAL button is the label — a line naming a key the device does not
+	     have is worse than no line at all. ]]
+	local wanted = if glyph == "" then "" else glyph .. "  ·  BREATHE FIRE"
+	if wanted ~= hintShown then
+		hintShown = wanted
+		hint.Text = wanted
+	end
 end
 
 local function aimNow(): Vector3
@@ -169,6 +235,8 @@ local function aimNow(): Vector3
 end
 
 local function draw()
+	drawHint()
+
 	local left = secondsLeft()
 	clock.Text = string.format("%d:%02d", math.floor(left / 60), math.floor(left % 60))
 
@@ -203,6 +271,11 @@ function WalrusController:start()
 					Remotes.Event.WalrusInput:FireServer({ aim = aimNow(), firing = false })
 				end
 				maxPool = 0
+				--[[ Cleared with the panel, so the next walrus re-reads its
+				     binding rather than trusting one taken three minutes and
+				     possibly one input device ago. ]]
+				hintShown = ""
+				hint.Text = ""
 			end
 		end
 		if not active then
@@ -217,7 +290,7 @@ function WalrusController:start()
 		end
 		nextSendAt = now + INPUT_PERIOD
 
-		local firing = firingNow()
+		local firing = specialDown()
 		wasFiring = firing
 		Remotes.Event.WalrusInput:FireServer({ aim = aimNow(), firing = firing })
 	end)

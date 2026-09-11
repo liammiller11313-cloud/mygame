@@ -93,6 +93,20 @@ local Action = table.freeze({
 	Ability2 = "Ability2",
 	Ability3 = "Ability3",
 	Ability4 = "Ability4",
+	--[[
+		The verb an ability gives you WHILE it is running, as opposed to the one
+		that starts it.
+
+		One verb for all of them rather than one per ability, because you can only
+		be inside one at a time — BECOME WALRUS is the only one with a special
+		today and a second would simply mean this key while that one is up.
+
+		It exists because the walrus was reading the FIRE button, which cost the
+		player their entire loadout for three minutes: a walrus could breathe fire
+		or shoot a gun and there was one trigger for both, so it was always fire
+		and never the gun. Two verbs need two buttons.
+	]]
+	Special = "Special",
 })
 
 --[[
@@ -221,6 +235,28 @@ local BINDINGS: { Binding } = {
 	{ action = Action.Slot5, keys = { Enum.KeyCode.Five, Enum.KeyCode.DPadUp }, slot = Enums.Slot.Pills },
 
 	{ action = Action.Ping, keys = { Enum.KeyCode.Q, Enum.KeyCode.ButtonR3 } },
+	--[[
+		F and the pad's View button.
+
+		F is free today and is the third entry in ABILITY_KEYS, which
+		AbilityConfig.MaxSlots of 2 does not reach — so nothing is bound to it and
+		nothing is displaced. audit.py check 32 knows about that overlap and says
+		so the day somebody raises MaxSlots to three, which is the only way the
+		two can ever meet.
+
+		ButtonSelect because it is the last free button on the pad and this is the
+		verb that can afford it. Every other button is spoken for: triggers shoot
+		and aim, bumpers are the panic moves, the four faces are jump, crouch,
+		reload and interact, the D-pad is the three consumables plus the weapon
+		swap, and both sticks click for sprint and ping. Select is reachable
+		without moving a thumb off a stick, which matters for a verb you press
+		while an animal the size of a car is being charged at.
+	]]
+	{
+		action = Action.Special,
+		keys = { Enum.KeyCode.F, Enum.KeyCode.ButtonSelect },
+		touch = "SPECIAL",
+	},
 
 	--[[ Keyboard only, and no touch button. A pad has no free face or shoulder
 	     button left — the view button opens the pause menu, which is where
