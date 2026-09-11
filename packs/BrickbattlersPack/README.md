@@ -248,6 +248,41 @@ None of it stops a determined exploiter from flying. It cannot: a player owns
 their own `HumanoidRootPart` and can write its velocity whenever they like. What
 it stops is these tools being the thing that *hands out* the launch.
 
+## The tuning is FROZEN, and the models are the author's
+
+The four weapons in `ReplicatedStorage.Assets.Weapons` are now the real Tools
+out of Brickbattle Ultimate, dropped in by the author. Two things follow, and
+both are decisions rather than observations.
+
+**Their scripts do not run, and that is not an oversight.** `adoptWeapon`'s
+first line is `sanitise(model)`, which destroys every `LuaSourceContainer` in a
+supplied asset — see PlaceholderFactory's header, which calls it "the security
+line and it is not negotiable: a Script inside a downloaded model runs on OUR
+server with full permissions". It takes the Sounds too, because every noise in
+this game goes through AudioService's voice budget. So a Tool dropped into that
+folder contributes its PARTS and its `Grip` pose; WeaponConfig and the services
+contribute everything it does.
+
+That split is what makes the rest of the game work on these weapons for free —
+ammo, reload, the mobile fire button, kill credit, gore, friendly fire, the
+Director's threat accounting — none of which exists in a brickbattle tool.
+
+**The numbers are not to be changed again.** Damage, rpm, magazine, reload,
+projectile speed and the lunge window are settled. The ledger below records
+where each came from and what it cost; it is a record now, not a working area.
+Integration is still fair game — where the model sits in the hand, which way the
+barrel points, which sound plays, whether the touch controls reach it — because
+that is about fitting the author's asset into the game rather than about how the
+weapon plays.
+
+If a weapon feels wrong, the first question is whether the model imported
+cleanly, not whether a number wants moving. The boot report's facing line
+answers it: **"the Tool's own posed Grip, carried across, nothing inferred"**
+means the pose came out of the Tool and nothing was guessed. "STRAIGHTENED" or
+"ASSUMED" means the Tool had no pose to read and the pipeline fell back to the
+longest axis of the mesh, which for a sword is the blade and for a launcher is
+the tube.
+
 ## The ledger — every original behaviour, and where it went
 
 The four weapons that became Fading Light weapons, checked line by line against

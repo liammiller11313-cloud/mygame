@@ -308,6 +308,18 @@ local function cloneAsModel(entry: Instance): Model?
 			local authored = Instance.new("Attachment")
 			authored.Name = "Grip"
 			authored.CFrame = grip
+			--[[ Where this pose CAME FROM, for the boot report. An attachment
+			     somebody built in Studio and one lifted off a Tool's Grip
+			     property are the same instance by the time anything downstream
+			     sees them, and "its own Grip attachment" was printed for both.
+
+			     They are not the same fact to the person reading that line. One
+			     says the model was authored for this pipeline; the other says a
+			     classic toolbox Tool was dropped in and its pose was read rather
+			     than guessed at — which is the whole question somebody asks
+			     after swapping a weapon's model, and the line could not answer
+			     it. ]]
+			authored:SetAttribute("FL_FromToolGrip", true)
 			authored.Parent = handle
 		end
 	end
@@ -2602,7 +2614,7 @@ end
 	World models only. A viewmodel is the same model measured the same way, so
 	reporting both would print every weapon twice and say nothing new.
 ]]
-local function recordFacing(weaponId: string, viewmodel: boolean)
+local function recordFacing(weaponId: string, viewmodel: boolean, model: Model?)
 	if viewmodel then
 		return
 	end
@@ -2613,7 +2625,12 @@ local function recordFacing(weaponId: string, viewmodel: boolean)
 		     anything, so there is no verdict to report and saying so is the
 		     honest line: this model's orientation is whatever its author built,
 		     which is the answer we most want and the one we cannot check. ]]
-		facingVerdicts[weaponId] = "its own Grip attachment, nothing inferred"
+		local grip = if model then findAttachmentNamed(model, "Grip") else nil
+		if grip and grip:GetAttribute("FL_FromToolGrip") then
+			facingVerdicts[weaponId] = "the Tool's own posed Grip, carried across, nothing inferred"
+		else
+			facingVerdicts[weaponId] = "its own Grip attachment, nothing inferred"
+		end
 		return
 	end
 
@@ -2845,7 +2862,7 @@ local function adoptDualWeapon(model: Model, halves: { Model }, weaponId: string
 		     the report, and it was. The right half wins the key: both halves are
 		     the same gun measured the same way. ]]
 		if half == right then
-			recordFacing(weaponId, viewmodel)
+			recordFacing(weaponId, viewmodel, half)
 		end
 		--[[ Reported like any other guessed grip. A pair took the dual branch and
 		     never reached the single path's bookkeeping, so a pair whose halves
@@ -2915,7 +2932,7 @@ local function adoptWeapon(model: Model, weaponId: string, viewmodel: boolean): 
 		ensureGrip(model, handle, invented, LONG_GUN_CLASS[class] == true),
 		definition and definition.modelRotation
 	)
-	recordFacing(weaponId, viewmodel)
+	recordFacing(weaponId, viewmodel, model)
 
 	--[[ Named, once per weapon, when BOTH halves of where-to-hold-it were
 	     guessed. A model that shipped either a Handle part or a Grip attachment
