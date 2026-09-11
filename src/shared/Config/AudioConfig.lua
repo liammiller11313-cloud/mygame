@@ -85,6 +85,10 @@ local ID = table.freeze({
 	     weapon sound in this game that is its own recording — which is the right
 	     way round for a gun that exists for one person. ]]
 	WalrusFire = "rbxassetid://18775810594",
+	--[[ The walrus's own two, both real uploads. The third sound it makes is
+	     WalrusFire above, borrowed deliberately — see AudioConfig.Walrus. ]]
+	WalrusFlame = "rbxassetid://140718666763137",
+	WalrusBonk = "rbxassetid://137041944943141",
 	ShotgunPump = "rbxassetid://113837896417526",
 	--[[ The shotgun's own reload. It is the only shell-by-shell weapon in the
 	     game, so ShellInsert below is already exclusively its — if a second one
@@ -723,6 +727,32 @@ end
 --[[ Gore. Falls back to the body-shot samples pitched down hard, which reads as
      a heavier, wetter version of the same event — better than silence, and
      genuinely convincing until dedicated samples are uploaded. ]]
+--[[
+	BECOME WALRUS, which is the only ability in the game with a voice of its own.
+
+	── THE HURT SOUND IS THE RPG'S, AND THAT IS THE POINT ──────────────────────
+	Taking a hit plays WalrusFire — the same sample the RPG-7 Walrus Spec fires
+	with. Not a shortcut: the two arrive together on one code and are the same
+	joke, so a walrus that grunts in the launcher's voice ties the present to
+	itself. Pitched down and quieter than the gun, so it reads as the same animal
+	rather than as a rocket going off behind you.
+
+	── AND IT IS THROTTLED WHERE IT IS PLAYED ──────────────────────────────────
+	A walrus stood in a horde takes a hit about twice a second, and a sample per
+	hit would be a wall of noise on the one ability whose whole feeling is being
+	unbothered. BecomeWalrus rate-limits it; see HURT_INTERVAL there.
+]]
+AudioConfig.Walrus = {
+	Hurt = sound(ID.WalrusFire, 0.7, 0.62, 0.7, 120, 3),
+	--[[ Looping is deliberately NOT set. The breath ticks on the server and each
+	     tick plays this, so a looped emitter would be a second thing to start and
+	     stop and to leak if the walrus ended mid-breath. ]]
+	Flame = sound(ID.WalrusFlame, 0.75, 0.95, 1.06, 110, 3),
+	--[[ Loudest of the three and carrying furthest, because a bonk is the thing
+	     a teammate across the street most wants to have heard. ]]
+	Bonk = sound(ID.WalrusBonk, 0.95, 0.9, 1.08, 180, 5),
+} :: { [string]: SoundDefinition }
+
 AudioConfig.Gore = {
 	Dismember = varied({ ID.BodyShot2, ID.BodyShot3 }, 0.95, 0.66, 0.76, 170, 6),
 	Gib = varied({ ID.BodyShot1, ID.BodyShot3 }, 1.0, 0.55, 0.65, 210, 7),

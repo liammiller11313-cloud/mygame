@@ -242,12 +242,20 @@ function LoadoutConfig.candidates(slot: string, owned: { [string]: boolean }?): 
 			Robux buy something equippable.
 		]]
 		local definition = WeaponConfig.get(id)
+		--[[ A weapon the player actually HOLDS is never hidden, whatever kind it
+		     is. That covers the one case floorOnly's blanket exclusion gets wrong:
+		     the game's owner owns everything, including the room weapons, and a
+		     developer who cannot put the FlintLock in a loadout cannot test it
+		     without playing a Backrooms round first. For everybody else nothing
+		     changes, because nobody else ever owns one. ]]
+		local held = owned ~= nil and owned[id] == true
 		local hidden = definition ~= nil
+			and not held
 			and (
 				definition.floorOnly == true
-				--[[ Only for the one account that holds it. See the header: for
-				     anybody else this is a promise that cannot come true. ]]
-				or (definition.codeOnly == true and not (owned ~= nil and owned[id] == true))
+				--[[ Only for an account that holds it. See the header: for anybody
+				     else this is a promise that cannot come true. ]]
+				or definition.codeOnly == true
 			)
 		if not seen[id] and not hidden then
 			table.insert(out, id)

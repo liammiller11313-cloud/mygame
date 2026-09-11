@@ -22,6 +22,7 @@
 ]]
 
 local AbilityConfig = require(script.Parent.AbilityConfig)
+local GameConfig = require(script.Parent.GameConfig)
 local Enums = require(script.Parent.Parent.Enums)
 local PassConfig = require(script.Parent.PassConfig)
 local WeaponConfig = require(script.Parent.WeaponConfig)
@@ -149,6 +150,7 @@ CodeConfig.Codes = table.freeze({
 		reward = {
 			weapons = { Enums.Weapon.RPG7WalrusSpec },
 			abilities = { Enums.Ability.BecomeWalrus },
+			dollars = 500,
 		},
 	},
 } :: { Code })
@@ -195,6 +197,15 @@ function CodeConfig.allows(code: Code, userId: any): boolean
 	end
 	if typeof(userId) ~= "number" then
 		return false
+	end
+	--[[ And whoever the game belongs to, who can type any code in it. Not a
+	     back door: an owner already holds everything a code could hand over —
+	     see GameConfig.Owners — so this is only about being able to TEST a
+	     restricted code without borrowing the account it was written for. ]]
+	for _, owner in GameConfig.Owners do
+		if owner == userId then
+			return true
+		end
 	end
 	for _, id in allowed do
 		if id == userId then

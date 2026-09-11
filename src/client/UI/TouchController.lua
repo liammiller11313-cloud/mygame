@@ -98,6 +98,33 @@ local PAD_LAYOUT: { [string]: { x: number, y: number, size: number, prominent: b
 	     is nothing. ]]
 	Jump = { x = 232, y = 0, size = JUMP_SIZE, prominent = true },
 	Crouch = { x = 238, y = 94, size = BUTTON },
+
+	--[[
+		── THE ABILITIES, AND WHY THEY WERE NOT HERE ───────────────────────────
+		InputController marks both ability slots `touch = "ABILITY n"`, and its
+		own comment says "Touch gets real buttons: see `touch`, which
+		TouchController draws". It did not. This table is the other half of that
+		sentence and had no rows for them, and the loop below deliberately skips
+		any verb marked for touch with nowhere to put it — so that an unplaced
+		button cannot end up stacked under the fire button.
+
+		The result was that NO ability was reachable on a phone. Not the walrus,
+		not the shield, not any of the six: a mobile player could buy one, equip
+		it, watch its cooldown tick down on the HUD, and never once press it.
+
+		── A THIRD ROW, AND ONLY WHEN IT IS EARNED ─────────────────────────────
+		Above the other two rather than beside them. An ability is on a five
+		minute cooldown and is a decision, so it must not sit in the arc a thumb
+		RESTS in — a mis-press beside the trigger costs five minutes, which is the
+		most expensive accidental tap in the game. The stretch is the point, the
+		same way jump and crouch are a deliberate reach.
+
+		Each is drawn only while its slot actually holds something. A player with
+		no abilities gets the pad exactly as it was, which is most players and
+		every new one; it grows only for somebody with something to press.
+	]]
+	Ability1 = { x = 94, y = 188, size = BUTTON },
+	Ability2 = { x = 166, y = 188, size = BUTTON },
 }
 
 --[[ The pad is as wide as its leftmost button reaches. Jump is 76 at x=232, so
@@ -106,7 +133,11 @@ local PAD_LAYOUT: { [string]: { x: number, y: number, size: number, prominent: b
      did not, and a pad narrower than its contents clips the far column on the
      platform least able to spare it. ]]
 local PAD_WIDTH = 232 + JUMP_SIZE
-local PAD_HEIGHT = 158
+--[[ Three rows now: the top one is the abilities. Written as the row's own
+     offset plus a button rather than as a typed 252, for the same reason the
+     width above is written out — the last three times a button moved, a
+     hand-written total did not. ]]
+local PAD_HEIGHT = 188 + BUTTON
 
 --[[ The pad clears the ammo counter, which sits above the hotbar in the same
      corner. Derived rather than typed: the ammo panel's own position is
@@ -225,6 +256,31 @@ local TOGGLE: { [string]: boolean } = {
 	verb ends for a reason nobody pressed, and the next tap does the right thing
 	because it is reading the same answer.
 ]]
+--[[ Which ability slot a pad button drives, or nil. Parsed from the action name
+     rather than listed, so a third slot needs a key in InputController and a
+     place in PAD_LAYOUT and nothing here. ]]
+local function abilitySlotOf(action: string): number?
+	local index = string.match(action, "^Ability(%d+)$")
+	return if index then tonumber(index) else nil
+end
+
+--[[ Whether that slot actually holds something. Asked of the profile, which is
+     the only thing that knows — an ability is equipped in the menu and the pad
+     has no memory of it. A button for an empty slot is a button that refuses
+     every press, and on the platform with the least room to spare. ]]
+local function slotFilled(slot: number): boolean
+	local store = Registry.find("ProfileController")
+	if not store or typeof(store.getAbilitySlots) ~= "function" then
+		return false
+	end
+	local ok, slots = pcall(store.getAbilitySlots, store)
+	if not ok or typeof(slots) ~= "table" then
+		return false
+	end
+	local id = slots[slot]
+	return typeof(id) == "string" and id ~= ""
+end
+
 local function latchedState(action: string): boolean
 	if action == "Crouch" then
 		return Attributes.get(player, Attributes.Player.IsCrouching, false) == true
@@ -536,6 +592,12 @@ local function build()
 			local entry = newButton(binding.action, binding.touch, place.size, place.prominent)
 			entry.frame.AnchorPoint = Vector2.new(1, 1)
 			entry.frame.Position = UDim2.new(1, -place.x, 1, -place.y)
+			--[[ Hidden until the state sweep says otherwise, a fifteenth of a
+			     second from now. The alternative is two dead buttons on screen for
+			     the first frame of every round. ]]
+			if abilitySlotOf(binding.action) then
+				entry.frame.Visible = false
+			end
 			entry.contextual = CONTEXTUAL[binding.action] == true
 			if entry.contextual then
 				--[[ What this button is when its verb HAS a target. `entry.action`
@@ -606,6 +668,21 @@ local function refreshState()
 			)
 		then
 			releaseEntry(entry)
+		end
+
+		--[[ An ability button exists only while its slot holds something — see
+		     PAD_LAYOUT. Released on the way out, because a slot emptied under a
+		     finger would otherwise leave the verb held with no button left to
+		     raise it. ]]
+		local slot = abilitySlotOf(entry.action)
+		if slot then
+			local wanted = slotFilled(slot)
+			if entry.frame.Visible ~= wanted then
+				if not wanted then
+					releaseEntry(entry)
+				end
+				entry.frame.Visible = wanted
+			end
 		end
 
 		--[[ Crouch, painted from the server's own answer rather than from the

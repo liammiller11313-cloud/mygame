@@ -2586,12 +2586,38 @@ WeaponConfig.Definitions = {
 		Single-target is damage x rpm/60. Crowd is penetration x rpm/60.
 
 		                 price   single   crowd   reach   speed   knock
-		  Knife           free      475    2.50      11    1.10      18
-		  Baseball Bat   1,400      301    7.92      16    1.06      62
-		  Lead Pipe      1,800      573    2.67      14    1.04      44
-		  Machete        2,400      500    5.00      16    1.06      26
-		  Fire Axe       3,200      620    4.13      17    1.02      34
-		  Classic Sword   pass      560    2.33      12    1.10      18
+		  Knife           free      213    2.50      11    1.10      18
+		  Baseball Bat   1,400      127    7.92      16    1.06      62
+		  Lead Pipe      1,800      253    2.67      14    1.04      44
+		  Machete        2,400      225    5.00      16    1.06      26
+		  Fire Axe       3,200      274    4.13      17    1.02      34
+		  Classic Sword   pass      245    2.33      12    1.10      18
+
+		── AND WHY THE SINGLE-TARGET COLUMN WAS CUT ─────────────────────────────
+		Those numbers used to run 301 to 620, and the whole column was wrong for
+		one reason nothing in this file was measuring: MELEE DOES NOT RELOAD.
+
+		A gun's damage per second is a burst figure that a magazine interrupts.
+		Counted honestly — magazine, then reload, then magazine — the best gun in
+		the game sustains 351 and the median sustains 168. The Fire Axe sustained
+		620, because there is nothing to interrupt. So the best melee was 1.77x
+		the best GUN at the one job melee is not supposed to be for, while also
+		being the answer to crowds, while also never running out of ammunition.
+
+		It showed up at the top of the roster as well: a 600-damage axe deleted a
+		450-health Charger in ONE swing, which made the paragraph above about
+		damage being "a statement about Chargers" say something nobody intended.
+
+		The column is now scaled so the best melee sustains 274 — under the best
+		gun's 351 and comfortably over the median's 168. Melee still beats an
+		average weapon on sustained damage, which is correct and is what no
+		reload should buy you, and it no longer beats a good one.
+
+		CROWD IS UNTOUCHED, and that is the point of doing it this way. `rpm` and
+		`penetration` did not move, and every melee still one-shots a Common at
+		any value over 50 — so the horde column above is the same number it was,
+		and melee's actual identity is exactly as strong as it was yesterday. The
+		only thing that changed is how fast a melee kills ONE big thing.
 
 		── WHY IT WAS RETUNED ───────────────────────────────────────────────────
 		The previous numbers put the free knife at 650 single-target — the
@@ -2633,7 +2659,7 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 300,
+		damage = 135,
 		rpm = 100,
 		pellets = 1,
 		magSize = 0,
@@ -2692,7 +2718,7 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 600,
+		damage = 265,
 		rpm = 62,
 		pellets = 1,
 		magSize = 0,
@@ -2752,7 +2778,7 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 190,
+		damage = 80,
 		rpm = 95,
 		pellets = 1,
 		magSize = 0,
@@ -2811,7 +2837,7 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 430,
+		damage = 190,
 		rpm = 80,
 		pellets = 1,
 		magSize = 0,
@@ -2871,7 +2897,7 @@ WeaponConfig.Definitions = {
 		class = "Melee",
 		fireMode = "Melee",
 
-		damage = 190,
+		damage = 85,
 		rpm = 150,
 		pellets = 1,
 		magSize = 0,
@@ -3498,7 +3524,7 @@ WeaponConfig.Definitions = {
 			rangeMultiplier = 1.6, -- 12 studs becomes 19, past even the Machete
 		},
 
-		damage = 240,
+		damage = 105,
 		rpm = 140,
 		pellets = 1,
 		magSize = 0,

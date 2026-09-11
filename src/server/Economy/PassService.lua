@@ -47,6 +47,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local GameConfig = require(Shared.Config.GameConfig)
 local PassConfig = require(Shared.Config.PassConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
@@ -259,6 +260,13 @@ function PassService:owns(player: Player, passId: string): boolean
 	local pass = PassConfig.get(passId)
 	if not pass then
 		return false
+	end
+	--[[ Whose game it is, before Roblox is asked anything. An owner owns every
+	     pass and there is no web call worth making about it — see
+	     GameConfig.Owners. This also means the shop shows them OWNED rather than
+	     offering to sell somebody their own game. ]]
+	if GameConfig.isOwner(player) then
+		return true
 	end
 	return refresh(player, pass) == true
 end

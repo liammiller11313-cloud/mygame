@@ -57,6 +57,51 @@ GameConfig.BuildStamp = "2026-09-11-alpha09"
 ]]
 GameConfig.Version = "0.9 ALPHA"
 
+--[[
+	Whose game this is.
+
+	Every account named here owns everything: every weapon, every ability, every
+	pass, and every code-restricted thing, without buying, redeeming or unlocking
+	any of it. It is a development grant — the person building the game should not
+	have to earn their way to the content they are testing.
+
+	── ONE LIST, AND EVERY OWNERSHIP QUESTION READS IT ─────────────────────────
+	The alternative is a flag sprinkled through four services, and the way that
+	fails is silent and specific: one of them gets missed, the owner tests
+	everything but the fifth thing, and finds out the fifth thing is broken from
+	somebody else. ProfileService.unlockedSet, ProfileService:ownsAbility,
+	PassService:owns and CodeConfig.allows all ask this and nothing else.
+
+	── BY USERID, AND ONLY EVER ON THE SERVER ──────────────────────────────────
+	A UserId because a username can be changed and this grant should survive one.
+	And the check is only ever made against `player.UserId` on the SERVER, which
+	Roblox fills in from the connection — a client cannot claim to be one of these
+	any more than it can claim to be somebody else.
+
+	This file is shared, so a client can READ the list. That is fine and is not a
+	secret: knowing an owner's id grants nothing, and the client needs it to draw
+	its own screens correctly rather than showing the owner locks that do not
+	apply to them.
+]]
+GameConfig.Owners = table.freeze({
+	1729528634, -- spacecase201
+})
+
+--[[ Whether this player owns the game. Takes a Player rather than an id so no
+     call site can accidentally pass something a client chose. ]]
+function GameConfig.isOwner(player: any): boolean
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false
+	end
+	local id = player.UserId
+	for _, owner in GameConfig.Owners do
+		if owner == id then
+			return true
+		end
+	end
+	return false
+end
+
 GameConfig.MaxSurvivors = 4
 GameConfig.RespawnClosetsEnabled = true
 

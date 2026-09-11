@@ -87,6 +87,7 @@ local ProgressionConfig = require(Shared.Config.ProgressionConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
+local GameConfig = require(Shared.Config.GameConfig)
 local Trove = require(Shared.Util.Trove)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
@@ -651,6 +652,25 @@ local function unlockedSet(player: Player, profile: Profile): { [string]: boolea
 		into[weaponId] = true
 	end
 
+	--[[
+		Whose game it is, answered first and answering everything.
+
+		An owner is handed the whole roster rather than having the three roads
+		below merged for them — buying, a pass and a code are ways to EARN a
+		weapon, and the person building the game is not earning anything. Floor
+		weapons included: a developer who cannot put the FlintLock in a loadout
+		cannot test the FlintLock without playing a Backrooms round first.
+
+		See GameConfig.Owners. Read from player.UserId on the server, which is not
+		a thing a client gets to choose.
+	]]
+	if GameConfig.isOwner(player) then
+		for weaponId in WeaponConfig.all() do
+			add(weaponId)
+		end
+		return merged or profile.owned
+	end
+
 	--[[ Bought from Roblox. Asked of Roblox every session and never written down
 	     — that record is theirs and a DataStore of ours must not be able to lose
 	     it. See PassService. ]]
@@ -707,6 +727,26 @@ local function unlockedSet(player: Player, profile: Profile): { [string]: boolea
 	end
 
 	return merged or profile.owned
+end
+
+--[[
+	The ability set as the CLIENT should see it, which is the stored one for
+	everybody but an owner.
+
+	Built rather than returned by reference for an owner, because the stored table
+	is the thing that gets written to a DataStore — handing out a copy with six
+	extra keys in it and having somebody save it would turn a development grant
+	into a permanent unlock on a real profile.
+]]
+local function abilitySet(player: Player, profile: Profile): { [string]: boolean }
+	if not GameConfig.isOwner(player) then
+		return profile.abilities
+	end
+	local all: { [string]: boolean } = {}
+	for _, definition in AbilityConfig.Definitions do
+		all[definition.id] = true
+	end
+	return all
 end
 
 --[[
@@ -808,7 +848,10 @@ function ProfileService:sync(player: Player)
 		     own. Every screen that reads this payload already needs all of it,
 		     and a second "here is your profile, the ability half" event is a
 		     second thing that can arrive out of order with the first. ]]
-		abilities = profile.abilities,
+		--[[ Expanded for an owner, the same way `owned` above is. A developer
+		     whose panel shows five abilities greyed out is a developer who cannot
+		     equip the one they are testing. See abilitySet. ]]
+		abilities = abilitySet(player, profile),
 		abilitySlots = profile.abilitySlots,
 		degraded = profile.degraded,
 	})
@@ -1517,6 +1560,10 @@ end
 -- ── abilities ───────────────────────────────────────────────────────────────
 
 function ProfileService:ownsAbility(player: Player, id: string): boolean
+	-- See GameConfig.Owners, and unlockedSet above, which answers the same way.
+	if GameConfig.isOwner(player) and AbilityConfig.get(id) ~= nil then
+		return true
+	end
 	local profile = profiles[player]
 	return profile ~= nil and profile.abilities[id] == true
 end

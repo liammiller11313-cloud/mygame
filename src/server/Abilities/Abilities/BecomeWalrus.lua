@@ -96,6 +96,8 @@ type Walrus = {
 	speedBefore: number,
 	sweepAt: number,
 	flameAt: number,
+	-- When the hurt sample may next play. See HURT_INTERVAL.
+	hurtAt: number,
 	--[[ The held trigger, as last reported. Cleared by the client sending false,
 	     by the walrus ending, and by the client going quiet — see stale. ]]
 	firing: boolean,
@@ -118,6 +120,24 @@ end
      a second, so a client that stops sending stops breathing rather than
      breathing forever. ]]
 local INPUT_GRACE = 0.4
+
+--[[ How often the hurt sample may play, however often the walrus is hit.
+
+     A walrus stood in a horde takes something about twice a second, and a grunt
+     per hit would be a wall of noise on the one ability whose entire feeling is
+     being unbothered by it. Long enough to read as "that hurt" and short enough
+     that a Tank landing three in a row is audibly three. ]]
+local HURT_INTERVAL = 0.55
+
+--[[ Everything this ability says, in one place. Through AudioService so the
+     walrus inherits the rolloff and the voice budget the rest of the game is
+     mixed against, rather than being the one thing that ignores them. ]]
+local function say(walrus: Walrus, key: string)
+	local audio: any = Registry.find("AudioService")
+	if audio and typeof(audio.play) == "function" then
+		pcall(audio.play, audio, "Walrus", key, walrus.root.Position)
+	end
+end
 
 local function publish(walrus: Walrus)
 	local player = walrus.player
@@ -282,6 +302,7 @@ function BecomeWalrus.activate(context: any): boolean
 		speedBefore = humanoid.WalkSpeed,
 		sweepAt = 0,
 		flameAt = 0,
+		hurtAt = 0,
 		firing = false,
 		aim = root.CFrame.LookVector,
 		heardAt = 0,
@@ -325,6 +346,15 @@ function BecomeWalrus.absorb(player: Player, amount: number): number
 	walrus.pool -= taken
 	publish(walrus)
 
+	--[[ The RPG's own voice, throttled. See AudioConfig.Walrus for why the hurt
+	     sound is the launcher's firing sample, and HURT_INTERVAL for why it is
+	     not played on every hit. ]]
+	local clock = now()
+	if clock >= walrus.hurtAt then
+		walrus.hurtAt = clock + HURT_INTERVAL
+		say(walrus, "Hurt")
+	end
+
 	if walrus.pool <= 0 then
 		revert(walrus, true)
 	end
@@ -350,6 +380,11 @@ local function bonk(walrus: Walrus, clock: number)
 
 	local origin = walrus.root.Position
 	local heading = if speed > 0 then Vector3.new(velocity.X, 0, velocity.Z).Unit else walrus.aim
+	--[[ One bonk sound per SWEEP that connected, not one per body. A walrus
+	     ploughing into six Commons makes one heavy noise, which is what a walrus
+	     ploughing into six Commons sounds like; six copies of it inside a tenth
+	     of a second is a burst of static. ]]
+	local connected = false
 
 	for _, target in AbilitySupport.infectedWithin(origin, walrus.tuning.BonkRadius) do
 		local last = walrus.bonkedAt[target.model]
@@ -406,6 +441,11 @@ local function bonk(walrus: Walrus, clock: number)
 		if infected and typeof(infected.stagger) == "function" then
 			pcall(infected.stagger, infected, target.model, push, walrus.tuning.BonkStumble)
 		end
+		connected = true
+	end
+
+	if connected then
+		say(walrus, "Bonk")
 	end
 end
 
@@ -433,6 +473,11 @@ local function breathe(walrus: Walrus, clock: number)
 	if not damageService then
 		return
 	end
+
+	--[[ Every tick, hit or miss. The breath is a thing the player is DOING, and a
+	     flamethrower that only makes a noise when it catches something would go
+	     silent the moment you needed to know it was still running. ]]
+	say(walrus, "Flame")
 
 	local limit = math.cos(math.rad(walrus.tuning.FlameAngle))
 	local burned = false
