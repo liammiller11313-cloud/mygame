@@ -139,6 +139,59 @@ export type PaintProfile = {
 	budget: number,
 }
 
+--[[
+	Lunge — the classic sword's second attack, and the half this game's version
+	arrived without.
+
+	    if (Tick - LastAttack < 0.2) then Lunge() else Attack() end
+
+	Three damage tiers in the original: 5 for a touch, 10 for a slash, 30 for a
+	lunge you trigger by clicking again immediately. The in-game sword had one
+	flat swing, which is the Machete with a shorter reach and a faster arm — a
+	worse Machete, sold for Robux.
+
+	── THE 0.2 SECOND WINDOW CANNOT SURVIVE THE TRIP ────────────────────────────
+	A classic Tool is limited by `Tool.Enabled`, which the script controls
+	directly, so a double-click 0.2s apart is a thing a player can physically do.
+	Here the swing rate is the WEAPON's: 140rpm is one swing every 0.43 seconds
+	and MeleeService refuses anything faster. A 0.2s window would be a window no
+	input could ever land in.
+
+	So the window is what "click again immediately" MEANS in a rate-limited
+	game — swing again as soon as you are allowed, rather than pausing — and the
+	numbers are chosen so neither boundary is anywhere near a decision the
+	network could flip:
+
+	    swing            t = 0.00     delta —          normal
+	    swing            t = 0.43     delta 0.43       LUNGE   (window 0.9)
+	    ...locked until  t = 1.63
+	    swing            t = 1.63     delta 1.20       normal  (window 0.9)
+
+	0.43 sits 0.47s inside the window and 1.20 sits 0.30s outside it. Both sides
+	run this same function on their own clock — the client to predict the swing
+	it is about to play, the server to decide what it is worth — and a
+	disagreement would take jitter measured in hundreds of milliseconds.
+
+	── AND IT IS NOT FREE DAMAGE ────────────────────────────────────────────────
+	The cycle above is 960 damage in 1.63 seconds, against 560 a second swinging
+	normally: within a few percent of the same, which is the point. What a lunge
+	buys is BURST and REACH — one blow big enough to matter to a special, from
+	further than the sword can otherwise touch — and what it costs is 1.2 seconds
+	of standing still in a game where that is the expensive part. A sidegrade, as
+	everything in this pack has to be.
+]]
+export type LungeProfile = {
+	--[[ Seconds since the last swing inside which the next one lunges. Must sit
+	     comfortably above the weapon's own fire delay, or no input can reach it,
+	     and comfortably below `cooldown`, or a lunge chains into another. ]]
+	window: number,
+	--[[ How long after a lunge before anything may be swung. This is the whole
+	     cost of the attack, and it is what forces the alternation above. ]]
+	cooldown: number,
+	damageMultiplier: number, -- the classic's 30 against its 10
+	rangeMultiplier: number, -- a thrust reaches further than an arc
+}
+
 export type WeaponDefinition = {
 	id: string,
 	displayName: string,
@@ -227,6 +280,11 @@ export type WeaponDefinition = {
 	     scenery the colour it found it, which is every other weapon in the
 	     roster. See PaintProfile above, and PaintService for what reads it. ]]
 	paint: PaintProfile?,
+	--[[ Present only on the classic sword. Absent means a melee weapon with one
+	     attack, which is every other one in the roster. See LungeProfile above;
+	     MeleeService reads it on the server and WeaponController predicts it on
+	     the client, both through WeaponConfig.isLunge. ]]
+	lunge: LungeProfile?,
 	--[[ Whether landing a shot sets the target on fire, through the same
 	     InfectedService:ignite the molotov and the Incendiary requisition use.
 	     Nil on every gun: bullets do not light people, and a flag that defaulted
@@ -3227,6 +3285,15 @@ WeaponConfig.Definitions = {
 		passOnly = true,
 		placeable = false,
 
+		--[[ The classic's 30-against-10, and its reach. See LungeProfile for the
+		     timing, which is the part that could not be ported literally. ]]
+		lunge = {
+			window = 0.9,
+			cooldown = 1.2,
+			damageMultiplier = 3.0,
+			rangeMultiplier = 1.6, -- 12 studs becomes 19, past even the Machete
+		},
+
 		damage = 240,
 		rpm = 140,
 		pellets = 1,
@@ -3351,10 +3418,26 @@ WeaponConfig.Definitions = {
 		knockback = 4,
 	},
 
-	--[[ One shot, dead flat, no recoil at all — the pellet cancels its own
-	     gravity, which is the whole trick and the reason this is a precision
-	     weapon rather than a weak one. Two body shots or one head, and then a
-	     long wait: the slowest-firing sidearm in the game by a distance. ]]
+	--[[
+		One shot, no recoil at all, and it keeps going. Two body shots or one
+		head, and then a long wait: the slowest-firing sidearm in the game by a
+		distance.
+
+		── WHAT MAKES IT PRECISE, WRITTEN HONESTLY ──────────────────────────────
+		This used to say the pellet cancelled its own gravity, "which is the whole
+		trick". The classic's does — packs/BrickbattlersPack/Slingshot.lua hangs a
+		BodyForce of mass × workspace.Gravity on it so it flies flat instead of
+		arcing — and in THIS game that describes a mechanism which does not exist.
+		Every weapon here is hitscan. Nothing drops, so nothing has any gravity to
+		cancel, and a comment naming the trick that sets a weapon apart had named
+		a trick every other weapon in the roster also has.
+
+		What actually sets it apart is below and is real: falloff that barely
+		starts before 150 studs and never takes more than a tenth, zero recoil,
+		and no spread at all while aimed. It hits what it is pointed at, at any
+		range a level contains. That is the same FEEL the classic's flat pellet
+		gives, arrived at by the only means this game offers.
+	]]
 	[Enums.Weapon.ClassicSlingshot] = {
 		id = Enums.Weapon.ClassicSlingshot,
 		displayName = "Classic Slingshot",
@@ -3390,12 +3473,25 @@ WeaponConfig.Definitions = {
 		pellets = 1,
 		magSize = 12,
 		reserveMax = -1,
-		penetration = 1,
-		penetrationFalloff = 0.7,
+		--[[
+			The classic's pellet does not stop at the first thing it touches. It
+			carries on with HALF the bite, over and over, until it is under one
+			point of damage and gives up — see PelletScript.lua, where the whole
+			behaviour is `damage /= 2`.
 
-		--[[ No falloff worth the name. A pellet that ignores gravity ignores
-		     distance too, and that is the sidegrade: it trades the Magnum's
-		     stopping power for a shot that lands exactly where it is pointed. ]]
+			Three bodies and 0.5 is that rule in the terms this game already has.
+			It is not a buff: the first body still takes 32, which is what it took
+			before, and the change is only about what happens to whatever is
+			standing behind it. A slingshot that punches down a line of Commons
+			for 32, 16 and 8 is the classic; one that buries itself in the first
+			one was a Magnum with a worse name.
+		]]
+		penetration = 3,
+		penetrationFalloff = 0.5,
+
+		--[[ No falloff worth the name, and this is the sidegrade: it trades the
+		     Magnum's stopping power for a shot that lands exactly where it is
+		     pointed, at any range a level contains. ]]
 		falloffStart = 150,
 		falloffEnd = 260,
 		falloffMin = 0.9,
@@ -3516,6 +3612,23 @@ WeaponConfig.Definitions = {
 		knockback = 70,
 	},
 } :: { [string]: WeaponDefinition }
+
+--[[
+	Whether a swing this soon after the last one is a lunge.
+
+	The ONE place the rule lives, called by both sides on their own clock. See
+	LungeProfile for why that is safe and why the numbers are spaced the way they
+	are. `since` is seconds since this player's previous swing, and a first swing
+	— nothing to follow — passes a delta big enough to fail, which it must: a
+	lunge is a follow-up by definition.
+]]
+function WeaponConfig.isLunge(definition: WeaponDefinition, since: number): boolean
+	local profile = definition.lunge
+	if not profile or typeof(since) ~= "number" or since ~= since then
+		return false
+	end
+	return since > 0 and since <= profile.window
+end
 
 --[[
 	Which colour this shot is painted in, or nil for a gun that paints nothing.

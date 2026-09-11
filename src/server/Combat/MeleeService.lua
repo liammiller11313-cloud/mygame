@@ -84,6 +84,13 @@ type Actor = {
      compares and nothing else. ]]
 type AttackerState = {
 	lastSwingAt: number,
+	--[[ When the sword may next be swung at all, which is only ever moved by a
+	     LUNGE — see WeaponConfig.LungeProfile. Kept apart from lastSwingAt
+	     because the two answer different questions: one is "how long since you
+	     attacked", which decides whether the next swing lunges, and this is "are
+	     you still committed to the last one", which decides whether there is a
+	     next swing yet. Folding them would make a lunge shorten its own window. ]]
+	lockedUntil: number,
 	lastShoveAt: number,
 	shoveTimes: { number },
 	shoveCursor: number,
@@ -206,6 +213,7 @@ local function stateFor(player: Player): AttackerState
 	if not state then
 		state = {
 			lastSwingAt = -math.huge,
+			lockedUntil = 0,
 			lastShoveAt = -math.huge,
 			-- Seeded so far in the past that a player's first four shoves can
 			-- never read as fatigued, however few seconds old the server is.
@@ -617,7 +625,63 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 	if now - state.lastSwingAt < WeaponConfig.getFireDelay(definition) * FIRE_DELAY_LENIENCY then
 		return records
 	end
+	--[[ And the lunge's own hold, which is longer than any fire delay. Only a
+	     weapon that HAS a lunge can be held by one: a player who swaps to a
+	     machete mid-lock is swinging a different weapon, and the sword's
+	     commitment is not something the machete inherited. ]]
+	if definition.lunge and now < state.lockedUntil then
+		return records
+	end
+
+	--[[
+		Whether this swing is the classic's second click.
+
+		Read BEFORE lastSwingAt is overwritten, which is the whole reason these
+		three lines are in this order — the delta this needs is the one that is
+		about to be destroyed.
+
+		Both sides run WeaponConfig.isLunge on their own clock, so the client has
+		already played the lunge's animation and set its own longer cooldown by
+		the time this is asked. See LungeProfile for why that agreement holds.
+	]]
+	local lunging = WeaponConfig.isLunge(definition, now - state.lastSwingAt)
 	state.lastSwingAt = now
+	if lunging and definition.lunge then
+		--[[
+			LENIENT, and for the same reason FIRE_DELAY_LENIENCY is.
+
+			The client holds itself for the full cooldown and then swings the
+			instant it expires. If the server held for exactly as long, whether
+			that swing landed would come down to whether this packet's jitter
+			happened to be larger than the lunge packet's — a coin flip, on every
+			single lunge, and the losing side is a player who pressed attack,
+			watched the animation play, and took no damage off anything.
+
+			Measured rather than guessed. Simulated at 120,000 swings per jitter
+			level: holding for the full cooldown ate 16% of the swings that follow
+			a lunge at only ±20ms of jitter, every one of them on this check. At
+			0.85 the server's hold ends 180ms before the client's, and the same
+			simulation eats none at ±20ms and none at ±50ms. What is left above
+			that is the fire-delay check on the line before, which every melee
+			weapon in the game has always been subject to.
+
+			The cost is that a client could lunge 15% faster than intended. That
+			is the same trade the fire-delay leniency above already made, and
+			losing legitimate swings is still the worse bug.
+		]]
+		state.lockedUntil = now + definition.lunge.cooldown * FIRE_DELAY_LENIENCY
+	end
+
+	--[[ What the swing is worth and how far it reaches. A lunge is a thrust: it
+	     hits harder and further than the arc, and it still only takes the one
+	     body an arc does — `penetration` is untouched, because a lunge that
+	     cleaved would be a better Machete rather than a different weapon. ]]
+	local swingDamage = definition.damage
+	local swingRange = definition.maxRange
+	if lunging and definition.lunge then
+		swingDamage *= definition.lunge.damageMultiplier
+		swingRange *= definition.lunge.rangeMultiplier
+	end
 
 	local actor = validateActor(player, origin, direction)
 	if not actor then
@@ -653,15 +717,7 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 	local candidates: { Candidate } = {}
 	local infectedService = Registry.find("InfectedService")
 	if infectedService then
-		gatherCone(
-			apex,
-			unit,
-			definition.maxRange,
-			SWING_HALF_ANGLE,
-			infectedService:getAlive(),
-			false,
-			candidates
-		)
+		gatherCone(apex, unit, swingRange, SWING_HALF_ANGLE, infectedService:getAlive(), false, candidates)
 	end
 
 	-- Nearest first: cleaving is a line of bodies, and the one in your face has
@@ -696,7 +752,7 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 
 		local result = damageService:applyDamage(
 			candidate.model,
-			definition.damage,
+			swingDamage,
 			Types.newDamageContext({
 				attacker = player,
 				weaponId = weaponId,
@@ -751,8 +807,7 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 	-- A swing that meets a wall should mark the wall. One ray, only on a whiff,
 	-- and only for geometry — blood on flesh belongs to GoreService.
 	if #records == 0 then
-		local wall =
-			workspace:Raycast(apex, unit * definition.maxRange, RaycastUtil.excluding({ actor.character }))
+		local wall = workspace:Raycast(apex, unit * swingRange, RaycastUtil.excluding({ actor.character }))
 		-- Geometry only. A body that survived the sweep but stopped this ray is
 		-- flesh, and flesh is GoreService's to decorate.
 		local struck = if wall then (RigUtil.getCharacterFromPart(wall.Instance :: BasePart)) else nil

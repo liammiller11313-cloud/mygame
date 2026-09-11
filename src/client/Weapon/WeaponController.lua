@@ -167,6 +167,10 @@ local state = {
 	pumpAt = 0,
 	nextShoveAt = 0,
 	nextSwingAt = 0,
+	--[[ When the last melee swing went out, which is a different question from
+	     when the next one may: the gap between them is what decides whether it
+	     lunges. See WeaponConfig.LungeProfile. ]]
+	lastSwingAt = -math.huge,
 	reload = nil :: any,
 
 	--[[
@@ -730,6 +734,12 @@ local function dryFire()
 	WeaponController:beginReload()
 end
 
+--[[ Vertical kick for a lunge, in the degrees CameraController:addRecoil takes.
+     About a fifth of the rocket launcher's 2.4 — enough to feel like the sword
+     went somewhere, nowhere near enough to throw off the aim of a player who is
+     mid-fight and about to be locked in place for over a second. ]]
+local LUNGE_CAMERA_KICK = 0.5
+
 local function swingMelee()
 	local definition = state.definition
 	if not definition then
@@ -739,7 +749,33 @@ local function swingMelee()
 	if now < state.nextSwingAt or not canAct() then
 		return
 	end
-	state.nextSwingAt = now + WeaponConfig.getFireDelay(definition)
+
+	--[[
+		The classic sword's second click, predicted here rather than waited for.
+
+		Read before nextSwingAt is touched and against lastSwingAt, which is the
+		delta MeleeService will independently measure on its own clock a moment
+		later. Both sides call the same WeaponConfig.isLunge with the same
+		numbers, and LungeProfile explains why the two cannot realistically
+		disagree — a lunge sits half a second inside the window and the swing
+		after one sits a third of a second outside it.
+
+		Predicting it matters: a lunge that only announced itself when the damage
+		arrived would be a swing that felt identical and happened to hit harder,
+		which is not an attack the player can aim or commit to.
+	]]
+	local lunging = WeaponConfig.isLunge(definition, now - state.lastSwingAt)
+	state.lastSwingAt = now
+	--[[ And the lunge's hold, mirrored exactly. If this stayed at the fire delay
+	     the client would let the player swing again at 0.43s into a lock the
+	     server keeps until 1.2 — an input that travels, is refused, and produces
+	     nothing, which reads as the sword dropping swings. ]]
+	state.nextSwingAt = now
+		+ (
+			if lunging and definition.lunge
+				then definition.lunge.cooldown
+				else WeaponConfig.getFireDelay(definition)
+		)
 
 	local origin, direction = cameraRay()
 	Remotes.Event.SwingMelee:FireServer({
@@ -750,11 +786,23 @@ local function swingMelee()
 
 	local viewmodel = Registry.find("ViewmodelController")
 	if viewmodel then
-		viewmodel:onMeleeSwing(definition)
+		viewmodel:onMeleeSwing(definition, lunging)
 	end
 	local camera = Registry.find("CameraController")
 	if camera then
 		camera:onWeaponFired(definition, 0, 0)
+		--[[ A lunge is a thrust with three times the weight behind it, and the
+		     camera is the only thing that can say so before the damage lands.
+
+		     Through addRecoil rather than onWeaponFired's own recoil, which this
+		     weapon can never reach: that branch is gated on recoilVertical being
+		     above zero and a sword's is 0, so a kick handed to it would be
+		     dropped in silence. Same spring either way, so a lunge inherits the
+		     ceiling, the recovery and the player's own view-scale setting rather
+		     than becoming a second kind of kick. ]]
+		if lunging and typeof(camera.addRecoil) == "function" then
+			camera:addRecoil(LUNGE_CAMERA_KICK, 0)
+		end
 	end
 	playLocal(AudioConfig.WeaponFire[definition.id])
 end

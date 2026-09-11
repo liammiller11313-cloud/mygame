@@ -2218,14 +2218,38 @@ end
 	drawing a machete always opens with the same stroke instead of inheriting
 	whichever way the last knife happened to leave it.
 ]]
-function ViewmodelController:onMeleeSwing(definition: any)
+--[[
+	How a lunge differs from a slash, in the hands.
+
+	An arc alternates left and right and rolls the weapon over; a THRUST goes
+	forward and does not. So a lunge drops the side-to-side entirely and spends
+	all of it on depth, which is what makes the two read as different attacks
+	from inside the player's own view rather than as the same swing that happened
+	to do more damage.
+
+	It also does NOT flip swingSign. The alternation belongs to the arc, and a
+	thrust that consumed a turn of it would leave the next real swing coming from
+	the same side as the last one.
+]]
+local LUNGE_DEPTH = 2.6
+local LUNGE_DROP = math.rad(-26)
+
+function ViewmodelController:onMeleeSwing(definition: any, lunging: boolean?)
 	current.inspectClock = -1
+
+	local reach = if definition then definition.kickback else 0.3
+	local speed = kickPosition.speed
+	local rotationSpeed = kickRotation.speed
+
+	if lunging then
+		kickPosition:impulse(Vector3.new(0, 0, -reach * LUNGE_DEPTH * speed * IMPULSE_GAIN))
+		kickRotation:impulse(Vector3.new(LUNGE_DROP * rotationSpeed * IMPULSE_GAIN, 0, 0))
+		return
+	end
 
 	local sign = current.swingSign
 	current.swingSign = -sign
 
-	local speed = kickPosition.speed
-	local reach = if definition then definition.kickback else 0.3
 	kickPosition:impulse(
 		Vector3.new(
 			-reach * 1.6 * speed * IMPULSE_GAIN * sign,
@@ -2233,7 +2257,6 @@ function ViewmodelController:onMeleeSwing(definition: any)
 			-reach * 1.2 * speed * IMPULSE_GAIN
 		)
 	)
-	local rotationSpeed = kickRotation.speed
 	kickRotation:impulse(
 		Vector3.new(
 			math.rad(-18) * rotationSpeed * IMPULSE_GAIN,
