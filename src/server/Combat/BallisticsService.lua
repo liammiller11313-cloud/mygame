@@ -569,6 +569,22 @@ function BallisticsService:resolveShot(
 	local pogoAt: Vector3? = nil
 	local pogoHit = false
 
+	--[[
+		And the paint, for the one gun that has any.
+
+		Taken from the SEED rather than rolled here, which is what makes one
+		trigger pull one colour everywhere: the shooter's own tracer is drawn on
+		their machine from the same seed before this code has run at all, and a
+		colour rolled on the server would have meant a green streak followed by a
+		pink splat. See WeaponConfig.paintColor.
+
+		Nil for all thirty-five other guns, and the loop below tests it before it
+		tests anything else, so paint costs a nil check on every other shot in
+		the game. See PaintService.
+	]]
+	local paintColor = WeaponConfig.paintColor(definition, seed)
+	local paint: any = if paintColor then Registry.find("PaintService") else nil
+
 	for _, pelletDirection in directions do
 		local hits = RaycastUtil.pierce(
 			origin,
@@ -630,6 +646,20 @@ function BallisticsService:resolveShot(
 			elseif not model then
 				-- Scenery. Blood on flesh is GoreService's; sparks and dust on the
 				-- world are this one's.
+
+				--[[ And paint, for the gun that leaves some. Applied before the
+				     impact event so the answer can ride along on it: PaintService
+				     returns the colour it actually put down, or nil when the shot
+				     landed on something it refuses to recolour — a puzzle prop, a
+				     barricade, a wall too big to be a prop — and the client then
+				     draws a splat only where a real one went. A splat on a
+				     surface that did not change colour is the gun looking broken
+				     in exactly the places it is being careful. ]]
+				local splat: Color3? = nil
+				if paintColor and paint and typeof(paint.splash) == "function" then
+					splat = paint:splash(hit.instance, paintColor, definition.paint)
+				end
+
 				if impactsSent < MAX_IMPACT_EVENTS_PER_SHOT then
 					impactsSent += 1
 					Remotes.fireInRange("ImpactEffect", hit.position, EFFECT_RADIUS, {
@@ -637,6 +667,7 @@ function BallisticsService:resolveShot(
 						normal = hit.normal,
 						material = hit.material,
 						damageType = damageType,
+						paint = splat,
 					})
 				end
 				if audio then
@@ -656,6 +687,12 @@ function BallisticsService:resolveShot(
 				origin = origin,
 				endPosition = endPosition,
 				weaponId = weaponId,
+				--[[ Nil for every gun but the paintball. The shooter never sees
+				     this one — their own tracer was drawn locally from the same
+				     seed, and is already this colour — so it is here for the rest
+				     of the team, who would otherwise watch a green streak land as
+				     a pink splat. ]]
+				tint = paintColor,
 			})
 		end
 

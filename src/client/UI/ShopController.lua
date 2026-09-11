@@ -308,7 +308,7 @@ end
 --[[ Which tab draws from PassConfig instead of the Dollars catalogue. Named
      rather than compared inline, so the tab can be renamed in EconomyConfig
      without the shop quietly falling back to an empty list. ]]
-local PASS_CATEGORY = "PASSES"
+local PASS_CATEGORY = EconomyConfig.PassCategory
 
 local function passes(): any
 	return Registry.find("PassController")
@@ -1053,8 +1053,20 @@ function ShopController:isOpen(): boolean
 	return state.open
 end
 
-function ShopController:open()
+--[[ `category` opens the shop ON a tab rather than on whichever one was last
+     looked at. Used by the loadout picker, which sends a player here because
+     they pressed a specific locked weapon and should land where that weapon is
+     sold. Ignored if it names a tab that does not exist, so a bad caller opens
+     the shop rather than nothing. ]]
+function ShopController:open(category: string?)
+	if typeof(category) == "string" and table.find(EconomyConfig.Categories, category) then
+		state.category = category
+	end
 	if state.open then
+		--[[ Already open, and pointed at a different tab than it was: redraw it
+		     there. Without this, opening the shop from a locked row while it is
+		     somehow already up would silently ignore the request. ]]
+		renderCategory(state.category)
 		return
 	end
 	state.open = true

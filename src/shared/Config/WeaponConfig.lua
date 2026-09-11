@@ -94,6 +94,51 @@ export type PogoProfile = {
 	maxRange: number,
 }
 
+--[[
+	Paint — the other half of what a paintball gun IS.
+
+	The classic repaints whatever it hits and everyone remembers it for that, not
+	for the five damage. This game's version shipped with the damage and none of
+	the paint, which makes it an SMG with a silly name.
+
+	── WHAT THE CLASSIC ACTUALLY DID ────────────────────────────────────────────
+	    if hit:GetMass() < 1.2 * 200 then
+	        hit.BrickColor = ball.BrickColor
+	    end
+
+	That mass test is the whole design and it is a better rule than it looks. A
+	part's mass is its volume times its material density, so the limit is really
+	a SIZE limit: props, crates, panels and railings repaint, and the floor,
+	the sky-high warehouse wall and the street do not. A paintball gun that
+	recolours an entire building reads as a bug even when it is working.
+
+	── ONE COLOUR PER SHOT, NOT PER GUN ─────────────────────────────────────────
+	The classic tool fires one colour, whichever the ball was built in. A palette
+	sprayed at random is the deliberate change: it is instantly readable as a
+	paintball gun from across a room, it makes two players painting the same
+	corridor legible as two players, and it costs nothing. Said plainly because
+	it IS a change, and the rest of this block is not.
+
+	── AND A BUDGET, WHICH THE CLASSIC HAD NO NEED OF ───────────────────────────
+	A brickbattle server has one paintball gun and a dozen bricks. This has a
+	1000rpm version of it and a map with several thousand parts, and every
+	repaint is a property change replicated to everybody. `budget` is the number
+	of DISTINCT parts one round may recolour; painting over a part that is
+	already painted is free and always allowed, so the cap bounds traffic without
+	ever taking the gun away from the player holding it.
+]]
+export type PaintProfile = {
+	--[[ Sprayed at random, one drawn per shot. More than a handful stops reading
+	     as a palette and starts reading as noise. ]]
+	colors: { Color3 },
+	--[[ The classic's 1.2 * 200, kept exactly. See above for why a mass limit is
+	     the right shape for a size rule. ]]
+	maxMass: number,
+	--[[ Distinct parts per round. Repaints of something already painted do not
+	     count against it. ]]
+	budget: number,
+}
+
 export type WeaponDefinition = {
 	id: string,
 	displayName: string,
@@ -178,6 +223,10 @@ export type WeaponDefinition = {
 	     gun that does not throw its user anywhere, which is all thirty-five of
 	     the others. See PogoProfile above, and PogoService for what reads it. ]]
 	pogo: PogoProfile?,
+	--[[ Present only on the paintball gun. Absent means a gun that leaves the
+	     scenery the colour it found it, which is every other weapon in the
+	     roster. See PaintProfile above, and PaintService for what reads it. ]]
+	paint: PaintProfile?,
 	--[[ Whether landing a shot sets the target on fire, through the same
 	     InfectedService:ignite the molotov and the Incendiary requisition use.
 	     Nil on every gun: bullets do not light people, and a flag that defaulted
@@ -3226,7 +3275,9 @@ WeaponConfig.Definitions = {
 
 	--[[ Sprays, and barely stings. Four body shots on a Common where an SMG
 	     takes three, at a rate no other weapon in the roster matches — the gun
-	     for somebody who would rather hold the trigger than aim. ]]
+	     for somebody who would rather hold the trigger than aim.
+
+	     And it paints, which is the half it shipped without. See PaintProfile. ]]
 	[Enums.Weapon.ClassicPaintballGun] = {
 		id = Enums.Weapon.ClassicPaintballGun,
 		displayName = "Classic Paintball Gun",
@@ -3236,6 +3287,23 @@ WeaponConfig.Definitions = {
 		fireMode = "Auto",
 		passOnly = true,
 		placeable = false,
+
+		--[[ Six, because the seventh is always a near-duplicate of one of the
+		     first six at the size a splat is actually seen. Bright and saturated
+		     on purpose: these land on grey concrete and brown crates, and a
+		     muted palette would read as dirt rather than as paint. ]]
+		paint = {
+			colors = {
+				Color3.fromRGB(255, 89, 94), -- red
+				Color3.fromRGB(255, 202, 58), -- yellow
+				Color3.fromRGB(138, 201, 38), -- green
+				Color3.fromRGB(25, 130, 196), -- blue
+				Color3.fromRGB(106, 76, 147), -- purple
+				Color3.fromRGB(255, 122, 199), -- pink
+			},
+			maxMass = 240, -- the classic's 1.2 * 200
+			budget = 600,
+		},
 
 		damage = 13,
 		rpm = 1000,
@@ -3448,6 +3516,35 @@ WeaponConfig.Definitions = {
 		knockback = 70,
 	},
 } :: { [string]: WeaponDefinition }
+
+--[[
+	Which colour this shot is painted in, or nil for a gun that paints nothing.
+
+	── DERIVED FROM THE SEED, AND THAT IS THE WHOLE REASON IT LIVES HERE ────────
+	The shot seed is the one number client and server already agree on — see
+	ShotPattern, which builds the pellet cone out of it for exactly this reason.
+	Taking the colour from it means the tracer the shooter draws locally, the
+	tracer everybody else receives, and the splat the server puts on the wall are
+	all the same colour without a single extra byte on the wire or a round trip
+	to find out.
+
+	Rolling it freely on the server instead would have given a green tracer
+	followed by a pink splat, which reads as two different things happening.
+
+	Not an anti-cheat surface: a client picking seeds until it gets the colour it
+	likes has cheated its way to a colour.
+]]
+function WeaponConfig.paintColor(definition: WeaponDefinition, seed: number): Color3?
+	local profile = definition.paint
+	if not profile then
+		return nil
+	end
+	local count = #profile.colors
+	if count == 0 or typeof(seed) ~= "number" or seed ~= seed then
+		return nil
+	end
+	return profile.colors[math.floor(math.abs(seed)) % count + 1]
+end
 
 --[[
 	Seconds between shots. Derived rather than stored so that editing `rpm` is

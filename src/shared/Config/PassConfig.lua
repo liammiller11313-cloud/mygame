@@ -105,9 +105,13 @@ PassConfig.Passes = table.freeze({
 
 local byId: { [string]: Pass } = {}
 local byGamePassId: { [number]: Pass } = {}
+local byWeapon: { [string]: Pass } = {}
 for _, pass in PassConfig.Passes do
 	byId[pass.id] = pass
 	byGamePassId[pass.gamePassId] = pass
+	for _, weaponId in pass.grantsWeapons do
+		byWeapon[weaponId] = pass
+	end
 end
 
 function PassConfig.get(id: string): Pass?
@@ -118,6 +122,22 @@ end
      pass id it just sold, and nothing else. ]]
 function PassConfig.byGamePassId(gamePassId: number): Pass?
 	return byGamePassId[gamePassId]
+end
+
+--[[
+	Which pass unlocks this weapon, or nil for one bought with Dollars.
+
+	The question the LOADOUT screen has, and it had no way to ask it. A pack
+	weapon has no catalogue row, so an unowned one drew as a bare "LOCKED" — no
+	price, nothing saying it was for sale at all — and pressing it opened the
+	shop on a weapons tab that does not stock it. Four weapons behind a hundred
+	Robux, presented as four weapons behind nothing.
+
+	Built from `grantsWeapons` rather than written out, so it is the same list
+	the entitlement is granted from and cannot disagree with it.
+]]
+function PassConfig.forWeapon(weaponId: string): Pass?
+	return byWeapon[weaponId]
 end
 
 --[[ Formatted the way Roblox writes a price, so the shop's Robux column cannot

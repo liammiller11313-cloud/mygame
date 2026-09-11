@@ -467,7 +467,13 @@ end
 	shot, and at 900rpm that is forty-five instances a second for something on
 	screen for three frames.
 ]]
-function ImpactController:drawTracer(origin: Vector3, endPosition: Vector3, weaponId: string)
+--[[ `tint` overrides the weapon's own tracerColor for this shot, and exists for
+     exactly one gun: a paintball gun whose pellets are all the same green is a
+     paintball gun that lies about what it is about to do to the wall. The
+     colour comes off the shot seed, so the streak the shooter draws locally and
+     the splat the server puts down are the same colour without either of them
+     asking the other. See WeaponConfig.paintColor. ]]
+function ImpactController:drawTracer(origin: Vector3, endPosition: Vector3, weaponId: string, tint: Color3?)
 	if not enabled or typeof(origin) ~= "Vector3" or typeof(endPosition) ~= "Vector3" then
 		return
 	end
@@ -487,7 +493,7 @@ function ImpactController:drawTracer(origin: Vector3, endPosition: Vector3, weap
 	local width = definition.tracerWidth
 	part.Size = Vector3.new(width, width, length)
 	part.CFrame = faceAlong(origin + delta * 0.5, delta / length)
-	part.Color = definition.tracerColor
+	part.Color = if typeof(tint) == "Color3" then tint else definition.tracerColor
 	part.Transparency = TRACER_TRANSPARENCY
 	slot.until_ = os.clock() + TRACER_FADE
 end
@@ -588,13 +594,30 @@ end
      deliberately ships with no asset ids at all. A thin cylinder needs nothing,
      reads correctly at every distance a player will see it from, and can be
      recycled like everything else here. ]]
-local function spawnHole(position: Vector3, normal: Vector3, class: any, scale: number)
-	if not class.holeColor or class.holeSize <= 0 then
+--[[
+	How wide a paint splat is, and why it is a constant rather than a multiple of
+	the material's own holeSize.
+
+	holeSize runs from 0.3 to 0.55 across the classes and is ZERO on the ones
+	that do not mark at all. A paintball gun has to leave something on glass, so
+	scaling off a number that is sometimes nothing would give a gun that silently
+	stops working on certain surfaces — which is the exact failure the whole
+	mark-without-recolouring path in PaintService exists to avoid. Three times a
+	bullet hole at its widest, which reads as a splat rather than as a big hole.
+]]
+local SPLAT_SIZE = 1.5
+
+local function spawnHole(position: Vector3, normal: Vector3, class: any, scale: number, paint: Color3?)
+	--[[ Paint overrides both the colour and the size, and it overrides the
+	     REFUSAL too: a class with no hole of its own still takes a splat. ]]
+	local color = paint or class.holeColor
+	local size = if paint then SPLAT_SIZE else class.holeSize * scale
+	if not color or size <= 0 then
 		return
 	end
 	local slot = holeSlot()
 	local part = slot.part
-	local diameter = class.holeSize * scale * random:NextNumber(0.8, 1.25)
+	local diameter = size * random:NextNumber(0.8, 1.25)
 
 	part.Size = Vector3.new(HOLE_THICKNESS, diameter, diameter)
 	-- Rotate the lookAt frame so the cylinder's flat face (its local X axis)
@@ -602,8 +625,11 @@ local function spawnHole(position: Vector3, normal: Vector3, class: any, scale: 
 	part.CFrame = faceAlong(position + normal * HOLE_OFFSET, normal)
 		* CFrame.Angles(0, math.pi * 0.5, 0)
 		* CFrame.Angles(random:NextNumber(0, math.pi * 2), 0, 0)
-	part.Color = class.holeColor
-	slot.transparency = random:NextNumber(0.12, 0.32)
+	part.Color = color
+	--[[ Wet paint is opaque; a bullet hole is a scuff. A splat drawn at a hole's
+	     transparency over a part the server has just recoloured would be
+	     invisible against its own colour. ]]
+	slot.transparency = if paint then random:NextNumber(0, 0.06) else random:NextNumber(0.12, 0.32)
 	part.Transparency = slot.transparency
 	slot.bornAt = os.clock()
 end
@@ -632,7 +658,12 @@ function ImpactController:spawnImpact(
 	position: Vector3,
 	normal: Vector3,
 	material: Enum.Material?,
-	damageType: string?
+	damageType: string?,
+	--[[ The colour the server actually put down, for the one gun that puts any.
+	     Nil on every other shot in the game, and nil for a paintball round that
+	     landed on something PaintService refuses to mark — so a splat appears
+	     only where the server agreed there should be one. ]]
+	paint: Color3?
 )
 	if not enabled or typeof(position) ~= "Vector3" then
 		return
@@ -666,7 +697,7 @@ function ImpactController:spawnImpact(
 	slot.spark:Emit(sparks)
 	slot.dust:Emit(dust)
 
-	spawnHole(position, surface, class, scale)
+	spawnHole(position, surface, class, scale, paint)
 end
 
 -- ── remote muzzle flashes ───────────────────────────────────────────────────
@@ -787,14 +818,22 @@ local function onTracerEffect(payload: any)
 			return
 		end
 	end
-	ImpactController:drawTracer(payload.origin, payload.endPosition, payload.weaponId)
+	local tint = if typeof(payload.tint) == "Color3" then payload.tint else nil
+	ImpactController:drawTracer(payload.origin, payload.endPosition, payload.weaponId, tint)
 end
 
 local function onImpactEffect(payload: any)
 	if typeof(payload) ~= "table" then
 		return
 	end
-	ImpactController:spawnImpact(payload.position, payload.normal, payload.material, payload.damageType)
+	local paint = if typeof(payload.paint) == "Color3" then payload.paint else nil
+	ImpactController:spawnImpact(
+		payload.position,
+		payload.normal,
+		payload.material,
+		payload.damageType,
+		paint
+	)
 end
 
 local function onWeaponFired(payload: any)

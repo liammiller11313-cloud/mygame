@@ -672,12 +672,16 @@ local function drawTracers(origin: Vector3, direction: Vector3, seed: number, sp
 	local count = math.min(#directions, MAX_PREDICTED_TRACERS)
 	local range = definition.maxRange
 	local params = tracerParams()
+	--[[ Nil for every gun but one. Derived from the same seed the cone above is,
+	     so this streak is already the colour the server is about to paint the
+	     wall — no round trip, and no green pellet followed by a pink splat. ]]
+	local tint = WeaponConfig.paintColor(definition, seed)
 
 	for index = 1, count do
 		local pellet = directions[index]
 		local hit = Workspace:Raycast(origin, pellet * range, params)
 		local endPosition = if hit then hit.Position else origin + pellet * range
-		impacts:drawTracer(visualOrigin, endPosition, definition.id)
+		impacts:drawTracer(visualOrigin, endPosition, definition.id, tint)
 	end
 end
 

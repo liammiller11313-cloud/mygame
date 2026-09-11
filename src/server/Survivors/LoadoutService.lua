@@ -174,6 +174,27 @@ function LoadoutService:start()
 		end))
 	end
 
+	--[[
+		And so can a game pass, one step later still.
+
+		The profile arriving late is a DataStore read; the pass arriving late is
+		a web call to Roblox that is usually slower. A player who owns
+		Brickbattler's Pack and has a paintball gun in their active loadout gets
+		the default instead if they spawn before that answer lands — the loadout
+		names a weapon the unlock set does not contain yet, so sanitise falls back
+		on the way to their hands.
+
+		It corrects itself at the next round start, which is the point at which it
+		matters. It should not have to: standing in the lobby holding the wrong
+		gun is how somebody concludes the thing they paid for does not work.
+	]]
+	local passes = Registry.find("PassService")
+	if passes and passes.unlocked then
+		serviceTrove:add(passes.unlocked:connect(function(player: Player)
+			reapply(player)
+		end))
+	end
+
 	serviceTrove:connect(Remotes.Event.SetLoadout.OnServerEvent, function(player, payload)
 		if typeof(payload) ~= "table" or throttled(player) then
 			return

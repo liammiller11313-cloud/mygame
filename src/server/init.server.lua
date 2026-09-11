@@ -201,6 +201,11 @@ local MODULES = {
 	--[[ Read by BallisticsService when a pogo weapon's shot lands. Guarded there,
 	     so a missing PogoService costs the launch and never the shot. ]]
 	"Combat/PogoService",
+	--[[ And the same arrangement for the paintball gun's paint: read by
+	     BallisticsService when a shot lands on scenery, guarded there, so a
+	     missing PaintService costs the colour and never the round. Listens to
+	     MapService.mapChanged, which is registered well above this. ]]
+	"Combat/PaintService",
 	"Combat/MeleeService",
 	"Combat/ProjectileService",
 	"Infected/InfectedService",

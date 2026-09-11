@@ -50,6 +50,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local PassConfig = require(Shared.Config.PassConfig)
 local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
+local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
 
 local PassService = {}
@@ -89,7 +90,41 @@ local retryFor = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: { [s
 local lastPrompt = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: number }
 local inFlight = (setmetatable({}, { __mode = "k" }) :: any) :: { [Player]: { [string]: boolean } }
 
+--[[
+	Fired when a player's pass answer turns into a YES, with the player.
+
+	The point of it is timing rather than news. Owning a pass unlocks weapons,
+	and the ask is a web call that routinely lands AFTER the player has already
+	spawned in the lobby — so without this they stand there holding the default
+	UMP-45 while a paintball gun they own sits one resolved promise away, and
+	nothing changes until they die or touch the picker.
+
+	LoadoutService listens and re-arms them. It is the same story its
+	ProfileService.loaded hook already handles, one step further down: first the
+	profile lands late, then the pass behind it does.
+
+	Only on a transition to owned. A sweep that re-confirms what was already true
+	is not news, and re-arming a player every two seconds for the rest of their
+	session would be.
+]]
+PassService.unlocked = Signal.new()
+
 local serviceTrove = Trove.new()
+
+--[[ Writes an answer, and announces the one answer worth announcing. Every
+     path that can turn a pass into a YES goes through here so the transition
+     test lives once — see the signal's own note. ]]
+local function setOwned(player: Player, passId: string, value: boolean)
+	local owned = state[player]
+	if not owned then
+		return
+	end
+	local before = owned[passId]
+	owned[passId] = value
+	if value and before ~= true then
+		PassService.unlocked:fire(player, passId)
+	end
+end
 
 local function ownedTable(player: Player)
 	local t = state[player]
@@ -198,7 +233,7 @@ local function refresh(player: Player, pass: PassConfig.Pass): boolean?
 	if waits then
 		waits[pass.id] = nil
 	end
-	owned[pass.id] = result == true
+	setOwned(player, pass.id, result == true)
 	return owned[pass.id]
 end
 
@@ -399,7 +434,8 @@ function PassService:start()
 			if not pass then
 				return
 			end
-			ownedTable(player)[pass.id] = true
+			ownedTable(player)
+			setOwned(player, pass.id, true)
 			publish(player)
 		end
 	)

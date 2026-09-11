@@ -247,6 +247,12 @@ EconomyConfig.MaxPerRound = 8_000
      row of tabs. ]]
 EconomyConfig.Categories = table.freeze({ "PRIMARY", "SECONDARY", "MELEE", "PASSES" })
 
+--[[ That odd one, by name. Two screens now have to agree on which tab the Robux
+     catalogue lives under — the shop draws it, and the loadout picker sends a
+     player to it when they press a weapon only a pass unlocks — and a string
+     literal in each is the version of that agreement which breaks silently. ]]
+EconomyConfig.PassCategory = "PASSES"
+
 --[[
 	Every purchasable thing, and every thing that will be.
 

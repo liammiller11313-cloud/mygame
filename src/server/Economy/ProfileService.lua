@@ -344,7 +344,36 @@ local function migrate(stored: any): Profile
 	     an ability equipped that it no longer owns. ]]
 	profile.abilitySlots = AbilityConfig.sanitiseSlots(stored.abilitySlots, profile.abilities)
 
-	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, profile.owned, profile.abilities)
+	--[[
+		── STRUCTURE HERE, OWNERSHIP AT THE POINT OF USE ───────────────────────
+		`nil` for the owned set, and deliberately, because the set this function
+		can see is the WRONG one.
+
+		`profile.owned` is only what was bought with Dollars. A weapon that came
+		with a game pass is never in it — see unlockedSet, which merges the two —
+		and passing it here made every load quietly rewrite the player's saved
+		loadout: a Brickbattler's Pack weapon failed the ownership test, fell back
+		to the default for its slot, and was saved back over on the next write.
+		Equip it, play, rejoin, and it is a UMP-45 again, with nothing anywhere
+		saying why. Four weapons somebody paid a hundred Robux for, forgotten
+		once per session.
+
+		The set cannot be fixed here either. This is a pure function of what came
+		out of the DataStore and has no Player to ask, and the pass answer is a
+		web call that has very likely not landed yet — so even reaching for it
+		would be trading a certain bug for a race.
+
+		So this sanitises SHAPE and nothing else: a loadout that names a weapon
+		which no longer exists still collapses to the default, because that is
+		structural and knowable from here. Ownership is checked where the full
+		set IS known — activeLoadout on the way to a spawn, setLoadout on the way
+		in from a client, sync on the way out to one — all three of which already
+		go through unlockedSet. A weapon this player genuinely no longer owns
+		therefore stays visible in the picker and still will not spawn, which is
+		the right way round: the loadout is a preference, and a preference should
+		survive losing the thing it points at.
+	]]
+	profile.loadouts = LoadoutConfig.sanitiseAll(stored.loadouts, nil, profile.abilities)
 	--[[ Names are sanitised the same way and separately from the slots, because
 	     a profile saved before naming existed has loadouts and no names — see
 	     sanitiseNames, which answers a default for every one it does not find. ]]
@@ -381,7 +410,8 @@ local function migrate(stored: any): Profile
 					seeded = LoadoutConfig.withAbility(seeded, slot, id)
 				end
 			end
-			profile.loadouts[index] = LoadoutConfig.sanitise(seeded, profile.owned, profile.abilities)
+			-- nil for the same reason the sanitise above passes nil.
+			profile.loadouts[index] = LoadoutConfig.sanitise(seeded, nil, profile.abilities)
 		end
 	end
 	syncAbilityMirror(profile)
@@ -610,6 +640,50 @@ local function unlockedSet(player: Player, profile: Profile): { [string]: boolea
 	end
 
 	return merged or profile.owned
+end
+
+--[[
+	The unlock set for EDITING loadout `index`, which is the set above plus
+	whatever that loadout already names.
+
+	── AN OWNERSHIP CHECK SHOULD GATE A CHANGE, NOT A RE-READ ──────────────────
+	unlockedSet fails closed on purpose: a pass it has not heard back about yet
+	reads as "no". That is right for a spawn — better to hand somebody the
+	default than a weapon they might not own — and quietly destructive for an
+	edit, because every write path re-sanitises the WHOLE loadout and saves the
+	result. So a player whose pass had not resolved yet could open the ability
+	panel, equip a perk, and have their paintball gun replaced by a UMP-45 as a
+	side effect. They changed an ability. The ability code never touches a weapon
+	slot. Sanitise did it on the way past.
+
+	Grandfathering what is already stored closes every one of those doors at once
+	and opens none: the only way a weapon gets INTO a stored loadout is a
+	sanitise that accepted it against a real unlock set, so the invariant carries
+	forward on its own. A client inventing a weapon it does not own is refused
+	exactly as before — the id is not in the unlock set and not in the stored
+	loadout either.
+
+	What it deliberately does NOT do is let an ungranted weapon reach anybody's
+	hands. activeLoadout still gates the spawn on unlockedSet alone. This is only
+	ever about not deleting a choice somebody made.
+]]
+local function editableSet(player: Player, profile: Profile, index: number): { [string]: boolean }
+	local set = unlockedSet(player, profile)
+	local stored = profile.loadouts[index]
+	if not stored then
+		return set
+	end
+	local widened: { [string]: boolean }? = nil
+	for _, slot in LoadoutConfig.Slots do
+		local id = stored[slot]
+		if typeof(id) == "string" and id ~= "" and not set[id] then
+			if not widened then
+				widened = table.clone(set)
+			end
+			(widened :: any)[id] = true
+		end
+	end
+	return widened or set
 end
 
 local function publish(player: Player, profile: Profile)
@@ -1408,7 +1482,9 @@ function ProfileService:setAbilitySlot(player: Player, slot: number, id: string)
 	     the id came off a wire. ]]
 	local index = LoadoutConfig.clampIndex(profile.active)
 	local next_ = LoadoutConfig.withAbility(profile.loadouts[index], slot, id)
-	local cleaned = LoadoutConfig.sanitise(next_, unlockedSet(player, profile), profile.abilities)
+	--[[ editableSet, not unlockedSet: this edits an ABILITY, and it must not be
+	     able to change a weapon as a side effect. See editableSet. ]]
+	local cleaned = LoadoutConfig.sanitise(next_, editableSet(player, profile, index), profile.abilities)
 	if LoadoutConfig.equal(profile.loadouts[index], cleaned) then
 		return false
 	end
@@ -1446,7 +1522,11 @@ function ProfileService:setLoadout(player: Player, index: number, loadout: any):
 		return false
 	end
 	local slot = LoadoutConfig.clampIndex(index)
-	local cleaned = LoadoutConfig.sanitise(loadout, unlockedSet(player, profile), profile.abilities)
+	--[[ Also editableSet. A client sending back the loadout it was drawing —
+	     which is what the picker does on every edit, one slot changed and the
+	     other two carried over — must not lose the other two because a pass has
+	     not resolved yet. A weapon it does NOT already hold is still refused. ]]
+	local cleaned = LoadoutConfig.sanitise(loadout, editableSet(player, profile, slot), profile.abilities)
 	if LoadoutConfig.equal(profile.loadouts[slot], cleaned) then
 		return false
 	end

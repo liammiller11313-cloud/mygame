@@ -47,6 +47,7 @@ local AudioConfig = require(Shared.Config.AudioConfig)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
 local Enums = require(Shared.Enums)
 local LoadoutConfig = require(Shared.Config.LoadoutConfig)
+local PassConfig = require(Shared.Config.PassConfig)
 local Registry = require(Shared.Util.Registry)
 local Signal = require(Shared.Util.Signal)
 local Remotes = require(Shared.Net.Remotes)
@@ -607,6 +608,11 @@ local function buildPickRow(slot: string, weaponId: string, index: number)
 	local store = profile()
 	local owned = store and store:owns(weaponId)
 	local price = EconomyConfig.priceOf(weaponId)
+	--[[ The other currency. A pack weapon has no catalogue row, so `price` is
+	     nil for it and the row used to say a flat "LOCKED" — no cost, no way to
+	     get it, and a press that opened a tab which does not stock it. Four
+	     weapons behind a hundred Robux, drawn as four weapons behind nothing. ]]
+	local pass = PassConfig.forWeapon(weaponId)
 	local height = if isTouch() then PICK_ROW_HEIGHT_TOUCH else PICK_ROW_HEIGHT
 
 	local button = Widgets.button(pickList, weaponId)
@@ -630,6 +636,8 @@ local function buildPickRow(slot: string, weaponId: string, index: number)
 		local current = editing()[slot] == weaponId
 		status.Text = if current then "EQUIPPED" else ""
 		status.TextColor3 = COLOR.Accent
+	elseif pass then
+		status.Text = "PASS · " .. PassConfig.format(pass.robux)
 	else
 		status.Text = if price then "LOCKED · " .. EconomyConfig.format(price) else "LOCKED"
 	end
@@ -645,10 +653,13 @@ local function buildPickRow(slot: string, weaponId: string, index: number)
 		else
 			--[[ A locked row is not a dead row. Pressing it opens the shop on
 			     the thing you just tried to equip, which is the only useful
-			     thing it could do. ]]
+			     thing it could do — and on the TAB that actually sells it,
+			     because the two catalogues do not live under the same one. A
+			     pack weapon sent somebody to PRIMARY, which stocks none of
+			     them. ]]
 			UiSound.play(AudioConfig.UI.MenuBack)
 			LoadoutController:close()
-			callController("ShopController", "open")
+			callController("ShopController", "open", if pass then EconomyConfig.PassCategory else nil)
 		end
 	end)
 	--[[ Only what can be picked lights up. A LOCKED row that highlights under the
