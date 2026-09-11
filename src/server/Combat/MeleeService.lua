@@ -568,7 +568,7 @@ function MeleeService:start()
 		-- clientTime rides along in the payload and is ignored for the same
 		-- reason BallisticsService ignores it: nothing in this build records a
 		-- position history to rewind against.
-		MeleeService:swing(player, payload.origin, payload.direction)
+		MeleeService:swing(player, payload.origin, payload.direction, payload.lunge == true)
 	end))
 
 	trove:add(Remotes.Event.Shove.OnServerEvent:Connect(function(player: Player, payload: any)
@@ -589,7 +589,17 @@ end
 	honours FriendlyFireMeleeMultiplier being 0 and stops a teammate in a doorway
 	from consuming one of the three bodies the swing may cleave.
 ]]
-function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3): { Types.HitRecord }
+function MeleeService:swing(
+	player: Player,
+	origin: Vector3,
+	direction: Vector3,
+	--[[ The client saying this swing came from a fresh press rather than from
+	     holding the trigger down — see swingMelee's own note. Checked, never
+	     trusted: the window below is still the gate, so the most a client can win
+	     by always claiming it is the cadence an honest double-tap already gets.
+	     What it carries is the one fact the server has no way to see. ]]
+	claimsLunge: boolean?
+): { Types.HitRecord }
 	local records: { Types.HitRecord } = {}
 
 	-- Cheapest first, and the rate check ahead of everything that touches the
@@ -636,15 +646,21 @@ function MeleeService:swing(player: Player, origin: Vector3, direction: Vector3)
 	--[[
 		Whether this swing is the classic's second click.
 
-		Read BEFORE lastSwingAt is overwritten, which is the whole reason these
-		three lines are in this order — the delta this needs is the one that is
-		about to be destroyed.
+		BOTH halves have to agree. The client's claim is the half about intent —
+		a fresh press rather than a held trigger, which this side cannot observe —
+		and isLunge is the half about timing, which this side measures on its own
+		clock and does not take anybody's word for. A client claiming a lunge it
+		has not earned the timing for gets an ordinary swing.
 
-		Both sides run WeaponConfig.isLunge on their own clock, so the client has
-		already played the lunge's animation and set its own longer cooldown by
-		the time this is asked. See LungeProfile for why that agreement holds.
+		Read BEFORE lastSwingAt is overwritten, which is the whole reason these
+		lines are in this order — the delta this needs is the one that is about to
+		be destroyed.
+
+		The client has already played the lunge's animation and set its own longer
+		cooldown by the time this runs; see LungeProfile for why the two clocks
+		agree about the window.
 	]]
-	local lunging = WeaponConfig.isLunge(definition, now - state.lastSwingAt)
+	local lunging = claimsLunge == true and WeaponConfig.isLunge(definition, now - state.lastSwingAt)
 	state.lastSwingAt = now
 	if lunging and definition.lunge then
 		--[[

@@ -36,7 +36,7 @@ local EVENTS: { string } = {
 	"FireWeapon", -- {origin: Vector3, direction: Vector3, seed: number, clientTime: number}
 	"ReloadWeapon", -- ()
 	"SwitchSlot", -- (slot: string)
-	"SwingMelee", -- {origin: Vector3, direction: Vector3, clientTime: number}
+	"SwingMelee", -- {origin: Vector3, direction: Vector3, clientTime: number, lunge: boolean?}
 	"Shove", -- {origin: Vector3, direction: Vector3}   the L4D panic button
 	"ThrowItem", -- {origin: Vector3, direction: Vector3, power: number}
 	"UseItem", -- (slot: string)                        medkit / pills / adrenaline

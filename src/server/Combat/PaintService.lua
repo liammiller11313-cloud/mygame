@@ -145,21 +145,18 @@ local painted = (setmetatable({}, { __mode = "k" }) :: any) :: { [BasePart]: boo
 local spent = 0
 
 --[[
-	Verdicts that cannot change while this map is loaded, remembered so they are
-	worked out once per part rather than once per shot.
+	Whether each part may take paint at all, remembered so it is worked out once
+	per part rather than once per shot.
 
 	The walk this saves is not free: isProtected climbs a part's ancestors asking
 	thirteen tag questions at each level, and at a thousand rounds a minute —
 	which this gun is the only weapon in the game to reach — most of those shots
 	land on a wall whose answer was settled the first time somebody hit it.
 
-	Only the STATIC half is stored. Whether a part is protected, invisible, made
-	of light, outside the map or too heavy are all facts about the part; whether
-	the round has budget left is not, so that one is re-asked every time and a
-	part is never cached as refused for a reason that could expire. Cleared with
-	the map, like everything else here.
+	See `paintable` for what is deliberately NOT in here. Cleared with the map,
+	like everything else in this file.
 ]]
-local decided = (setmetatable({}, { __mode = "k" }) :: any) :: { [BasePart]: any }
+local decided = (setmetatable({}, { __mode = "k" }) :: any) :: { [BasePart]: boolean }
 
 local serviceTrove = Trove.new()
 
@@ -222,30 +219,35 @@ local MARK_ONLY: Verdict = table.freeze({ recolour = false, mark = true, charge 
 local REPAINT: Verdict = table.freeze({ recolour = true, mark = true, charge = false })
 local FRESH: Verdict = table.freeze({ recolour = true, mark = true, charge = true })
 
---[[ Everything about the PART, worked out once and remembered. NOTHING, or
-     MARK_ONLY for a surface too big to recolour, or FRESH for one that is fair
-     game if the round can still afford it. ]]
-local function classify(part: BasePart, profile: WeaponConfig.PaintProfile): Verdict
+--[[
+	Whether this part may take paint AT ALL, worked out once and remembered.
+
+	Deliberately the only thing cached, and deliberately the only thing that CAN
+	be: every question it asks is about the part and nothing else — is it
+	protected, is it made of light, is it invisible, is it even in the map — so
+	the answer cannot go stale while that map is loaded.
+
+	The two questions it does not ask are the two that would make a cache lie.
+	The budget belongs to the round rather than to the part. And the mass limit
+	belongs to the WEAPON: there is one paint gun today, and an entry keyed only
+	by part would quietly hand a second one the first one's answer the day
+	somebody adds it with a different maxMass. That bug would be invisible — a
+	paintball gun refusing a crate for a limit that is not its own — so the mass
+	is asked every time. It is a property read; the tag walk this saves is not.
+]]
+local function paintable(part: BasePart): boolean
 	local known = decided[part]
-	if known then
+	if known ~= nil then
 		return known
 	end
-
-	local verdict = FRESH
+	local allowed = true
 	if part.Transparency > MAX_TRANSPARENCY or SKIP_MATERIAL[part.Material] then
-		verdict = NOTHING
+		allowed = false
 	elseif not inLiveMap(part) or isProtected(part) then
-		verdict = NOTHING
-	--[[ The classic's own test, and after the others because it is the only one
-	     that touches the physics engine. GetMass is volume times material
-	     density, so this is a size rule wearing a mass rule's clothes: props and
-	     panels pass, the warehouse wall does not. See PaintProfile. ]]
-	elseif part:GetMass() >= profile.maxMass then
-		verdict = MARK_ONLY
+		allowed = false
 	end
-
-	decided[part] = verdict
-	return verdict
+	decided[part] = allowed
+	return allowed
 end
 
 local function admits(part: BasePart, profile: WeaponConfig.PaintProfile): Verdict
@@ -253,15 +255,22 @@ local function admits(part: BasePart, profile: WeaponConfig.PaintProfile): Verdi
 	if painted[part] then
 		return REPAINT
 	end
-	local verdict = classify(part, profile)
-	--[[ The one question that is about the ROUND rather than the part, so the one
-	     that is asked every time. A part refused here is refused for now; the
-	     same part is still FRESH as far as `decided` is concerned, which is what
-	     stops a cache from outliving the reason it was written. ]]
-	if verdict == FRESH and spent >= profile.budget then
+	if not paintable(part) then
+		return NOTHING
+	end
+	--[[ The classic's own test. GetMass is volume times material density, so this
+	     is a size rule wearing a mass rule's clothes: props and panels pass, the
+	     warehouse wall does not. See PaintProfile. ]]
+	if part:GetMass() >= profile.maxMass then
 		return MARK_ONLY
 	end
-	return verdict
+	--[[ And the one question that is about the ROUND rather than the part. A part
+	     refused here is refused for now and nothing is written down about it, so
+	     a budget that has run out can never outlive the round it ran out in. ]]
+	if spent >= profile.budget then
+		return MARK_ONLY
+	end
+	return FRESH
 end
 
 -- ── public API ──────────────────────────────────────────────────────────────

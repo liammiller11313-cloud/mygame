@@ -847,13 +847,42 @@ function SurvivorService:_computeWalkSpeed(record): number
 		speed *= S.AdrenalineSpeedBonus
 	end
 
-	-- The weapon in hand is a movement stat in this game; the number lives in
-	-- WeaponConfig and the server owns the property, so it is applied here.
+	--[[
+		The weapon in hand is a movement stat in this game; the number lives in
+		WeaponConfig and the server owns the property, so it is applied here.
+
+		── AND AIMING IS THE OTHER HALF OF THAT NUMBER ─────────────────────────
+		Every one of the thirty-six weapons declares an `aimWalkSpeedScale`
+		beside its `walkSpeedScale`, carefully and distinctly — 0.55 on a
+		marksman rifle against 0.85 on an SMG — and until now NOTHING in the game
+		read it. Not this file, not the client, not one line anywhere. Aiming
+		down the sights has always been free: tighter spread, a narrower view,
+		and no cost at all to how fast you move.
+
+		That is a defect rather than a decision. A required field on the weapon
+		type, given a considered value thirty-six times, is the design saying
+		what aiming is supposed to cost; a shooter where sights are free is one
+		where the correct play is to hold them permanently.
+
+		It also settles a platform question that the mobile aim toggle would
+		otherwise have opened. A phone has no sprint control — the wish is simply
+		always on, see InputController.assertSprintWish — so a touch player
+		cannot be made to choose between running and aiming the way a desktop
+		player is, whose Shift cancels the sights. With aiming free, a toggled
+		mobile aim was a permanent accuracy bonus nobody else could have. With
+		aiming priced, both platforms pay the same thing for it: they move
+		slower, and that is a cost a sprint cannot refund because it lands after
+		the sprint floor above.
+	]]
 	local inventory = Registry.find("InventoryService")
 	if inventory then
 		local _, definition = inventory:getActiveWeapon(record.player)
 		if definition then
-			speed *= definition.walkSpeedScale
+			local ballistics = Registry.find("BallisticsService")
+			local aiming = ballistics
+				and typeof(ballistics.isAiming) == "function"
+				and ballistics:isAiming(record.player)
+			speed *= if aiming then definition.aimWalkSpeedScale else definition.walkSpeedScale
 		end
 	end
 

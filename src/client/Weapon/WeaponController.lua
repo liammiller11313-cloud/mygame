@@ -740,7 +740,24 @@ end
      mid-fight and about to be locked in place for over a second. ]]
 local LUNGE_CAMERA_KICK = 0.5
 
-local function swingMelee()
+--[[
+	`fromPress` is the whole difference between a slash and a lunge.
+
+	Holding the trigger with a melee out re-swings from the Heartbeat loop at the
+	weapon's fire rate — see the `fireMode == "Melee"` branch there. Without this
+	flag, every one of those repeats would be measured against the previous swing,
+	land inside the lunge window, and lunge: a player holding the button would
+	lunge every second attack, be locked in place for over a second each time, and
+	never have chosen any of it. In a horde that is a death.
+
+	It is also not the classic. `if (Tick - LastAttack < 0.2) then Lunge()` hangs
+	off Tool.Activated, which a HELD button raises exactly once — so holding a
+	classic sword gives ordinary swings forever, and the lunge has always been a
+	deliberate second click.
+
+	So a lunge is only ever the swing that came from a fresh press.
+]]
+local function swingMelee(fromPress: boolean?)
 	local definition = state.definition
 	if not definition then
 		return
@@ -754,17 +771,16 @@ local function swingMelee()
 		The classic sword's second click, predicted here rather than waited for.
 
 		Read before nextSwingAt is touched and against lastSwingAt, which is the
-		delta MeleeService will independently measure on its own clock a moment
-		later. Both sides call the same WeaponConfig.isLunge with the same
-		numbers, and LungeProfile explains why the two cannot realistically
-		disagree — a lunge sits half a second inside the window and the swing
-		after one sits a third of a second outside it.
+		delta MeleeService independently re-checks on its own clock a moment
+		later. The server will not take this on trust — it grants a lunge only
+		when its OWN timing says one was available — but it does need to be told,
+		because "a fresh press" is a fact only this side has.
 
 		Predicting it matters: a lunge that only announced itself when the damage
 		arrived would be a swing that felt identical and happened to hit harder,
 		which is not an attack the player can aim or commit to.
 	]]
-	local lunging = WeaponConfig.isLunge(definition, now - state.lastSwingAt)
+	local lunging = fromPress == true and WeaponConfig.isLunge(definition, now - state.lastSwingAt)
 	state.lastSwingAt = now
 	--[[ And the lunge's hold, mirrored exactly. If this stayed at the fire delay
 	     the client would let the player swing again at 0.43s into a lock the
@@ -782,6 +798,13 @@ local function swingMelee()
 		origin = origin,
 		direction = direction,
 		clientTime = Workspace:GetServerTimeNow(),
+		--[[ A CLAIM, not an instruction. MeleeService checks the window itself
+		     and refuses one this timing could not have earned, so the most a
+		     client can win by always claiming it is the lunge cadence an honest
+		     player gets by double-tapping — which is the same cadence. What the
+		     server cannot see is whether the trigger was pressed or held, and
+		     that is the only thing this actually carries. ]]
+		lunge = lunging,
 	})
 
 	local viewmodel = Registry.find("ViewmodelController")
@@ -954,7 +977,10 @@ local function fireOnce()
 		return
 	end
 	if definition.fireMode == "Melee" then
-		swingMelee()
+		--[[ fireOnce runs on the press edge, so this swing is a deliberate one
+		     and may lunge. The Heartbeat repeat below calls swingMelee with
+		     nothing and therefore never can. ]]
+		swingMelee(true)
 		return
 	end
 
