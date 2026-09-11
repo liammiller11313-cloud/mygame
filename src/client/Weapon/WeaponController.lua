@@ -640,6 +640,24 @@ end
 	agrees, because the inputs are identical.
 ]]
 local function drawTracers(origin: Vector3, direction: Vector3, seed: number, spread: number, definition: any)
+	--[[
+		A weapon whose round FLIES draws no tracer, because the round is the
+		tracer and it is a real object the server owns.
+
+		Predicting one anyway is what a hitscan weapon does, and doing it here
+		produced the exact thing the travelling round was added to stop: an
+		instant streak to the far wall, followed a fifth of a second later by the
+		ball arriving at the same place. Two shots, one trigger pull, and the
+		first one lands before the gun has finished firing.
+
+		Only the shooter ever saw it. BallisticsService returns before it sends a
+		TracerEffect, so everybody else was already watching the round itself —
+		which made this a bug you could only find by holding the gun.
+	]]
+	if definition.projectile then
+		return
+	end
+
 	local impacts = Registry.find("ImpactController")
 	if not impacts or typeof(impacts.drawTracer) ~= "function" then
 		warnOnce(

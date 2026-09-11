@@ -3580,10 +3580,53 @@ WeaponConfig.Definitions = {
 		displayName = "Classic Paintball Gun",
 		modelName = "ClassicPaintballGun",
 		slot = Enums.Slot.Primary,
-		class = "SMG",
-		fireMode = "Auto",
+		--[[
+			── IT WAS AN SMG THAT HAPPENED TO BE GREEN ───────────────────────────
+			"Auto" at a thousand rounds a minute, hitscan, thirteen a hit. It
+			painted what it touched and it sounded right and it played like a
+			Kriss Vector, because every number describing how it FIRES came off a
+			submachine gun and only the ones describing how it LOOKS came off a
+			paintball gun.
+
+			The classic is one ball per click, and the ball is a thing in the
+			world: it leaves the barrel, it crosses the room, and it arrives. You
+			can watch it go, and you can miss a moving target by leading it wrong
+			— which is not a mistake a hitscan weapon lets anybody make.
+
+			So: Semi, three hundred a minute, which is about as fast as a hand
+			clicks and is what the classic's rate limit really was. And a real
+			travelling round; see `projectile` below.
+		]]
+		class = "Rifle",
+		fireMode = "Semi",
 		passOnly = true,
 		placeable = false,
+
+		--[[
+			The ball itself.
+
+			`gravity = false`, and that is the one deliberate departure from the
+			original, which made an ordinary part and let it drop. A crosshair
+			that does not compensate plus a ball that falls means every shot past
+			about forty studs lands in the dirt and the player has no way to know
+			by how much — the classic was aimed down a mouse cursor sitting on the
+			target, which hides the whole problem. Straight flight is what makes a
+			centre-screen crosshair tell the truth.
+
+			Two hundred studs a second crosses a room in a fifth of a second and
+			is still slow enough to watch leave the barrel. `color` is only the
+			fallback: every real shot overrides it with that shot's paint, so the
+			ball in the air, the splat it leaves and the streak the rest of the
+			team sees are one colour.
+		]]
+		projectile = {
+			speed = 200,
+			lifetime = 3,
+			size = Vector3.new(0.6, 0.6, 0.6),
+			color = Color3.fromRGB(138, 201, 38),
+			gravity = false,
+			spin = 6,
+		},
 
 		--[[ Six, because the seventh is always a near-duplicate of one of the
 		     first six at the size a splat is actually seen. Bright and saturated
@@ -3602,14 +3645,35 @@ WeaponConfig.Definitions = {
 			budget = 600,
 		},
 
-		damage = 13,
-		rpm = 1000,
+		--[[
+			Forty-two a ball at three hundred a minute is 210 a second, against the
+			217 it did before and a roster median of 338. Almost exactly where it
+			was on paper, and nowhere near where it was in a fight: what it gave up
+			is the spray, and a miss now costs a ball that has already left the
+			barrel. Two balls to a Common, either way.
+		]]
+		damage = 42,
+		rpm = 300,
 		pellets = 1,
-		magSize = 60,
-		reserveMax = 300,
+		--[[ Long, because the classic never reloaded at all. This is as close as a
+		     game with magazines gets: about seven seconds of steady clicking
+		     before the first one. ]]
+		magSize = 36,
+		reserveMax = 216,
 		penetration = 1,
 		penetrationFalloff = 0.6,
 
+		--[[ ── INERT BELOW, AND LEFT HONEST ─────────────────────────────────
+		     Falloff, spread and bloom describe a RAY, and this weapon no longer
+		     casts one: BallisticsService hands a travelling round the aim vector
+		     itself and ProjectileService resolves it flat, wherever it lands. The
+		     classic fires dead straight and does the same damage at eighty studs
+		     as at eight, which is exactly what the original did.
+
+		     Kept rather than zeroed because audit.py requires a complete weapon,
+		     and because a zero here would read to the next person as "no spread,
+		     deliberately" rather than "not consulted". These are the numbers it
+		     had; they are simply no longer asked. ]]
 		falloffStart = 40,
 		falloffEnd = 110,
 		falloffMin = 0.45,
@@ -3622,12 +3686,16 @@ WeaponConfig.Definitions = {
 		bloomPerShot = 0.22,
 		bloomRecovery = 7,
 
-		recoilVertical = 0.24,
-		recoilHorizontal = 0.16,
-		recoilRecovery = 11,
-		kickback = 0.08,
+		--[[ Recoil is NOT inert — it is a camera effect and the camera is still
+		     here. Raised from a submachine gun's constant patter to one visible
+		     nudge per click, which is what a weapon you fire deliberately should
+		     feel like in the hands. ]]
+		recoilVertical = 0.5,
+		recoilHorizontal = 0.18,
+		recoilRecovery = 9,
+		kickback = 0.16,
 
-		reloadTime = 2.4,
+		reloadTime = 2.2,
 		reloadPerShell = 0,
 		drawTime = 0.34,
 		aimTime = 0.19,
@@ -3774,6 +3842,58 @@ WeaponConfig.Definitions = {
 		fireMode = "Semi",
 		passOnly = true,
 		placeable = false,
+
+		--[[
+			── IT WAS A SHOTGUN THAT MADE AN EXPLOSION ───────────────────────────
+			Hitscan, with blastRadius and blastDamage at the end of the ray. Pull
+			the trigger and the far wall is already on fire. That is not what a
+			classic rocket launcher is and it is not how anybody plays against
+			one: the whole weapon is the second and a half between firing and
+			landing, which is long enough for the target to move and long enough
+			for the shooter to have been wrong.
+
+			So it flies now. The reference implementation is in
+			packs/BrickbattlersPack/RocketScript.lua — a servo that pushes the
+			missile toward a point one stud further along its own nose every
+			frame, at seven times the distance it has fallen behind.
+
+			That servo settles at a measurable speed: the target advances one stud
+			per frame and the body has to cover one stud per frame to keep up, so
+			at sixty frames a second it cruises at about SIXTY STUDS A SECOND. That
+			is the classic, and it is slow — slow enough to sidestep, which was the
+			point of it.
+
+			Seventy-five here rather than sixty, and that is the "optimised for the
+			game" part written down: a brickbattle opponent walked at sixteen studs
+			a second and a Charger in this game covers thirty. The extra fifteen is
+			what keeps the weapon usable against the things it now has to hit, and
+			it is still visibly a rocket you can watch cross a street.
+
+			Not modelled: the wobble. The servo's overshoot is what gives the
+			classic its drunken weave, and reproducing it would mean a per-frame
+			correction loop for every round in the air to buy a cosmetic. The
+			round flies straight and tumbles a little instead.
+		]]
+		projectile = {
+			speed = 75,
+			--[[ The pack's own FLIGHT_TIME. At seventy-five studs a second that is
+			     750 studs, which is twice this weapon's range and therefore a
+			     backstop rather than a limit — it exists so a rocket fired at the
+			     sky stops being an object eventually. ]]
+			lifetime = 10,
+			--[[ The classic template, exactly: Vector3.new(1, 1, 4), studs on every
+			     face. See ServerLauncher.lua. ]]
+			size = Vector3.new(1, 1, 4),
+			-- BrickColor 23, "Bright blue", which is the colour it has always been.
+			color = Color3.fromRGB(13, 105, 172),
+			--[[ The classic sets AssemblyLinearVelocity every frame, which
+			     overrides gravity in practice. False says the same thing once. ]]
+			gravity = false,
+			--[[ Barely. A rocket is nose-forward and a spinning one reads as
+			     debris; this is enough to say "in flight" and not enough to look
+			     like it is out of control. ]]
+			spin = 1.5,
+		},
 
 		blastRadius = 16,
 		blastDamage = 170,

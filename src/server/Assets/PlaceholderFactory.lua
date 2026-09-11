@@ -239,9 +239,32 @@ end
 
 	A Tool's contents are lifted into a fresh Model rather than the Tool being
 	cloned as-is. A Tool parented into Workspace is a pickup Roblox itself will
-	offer to anybody who touches it, it carries its own grip and activation
-	behaviour, and none of that survives contact with a game that owns its own
-	carrying. The parts are all that was ever wanted.
+	offer to anybody who touches it, it carries its own activation behaviour, and
+	none of that survives contact with a game that owns its own carrying. The
+	parts are all that was ever wanted.
+
+	── EXCEPT THE GRIP, WHICH IS THE ONE THING WORTH KEEPING ───────────────────
+	This used to throw the Tool's `Grip` away with the rest of it, and that was
+	the reason every weapon out of a classic toolbox pack sat wrong in the fist.
+
+	A purpose-built FPS model is authored barrel-down-Z and needs no correction,
+	which is what ensureGrip's inference assumes. A classic Roblox tool is not
+	built that way and never had to be: the artist modelled the handle at
+	whatever angle was convenient and then wrote the correction into the Tool's
+	Grip property. Throwing that away does not leave the model uncorrected — it
+	leaves it corrected by a GUESS, taken from the longest axis of a mesh whose
+	longest axis is a sword's blade or a launcher's tube.
+
+	So the Grip comes across, as the attachment this pipeline already prefers
+	over anything it works out for itself. The maths is the same identity from
+	both ends: Roblox welds a tool with Handle.CFrame = Hand * C0 * Grip:Inverse,
+	and holdPose places a model with Handle.CFrame = target * Grip:Inverse. Same
+	CFrame, in the same space (the Handle's), so it transfers across unchanged.
+
+	Strictly additive. A Model is not a Tool and never reaches this; a Tool whose
+	Grip is identity — which is every tool nobody bothered to pose — is left to
+	the inference exactly as before, because an identity Grip is not an answer,
+	it is the absence of one.
 ]]
 local function cloneAsModel(entry: Instance): Model?
 	if entry:IsA("Model") then
@@ -260,6 +283,33 @@ local function cloneAsModel(entry: Instance): Model?
 	local handle = model:FindFirstChild("Handle")
 	if handle and handle:IsA("BasePart") then
 		model.PrimaryPart = handle
+
+		--[[ Against the identity rather than against nothing: `~=` on two CFrames
+		     is exact, and a pose somebody nudged to 1e-7 of identity is still not
+		     a pose. The tolerance is per-component and deliberately loose. ]]
+		local grip = (entry :: Tool).Grip
+		local posed = grip.Position.Magnitude > 1e-3
+			or math.abs(grip.RightVector:Dot(Vector3.xAxis) - 1) > 1e-3
+			or math.abs(grip.UpVector:Dot(Vector3.yAxis) - 1) > 1e-3
+
+		--[[ Searched here rather than through findAttachmentNamed, which is
+		     declared two thousand lines below this and would be a forward
+		     reference. The scan is the same one, over a model that was assembled
+		     three lines ago and is as small as it will ever be. ]]
+		local already = false
+		for _, descendant in model:GetDescendants() do
+			if descendant:IsA("Attachment") and descendant.Name == "Grip" then
+				already = true
+				break
+			end
+		end
+
+		if posed and not already then
+			local authored = Instance.new("Attachment")
+			authored.Name = "Grip"
+			authored.CFrame = grip
+			authored.Parent = handle
+		end
 	end
 	return model
 end

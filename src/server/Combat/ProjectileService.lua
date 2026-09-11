@@ -77,6 +77,7 @@ local RigUtil = require(Shared.Util.RigUtil)
 local Trove = require(Shared.Util.Trove)
 local Types = require(Shared.Types)
 local UITheme = require(Shared.Config.UITheme)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local THROWABLE = Enums.Throwable
 local VALIDATION = GameConfig.HitValidation
@@ -103,7 +104,33 @@ local THROW_INTERVAL = 0.4
      the gap regardless — see launch. ]]
 local ROUND_SPAWN_AHEAD = 3
 
-local MAX_LIVE_PROJECTILES = 12
+--[[
+	Raised from 12, and the number stopped being arbitrary when the paintball
+	became a real projectile.
+
+	Twelve was sized for throwables: four survivors cannot have more than a few
+	molotovs and pipe bombs in the air at once, and a rocket is one round every
+	three seconds. A semi-automatic paintball is a different shape of demand
+	entirely. Five a second each, a three-second life, GameConfig.MaxSurvivors of
+	4 — sixty in the air if the whole team empties its magazines into open sky at
+	the same moment and not one ball hits anything.
+
+	Which is the number this is deliberately just UNDER. Sixty is the ceiling of
+	a case that does not happen: a ball at two hundred studs a second covers six
+	hundred studs before it times out, so in a real fight almost every one is
+	gone in a fifth of a second and the live count sits in single figures.
+	Fifty-six buys the whole realistic range and leaves the pathological case to
+	evict its own oldest ball, which is exactly what _evictOldest is for.
+
+	Sixty cheap parts is nothing. Sixty parts EVICTING a lit pipe bomb is the
+	thing that mattered, and that is the other half of _evictOldest.
+]]
+local MAX_LIVE_PROJECTILES = 56
+
+--[[ How far an impact effect is worth sending. The same cull distance
+     BallisticsService and MeleeService use for theirs, read from the same place,
+     so a paint splat and a bullet mark appear and stop appearing together. ]]
+local EFFECT_RADIUS = GoreConfig.Budget.CullDistance
 
 -- Muzzle velocity at power 1, plus the lob that makes a throw arc instead of
 -- travelling like a bullet. The lift is what lets a player put one over a car.
@@ -577,6 +604,14 @@ end
 	`spec` is the weapon's ProjectileProfile; `radius` and `damage` are its
 	ordinary blastRadius and blastDamage, so a travelling launcher and a hitscan
 	one are tuned in the same two fields and read the same way.
+
+	`contact` is for a round that does NOT explode — the classic paintball, which
+	travels like a rocket and lands like a bullet. Nil means the round detonates,
+	which is what a launcher does and what every caller did before it existed.
+	When present it carries `damage` (single target, where it actually hit),
+	`paint` (the weapon's PaintProfile) and `tint` (this shot's colour, which is
+	also the colour of the ball in flight — a paintball that flew green and
+	landed pink would read as two different objects).
 ]]
 function ProjectileService:launch(
 	owner: Player,
@@ -586,7 +621,8 @@ function ProjectileService:launch(
 	spec: any,
 	radius: number,
 	damage: number,
-	character: Model?
+	character: Model?,
+	contact: any?
 )
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" or direction.Magnitude <= EPSILON then
 		return
@@ -595,7 +631,7 @@ function ProjectileService:launch(
 		return
 	end
 	if #self._live >= MAX_LIVE_PROJECTILES then
-		self:_retireProjectile(1)
+		self:_evictOldest()
 	end
 
 	local unit = direction.Unit
@@ -623,7 +659,10 @@ function ProjectileService:launch(
 	     tumbles, so it has to START pointed down the shot or the first frame is a
 	     rocket flying sideways. ]]
 	body.CFrame = CFrame.lookAt(muzzle, muzzle + unit)
-	body.Color = spec.color
+	--[[ This shot's paint over the profile's colour. See `contact` above: the
+	     ball in the air and the splat it leaves are the same colour because they
+	     are the same number, read once in BallisticsService from the shot seed. ]]
+	body.Color = if contact and typeof(contact.tint) == "Color3" then contact.tint else spec.color
 	body.Material = Enum.Material.Metal
 	body.Anchored = false
 	--[[ Never collides. Contact is the swept ray in _stepProjectile, which is
@@ -700,7 +739,7 @@ function ProjectileService:launch(
 		     no map family and no inventory slot, and borrowing an id would make it
 		     look like one to every tool that reads them. `rocket` is what it is,
 		     and _detonate branches on that first. ]]
-		rocket = { weaponId = weaponId, radius = radius, damage = damage },
+		rocket = { weaponId = weaponId, radius = radius, damage = damage, contact = contact },
 		owner = owner,
 		body = body,
 		light = nil,
@@ -708,6 +747,14 @@ function ProjectileService:launch(
 		params = RaycastUtil.excluding(ignore),
 		-- The EYE, not the muzzle. See the offset above.
 		lastPosition = origin,
+		--[[ Kept apart from lastPosition, which moves every step. A contact round
+		     reports how far it travelled, and that is measured from where it was
+		     fired rather than from where it was one frame ago. ]]
+		spawnOrigin = origin,
+		--[[ The way it was pointed when it left. Used only as the fallback for a
+		     contact round's travel direction: the live reading is the step it
+		     just took, and a step of zero length has no direction to normalise. ]]
+		heading = unit,
 		spawnedAt = os.clock(),
 		endsAt = os.clock() + spec.lifetime,
 		lureAt = 0,
@@ -726,7 +773,7 @@ function ProjectileService:_spawnProjectile(
 	character: Model?
 )
 	if #self._live >= MAX_LIVE_PROJECTILES then
-		self:_retireProjectile(1)
+		self:_evictOldest()
 	end
 
 	local trove = Trove.new()
@@ -953,7 +1000,11 @@ function ProjectileService:_stepProjectile(record: any, index: number, now: numb
 		if travelled > EPSILON then
 			local result = Workspace:Raycast(record.lastPosition, delta, record.params)
 			if result then
-				self:_detonate(record, index, result.Position + result.Normal * 0.2)
+				--[[ The instance and the normal go through too. A blast does not
+				     care what it touched — it re-finds everything in its radius —
+				     but a contact round is defined by the one part it hit: that
+				     part is what takes the damage and what gets painted. ]]
+				self:_detonate(record, index, result.Position + result.Normal * 0.2, result)
 				return
 			end
 		end
@@ -997,7 +1048,7 @@ function ProjectileService:_stepPipeBomb(record: any, position: Vector3, now: nu
 end
 
 --[[ Whatever a projectile turns into when it stops being one. ]]
-function ProjectileService:_detonate(record: any, index: number, position: Vector3)
+function ProjectileService:_detonate(record: any, index: number, position: Vector3, hit: RaycastResult?)
 	local kind = record.kind
 	local owner = record.owner
 
@@ -1007,7 +1058,31 @@ function ProjectileService:_detonate(record: any, index: number, position: Vecto
 	     drift. ]]
 	local rocket = record.rocket
 	if rocket then
-		self:detonate(owner, position, rocket.radius, rocket.damage, rocket.weaponId)
+		if rocket.contact then
+			self:_impactRound(record, position, rocket, hit)
+		else
+			self:detonate(owner, position, rocket.radius, rocket.damage, rocket.weaponId)
+		end
+		--[[ And the shove, for a launcher that has one.
+
+		     Here rather than at the trigger, which is where the hitscan path
+		     fires it and where it could not stay: a rocket jump is the BLAST
+		     lifting you, and a travelling rocket's blast happens a second after
+		     the trigger and somewhere else. Firing it on the pull would have
+		     launched the player off a rocket still in the air, in whatever
+		     direction the shot was eventually going to land — which is the
+		     classic move's timing inverted and its aiming removed.
+
+		     PogoService owns whether it counts: its own maxRange is what decides
+		     that a rocket which went off across the street does not move you. ]]
+		local launcher = WeaponConfig.get(rocket.weaponId)
+		local profile = launcher and launcher.pogo
+		if profile and owner then
+			local pogo = Registry.find("PogoService")
+			if pogo and typeof(pogo.launch) == "function" then
+				pogo:launch(owner, profile, position, true)
+			end
+		end
 		self:_retireProjectile(index)
 		return
 	end
@@ -1025,6 +1100,118 @@ function ProjectileService:_detonate(record: any, index: number, position: Vecto
 	end
 
 	self:_retireProjectile(index)
+end
+
+--[[
+	Room for one more, made by giving up the LEAST important thing in the air.
+
+	This used to be `_retireProjectile(1)` — the oldest record, whatever it was.
+	With a rocket every three seconds that was fine and never fired. With a
+	semi-automatic paintball it fires constantly, and the oldest record is
+	routinely somebody's lit pipe bomb: four seconds into its fuse, the whole
+	team backing away from where it is about to go off, deleted by a teammate's
+	paint pellet and never exploding at all.
+
+	So a FIRED ROUND goes first — it is one shot out of sixty and nobody can tell
+	which one went missing. Only when every live record is a throwable does this
+	fall back to the oldest of those, which is the old behaviour and is now the
+	case it was always meant for.
+]]
+function ProjectileService:_evictOldest()
+	for index, record in self._live do
+		if record.rocket then
+			self:_retireProjectile(index)
+			return
+		end
+	end
+	self:_retireProjectile(1)
+end
+
+--[[
+	A round that LANDS rather than going off.
+
+	The classic paintball, and the reason this exists at all: it travels like a
+	rocket and resolves like a bullet, and neither of the two paths already here
+	could do both. `detonate` re-finds everything in a radius, which turns one
+	pellet into a grenade; the hitscan path in BallisticsService resolves at the
+	trigger, which is what made this gun an SMG that happened to be green.
+
+	Deliberately the same SHAPE as the hitscan impact it replaces — flesh takes
+	damage through DamageService and scenery takes paint through PaintService,
+	and never both — so a paint pellet and a bullet leave the same kind of mark
+	on the same kind of surface. What is different is only WHEN: a third of a
+	second after the trigger, wherever the ball actually got to.
+]]
+function ProjectileService:_impactRound(record: any, position: Vector3, rocket: any, hit: RaycastResult?)
+	local contact = rocket.contact
+	local part = hit and hit.Instance
+	local owner = record.owner
+	local normal = if hit then hit.Normal else Vector3.yAxis
+
+	--[[ Nothing to resolve against. A round that reached the end of its life in
+	     open air has hit nobody and painted nothing, and inventing a target
+	     under it would be the pack's own invented-ground bug in a new place —
+	     see PogoService for that one. ]]
+	if not part or not part:IsA("BasePart") then
+		return
+	end
+
+	--[[ The step it just took, which is where it was actually going. Falls back
+	     to the way it was fired when that step is too short to normalise — a
+	     zero-length Unit is NaN, and a NaN direction reaches GoreService and
+	     decides which way a body falls. ]]
+	local step = position - record.lastPosition
+	local travel = if step.Magnitude > 1e-3 then step.Unit else record.heading
+
+	local model, humanoid = RigUtil.getCharacterFromPart(part)
+	if model and humanoid and RigUtil.isAlive(model) then
+		local damageService = Registry.find("DamageService")
+		if damageService and contact.damage > 0 then
+			damageService:applyDamage(
+				model,
+				contact.damage,
+				Types.newDamageContext({
+					attacker = owner,
+					weaponId = rocket.weaponId,
+					damageType = Enums.DamageType.Bullet,
+					region = RigUtil.getHitRegion(part),
+					hitPart = part,
+					hitPosition = position,
+					hitNormal = normal,
+					--[[ Where it was GOING, not where the shooter was standing.
+					     A travelling round is the only thing in this game whose
+					     direction of travel and its owner's facing can differ by
+					     ninety degrees — they had a second to turn around — and
+					     the direction is what decides which way a corpse falls. ]]
+					direction = travel,
+					distance = (position - record.spawnOrigin).Magnitude,
+					piercedCount = 0,
+				})
+			)
+		end
+		return
+	end
+
+	--[[ Scenery, which is where the paint goes. PaintService answers with the
+	     colour it actually put down, or nil where it refused — a puzzle prop, a
+	     barricade, something too heavy to be a prop — and the client draws a
+	     splat only where a real one landed. See BallisticsService, which makes
+	     exactly this call for the hitscan half. ]]
+	local splat: Color3? = nil
+	if contact.tint and contact.paint then
+		local paint = Registry.find("PaintService")
+		if paint and typeof(paint.splash) == "function" then
+			splat = paint:splash(part, contact.tint, contact.paint)
+		end
+	end
+
+	Remotes.fireInRange("ImpactEffect", position, EFFECT_RADIUS, {
+		position = position,
+		normal = normal,
+		material = part.Material,
+		damageType = Enums.DamageType.Bullet,
+		paint = splat,
+	})
 end
 
 function ProjectileService:_retireProjectile(index: number)

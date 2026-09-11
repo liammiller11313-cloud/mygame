@@ -294,17 +294,23 @@ read in the file it lives in.
 | Blast pressure throws bodies | `knockback = 70` |
 | It hurts whoever fired it | verified in code, not assumed: self-damage passes `applyDamage`'s friendly-fire gate where a teammate's is blocked, so a rocket at your own feet costs about 43 health on Normal |
 | Rocket jump | the `pogo` block, `directional = true` — away from the blast, so shooting the wall behind you is the move |
-| Swoosh in flight, Explosion on contact | there is no flight to swoosh through; the blast is ProjectileService's |
-| **A travelling rocket with a servo wobble, 10s of flight** | **hitscan, detonating where the shot lands.** The one difference that is a SYSTEMS choice rather than a weapon one — the RPG-7 works the same way, so changing it is a decision about both weapons and not about this one |
+| Explosion on contact | the blast is ProjectileService's, at the point the round actually reaches |
+| **A travelling rocket, 10s of flight** | **a travelling rocket, 10s of flight.** This row used to read "hitscan, detonating where the shot lands" and called it a systems choice. It was not — it was a shotgun that made an explosion. A `projectile` block now puts the rocket in the air |
+| The servo: velocity = 7 × how far it has fallen behind a point one stud further along its nose, every frame | **75 studs/s, straight.** The servo settles at about 60 studs/s (one stud per frame at 60fps), which is the classic's real speed and is measurably slow. 75 is the "optimised for the game" nudge, written down: a brickbattle opponent walked at 16 studs/s and a Charger here covers 30 |
+| The wobble the servo's overshoot produces | **not modelled.** A per-frame correction loop for every round in the air, to buy a cosmetic. It tumbles gently instead |
+| Rocket jump fires on the trigger (the client's `COOLDOWN`) | fires on the DETONATION. A rocket jump is the blast lifting you, and the blast is now a second downrange — firing it on the pull would launch you off a rocket still in the air |
+| `Swoosh` looping in flight | not yet. There is flight to swoosh through now, which there was not before; the sound is not wired |
 
 ### Classic Paintball Gun — `Paintball.lua`
 
 | The original | In the game |
 |---|---|
-| 5 damage | 13 — four body shots on a Common where an SMG takes three |
+| 5 damage | 42 — two body shots on a Common. Was 13 at 1000rpm, which is the same 210-a-second on paper and a completely different weapon in the hand |
+| **One ball per click, and the ball is a real object that crosses the room** | **one ball per click, and the ball is a real object that crosses the room.** This row used to say "Auto, 1000rpm, hitscan" — it was a Kriss Vector that painted things. 200 studs/s, a fifth of a second across a room, and a miss now costs a ball that has already left |
+| The ball has gravity and drops | **it does not.** The one deliberate departure: the classic was aimed down a mouse cursor sitting on the target, which hides the drop. A centre-screen crosshair does not, and a ball that falls 24 studs over 100 makes it lie |
 | Repaints anything under `1.2 * 200` mass | `PaintService`, the same 240 limit, for the same reason: it is a size rule wearing a mass rule's clothes |
-| Three splat parts, growing to 4× and gone in two seconds | one splat per hit, from the pooled decal system. Three at 1000rpm would spend a 56-slot pool in a second |
-| Eight-second ball life | `maxRange` 220 |
+| Three splat parts, growing to 4× and gone in two seconds | one splat per hit, from the pooled decal system. Three per shot would spend a 56-slot pool in a few seconds |
+| Eight-second ball life | three, which at 200 studs/s is 600 studs — well past this weapon's 220 of range, so it is a backstop and not a limit |
 | The creator tag expires on its own | the game's own kill credit |
 | **The ball's single BrickColor** | **a six-colour palette, one drawn per shot from the shot seed.** A deliberate change: it reads as a paintball gun from across a room, and it makes two players painting the same corridor legible as two players |
 | **It paints PEOPLE too** — a limb is well under the mass limit | **deliberately not.** A special infected is told apart at six paces by its colour, and a team that cannot tell a Boomer from a Common has lost the fight that colour was warning them about |

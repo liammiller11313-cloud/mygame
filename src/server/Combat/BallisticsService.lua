@@ -574,18 +574,61 @@ function BallisticsService:resolveShot(
 		Returns no records on purpose. There is no hit yet to report, and inventing
 		one would put a hitmarker on a shot still in the air.
 	]]
-	if definition.projectile and definition.blastRadius and definition.blastDamage then
+	--[[
+		And the paint, for the one gun that has any.
+
+		Taken from the SEED rather than rolled here, which is what makes one
+		trigger pull one colour everywhere: the shooter's own tracer is drawn on
+		their machine from the same seed before this code has run at all, and a
+		colour rolled on the server would have meant a green streak followed by a
+		pink splat. See WeaponConfig.paintColor.
+
+		Nil for all thirty-five other guns, and the pellet loop tests it before it
+		tests anything else, so paint costs a nil check on every other shot in
+		the game. See PaintService.
+
+		ABOVE the travelling-round branch, not below it, because the paintball is
+		now on both sides of that line: its colour has to reach the round it
+		launches as well as the splat a hitscan shot leaves. It was below, which
+		meant the one gun this exists for could not see it.
+	]]
+	local paintColor = WeaponConfig.paintColor(definition, seed)
+	local paint: any = if paintColor then Registry.find("PaintService") else nil
+
+	if definition.projectile then
 		local projectiles = Registry.find("ProjectileService")
 		if projectiles and typeof(projectiles.launch) == "function" then
+			--[[
+				A round that goes off, or a round that lands.
+
+				The condition used to require a blast, which quietly meant a
+				travelling round could only ever be a rocket: give the classic
+				paintball a ProjectileProfile and no blastRadius and it fell
+				straight through to the hitscan path below, resolving at the
+				trigger while carrying a description of a ball in flight.
+
+				`contact` is what the other half needs — the single-target damage,
+				the paint profile and this shot's colour. Nil for a launcher, which
+				re-finds its targets in a radius and paints nothing.
+			]]
+			local contact: any = nil
+			if not (definition.blastRadius and definition.blastDamage) then
+				contact = {
+					damage = definition.damage,
+					paint = definition.paint,
+					tint = paintColor,
+				}
+			end
 			projectiles:launch(
 				shooter,
 				weaponId,
 				origin,
 				unit,
 				definition.projectile,
-				definition.blastRadius,
-				definition.blastDamage,
-				character
+				definition.blastRadius or 0,
+				definition.blastDamage or 0,
+				character,
+				contact
 			)
 		else
 			--[[ Loud, because the alternative is silent. A hitscan weapon with no
@@ -613,22 +656,6 @@ function BallisticsService:resolveShot(
 	     only: a volley is one trigger pull and must be one launch. ]]
 	local pogoAt: Vector3? = nil
 	local pogoHit = false
-
-	--[[
-		And the paint, for the one gun that has any.
-
-		Taken from the SEED rather than rolled here, which is what makes one
-		trigger pull one colour everywhere: the shooter's own tracer is drawn on
-		their machine from the same seed before this code has run at all, and a
-		colour rolled on the server would have meant a green streak followed by a
-		pink splat. See WeaponConfig.paintColor.
-
-		Nil for all thirty-five other guns, and the loop below tests it before it
-		tests anything else, so paint costs a nil check on every other shot in
-		the game. See PaintService.
-	]]
-	local paintColor = WeaponConfig.paintColor(definition, seed)
-	local paint: any = if paintColor then Registry.find("PaintService") else nil
 
 	for _, pelletDirection in directions do
 		local hits = RaycastUtil.pierce(
