@@ -617,6 +617,27 @@ function BallisticsService:resolveShot(
 					damage = definition.damage,
 					paint = definition.paint,
 					tint = paintColor,
+					--[[ The same two numbers the hitscan path below reads, handed
+					     to a round that has to spend them over a flight instead of
+					     along a ray. Absent for a weapon that pierces nothing,
+					     which is every one of them but the classic slingshot.
+
+					     `left` is mutable and per shot, which is why this table is
+					     built here rather than shared: two pellets in the air at
+					     once must not share a counter. ]]
+					pierce = if definition.penetration > 1
+						then {
+							left = definition.penetration - 1,
+							-- How many it has been through, for the damage context.
+							spent = 0,
+							falloff = definition.penetrationFalloff,
+							--[[ PelletScript gives up under one point of damage.
+							     The same floor, so the chain ends where the
+							     original's does rather than at an arbitrary
+							     depth. ]]
+							floor = 1,
+						}
+						else nil,
 				}
 			end
 			projectiles:launch(

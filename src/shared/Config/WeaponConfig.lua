@@ -3551,15 +3551,60 @@ WeaponConfig.Definitions = {
 
 		--[[ The classic's 30-against-10, and its reach. See LungeProfile for the
 		     timing, which is the part that could not be ported literally. ]]
+		--[[
+			── THE LUNGE WAS NOT A MOVE, IT WAS WHAT THE SWORD DID ──────────────
+			The original is one line: `if Tick - LastAttack < 0.2 then Lunge()`.
+			Two tenths of a second — a deliberate double click, and everything
+			slower than that is an ordinary slash.
+
+			This said 0.9, and MeleeService will not accept two swings closer
+			together than rpm x FIRE_DELAY_LENIENCY, which at 140rpm is 0.364s.
+			0.364 is inside 0.9, so a player simply holding the attack button
+			lunged EVERY TIME. The lockout was the only thing rationing it: the
+			sword was a lunge machine on a one-second cycle and the ordinary slash
+			barely existed at all.
+
+			0.2 on its own does not fix it — it is BELOW that 0.364s floor, so the
+			lunge becomes unreachable instead. The window has to sit above the
+			floor AND the ordinary rhythm has to be able to sit outside it, which
+			is only arrangeable by moving the swing rate as well. See rpm below.
+
+			0.30 leaves a window between 182ms and 300ms: a 118ms target. A
+			deliberate desktop double-click is about 120ms and a thumb double-tap
+			on glass is 200-300ms, so the move is available on a phone — which is
+			exactly what it was not.
+
+			Spam-clicking still lunges. That is not a bug left in; it is the
+			classic, where clicking fast is how you lunge.
+		]]
 		lunge = {
-			window = 0.9,
-			cooldown = 1.2,
+			window = 0.30,
+			--[[ 0.8, which is the 0.2 + 0.6 the original's grip animation took,
+			     rather than the 1.2 this was guessing at. ]]
+			cooldown = 0.8,
+			--[[ Three, measured rather than chosen: the original is Slash 10,
+			     Lunge 30. ]]
 			damageMultiplier = 3.0,
 			rangeMultiplier = 1.6, -- 12 studs becomes 19, past even the Machete
 		},
 
-		damage = 105,
-		rpm = 140,
+		--[[
+			Twice the swing rate at half the bite, and the two are one change
+			rather than two.
+
+			The classic sword is a fast-clicking weapon — that is the feel of it —
+			and the rate is also the only lever that puts a reachable lunge window
+			above MeleeService's floor. See `lunge` above: 280rpm drops that floor
+			from 0.364s to 0.182s, which is what leaves 0.30 any room.
+
+			52 rather than 105 so the ladder does not move: 52 x 280/60 is 243 a
+			second against the 245 this did at 140rpm — the same weapon arriving
+			in smaller pieces. It still one-shots a 50hp Common, which is the
+			constraint the whole melee rebalance was checked against, and the
+			lunge lands at 156.
+		]]
+		damage = 52,
+		rpm = 280,
 		pellets = 1,
 		magSize = 0,
 		reserveMax = 0,
@@ -3779,6 +3824,45 @@ WeaponConfig.Definitions = {
 		fireMode = "Semi",
 		passOnly = true,
 		placeable = false,
+
+		--[[
+			── THE PELLET IS A THING IN THE WORLD, AND ALWAYS WAS ───────────────
+			The last of the four still resolving at the trigger. Slingshot.lua
+			makes a part, gives it a velocity and lets it go: PELLET_SPEED = 100,
+			one stud cubed, BrickColor 26. A hitscan slingshot is a slingshot that
+			does not sling anything.
+
+			165 rather than the classic's 100, and that is the "optimised for the
+			game" half written down. A hundred studs a second crosses a room in
+			four tenths of a second, which is fine against a brickbattle opponent
+			walking at sixteen and is not fine against a Common already running at
+			you. 165 makes it a quarter of a second and is still visibly a pebble
+			in flight rather than a line drawn instantly.
+
+			`gravity = false` for the same reason the paintball's is: the original
+			was aimed down a mouse cursor sitting on the target, which hides the
+			drop entirely, and a centre-screen crosshair does not.
+
+			The chain survives the change. `penetration` and `penetrationFalloff`
+			below still mean what they meant — ProjectileService spends them over
+			the flight instead of along a ray, so the pellet still punches a line
+			of Commons for 32, 16 and 8.
+		]]
+		projectile = {
+			speed = 165,
+			--[[ The classic's two seconds. At 165 that is 330 studs, past this
+			     weapon's own 300 of range, so it is a backstop rather than a
+			     limit. ]]
+			lifetime = 2,
+			-- PELLET_SIZE, exactly.
+			size = Vector3.new(1, 1, 1),
+			-- BrickColor 26, "Black", which is what it has always been.
+			color = Color3.fromRGB(27, 42, 53),
+			gravity = false,
+			--[[ A pebble tumbles, and faster than a rocket does: it is small and
+			     has nothing keeping it pointed. ]]
+			spin = 9,
+		},
 
 		--[[ Shoot the floor, go up. Tamer than the pack's because this weapon
 		     fires at 75rpm rather than on a 0.12s cooldown — eight tenths of a

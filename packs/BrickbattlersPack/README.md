@@ -262,9 +262,10 @@ read in the file it lives in.
 
 | The original | In the game |
 |---|---|
-| Slash: 10 on a click | 240 a swing — the same weapon against a 50hp Common instead of a 100hp player |
-| Lunge: 30 on a second click within 0.2s | ×3 for 720, and the window is 0.9s. 0.2 is unreachable here: the swing rate belongs to the weapon, 140rpm is one swing every 0.43s, and MeleeService refuses anything faster. See `WeaponConfig.LungeProfile` |
-| The lunge holds the tool for its grip animation | 1.2s lockout, which is the whole cost of the attack |
+| Slash: 10 on a click | 52 a swing at 280rpm. Was 240 at 140rpm — same 243 a second, arriving in smaller pieces, and a fast-clicking sword is the whole feel of the classic |
+| Lunge: 30 on a second click within 0.2s | ×3 for 156, on a 0.30s window. **This row used to say 0.2 was unreachable and settle for 0.9, and 0.9 was not a compromise — it was broken.** MeleeService's floor at 140rpm is 0.364s, which is INSIDE 0.9, so holding the attack button lunged every single time and the ordinary slash barely existed. The fix is not the window alone: 280rpm drops that floor to 0.182s, which is what leaves 0.30 any room. The two taps must land 182–300ms apart — a desktop double-click is ~120ms and a thumb double-tap is 200–300ms, so the move exists on a phone, which it did not |
+| Spam-clicking lunges | it still does. Not a bug left in: `if Tick - LastAttack < 0.2 then Lunge()` is exactly that |
+| The lunge holds the tool for its grip animation | 0.8s lockout, which is the 0.2 + 0.6 that animation took. Was 1.2, guessed |
 | Grip swings Up → Out → Up | the viewmodel drops the arc's left-right entirely and spends it on depth, because a thrust is not a swing |
 | `SwordSlash` and `SwordLunge` — two samples | two, the same id re-pitched down and carrying further. See `AudioConfig.WeaponLunge` |
 | Team and self checks | `FriendlyFireMeleeMultiplier` is 0 |
@@ -275,13 +276,15 @@ read in the file it lives in.
 
 | The original | In the game |
 |---|---|
-| A BodyForce cancels gravity, so the pellet flies dead flat | every weapon here is hitscan, so nothing drops and there is no gravity to cancel. The FEEL is carried by falloff that barely starts before 150 studs, zero recoil, and no spread at all while aimed |
+| **`PELLET_SPEED = 100` — a part with a velocity** | **165 studs/s, a real travelling pellet.** This row used to say "every weapon here is hitscan, so nothing drops", which was true and was the problem: a hitscan slingshot does not sling anything. 165 rather than 100 is the optimisation — a hundred crosses a room in four tenths of a second, fine against a brickbattle opponent walking at 16 and not fine against a Common running at you |
+| A BodyForce cancels gravity, so the pellet flies dead flat | `gravity = false`, which is now a real cancellation of a real drop rather than a property of having no flight. Deliberate: the classic is aimed down a mouse cursor sitting on the target, which hides the drop, and a centre-screen crosshair does not |
 | 8 damage | 32 |
-| `damage /= 2` on every surface until it is under 1 | `penetration = 3`, `penetrationFalloff = 0.5`. The first body still takes full damage; the change is only what happens behind it |
-| A black 1×1×1 ball | `tracerColor` RGB(60,60,60) |
-| Two-second pellet life | `maxRange` 300 |
+| `damage /= 2` on every surface until it is under 1 | `penetration = 3`, `penetrationFalloff = 0.5` — 32, then 16, then 8 through a line of Commons, and it SURVIVED the round becoming a projectile. ProjectileService spends the same two numbers over the flight instead of along a ray, adding each body to the round's own ignore list as it goes |
+| It bounces off walls and halves | **not modelled.** Scenery spends the pellet. A reflection solver for a weapon nobody aims at walls on purpose is not worth it, and the alternative — carrying on through the wall — is worse than not modelling it |
+| A black 1×1×1 ball | `Vector3.new(1, 1, 1)` and BrickColor 26, exactly, on the round itself |
+| Two-second pellet life | two seconds. At 165 that is 330 studs, past this weapon's own 300 of range, so it is a backstop rather than a limit |
 | No team check — the pellet hurts your own side | the game's own friendly fire, 0.25 |
-| Pogo — shoot the floor, go up | the `pogo` block, `directional = false`, capped. See `PogoProfile` |
+| Pogo — shoot the floor, go up | the `pogo` block, `directional = false`, capped. See `PogoProfile`. It fires on the pellet's IMPACT now rather than on the trigger, which is both correct and what the classic does — the pellet has to actually reach the floor |
 | **`RELOAD = 6` — one pellet every six seconds** | **75rpm with a 12-round magazine.** The single biggest optimisation in the pack. Six seconds between shots is a duel timing; against a horde it is a weapon nobody would carry. It is still the slowest-firing sidearm in the game by a distance |
 
 ### Classic Rocket Launcher — `ServerLauncher.lua`, `RocketScript.lua`

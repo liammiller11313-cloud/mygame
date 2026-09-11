@@ -740,6 +740,9 @@ function ProjectileService:launch(
 	end
 
 	table.insert(self._live, {
+		--[[ Kept, not just handed to RaycastUtil once. A piercing round adds each
+		     body it goes through, and rebuilding the params needs the list. ]]
+		ignore = ignore,
 		--[[ No `kind`. A kind is a THROWABLE id and items.py checks that every one
 		     of those is named in _detonate; a fired round is not a throwable, has
 		     no map family and no inventory slot, and borrowing an id would make it
@@ -1071,7 +1074,16 @@ function ProjectileService:_detonate(record: any, index: number, position: Vecto
 	local rocket = record.rocket
 	if rocket then
 		if rocket.contact then
-			self:_impactRound(record, position, rocket, hit)
+			--[[ A contact round can survive its own impact. The classic slingshot
+			     punches through a line of bodies, and _impactRound says whether
+			     this one was the last — see it for the chain. ]]
+			if not self:_impactRound(record, position, rocket, hit) then
+				--[[ Still flying. The sweep resumes from where it struck rather
+				     than from the step before it, or the very next raycast starts
+				     behind the body it just went through and hits it again. ]]
+				record.lastPosition = position
+				return
+			end
 		else
 			self:detonate(owner, position, rocket.radius, rocket.damage, rocket.weaponId)
 		end
@@ -1154,7 +1166,12 @@ end
 	on the same kind of surface. What is different is only WHEN: a third of a
 	second after the trigger, wherever the ball actually got to.
 ]]
-function ProjectileService:_impactRound(record: any, position: Vector3, rocket: any, hit: RaycastResult?)
+function ProjectileService:_impactRound(
+	record: any,
+	position: Vector3,
+	rocket: any,
+	hit: RaycastResult?
+): boolean
 	local contact = rocket.contact
 	local part = hit and hit.Instance
 	local owner = record.owner
@@ -1165,7 +1182,7 @@ function ProjectileService:_impactRound(record: any, position: Vector3, rocket: 
 	     under it would be the pack's own invented-ground bug in a new place —
 	     see PogoService for that one. ]]
 	if not part or not part:IsA("BasePart") then
-		return
+		return true
 	end
 
 	--[[ The step it just took, which is where it was actually going. Falls back
@@ -1177,6 +1194,15 @@ function ProjectileService:_impactRound(record: any, position: Vector3, rocket: 
 
 	local model, humanoid = RigUtil.getCharacterFromPart(part)
 	if model and humanoid and RigUtil.isAlive(model) then
+		--[[ How many bodies this round has already been through, which the
+		     hitscan path reports and this one was hard-coding to zero. It is not
+		     decoration: the damage context carries it, and a third body being
+		     told it is the first is the same class of lie as a wrong hit normal.
+		     Counted from what the pierce has SPENT rather than tracked
+		     separately, so the two cannot drift. ]]
+		local pierce = contact.pierce
+		local pierced = if pierce then pierce.spent else 0
+
 		local damageService = Registry.find("DamageService")
 		if damageService and contact.damage > 0 then
 			damageService:applyDamage(
@@ -1197,11 +1223,37 @@ function ProjectileService:_impactRound(record: any, position: Vector3, rocket: 
 					     the direction is what decides which way a corpse falls. ]]
 					direction = travel,
 					distance = (position - record.spawnOrigin).Magnitude,
-					piercedCount = 0,
+					piercedCount = pierced,
 				})
 			)
 		end
-		return
+
+		--[[
+			── AND THE CHAIN, FOR A ROUND THAT DOES NOT STOP AT ONE BODY ────────
+			The classic slingshot's pellet carries on with half the bite, over and
+			over, until it is under a point of damage and gives up — PelletScript's
+			whole behaviour is `damage /= 2`. This game already had that as
+			`penetration` and `penetrationFalloff` on the hitscan path, and making
+			the pellet travel must not quietly delete it.
+
+			So the same two numbers, along a flight path instead of along a ray. A
+			body is added to the round's ignore list before it flies on, which is
+			what stops the very next sweep resolving against the one it has
+			already been through, and the damage is halved for whatever is behind
+			it: 32, then 16, then 8.
+
+			Nil for the paintball and every launcher, which resolve on the first
+			thing they touch.
+		]]
+		if pierce and pierce.left > 0 and contact.damage > pierce.floor then
+			pierce.left -= 1
+			pierce.spent += 1
+			contact.damage *= pierce.falloff
+			table.insert(record.ignore, model)
+			record.params = RaycastUtil.excluding(record.ignore)
+			return false
+		end
+		return true
 	end
 
 	--[[ Scenery, which is where the paint goes. PaintService answers with the
@@ -1224,6 +1276,12 @@ function ProjectileService:_impactRound(record: any, position: Vector3, rocket: 
 		damageType = Enums.DamageType.Bullet,
 		paint = splat,
 	})
+	--[[ Scenery always spends the round, however many bodies it had left in it.
+	     The original pellet bounces off a wall and halves; modelling that would
+	     mean a reflection solver for a weapon nobody aims at walls on purpose,
+	     and the alternative — carrying on through the wall — is worse than not
+	     modelling it at all. ]]
+	return true
 end
 
 function ProjectileService:_retireProjectile(index: number)
