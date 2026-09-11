@@ -659,6 +659,41 @@ AudioConfig.MeleeImpact = {
 	Blade = sound(ID.BladeFlesh, 0.78, 0.94, 1.06, 140, 5),
 } :: { [string]: SoundDefinition }
 
+--[[
+	A melee attack that is not the ordinary swing.
+
+	One entry, for the classic sword's lunge. The original has SwordSlash and
+	SwordLunge as two separate samples and plays them on the two different
+	attacks, because the lunge is a commitment — over a second of standing still
+	— and a player has to be able to hear that they made it rather than work it
+	out from the damage afterwards.
+
+	Same sample as the swing, pitched DOWN rather than up and carrying half again
+	as far, which is this file's own convention for the pack: every sound in it
+	is an existing id re-pitched, and when real classic audio exists only the id
+	changes. The swing is quiet and high because a light blade moves fast; the
+	lunge is the same blade thrown forward with a body behind it.
+]]
+AudioConfig.WeaponLunge = {
+	[Enums.Weapon.ClassicSword] = sound(ID.MacheteSwing, 0.85, 0.8, 0.88, 105, 4),
+} :: { [string]: SoundDefinition }
+
+--[[ What one melee attack sounds like. `lunging` picks the heavier sample where
+     a weapon has one, and every weapon that does not simply swings — which is
+     every melee in the game but the sword. ]]
+function AudioConfig.meleeSwing(weaponId: string?, lunging: boolean?): SoundDefinition?
+	if typeof(weaponId) ~= "string" then
+		return nil
+	end
+	if lunging then
+		local heavy = AudioConfig.WeaponLunge[weaponId]
+		if heavy then
+			return heavy
+		end
+	end
+	return AudioConfig.WeaponFire[weaponId]
+end
+
 local MELEE_IMPACT_KIND: { [string]: string } = {
 	[Enums.Weapon.BaseballBat] = "Blunt",
 	[Enums.Weapon.LeadPipe] = "Blunt",

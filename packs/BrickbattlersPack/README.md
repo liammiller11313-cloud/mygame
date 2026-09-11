@@ -3,9 +3,13 @@
 Corrected versions of the tool scripts from Brickbattle Ultimate. The behaviour
 and the tuning are unchanged; what changed is who is allowed to ask for it.
 
-Nothing here is wired into Fading Light yet — these are standalone Roblox Tool
-scripts. `check.sh` parses and lints them, but `audit.py` does not look at them
-because they reference no game module.
+These are standalone Roblox Tool scripts. `check.sh` parses and lints them, but
+`audit.py` does not look at them because they reference no game module.
+
+**Four of the seven are now also real weapons in Fading Light**, rebuilt against
+this game's own systems rather than dropped in as tools. These files stay as the
+REFERENCE — what the originals actually do, in code — and the ledger at the
+bottom of this file accounts for every behaviour in them one by one.
 
 ## Where each file goes
 
@@ -243,3 +247,72 @@ the pack.
 None of it stops a determined exploiter from flying. It cannot: a player owns
 their own `HumanoidRootPart` and can write its velocity whenever they like. What
 it stops is these tools being the thing that *hands out* the launch.
+
+## The ledger — every original behaviour, and where it went
+
+The four weapons that became Fading Light weapons, checked line by line against
+the scripts in this folder. Everything in the originals is in one of three
+columns: carried over, translated into something this game already has, or
+deliberately left out with the reason written down.
+
+Nothing is listed as "carried over" on the strength of a comment. Each one was
+read in the file it lives in.
+
+### Classic Sword — `SwordScript.lua`
+
+| The original | In the game |
+|---|---|
+| Slash: 10 on a click | 240 a swing — the same weapon against a 50hp Common instead of a 100hp player |
+| Lunge: 30 on a second click within 0.2s | ×3 for 720, and the window is 0.9s. 0.2 is unreachable here: the swing rate belongs to the weapon, 140rpm is one swing every 0.43s, and MeleeService refuses anything faster. See `WeaponConfig.LungeProfile` |
+| The lunge holds the tool for its grip animation | 1.2s lockout, which is the whole cost of the attack |
+| Grip swings Up → Out → Up | the viewmodel drops the arc's left-right entirely and spends it on depth, because a thrust is not a swing |
+| `SwordSlash` and `SwordLunge` — two samples | two, the same id re-pitched down and carrying further. See `AudioConfig.WeaponLunge` |
+| Team and self checks | `FriendlyFireMeleeMultiplier` is 0 |
+| Checks the RightGrip weld before damaging | the server validates the actor and the weapon in hand instead |
+| **Base: 5 on `Handle.Touched`** — brushing somebody hurts them | **left out, and it cannot be ported.** Nothing in this game welds a world weapon model into a hand, so there is no blade in the world for anything to touch. Faking it with a proximity sweep would be inventing a mechanic rather than porting one, and at this game's scale a passive touch worth half a slash would be 120 damage for walking into a crowd |
+
+### Classic Slingshot — `Slingshot.lua`, `PelletScript.lua`
+
+| The original | In the game |
+|---|---|
+| A BodyForce cancels gravity, so the pellet flies dead flat | every weapon here is hitscan, so nothing drops and there is no gravity to cancel. The FEEL is carried by falloff that barely starts before 150 studs, zero recoil, and no spread at all while aimed |
+| 8 damage | 32 |
+| `damage /= 2` on every surface until it is under 1 | `penetration = 3`, `penetrationFalloff = 0.5`. The first body still takes full damage; the change is only what happens behind it |
+| A black 1×1×1 ball | `tracerColor` RGB(60,60,60) |
+| Two-second pellet life | `maxRange` 300 |
+| No team check — the pellet hurts your own side | the game's own friendly fire, 0.25 |
+| Pogo — shoot the floor, go up | the `pogo` block, `directional = false`, capped. See `PogoProfile` |
+| **`RELOAD = 6` — one pellet every six seconds** | **75rpm with a 12-round magazine.** The single biggest optimisation in the pack. Six seconds between shots is a duel timing; against a horde it is a weapon nobody would carry. It is still the slowest-firing sidearm in the game by a distance |
+
+### Classic Rocket Launcher — `ServerLauncher.lua`, `RocketScript.lua`
+
+| The original | In the game |
+|---|---|
+| `COOLDOWN = 3` between shots | 30rpm, one in the tube, 3.4s reload, two in reserve |
+| A default Roblox `Explosion` (BlastRadius 4) | `blastRadius = 16`. Four times, because a horde shooter needs a rocket that clears a doorway rather than a rocket that clears a doorframe |
+| `DestroyJointRadiusPercent = 1` — everything in the radius comes apart | `GoreConfig.Scoring.ExplosiveAlwaysGibs`, read by both DamageService and GoreService |
+| Blast pressure throws bodies | `knockback = 70` |
+| It hurts whoever fired it | verified in code, not assumed: self-damage passes `applyDamage`'s friendly-fire gate where a teammate's is blocked, so a rocket at your own feet costs about 43 health on Normal |
+| Rocket jump | the `pogo` block, `directional = true` — away from the blast, so shooting the wall behind you is the move |
+| Swoosh in flight, Explosion on contact | there is no flight to swoosh through; the blast is ProjectileService's |
+| **A travelling rocket with a servo wobble, 10s of flight** | **hitscan, detonating where the shot lands.** The one difference that is a SYSTEMS choice rather than a weapon one — the RPG-7 works the same way, so changing it is a decision about both weapons and not about this one |
+
+### Classic Paintball Gun — `Paintball.lua`
+
+| The original | In the game |
+|---|---|
+| 5 damage | 13 — four body shots on a Common where an SMG takes three |
+| Repaints anything under `1.2 * 200` mass | `PaintService`, the same 240 limit, for the same reason: it is a size rule wearing a mass rule's clothes |
+| Three splat parts, growing to 4× and gone in two seconds | one splat per hit, from the pooled decal system. Three at 1000rpm would spend a 56-slot pool in a second |
+| Eight-second ball life | `maxRange` 220 |
+| The creator tag expires on its own | the game's own kill credit |
+| **The ball's single BrickColor** | **a six-colour palette, one drawn per shot from the shot seed.** A deliberate change: it reads as a paintball gun from across a room, and it makes two players painting the same corridor legible as two players |
+| **It paints PEOPLE too** — a limb is well under the mass limit | **deliberately not.** A special infected is told apart at six paces by its colour, and a team that cannot tell a Boomer from a Common has lost the fight that colour was warning them about |
+
+### The other three
+
+`ClassicTimebomb`, `ClassicSuperball` and `ClassicTrowel` are not sold and not
+wired in. The pass grants four and says four. A timebomb and a superball are
+throwables and belong in ProjectileService beside the pipe bomb; a trowel builds
+geometry and wants the barricade system. They arrive when their pipelines do,
+and until then describing seven and selling four would be the lie.

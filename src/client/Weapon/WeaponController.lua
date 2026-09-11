@@ -827,7 +827,10 @@ local function swingMelee(fromPress: boolean?)
 			camera:addRecoil(LUNGE_CAMERA_KICK, 0)
 		end
 	end
-	playLocal(AudioConfig.WeaponFire[definition.id])
+	--[[ The lunge has its own sample — see AudioConfig.WeaponLunge. The classic
+	     plays two sounds for its two attacks, and the heavier one is most of how
+	     a player knows which attack they just committed to. ]]
+	playLocal(AudioConfig.meleeSwing(definition.id, lunging))
 end
 
 --[[

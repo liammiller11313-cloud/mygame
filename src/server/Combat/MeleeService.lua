@@ -727,7 +727,12 @@ function MeleeService:swing(
 	     the WeaponFired remote above excludes them. ]]
 	local audio = Registry.find("AudioService")
 	if audio then
-		audio:playAt(AudioConfig.WeaponFire[weaponId], apex, nil, player)
+		--[[ A lunge has its own sample, pitched down and carrying further — see
+		     AudioConfig.WeaponLunge. The classic plays two different sounds for
+		     its two attacks, and it is right to: a lunge is over a second of
+		     standing still, and a teammate who can hear one coming knows not to
+		     step into the doorway you just committed to. ]]
+		audio:playAt(AudioConfig.meleeSwing(weaponId, lunging), apex, nil, player)
 	end
 
 	local candidates: { Candidate } = {}
