@@ -61,6 +61,21 @@ local REASON = table.freeze({
 	Early = "THAT CODE IS NOT ACTIVE YET",
 	Expired = "THAT CODE HAS EXPIRED",
 	Used = "YOU HAVE ALREADY USED THAT CODE",
+	--[[
+		A real code, typed by somebody it is not addressed to.
+
+		Deliberately NOT folded into Unknown, and it is a genuine trade. Saying
+		"not yours" confirms the string exists, which a stricter reading would
+		call a leak — but the thing it leaks is a code that cannot be redeemed by
+		the person now holding it, so there is nothing on the other side of the
+		disclosure.
+
+		What the alternative costs is real. A restricted code is a gift, and a
+		gift gets pasted into a group chat. Every friend who types it would be
+		told it does not exist, conclude the codes system is broken, and say so —
+		and the one person it IS for would hear that before they ever tried it.
+	]]
+	NotYours = "THAT CODE IS NOT YOURS",
 	Empty = "ENTER A CODE",
 	Busy = "SLOW DOWN",
 	Failed = "COULD NOT REDEEM — TRY AGAIN",
@@ -100,6 +115,13 @@ local function pay(player: Player, reward: any): string
 	if reward.passes then
 		for _, passId in reward.passes do
 			profiles:grantPass(player, passId)
+		end
+	end
+	--[[ A single weapon rather than a bundle — see CodeConfig.Reward.weapons for
+	     why the two are different things and not two spellings of one. ]]
+	if reward.weapons and typeof(profiles.grantWeapon) == "function" then
+		for _, weaponId in reward.weapons do
+			profiles:grantWeapon(player, weaponId)
 		end
 	end
 	if reward.dollars and reward.dollars > 0 then
@@ -160,6 +182,22 @@ local function onRedeem(player: Player, raw: any)
 	end
 	entry.wrong = 0
 
+	--[[
+		Whose code this is, before anything else about it.
+
+		Checked against player.UserId, which is a number the client never gets to
+		choose — the remote carries the typed string and nothing else, and the
+		identity comes from the connection. See CodeConfig.allows.
+
+		The wrong-guess counter is deliberately not touched: they typed a real
+		code, and locking somebody out of the panel for holding the wrong present
+		punishes the wrong thing.
+	]]
+	if not CodeConfig.allows(code, player.UserId) then
+		answer(player, false, REASON.NotYours)
+		return
+	end
+
 	--[[ os.time, not os.clock. The throttle above measures a duration and clock
 	     is right for that; a window is a moment in the world and only os.time
 	     knows what moment it is. ]]
@@ -214,12 +252,19 @@ function CodeService:start()
 				os.date("!%Y-%m-%d %H:%M", code.endsAt)
 			)
 			else "always live"
+		--[[ And who it is for, because a restricted code that says only "LIVE NOW"
+		     reads as open to everybody — which is the one thing about it worth
+		     being sure of at a glance. ]]
+		local audience = if code.allowedUserIds == nil
+			then "anybody"
+			else string.format("%d named player(s)", #code.allowedUserIds)
 		print(
 			string.format(
-				"[CodeService] %s  %s  (%s)  reward: %s",
+				"[CodeService] %s  %s  (%s)  for: %s  reward: %s",
 				code.code,
 				window,
 				if CodeConfig.isLive(code, os.time()) then "LIVE NOW" else "not live",
+				audience,
 				CodeConfig.describe(code.reward)
 			)
 		)

@@ -88,6 +88,7 @@ local Registry = require(Shared.Util.Registry)
 local Remotes = require(Shared.Net.Remotes)
 local Signal = require(Shared.Util.Signal)
 local Trove = require(Shared.Util.Trove)
+local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local PA = Attributes.Player
 
@@ -140,23 +141,29 @@ ProfileService.loaded = Signal.new()
 ProfileService.changed = Signal.new()
 
 --[[
-	(player: Player, passId: string) — a pass this profile now holds because a
-	CODE handed it over, rather than because Roblox sold it.
+	(player: Player, grantedId: string) — this profile's unlock set just got
+	bigger, by something it wrote down itself rather than something Roblox sold.
 
-	The twin of PassService.unlocked, and it exists for the same reason: owning a
-	pass unlocks weapons, and a player who gains one while standing in the lobby
-	is still holding whatever they spawned with until something re-arms them.
+	Named for the EFFECT rather than the cause, because there are two causes and
+	one effect. A code can hand over a pass (the pack, as PassConfig ids) or a
+	single weapon (the birthday RPG, as a WeaponConfig id), and `grantedId` is
+	whichever it was. Nothing should branch on it: the only thing a listener can
+	usefully do is re-read the unlock set, which is now correct either way.
 
-	Two signals rather than one because the two grants are genuinely different
-	facts arriving from different places — Roblox answering a web call, and this
-	profile reading a code it wrote down — and neither service should have to know
-	the other exists. LoadoutService listens to both and does the same thing with
-	each, which is the honest shape: it does not care WHY the set got bigger.
+	The twin of PassService.unlocked, and it exists for the same reason: a player
+	whose entitlement grows while they are standing in the lobby is still holding
+	whatever they spawned with until something re-arms them.
 
-	Fired only on the transition. grantPass already refuses a pass the profile
-	holds, so a second redemption of the same code announces nothing.
+	Two signals rather than one because the two ROADS are genuinely different
+	facts from different places — Roblox answering a web call, and this profile
+	reading something it stored — and neither service should have to know the
+	other exists. LoadoutService listens to both and does the same thing with
+	each.
+
+	Fired only on a transition. grantPass and grantWeapon both refuse something
+	already held, so redeeming the same code twice announces nothing.
 ]]
-ProfileService.passGranted = Signal.new()
+ProfileService.unlocked = Signal.new()
 
 export type Profile = {
 	version: number,
@@ -202,6 +209,20 @@ export type Profile = {
 	     about a pass this game may write down. ]]
 	redeemed: { [string]: boolean },
 	passGrants: { [string]: boolean },
+	--[[
+		Weapons a CODE handed over, by weapon id.
+
+		A fourth set rather than a fourth use of `owned`, and the reason is one
+		line of deserialise: `owned` is filtered against EconomyConfig at load,
+		because an id that left the catalogue is a weapon that was removed. A code
+		weapon has no catalogue row and never will — so writing one into `owned`
+		would look correct, save correctly, and be silently dropped on the very
+		next join. The gift would last exactly one session.
+
+		Filtered against WeaponConfig instead, which is the right question for a
+		thing that is not for sale: does this weapon still exist.
+	]]
+	codeWeapons: { [string]: boolean },
 	callsign: string,
 	accent: string,
 	--[[ Not persisted. True when this profile could not be read and must never
@@ -274,6 +295,7 @@ local function blankProfile(): Profile
 		     allowed to write down. ]]
 		redeemed = {},
 		passGrants = {},
+		codeWeapons = {},
 		callsign = "",
 		accent = "",
 		degraded = false,
@@ -458,6 +480,15 @@ local function migrate(stored: any): Profile
 			end
 		end
 	end
+	--[[ Against WeaponConfig rather than EconomyConfig, which is the whole reason
+	     this set exists separately from `owned`. See the field. ]]
+	if typeof(stored.codeWeapons) == "table" then
+		for weaponId, value in stored.codeWeapons do
+			if value == true and typeof(weaponId) == "string" and WeaponConfig.get(weaponId) then
+				profile.codeWeapons[weaponId] = true
+			end
+		end
+	end
 
 	--[[ Quest ids are dropped if the pool no longer carries them, for the same
 	     reason an unknown weapon id is dropped from `owned`: the alternative is
@@ -529,6 +560,7 @@ local function serialise(profile: Profile, lock: any): any
 		passTier = profile.passTier,
 		redeemed = profile.redeemed,
 		passGrants = profile.passGrants,
+		codeWeapons = profile.codeWeapons,
 		callsign = profile.callsign,
 		accent = profile.accent,
 		lock = lock,
@@ -655,6 +687,22 @@ local function unlockedSet(player: Player, profile: Profile): { [string]: boolea
 					add(weaponId)
 				end
 			end
+		end
+	end
+
+	--[[
+		And a weapon a code handed over directly, which is the fourth road.
+
+		Stored as WEAPON ids rather than as pass ids, unlike the block above, and
+		the difference is what the two things are. A pack is a bundle whose
+		contents may grow, so a redeemer is recorded as owning the BUNDLE and gets
+		whatever it later contains. A code weapon is one weapon given to one
+		person; there is no bundle for it to be a member of, and inventing one
+		would mean a storefront row for something that is not for sale.
+	]]
+	for weaponId, granted in profile.codeWeapons do
+		if granted == true then
+			add(weaponId)
 		end
 	end
 
@@ -1439,7 +1487,30 @@ function ProfileService:grantPass(player: Player, passId: string): boolean
 	--[[ After markChanged, so the client has the new unlock set before anything
 	     acts on it, and the weapon it is about to be handed is one its own screens
 	     already agree it owns. ]]
-	ProfileService.passGranted:fire(player, passId)
+	ProfileService.unlocked:fire(player, passId)
+	return true
+end
+
+--[[
+	Hands over ONE weapon, permanently, because a code said so.
+
+	The twin of grantPass and it answers on the same signal, because what
+	LoadoutService does about either is identical: the set of weapons this player
+	may hold just got bigger, so re-arm them. It does not care which road it
+	arrived on.
+
+	False when the profile is missing, the id is not a weapon, or it was already
+	granted — the last one matters for the same reason it does on an ability: a
+	caller that has already spent something needs to know it did not have to.
+]]
+function ProfileService:grantWeapon(player: Player, weaponId: string): boolean
+	local profile = profiles[player]
+	if not profile or not WeaponConfig.get(weaponId) or profile.codeWeapons[weaponId] then
+		return false
+	end
+	profile.codeWeapons[weaponId] = true
+	markChanged(player, profile, true)
+	ProfileService.unlocked:fire(player, weaponId)
 	return true
 end
 

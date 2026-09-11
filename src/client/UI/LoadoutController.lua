@@ -714,7 +714,12 @@ function LoadoutController:_openPicker(slot: string)
 			buildAbilityPickRow(entry.ability, definition.id, count)
 		end
 	else
-		local candidates = LoadoutConfig.candidates(slot)
+		--[[ The unlock set goes in, for the one weapon that is listed only to the
+		     account that holds it — see LoadoutConfig.candidates. Nil while the
+		     profile is still loading, which correctly lists nothing code-only
+		     rather than guessing. ]]
+		local store = profile()
+		local candidates = LoadoutConfig.candidates(slot, if store then store:getOwned() else nil)
 		for index, weaponId in candidates do
 			buildPickRow(slot, weaponId, index)
 		end

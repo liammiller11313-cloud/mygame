@@ -181,7 +181,8 @@ function LoadoutService:start()
 		The profile arriving late is a DataStore read. A game pass arriving late is
 		a web call to Roblox that is usually slower. A code being redeemed is not
 		late at all — it happens whenever the player types it, which is very often
-		while they are stood in the lobby looking at the menu.
+		while they are stood in the lobby looking at the menu, and it can hand over
+		either a pass or a single weapon.
 
 		All three end the same way: the active loadout names a weapon the unlock
 		set did not contain when the body was armed, sanitise fell back on the way
@@ -201,8 +202,8 @@ function LoadoutService:start()
 			reapply(player)
 		end))
 	end
-	if profiles and profiles.passGranted then
-		serviceTrove:add(profiles.passGranted:connect(function(player: Player)
+	if profiles and profiles.unlocked then
+		serviceTrove:add(profiles.unlocked:connect(function(player: Player)
 			reapply(player)
 		end))
 	end

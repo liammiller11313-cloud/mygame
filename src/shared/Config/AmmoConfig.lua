@@ -273,6 +273,22 @@ AmmoConfig.Magazines = {
 		the RPG's own warhead green rather than the tracer orange, because it is
 		the thing being loaded rather than the thing that arrives.
 	]]
+	--[[ The walrus. Its own magazine row rather than the Rocket's, because the
+	     round going down the tube is the one place the weapon's whole joke is
+	     visible at arm's length — and because the model exists: see
+	     Assets/Ammo/Magazines/"Walrus Ammo". Same perShellRound rule as the
+	     rocket, so it shows for the length of the reload rather than being
+	     thrown on the floor. ]]
+	WalrusRound = {
+		model = "Walrus Ammo",
+		--[[ Fatter and shorter than the RPG's rocket. It is a walrus. ]]
+		size = Vector3.new(0.42, 0.42, 0.9),
+		color = Color3.fromRGB(122, 86, 62),
+		material = Enum.Material.SmoothPlastic,
+		dropSpeed = 0,
+		lifetime = 4,
+		perShellRound = true,
+	},
 	Rocket = {
 		model = "Rocket",
 		size = Vector3.new(0.34, 0.34, 0.95),
@@ -305,6 +321,8 @@ AmmoConfig.Weapons = {
 	--[[ No case and no magazine, and a ROUND: the rocket itself, shown for the
 	     length of the reload. See AmmoConfig.Magazines.Rocket. ]]
 	[Enums.Weapon.RPG7] = { casing = "", magazine = "Rocket" },
+	-- Ejects nothing, like every launcher. Loads a walrus.
+	[Enums.Weapon.RPG7WalrusSpec] = { casing = "", magazine = "WalrusRound" },
 	[Enums.Weapon.M9] = { casing = "9mm", magazine = "PistolMag" },
 	[Enums.Weapon.Shotgun] = { casing = "12ga", magazine = "ShotgunShell" },
 	[Enums.Weapon.TacticalShotty] = { casing = "12ga", magazine = "ShotgunShell" },

@@ -98,6 +98,11 @@ local THROW_INTERVAL = 0.4
 -- Hard ceiling on objects in flight. Unreachable in a real round (one throwable
 -- per survivor), so hitting it means something is wrong and the oldest is
 -- retired rather than the newest refused.
+--[[ How far in front of the eye a fired round is placed. Far enough not to be
+     inside the shooter's own head for a frame, and the first swept ray covers
+     the gap regardless — see launch. ]]
+local ROUND_SPAWN_AHEAD = 3
+
 local MAX_LIVE_PROJECTILES = 12
 
 -- Muzzle velocity at power 1, plus the lob that makes a throw arc instead of
@@ -554,6 +559,164 @@ end
      the wrong place is part of the risk); a bottle does not survive its first
      contact, so it is left non-collidable and the swept raycast in _step is the
      only thing that stops it. ]]
+--[[
+	Fires a round that travels, for the one weapon that does.
+
+	── WHY THIS LIVES HERE AND NOT IN BALLISTICSSERVICE ────────────────────────
+	Everything a flying round needs already exists in this file and nowhere else:
+	a stepped list with a live cap, a swept-ray contact test that does not miss
+	fast movers the way .Touched does, and a detonation that produces the exact
+	explosion every other blast in the game produces. Building a second flight
+	loop next to this one would mean two answers to "what does an explosion look
+	like", and they would drift.
+
+	BallisticsService still owns the SHOT — it validated the shooter, spent the
+	ammunition, told the other clients and played the report. This owns only what
+	happens between the muzzle and the bang.
+
+	`spec` is the weapon's ProjectileProfile; `radius` and `damage` are its
+	ordinary blastRadius and blastDamage, so a travelling launcher and a hitscan
+	one are tuned in the same two fields and read the same way.
+]]
+function ProjectileService:launch(
+	owner: Player,
+	weaponId: string,
+	origin: Vector3,
+	direction: Vector3,
+	spec: any,
+	radius: number,
+	damage: number,
+	character: Model?
+)
+	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" or direction.Magnitude <= EPSILON then
+		return
+	end
+	if typeof(spec) ~= "table" or typeof(radius) ~= "number" or typeof(damage) ~= "number" then
+		return
+	end
+	if #self._live >= MAX_LIVE_PROJECTILES then
+		self:_retireProjectile(1)
+	end
+
+	local unit = direction.Unit
+	local trove = Trove.new()
+
+	--[[
+		Born a little in FRONT of the eye, and the swept ray still starts AT it.
+
+		The shot comes from the camera, and a round that appears exactly there is
+		one frame of a rocket inside the shooter's own head. So the body is placed
+		ahead — but `lastPosition` below stays at the true origin, so the very
+		first contact test covers the gap that was skipped.
+
+		Without that, firing with a wall a stud in front of you would put the round
+		on the far side of it and detonate in the next room. The offset is a
+		visual convenience and must not be allowed to become a way through
+		geometry.
+	]]
+	local muzzle = origin + unit * ROUND_SPAWN_AHEAD
+
+	local body = Instance.new("Part")
+	body.Name = "FL_Round_" .. weaponId
+	body.Size = spec.size
+	--[[ CFrame rather than Position: the round is longer than it is wide and
+	     tumbles, so it has to START pointed down the shot or the first frame is a
+	     rocket flying sideways. ]]
+	body.CFrame = CFrame.lookAt(muzzle, muzzle + unit)
+	body.Color = spec.color
+	body.Material = Enum.Material.Metal
+	body.Anchored = false
+	--[[ Never collides. Contact is the swept ray in _stepProjectile, which is
+	     exact; letting the engine also resolve a collision would bounce the round
+	     off the wall it is in the middle of detonating on. ]]
+	body.CanCollide = false
+	body.CanQuery = false
+	body.CanTouch = false
+	body.CastShadow = false
+	body.Locked = true
+	body.CollisionGroup = "Debris"
+
+	--[[ The user's own model, dressing only — the procedural part stays as the
+	     physics body and is simply hidden. Same rule the throwables follow, and
+	     for the same reason: flight must not change with whose model is loaded. ]]
+	local factory = Registry.find("PlaceholderFactory")
+	local dressing = factory
+		and typeof(factory.buildWeaponModel) == "function"
+		and factory:buildWeaponModel(weaponId .. "Round")
+	if dressing then
+		body.Transparency = 1
+		dressing:PivotTo(body.CFrame)
+		for _, part in dressing:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.Massless = true
+				part.CanCollide = false
+				part.CanQuery = false
+				part.CanTouch = false
+				part.CollisionGroup = "Debris"
+				local hold = Instance.new("WeldConstraint")
+				hold.Part0 = body
+				hold.Part1 = part
+				hold.Parent = part
+			end
+		end
+		dressing.Parent = body
+	end
+
+	body.Parent = self:_container()
+	trove:add(body)
+
+	--[[ Its own weight, cancelled. A force rather than a property because the
+	     mass is only knowable once the part exists and its dressing is welded on
+	     — the same reason the classic slingshot's pellet does it this way. See
+	     ProjectileProfile. ]]
+	if spec.gravity == false then
+		local lift = Instance.new("BodyForce")
+		lift.Name = "FL_NoDrop"
+		lift.Force = Vector3.new(0, body.AssemblyMass * Workspace.Gravity, 0)
+		lift.Parent = body
+	end
+
+	body.AssemblyLinearVelocity = unit * spec.speed
+	body.AssemblyAngularVelocity = Vector3.new(
+		random:NextNumber(-1, 1),
+		random:NextNumber(-1, 1),
+		random:NextNumber(-1, 1)
+	) * spec.spin
+
+	-- Server-owned, like every other projectile here: where it goes off is a
+	-- damage decision and not the shooter's to make.
+	pcall(function()
+		body:SetNetworkOwner(nil)
+	end)
+
+	local ignore: { Instance } = { body }
+	if character then
+		table.insert(ignore, character)
+	end
+
+	table.insert(self._live, {
+		--[[ No `kind`. A kind is a THROWABLE id and items.py checks that every one
+		     of those is named in _detonate; a fired round is not a throwable, has
+		     no map family and no inventory slot, and borrowing an id would make it
+		     look like one to every tool that reads them. `rocket` is what it is,
+		     and _detonate branches on that first. ]]
+		rocket = { weaponId = weaponId, radius = radius, damage = damage },
+		owner = owner,
+		body = body,
+		light = nil,
+		trove = trove,
+		params = RaycastUtil.excluding(ignore),
+		-- The EYE, not the muzzle. See the offset above.
+		lastPosition = origin,
+		spawnedAt = os.clock(),
+		endsAt = os.clock() + spec.lifetime,
+		lureAt = 0,
+		beepAt = 0,
+		lit = false,
+		shattersOnContact = true,
+	})
+end
+
 function ProjectileService:_spawnProjectile(
 	owner: Player,
 	kind: string,
@@ -837,6 +1000,17 @@ end
 function ProjectileService:_detonate(record: any, index: number, position: Vector3)
 	local kind = record.kind
 	local owner = record.owner
+
+	--[[ A fired round, before anything that reads `kind` — it has none. Through
+	     the PUBLIC detonate, which is the same call a hitscan launcher makes, so
+	     a travelling rocket and the RPG-7 produce one explosion and not two that
+	     drift. ]]
+	local rocket = record.rocket
+	if rocket then
+		self:detonate(owner, position, rocket.radius, rocket.damage, rocket.weaponId)
+		self:_retireProjectile(index)
+		return
+	end
 
 	if kind == THROWABLE.PipeBomb then
 		self:_explode(owner, position)

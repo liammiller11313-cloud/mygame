@@ -555,6 +555,51 @@ function BallisticsService:resolveShot(
 	BallisticsService.fired:fire(shooter, weaponId, definition)
 
 	-- ── resolution ───────────────────────────────────────────────────────────
+
+	--[[
+		A round that FLIES resolves nothing here.
+
+		Everything above this line still happened — the shooter was validated, the
+		ammunition was spent, the other clients were told and the report played —
+		because all of that is about pulling the trigger and none of it is about
+		where the shot lands. What is skipped is the part that assumes the shot has
+		ALREADY landed: the pellet rays, the tracer, the impact, and the blast at
+		the end of the ray.
+
+		A travelling round decides all four for itself, later, wherever it gets to.
+		Casting a ray as well would blow a hole in whatever is in front of the
+		shooter at the instant they fired AND send a rocket at it — the weapon
+		would hit twice, once instantly.
+
+		Returns no records on purpose. There is no hit yet to report, and inventing
+		one would put a hitmarker on a shot still in the air.
+	]]
+	if definition.projectile and definition.blastRadius and definition.blastDamage then
+		local projectiles = Registry.find("ProjectileService")
+		if projectiles and typeof(projectiles.launch) == "function" then
+			projectiles:launch(
+				shooter,
+				weaponId,
+				origin,
+				unit,
+				definition.projectile,
+				definition.blastRadius,
+				definition.blastDamage,
+				character
+			)
+		else
+			--[[ Loud, because the alternative is silent. A hitscan weapon with no
+			     ProjectileService still fires and simply does not explode; this one
+			     fires NOTHING, and a player whose launcher does nothing at all has
+			     no way to tell that from a bug in their own aim. ]]
+			warnOnce(
+				"projectile",
+				"ProjectileService:launch is missing; travelling-round weapons fire nothing at all"
+			)
+		end
+		return records
+	end
+
 	local damageService = Registry.get("DamageService")
 	local damageType = if definition.pellets > 1 then Enums.DamageType.Pellet else Enums.DamageType.Bullet
 	local maxDistance = definition.maxRange * VALIDATION.MaxRangeSlack

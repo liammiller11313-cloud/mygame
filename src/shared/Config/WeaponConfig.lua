@@ -192,6 +192,53 @@ export type LungeProfile = {
 	rangeMultiplier: number, -- a thrust reaches further than an arc
 }
 
+--[[
+	A round that actually FLIES.
+
+	Every other weapon in this game is hitscan: the ray is cast the frame the
+	trigger goes down and the shot has already landed. That is right for bullets
+	and it is right for the RPG-7, whose rocket is fast enough that a travelling
+	one would be a rendering detail rather than a mechanic.
+
+	This is for the one weapon where the travel IS the mechanic. A round with a
+	speed can be led, can be dodged, can be shot past a corner, and arrives after
+	a beat you can hear coming — none of which a hitscan launcher can offer, and
+	all of which are why somebody would carry it over the RPG-7 rather than
+	instead of it.
+
+	── IT COSTS THE DIRECT HIT ─────────────────────────────────────────────────
+	A hitscan blast weapon does its bullet damage AND its explosion — a rocket in
+	a Tank's chest is a direct hit plus a blast, which is what makes a good shot
+	better than a panicked one. A travelling round has no pellet to land, so it
+	is the blast and nothing else. `damage` on a weapon with one of these is
+	therefore dead, and the blast carries the whole weapon.
+
+	── AND IT FLIES FLAT ───────────────────────────────────────────────────────
+	`gravity = false` hangs a force on the round that cancels its own weight,
+	which is the same trick the classic slingshot's pellet uses. A rocket that
+	arced would be a grenade launcher, and aiming one at a Hunter on a roof would
+	be guesswork rather than a shot.
+
+	ProjectileService owns the flight, the contact test and the detonation. Its
+	swept-ray contact is what makes a fast round reliable: `.Touched` misses fast
+	movers, and a rocket that passes through a wall is worse than one that is
+	slow.
+]]
+export type ProjectileProfile = {
+	speed: number, -- studs per second
+	--[[ Seconds before it gives up and goes off wherever it is. A backstop, not a
+	     range: at any sane speed the round meets something first. Without it, a
+	     shot fired at the sky is a live object forever. ]]
+	lifetime: number,
+	size: Vector3,
+	color: Color3,
+	--[[ Whether it falls. False cancels its weight; see above. ]]
+	gravity: boolean,
+	--[[ Tumble, in radians per second. Cosmetic, and worth having: a round with
+	     no spin at all reads as a sliding prop rather than a thing in flight. ]]
+	spin: number,
+}
+
 export type WeaponDefinition = {
 	id: string,
 	displayName: string,
@@ -272,6 +319,27 @@ export type WeaponDefinition = {
 	     this only says where the weapon is SUPPOSED to come from. ]]
 	passOnly: boolean?,
 
+	--[[
+		Owned only by redeeming a CODE. The fourth way to hold a weapon, beside
+		buying one, finding one on a loot-room floor, and owning the pass.
+
+		Not a flavour of passOnly, and the difference is where the record lives. A
+		pass is Roblox's to remember and PassService asks for it every session; a
+		code redemption has no authority to ask, so the profile writes it down —
+		see ProfileService.codeWeapons, which is the only place this kind of
+		ownership exists.
+
+		It also cannot live in `owned` beside a bought weapon, which is the trap
+		that makes this a flag rather than a one-liner: `owned` is filtered against
+		EconomyConfig at load, so a weapon with no shop row would be silently
+		dropped on every join. A code weapon HAS no shop row and never will.
+
+		audit.py check 16 knows all four roads. Without this flag it correctly
+		reports the weapon as unreachable — nothing sells it, no room drops it, no
+		pass grants it.
+	]]
+	codeOnly: boolean?,
+
 	--[[ Present only on the pack's two pogo weapons. Absent means an ordinary
 	     gun that does not throw its user anywhere, which is all thirty-five of
 	     the others. See PogoProfile above, and PogoService for what reads it. ]]
@@ -285,6 +353,10 @@ export type WeaponDefinition = {
 	     MeleeService reads it on the server and WeaponController predicts it on
 	     the client, both through WeaponConfig.isLunge. ]]
 	lunge: LungeProfile?,
+	--[[ Present only on the Walrus Spec. Absent means a hitscan weapon, which is
+	     every other one in the game including the other two launchers. See
+	     ProjectileProfile above, and ProjectileService:launch for the flight. ]]
+	projectile: ProjectileProfile?,
 	--[[ Whether landing a shot sets the target on fire, through the same
 	     InfectedService:ignite the molotov and the Incendiary requisition use.
 	     Nil on every gun: bullets do not light people, and a flag that defaulted
@@ -906,6 +978,138 @@ WeaponConfig.Definitions = {
 		flatten every other gun's damage bar into nothing. That is the exact bug
 		the melee/gun split in ShopController was written to fix.
 	]]
+	--[[
+		── THE RPG-7 WALRUS SPEC ────────────────────────────────────────────────
+		A birthday present, and the only weapon in this game addressed to one
+		person. It comes from a code restricted to a single UserId — see
+		CodeConfig's DAVIS-13TH — so it can never appear in a shop, in the pass,
+		or on a loot-room floor, and `codeOnly` is what says so to audit.py.
+
+		── WHAT MAKES IT DIFFERENT FROM THE RPG-7 ───────────────────────────────
+		The round FLIES. Every other weapon in this game is hitscan, the two other
+		launchers included: the ray is cast the frame the trigger goes down and the
+		shot has already landed. This one puts an object in the world at 210 studs
+		a second and detonates it wherever it first touches something.
+
+		That is the whole weapon, and it cuts both ways. It can be led, shot past a
+		corner, or sent down a corridor ahead of a horde — and it can also be
+		walked out of, arrives late, and rewards a Hunter for moving. Against a
+		Tank standing still it is strictly better than the RPG-7; against anything
+		quick it is a harder shot.
+
+		── AND IT IS A GIFT, SO IT IS GENEROUS ──────────────────────────────────
+		550 against the RPG-7's 400, over 32 studs against its 26, with six in
+		reserve against its two. That is deliberately above the roster and it costs
+		the game nothing, because exactly one account can ever hold it.
+
+		Where it is NOT generous is the thing that would actually break a round:
+		the blast still hurts the person who fired it, on the same rule every other
+		explosive follows. A birthday gun that could be fired at your own feet with
+		impunity is a birthday gun that solves every Tank by standing still.
+	]]
+	[Enums.Weapon.RPG7WalrusSpec] = {
+		id = Enums.Weapon.RPG7WalrusSpec,
+		displayName = "RPG-7 Walrus Spec",
+		modelName = "RPG-7 Walrus Spec",
+		slot = Enums.Slot.Secondary,
+		class = "Launcher",
+		fireMode = "Semi",
+		codeOnly = true,
+		--[[ Never left on a shelf, for the same reason the RPG-7 is not: a
+		     Director that hands out a weapon one person redeemed has not made it
+		     rarer, it has made the code meaningless. ]]
+		placeable = false,
+
+		--[[ The walrus itself. See ProjectileProfile for why a travelling round
+		     needs every one of these and what each costs.
+
+		     210 studs a second is quick enough to hit a Common crossing a street
+		     and slow enough to see coming — about a third of a second to cross a
+		     room, which is the beat the whole weapon is built on. ]]
+		projectile = {
+			speed = 210,
+			--[[ Six seconds is over a kilometre at this speed, so nothing fired at
+			     anything ever reaches it. It is there so a shot at the sky is not a
+			     live object forever. ]]
+			lifetime = 6,
+			size = Vector3.new(1.1, 1.1, 2.6),
+			--[[ Walrus brown, and deliberately not the RPG's warhead green: the
+			     two are the same silhouette at distance and the colour is the only
+			     thing that says which one is coming at you. ]]
+			color = Color3.fromRGB(122, 86, 62),
+			-- Flat. A rocket that arced would be a grenade launcher.
+			gravity = false,
+			spin = 9,
+		},
+
+		--[[ Dead, and it has to be written anyway because the field is required.
+		     A travelling round lands no pellet — there is no ray to carry a direct
+		     hit — so the blast below is the entire weapon. See ProjectileProfile. ]]
+		damage = 0,
+
+		blastRadius = 32,
+		blastDamage = 550,
+
+		rpm = 40,
+		pellets = 1,
+		magSize = 1,
+		--[[ Six, against the RPG-7's two. The reserve is where a gift can be
+		     generous without changing how the weapon behaves on any single shot. ]]
+		reserveMax = 6,
+		penetration = 1,
+		penetrationFalloff = 1.0,
+
+		--[[ No falloff, like the RPG-7 and for the same reason: the explosion is
+		     at the impact point either way, so a distance rule would be one the
+		     player cannot see. ]]
+		falloffStart = 900,
+		falloffEnd = 900,
+		falloffMin = 1.0,
+		maxRange = 900,
+
+		--[[ Tighter than the RPG-7's, because a travelling round already punishes
+		     a bad shot by letting the target walk out of it. Punishing it twice —
+		     once with spread and once with travel time — would make the weapon
+		     feel broken rather than demanding. ]]
+		spreadHip = 1.4,
+		spreadAim = 0.2,
+		spreadMoving = 1.4,
+		spreadMax = 2.8,
+		bloomPerShot = 0.0,
+		bloomRecovery = 6.0,
+
+		recoilVertical = 6.0,
+		recoilHorizontal = 1.4,
+		recoilRecovery = 4.5,
+		kickback = 0.7,
+
+		reloadTime = 4.0,
+		reloadPerShell = 0,
+		drawTime = 0.85,
+		aimTime = 0.4,
+
+		walkSpeedScale = 0.9,
+		aimWalkSpeedScale = 0.58,
+		aimFov = 60,
+
+		shakeMagnitude = 2.8,
+		shakeRoughness = 12,
+		--[[ No tracer. There is a rocket in the air to look at, and a streak drawn
+		     to where a hitscan shot WOULD have landed would race the round it is
+		     supposed to be. ]]
+		tracerWidth = 0,
+		tracerColor = AMBER,
+		muzzleFlashSize = 3.2,
+		shellEject = false,
+
+		--[[ Zero for the same reason the RPG-7's are: ExplosiveAlwaysGibs already
+		     takes apart everything the blast kills, and these drive a direct hit
+		     this weapon does not have. ]]
+		gibPower = 0.0,
+		dismemberPower = 0.0,
+		knockback = 80,
+	},
+
 	[Enums.Weapon.RPG7] = {
 		id = Enums.Weapon.RPG7,
 		displayName = "RPG-7",

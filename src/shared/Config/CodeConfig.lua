@@ -21,7 +21,9 @@
 	decides whether a redemption is allowed — see CodeService.
 ]]
 
+local Enums = require(script.Parent.Parent.Enums)
 local PassConfig = require(script.Parent.PassConfig)
+local WeaponConfig = require(script.Parent.WeaponConfig)
 
 export type Reward = {
 	dollars: number?,
@@ -32,6 +34,20 @@ export type Reward = {
 	     a redeemer owns whatever the pack contains, the same as somebody who
 	     paid for it. See ProfileService.unlockedSet. ]]
 	passes: { string }?,
+	--[[
+		WEAPON ids, and the exception to the rule above.
+
+		A pack is a bundle whose contents may grow, so a code hands over the pass
+		and the redeemer gets whatever it later contains. A one-off weapon is not
+		a bundle and has nothing to be a member of — inventing a pass for it would
+		mean a storefront row for something that is not for sale, and a Robux price
+		on a gift.
+
+		Every id here must be a WeaponConfig weapon marked `codeOnly = true`, and
+		audit.py check 16 fails the build both ways round: a code granting a weapon
+		that is not codeOnly, and a codeOnly weapon no code grants.
+	]]
+	weapons: { string }?,
 }
 
 export type Code = {
@@ -43,6 +59,26 @@ export type Code = {
 	     — so it has to be written rather than fallen into. ]]
 	startsAt: number,
 	endsAt: number,
+	--[[
+		Who is allowed to type it, by Roblox UserId. Absent means anybody.
+
+		── ABSENT AND EMPTY MEAN OPPOSITE THINGS, ON PURPOSE ───────────────────
+		Nil is "this code is not restricted" — the ordinary case, and what every
+		public code wants. An empty TABLE is "restricted to nobody", and it
+		refuses everyone rather than letting everyone through.
+
+		That asymmetry is the whole safety property. A restricted code is
+		restricted because it is a gift or a prize, and the failure that matters
+		is not somebody being wrongly refused — they can be told — it is the gift
+		quietly becoming public because a list was left half-written. So the
+		half-written state is the locked one.
+
+		UserId rather than username, and that is not a preference. A Roblox
+		username can be changed, and a name-matched grant would stop recognising
+		its own owner the day they changed it — silently, months later, with the
+		code long expired and no way to re-issue it. A UserId is permanent.
+	]]
+	allowedUserIds: { number }?,
 	reward: Reward,
 }
 
@@ -77,6 +113,37 @@ CodeConfig.Codes = table.freeze({
 			dollars = 250,
 		},
 	},
+	{
+		--[[
+			A birthday present, and the only code in this game addressed to one
+			person.
+
+			Everything unusual about it is in service of that. It has no window,
+			because a gift that expires is a gift you can lose by being asleep. It
+			is restricted by UserId, because it is his. And it grants a WEAPON
+			rather than a pass, because there is no bundle for a single gun to be
+			a member of and inventing one would have put a Robux price on a
+			present.
+
+			More rewards are coming — see the reward table, which is the only part
+			that needs editing to add them.
+		]]
+		code = "DAVIS-13TH",
+		displayName = "DAVIS 13TH",
+		blurb = "Happy birthday. The walrus is loaded.",
+		--[[ No window, both ends. Deliberate rather than forgotten, which is
+		     exactly the case this file's own type comment says has to be written
+		     down rather than fallen into: a present should still be there
+		     whenever he gets round to typing it. ]]
+		startsAt = 0,
+		endsAt = 0,
+		--[[ Hawkhoop3. A UserId rather than the name, so a rename cannot quietly
+		     take his own present away from him — see the field. ]]
+		allowedUserIds = { 3170573678 },
+		reward = {
+			weapons = { Enums.Weapon.RPG7WalrusSpec },
+		},
+	},
 } :: { Code })
 
 local byCode: { [string]: Code } = {}
@@ -99,6 +166,35 @@ end
 
 for _, entry in CodeConfig.Codes do
 	byCode[CodeConfig.normalise(entry.code)] = entry
+end
+
+--[[
+	Whether this player is allowed to type this code at all.
+
+	Reads the ID and nothing else. A username would be the obvious thing to
+	compare and it is the wrong one twice over: it can be changed, and it arrives
+	as a string that has to be matched case-insensitively against something a
+	player could be persuaded to imitate. A UserId is a number the client does
+	not choose.
+
+	Absent list means an ordinary public code. Present list means the code is
+	addressed to somebody, and an EMPTY one refuses everybody — see the field for
+	why that direction is the safe one.
+]]
+function CodeConfig.allows(code: Code, userId: any): boolean
+	local allowed = code.allowedUserIds
+	if allowed == nil then
+		return true
+	end
+	if typeof(userId) ~= "number" then
+		return false
+	end
+	for _, id in allowed do
+		if id == userId then
+			return true
+		end
+	end
+	return false
 end
 
 function CodeConfig.get(input: any): Code?
@@ -131,6 +227,17 @@ function CodeConfig.describe(reward: Reward): string
 		for _, passId in reward.passes do
 			local pass = PassConfig.get(passId)
 			table.insert(parts, if pass then pass.displayName else string.upper(passId))
+		end
+	end
+	--[[ Before the currencies, because a weapon is the headline of any code that
+	     carries one and a dollar figure is not. ]]
+	if reward.weapons then
+		for _, weaponId in reward.weapons do
+			local definition = WeaponConfig.get(weaponId)
+			table.insert(
+				parts,
+				if definition then string.upper(definition.displayName) else string.upper(weaponId)
+			)
 		end
 	end
 	if reward.dollars and reward.dollars > 0 then

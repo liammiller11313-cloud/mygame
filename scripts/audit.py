@@ -1291,11 +1291,38 @@ if _weapons:
     # without a second list to keep in step.
     _pass_claimed = set()
     _floor_only = set()
+    _code_only = set()
     for _m in re.finditer(r"\[Enums\.Weapon\.(\w+)\]\s*=\s*\{(.*?)\n\t\},", _wc, re.S):
         if re.search(r"^\s*floorOnly\s*=\s*true", _m.group(2), re.M):
             _floor_only.add(_m.group(1))
         if re.search(r"^\s*passOnly\s*=\s*true", _m.group(2), re.M):
             _pass_claimed.add(_m.group(1))
+        if re.search(r"^\s*codeOnly\s*=\s*true", _m.group(2), re.M):
+            _code_only.add(_m.group(1))
+
+    # What the CODES actually grant, read from CodeConfig the same way the pass
+    # grants are read from PassConfig. A weapon that claims codeOnly and no code
+    # hands over is exactly as unreachable as a passOnly weapon no pass grants.
+    _cc = read(SRC / "shared/Config/CodeConfig.lua")
+    _code_granted = set()
+    for _m in re.finditer(r"weapons\s*=\s*\{(.*?)\}", _cc, re.S):
+        _code_granted.update(re.findall(r"Enums\.Weapon\.(\w+)", _m.group(1)))
+
+    for _id in sorted(_code_only - _code_granted):
+        problems.append(
+            f"{_id} says codeOnly = true but no CodeConfig code lists it in weapons — "
+            f"nothing grants it, so it is in the game and unreachable"
+        )
+    for _id in sorted(_code_granted - _code_only):
+        problems.append(
+            f"a CodeConfig code grants {_id!r}, which is not a WeaponConfig weapon marked "
+            f"codeOnly = true — a code promising something the roster does not gate that way"
+        )
+    for _id in sorted(_code_only & (_floor_only | _pass_claimed)):
+        problems.append(
+            f"{_id} is codeOnly AND floorOnly or passOnly — a weapon has exactly one way in, "
+            f"and a second one makes the first a lie"
+        )
 
     # What the passes ACTUALLY grant, read from PassConfig rather than believed
     # from the weapon's own flag. Two files that have to agree, so the build
@@ -1345,11 +1372,12 @@ if _weapons:
         # ProfileService merges PassService's grants into the set it sanitises
         # against, and LoadoutConfig.candidates already appends anything in
         # WeaponConfig the catalogue does not list, so the loadout path works.
-        if _id not in _shop and _id not in _floor_only and _id not in _pass_only:
+        if _id not in _shop and _id not in _floor_only and _id not in _pass_only and _id not in _code_only:
             problems.append(
                 f"{_id} is in WeaponConfig but not in EconomyConfig.Catalogue — there is no way "
                 f"to buy it or put it in a loadout. If it is meant to be found on the floor "
-                f"instead, say so with floorOnly = true, or passOnly = true if a game pass unlocks it"
+                f"instead, say so with floorOnly = true, passOnly = true if a game pass unlocks "
+                f"it, or codeOnly = true if a code does"
             )
         if _id in _shop and _id in _floor_only:
             problems.append(

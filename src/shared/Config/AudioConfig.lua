@@ -81,6 +81,10 @@ local ID = table.freeze({
 	PistolShot = "rbxassetid://132539859090895",
 	RevolverShot = "rbxassetid://18267120562",
 	ShotgunBlast = "rbxassetid://7244956099",
+	--[[ The walrus. A real upload rather than a re-pitched stand-in, and the only
+	     weapon sound in this game that is its own recording — which is the right
+	     way round for a gun that exists for one person. ]]
+	WalrusFire = "rbxassetid://18775810594",
 	ShotgunPump = "rbxassetid://113837896417526",
 	--[[ The shotgun's own reload. It is the only shell-by-shell weapon in the
 	     game, so ShellInsert below is already exclusively its — if a second one
@@ -333,6 +337,12 @@ AudioConfig.WeaponFire = {
 	     the far end when the rocket lands. Without a row here the loudest weapon
 	     in the game left the tube in total silence. ]]
 	[Enums.Weapon.RPG7] = sound(ID.ShotgunBlast, 1.0, 0.7, 0.76, 900, 6),
+	--[[ Its own sample, unpitched. Everything else in this table is an existing
+	     id moved up or down to stand in for a sound nobody has recorded yet; this
+	     one IS the sound, so it is played at 1.0 and left alone. Carries as far as
+	     the RPG-7's, because the two are the same silhouette at distance and a
+	     teammate should know which launcher just went off behind them. ]]
+	[Enums.Weapon.RPG7WalrusSpec] = sound(ID.WalrusFire, 1.0, 1.0, 1.0, 900, 6),
 
 	--[[
 		Melee swings — one sample each.

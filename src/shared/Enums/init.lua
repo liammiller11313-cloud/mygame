@@ -29,6 +29,10 @@ Enums.Weapon = table.freeze({
 	     working". It is a secondary by slot only — priced, loaded and reloaded so
 	     that carrying it means giving up the fallback the slot exists for. ]]
 	RPG7 = "RPG7",
+	--[[ A birthday present, and the only weapon in this game addressed to one
+	     person. Redeemed with a code restricted to a single UserId — see
+	     CodeConfig — and the only round in the game that actually flies. ]]
+	RPG7WalrusSpec = "RPG7WalrusSpec",
 	--[[ Secondary: a signal pistol, and the cheapest way into the burn the
 	     molotov owns. One shell, a long reload, and damage that barely troubles
 	     a Common on impact — what it does is set them alight and light the room

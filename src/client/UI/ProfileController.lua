@@ -119,6 +119,14 @@ function ProfileController:owns(itemId: string): boolean
 	return state.owned[itemId] == true
 end
 
+--[[ The whole unlock set, by reference. Read by the loadout screen, which needs
+     to ask about a weapon it has not drawn a row for yet — see
+     LoadoutConfig.candidates and the one weapon that is listed only to the
+     account holding it. Nothing mutates it; the sync replaces it wholesale. ]]
+function ProfileController:getOwned(): { [string]: boolean }
+	return state.owned
+end
+
 function ProfileController:canAfford(itemId: string): boolean
 	local price = EconomyConfig.priceOf(itemId)
 	return price ~= nil and state.dollars >= price

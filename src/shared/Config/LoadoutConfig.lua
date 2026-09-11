@@ -192,11 +192,27 @@ end
 	in WeaponConfig but not in the catalogue is appended rather than dropped, so
 	a weapon that is somehow not for sale is still equippable.
 
-	Ownership is deliberately NOT considered. The loadout screen draws the whole
-	roster and greys what you have not bought, because a list that hides what you
-	cannot afford is a list that never tells you what to save for.
+	Ownership is deliberately NOT considered — with ONE exception, below. The
+	loadout screen draws the whole roster and greys what you have not bought,
+	because a list that hides what you cannot afford is a list that never tells
+	you what to save for.
+
+	── AND THE EXCEPTION, WHICH IS THE SAME RULE ───────────────────────────────
+	`owned` is optional and is used for exactly one thing: a `codeOnly` weapon is
+	listed only for somebody who actually holds it.
+
+	That is not a departure from the paragraph above, it is the same principle
+	arriving at the opposite answer. A greyed row is a PROMISE that saving will
+	unlock it. That promise is true of everything with a price and false of a
+	weapon handed to one named account by a code that will never be issued again
+	— so for everybody else it is a row that says LOCKED forever, and a press
+	that opens a shop which does not stock it. Exactly the dead end floorOnly is
+	excluded to avoid.
+
+	Pass nil to list everything a slot could hold regardless, which is what a
+	tool wanting the full roster wants.
 ]]
-function LoadoutConfig.candidates(slot: string): { string }
+function LoadoutConfig.candidates(slot: string, owned: { [string]: boolean }?): { string }
 	local out = {}
 	local seen: { [string]: boolean } = {}
 
@@ -226,7 +242,14 @@ function LoadoutConfig.candidates(slot: string): { string }
 			Robux buy something equippable.
 		]]
 		local definition = WeaponConfig.get(id)
-		if not seen[id] and not (definition and definition.floorOnly) then
+		local hidden = definition ~= nil
+			and (
+				definition.floorOnly == true
+				--[[ Only for the one account that holds it. See the header: for
+				     anybody else this is a promise that cannot come true. ]]
+				or (definition.codeOnly == true and not (owned ~= nil and owned[id] == true))
+			)
+		if not seen[id] and not hidden then
 			table.insert(out, id)
 		end
 	end
