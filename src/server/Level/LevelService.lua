@@ -402,16 +402,57 @@ local function rebuildSections()
 	end)
 
 	if #sections == 0 then
-		warnOnce(
-			"noitems",
-			string.format(
-				"no %s parts in the map, so no pills, medkits, throwables or ammo will ever appear. "
-					.. "Tag a few flat surfaces (shelves, crates, counters) with %s; an optional FL_Slot "
-					.. "attribute forces what a pad holds.",
-				TAG_ITEM,
-				TAG_ITEM
+		--[[
+			── THIS WARNING USED TO BE FALSE, AND FALSE IN THE WORST DIRECTION ──
+			It said: "no pills, medkits, throwables or ammo will ever appear."
+
+			On Crossroads that is simply untrue. MapItemService found 47 spawn
+			points in it and AmmoCrateService armed 6 crates, because those two
+			read the map's own NAMED FOLDERS — Medkits, Pain Pills, Molotovs —
+			and have nothing to do with this tag. FL_ItemSpawn is the SECOND item
+			system: the pads ItemPlacer restocks mid-round, on the Director's
+			timing, ahead of where the team is fighting.
+
+			So a map with no pads and full folders has items and cannot be
+			restocked, which is a real thing to know and a small thing to lose. A
+			map with neither has no items at all, which is an emergency. Telling
+			somebody the second when they have the first sends them into Studio
+			to fix a map that is working — it is exactly what it did here.
+
+			Counted rather than assumed. `borrowedSpawnNodes` already reads those
+			folders one screen up, so this is the same answer the spawn nodes are
+			already built from and cannot disagree with it.
+		]]
+		local fromFolders = #borrowedSpawnNodes()
+		if fromFolders > 0 then
+			warnOnce(
+				"noitems",
+				string.format(
+					"no %s parts in the map. Its own item folders still work — %d point(s) are placed "
+						.. "at the start of the round and refill as they are used — but ItemPlacer has "
+						.. "no pads, so the Director cannot stock the part of the map the team is "
+						.. "fighting in partway through a wave. Tag a few flat surfaces (shelves, "
+						.. "crates, counters) with %s to turn that on; an optional FL_Slot attribute "
+						.. "forces what a pad holds.",
+					TAG_ITEM,
+					fromFolders,
+					TAG_ITEM
+				)
 			)
-		)
+		else
+			warnOnce(
+				"noitems",
+				string.format(
+					"no %s parts in the map AND no item folders in it either, so no pills, medkits, "
+						.. "throwables or ammo will appear at all. Either name some folders after the "
+						.. "families in MapConfig.MapItems, or tag a few flat surfaces (shelves, "
+						.. "crates, counters) with %s; an optional FL_Slot attribute forces what a pad "
+						.. "holds.",
+					TAG_ITEM,
+					TAG_ITEM
+				)
+			)
+		end
 	end
 end
 
@@ -905,7 +946,18 @@ local function survivorSpawnSummary(): string
 	if Workspace:FindFirstChildWhichIsA("SpawnLocation", true) then
 		return "NONE in the map — falling back to a SpawnLocation elsewhere in Workspace"
 	end
-	return "NONE anywhere — falling back to the flow spline or the map's centre"
+	if #flowPoints >= 2 then
+		return string.format("NONE anywhere — falling back to the middle of the %s spline", TAG_FLOW)
+	end
+	--[[ Named rather than lumped into "the map's centre", because they are not
+	     the same place and the difference is the whole reason the branch exists:
+	     the item spread is inside the level and the bounding box need not be. A
+	     summary that calls both "the centre" cannot tell a person which one they
+	     got, on the one line written for them to check exactly that. ]]
+	if #borrowedSpawnNodes() > 0 then
+		return "NONE anywhere — falling back to the middle of the map's item spread"
+	end
+	return "NONE anywhere, and no items to borrow from — falling back to the map's bounding box"
 end
 
 --[[
@@ -999,6 +1051,75 @@ function LevelService:getSurvivorSpawnCFrame(slot: number): CFrame
 		)
 		local point = standOn(ringPoint(centre, index))
 		return CFrame.lookAt(point, point + flatLook(direction or Vector3.new(0, 0, -1)))
+	end
+
+	--[[
+		── THE MIDDLE OF THE ITEM SPREAD, NOT THE MIDDLE OF THE BOUNDING BOX ────
+		Crossroads reaches here: no tagged part, no SpawnLocation of its own, no
+		SpawnLocation anywhere, and no flow spline either. Every branch above
+		needs the author to have marked something — a tagged part, a pad, or the
+		chain of flow nodes — and the branch below measures the map's bounding
+		box and drops the team into the centre of it.
+
+		A bounding box is the wrong shape to ask. It is the extent of every part
+		in the model — skybox shells, kill floors, the terrain apron, a roof —
+		so its centre is a point in the map's ENVELOPE and need not be anywhere
+		a person can stand, or even inside the level. That is the difference
+		between the team starting in the street and the team starting in the
+		rock under it.
+
+		The item folders answer the same question much better, and they are
+		already read for exactly this reason one screen up: a designer put every
+		medkit, bottle and pipe bomb somewhere a thing can sit on the floor. The
+		point of that spread nearest its own centroid is therefore both central
+		to the PLAYABLE space and known to be standable, which is two properties
+		the bounding-box centre has neither of.
+
+		One point for the whole team, deliberately. The borrowed nodes are handed
+		out round-robin where they are used as INFECTED spawns, because the horde
+		wants to come from everywhere; survivors want the opposite, and dealing
+		four players onto four different medkits would start the round with the
+		team spread across the map and no way to find each other. So: one anchor,
+		and the same ring every other untagged branch here uses.
+
+		Still warned about, in the same breath, because a heuristic that lands
+		somewhere sensible is not the same as being told where the team begins.
+	]]
+	local borrowed = borrowedSpawnNodes()
+	if #borrowed > 0 then
+		local sum = Vector3.zero
+		for _, node in borrowed do
+			sum += node.Position
+		end
+		local centroid = sum / #borrowed
+		local anchor = borrowed[1]
+		local best = math.huge
+		for _, node in borrowed do
+			local distance = (node.Position - centroid).Magnitude
+			--[[ Ties broken by name so the team starts in the same place every
+			     time this map loads. GetTagged and GetChildren order is not
+			     promised to be stable, and a spawn that wanders between rounds
+			     is a bug nobody can reproduce. ]]
+			if distance < best or (distance == best and node.Name < anchor.Name) then
+				best = distance
+				anchor = node
+			end
+		end
+		warnOnce(
+			"nosurvivorspawn",
+			string.format(
+				"no %s part, no SpawnLocation and no %s parts, so survivors are starting at the "
+					.. "middle of the map's own item spread — next to %q, which is at least somewhere "
+					.. "a designer decided the floor was. Tag ONE part with %s where you want the team "
+					.. "to begin; its rotation is the direction they face.",
+				TAG_SURVIVOR_SPAWN,
+				TAG_FLOW,
+				anchor:GetFullName(),
+				TAG_SURVIVOR_SPAWN
+			)
+		)
+		local point = standOn(ringPoint(anchor.Position, index))
+		return CFrame.lookAt(point, point + flatLook(anchor.CFrame.LookVector))
 	end
 
 	--[[
