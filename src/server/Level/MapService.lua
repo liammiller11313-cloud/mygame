@@ -380,6 +380,71 @@ end
 	Swaps to a map. Returns false and changes nothing when the map has no model,
 	which is what stops a bad vote from leaving the game with no world at all.
 ]]
+--[[
+	Anchors anything named in MapConfig.Indestructible, so an explosion cannot
+	take it apart. See that list for why it is anchoring and not something
+	cleverer.
+
+	Searched by descendant rather than by direct child: a loot room is a model
+	inside a model inside the map on every level anybody actually builds, and a
+	rule that only looked one deep would find nothing and say nothing.
+
+	Reports what it did, and — the half worth having — what it did NOT find. A
+	name in that list matching nothing in the map is the failure mode with no
+	symptom: the room is exactly as destructible as before, the list looks right,
+	and the only way to learn otherwise is to blow the room up in a live round.
+]]
+local function protectIndestructible(root: Instance, mapId: string)
+	for _, wanted in MapConfig.Indestructible do
+		local found = 0
+		local parts = 0
+		for _, descendant in root:GetDescendants() do
+			if descendant.Name ~= wanted then
+				continue
+			end
+			if not (descendant:IsA("Model") or descendant:IsA("BasePart") or descendant:IsA("Folder")) then
+				continue
+			end
+			found += 1
+			if descendant:IsA("BasePart") then
+				descendant.Anchored = true
+				parts += 1
+			else
+				for _, part in descendant:GetDescendants() do
+					if part:IsA("BasePart") then
+						part.Anchored = true
+						parts += 1
+					end
+				end
+			end
+		end
+		if found > 0 then
+			print(
+				string.format(
+					"[MapService] %q is indestructible in %s — %d part(s) anchored across %d match(es)",
+					wanted,
+					mapId,
+					parts,
+					found
+				)
+			)
+		else
+			--[[ Said once per map load rather than warnOnce'd, because the answer
+			     is per map: a name absent from Clinton and present in Crossroads
+			     is correct, and a warning that fired only the first time would
+			     have described whichever map happened to load first. ]]
+			print(
+				string.format(
+					"[MapService] %q is listed as indestructible and is not in %s — nothing anchored. "
+						.. "That is expected if the model belongs to another map, and a typo if it does not.",
+					wanted,
+					mapId
+				)
+			)
+		end
+	end
+end
+
 function MapService:load(mapId: string): boolean
 	local source = findSource(mapId)
 	if not source then
@@ -447,6 +512,11 @@ function MapService:load(mapId: string): boolean
 	if MapConfig.Handshake.Trace then
 		print(string.format('[MapHandshake] server published "%s" with %d parts', mapId, partCount))
 	end
+
+	--[[ Before anything downstream sees the map, because it changes the map
+	     itself rather than reading it, and every rebuild below should be looking
+	     at the finished article. ]]
+	protectIndestructible(clone, mapId)
 
 	--[[ Everything downstream rebuilds from tags rather than being told what
 	     changed: the flow spline, the spawn nodes, the item spots and the ammo

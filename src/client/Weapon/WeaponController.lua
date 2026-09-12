@@ -1066,6 +1066,26 @@ local function fireOnce()
 		NativeToolService, BallisticsService and MeleeService for the other ends.
 	]]
 	if definition.nativeTool then
+		--[[
+			The magazine is this game's — see NativeToolService — so an empty one
+			refuses here, at the click, rather than letting the Tool fire a round
+			nobody has. The server spends the round off the Tool's own Activated,
+			so not activating is exactly "do not fire".
+
+			`magSize > 0` and not merely "is a native tool", because the Classic
+			SWORD is one and its magSize is 0. Without that test every swing read
+			as an empty gun: ammo starts at zero for a weapon with no magazine, so
+			the sword would have dry-fired forever and never swung once.
+		]]
+		if definition.magSize > 0 then
+			if state.reload then
+				return
+			end
+			if state.ammo <= 0 then
+				dryFire()
+				return
+			end
+		end
 		activateNativeTool()
 		return
 	end
@@ -1572,25 +1592,26 @@ function WeaponController:start()
 		     in the roster notices. ]]
 		if definition and definition.fireMode == "Auto" and (state.firing or state.spinReadyAt > 0) then
 			fireOnce()
-		elseif state.firing and definition and not definition.nativeTool then
+		elseif state.firing and definition then
 			--[[
-				── WHY nativeTool IS EXCLUDED HERE AND NOT ONLY IN fireOnce ─────
-				Both branches below reach past fireOnce, so the guard inside it
-				does not cover them, and both were wrong for these weapons.
+				── ONE OF THESE TWO IS WRONG FOR A NATIVE TOOL, AND ONLY ONE ────
+				Both branches reach past fireOnce, so the guard inside it does not
+				cover them — but they do not need the same answer.
 
-				The Sword is fireMode "Melee", so holding the trigger called
-				swingMelee every frame — a swing remote per tick, which the
-				server then refused one at a time, for a weapon whose own
-				SwordScript had already handled the press.
-
-				And dryFire is the one you would have HEARD. The game tracks no
-				magazine for a native tool, so `state.ammo` sits at zero forever
-				— which is precisely the condition for the empty click. Holding
-				fire on a working Brickbattle gun would have clicked "empty" at
-				you, once per frame, over the top of its own firing sound.
+				The empty click is RIGHT now that these carry this game's
+				magazine. It was wrong while they carried none, because state.ammo
+				sat at zero forever and a working gun clicked "empty" at you once
+				per frame over the top of its own firing sound. With a real count
+				behind it, an empty native tool should click like anything else.
 			]]
 			if definition.fireMode == "Melee" then
-				swingMelee()
+				--[[ Not for the Sword: it is fireMode "Melee" AND a native tool,
+				     so this called swingMelee every frame while the trigger was
+				     held — a remote per tick, refused one at a time by a server
+				     whose SwordScript had already handled the press. ]]
+				if not definition.nativeTool then
+					swingMelee()
+				end
 			elseif state.ammo <= 0 and now >= state.nextFireAt then
 				-- Semi and Pump fire once per press, but an empty gun still has
 				-- to keep telling you it is empty while you hold the trigger.

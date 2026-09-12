@@ -332,6 +332,36 @@ function MapConfig.folderNamesIn(root: Instance?): string
 	return table.concat(names, ", ")
 end
 
+--[[
+	Models an explosion must not be able to take apart, by name, in any map.
+
+	── WHY THIS EXISTS, AND WHY IT IS A LIST OF NAMES ──────────────────────────
+	The classic rocket launcher's blast is a real Roblox `Explosion` with
+	`DestroyJointRadiusPercent` at the classic 1, which breaks every legacy joint
+	inside the radius. That is the weapon working: wrecking the place is most of
+	what a brickbattle rocket is for, and on Crossroads — the one map built out
+	of parts loose enough to notice — you can see it happen.
+
+	The loot room is the exception. It is the payoff for four beacons held alight
+	at once, and a team that blows the walls off it has skipped the objective
+	rather than beaten it. `LostTemple` is Crossroads', and the reward is behind
+	its `Gate`.
+
+	Protection is anchoring, applied when the map loads. An anchored part is one
+	an explosion can neither move nor drop when its joints go, so the model is
+	simply immune — no per-blast bookkeeping, nothing to get wrong at the moment
+	a rocket lands. It is safe here because the loot room's gate is DESTROYED
+	when the puzzle is solved rather than swung open (see PuzzleConfig's
+	CrossroadsBeacons entry), so nothing in this model was ever going to move.
+
+	A name rather than a tag because that is how every other map contract in this
+	file works — the item folders, the ammo crates, the ledges. A level designer
+	names things anyway; tagging is one more thing to forget.
+]]
+MapConfig.Indestructible = table.freeze({
+	"LostTemple",
+})
+
 MapConfig.DefaultMap = "Zombieville"
 
 --[[

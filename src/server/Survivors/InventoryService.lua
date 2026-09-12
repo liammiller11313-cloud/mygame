@@ -522,16 +522,6 @@ function InventoryService:beginReload(player: Player): boolean
 	if not definition or definition.magSize <= 0 then
 		return false
 	end
-	--[[ A native tool has no magazine to fill. Its ammo is whatever its own
-	     scripts say it is — the classic launcher's single tube, the sword's
-	     nothing at all — and this service never spends a round of it, because
-	     BallisticsService drops the shot before consumeAmmo. So a reload here
-	     would run a timer, play the HUD's reloading state and end by setting a
-	     counter nobody reads back to a number it never left. See
-	     NativeToolService. ]]
-	if definition.nativeTool then
-		return false
-	end
 	if entry.ammo >= definition.magSize or entry.reserve == 0 then
 		return false
 	end

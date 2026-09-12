@@ -469,11 +469,25 @@ function BallisticsService:resolveShot(
 		-- confused client, not an attack.
 		return records
 	end
-	--[[ And a native tool owns its own trigger. The four Brickbattle weapons are
-	     real Roblox Tools whose own scripts fire through their own remotes, so a
-	     shot resolved here as well would be the same trigger pull twice: two
-	     sets of damage, two sounds, two impacts. Dropped for the same reason the
-	     melee line above it is. See NativeToolService. ]]
+	--[[
+		── A NATIVE TOOL SPENDS A ROUND AND RESOLVES NOTHING ────────────────────
+		The four Brickbattle weapons fire through their own Tool's remote, so
+		resolving the shot here as well would be the same trigger pull twice —
+		two sets of damage, two sounds, two impacts. That part is dropped.
+
+		The AMMO is not. Their scripts carry no magazine, and a weapon in this
+		game that never runs out is one the loadout cannot be balanced around, so
+		the magazine is this game's: the count in the HUD is real, R reloads it,
+		and an empty gun stops. The Tool still decides everything a shot DOES —
+		what it spawns, what it sounds like, what it damages — which is the split
+		this has had all along. This is the last line of it.
+
+		The round is spent by NativeToolService, off the Tool's own Activated
+		signal on the server, rather than here. That signal IS the weapon firing;
+		a packet on this remote would only be the client claiming it did, and the
+		client does not send one for these weapons at all — it activates the Tool
+		instead. Consuming here would spend nothing and read as dead code.
+	]]
 	if definition.nativeTool then
 		return records
 	end

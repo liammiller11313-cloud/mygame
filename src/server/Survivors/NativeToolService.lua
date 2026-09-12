@@ -63,6 +63,11 @@ local OWNED_TAG = "FL_NativeTool"
 local NativeToolService = {}
 
 local serviceTrove = Trove.new()
+--[[ Connections that belong to the Tool currently in a hand, not to the
+     service. Cleaned when that Tool goes, because the next one is a different
+     instance and its Activated is a different signal — leaving the old one
+     connected would spend a round per shot per weapon ever equipped. ]]
+local toolTrove = Trove.new()
 -- What each player is currently holding, by weapon id, so an unchanged slot
 -- does not re-clone a Tool the player is in the middle of using.
 local held: { [Player]: string } = {}
@@ -191,6 +196,7 @@ end
 
 local function clearTools(player: Player)
 	held[player] = nil
+	toolTrove:clean()
 	sweepTools(player:FindFirstChildOfClass("Backpack"))
 	sweepTools(player.Character)
 end
@@ -363,6 +369,27 @@ function NativeToolService:refresh(player: Player)
 	local tool = source:Clone()
 	tool:SetAttribute(OWNED_TAG, true)
 	conditionTool(tool)
+	--[[
+		── THE MAGAZINE, WHICH IS THIS GAME'S AND NOT THE TOOL'S ────────────────
+		Their scripts carry no ammo and no reload — a classic brickbattle weapon
+		never ran out — and a weapon in this game that never runs out is one the
+		loadout cannot be balanced around. So the magazine is ours: the HUD count
+		is real, R reloads it, and the client will not activate an empty one.
+
+		Spent HERE, off the Tool's own Activated on the server, because that
+		signal IS the weapon firing. The alternative was a packet on FireWeapon,
+		which would only ever be the client claiming it fired — and the client
+		does not send one for these, it activates the Tool.
+
+		The Tool still decides everything a shot DOES: what it spawns, what it
+		sounds like, what it damages. This is the count, and nothing else.
+	]]
+	toolTrove:connect(tool.Activated, function()
+		local inv = Registry.find("InventoryService")
+		if inv and typeof(inv.consumeAmmo) == "function" then
+			inv:consumeAmmo(player, 1)
+		end
+	end)
 	tool.Parent = backpack
 	held[player] = weaponId
 	self:_syncCreditWatch()
@@ -435,6 +462,7 @@ function NativeToolService:destroy()
 		clearTools(player)
 	end
 	table.clear(held)
+	toolTrove:destroy()
 	if creditWatch then
 		creditWatch:Disconnect()
 		creditWatch = nil
