@@ -28,6 +28,8 @@ LABEL="dev.fadinglight.rojo"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$REPO/.rojo-dev.log"
 
+say() { printf '%s\n' "$*"; }
+
 ACTION="${1:-}"
 
 # Usage answers on any platform — being told what a command does should not
@@ -70,12 +72,59 @@ DOMAIN="gui/$(id -u)"
 #  So: enable before every bootstrap, and never write the flag in the first
 #  place. The old verb without -w unloads exactly as well.
 #]]
+#[[
+#  ── launchctl's OWN WORDS, WHICH THIS USED TO THROW AWAY ────────────────────
+#  Every call here ended in 2>/dev/null, and that hid the one thing worth
+#  having. launchctl does not fail quietly: a refusal comes with a numbered
+#  reason — "Bootstrap failed: 5: Input/output error", "Operation not permitted
+#  while System Integrity Protection is engaged", a path it cannot read — and
+#  all of it was going to /dev/null while this script reported success.
+#
+#  Worse, `job_running` can answer yes from a registration an earlier load left
+#  behind, so a bootstrap that failed outright still looked installed. Loaded,
+#  no pid, no exit code, empty log: a job launchd never accepted, described as
+#  a job launchd is refusing to spawn.
+#
+#  So the output is kept. LOAD_ERROR holds whatever it said, and the callers
+#  below print it rather than guessing on the user's behalf.
+#]]
+LOAD_ERROR=""
 load_job() {
+  LOAD_ERROR=""
   launchctl enable "$DOMAIN/$LABEL" 2>/dev/null
-  launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null
+  local out
+  out="$(launchctl bootstrap "$DOMAIN" "$PLIST" 2>&1)" && return 0
+  LOAD_ERROR="bootstrap: $out"
+  out="$(launchctl load "$PLIST" 2>&1)" && return 0
+  LOAD_ERROR="$LOAD_ERROR"$'\n'"load: $out"
+  return 1
 }
 unload_job() {
-  launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || launchctl unload "$PLIST" 2>/dev/null
+  launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+    || launchctl unload "$PLIST" >/dev/null 2>&1
+}
+
+#[[ Everything launchd will say about the job, for when none of the checks
+#   above can explain it. Printed rather than parsed: the field that names the
+#   real cause is different every time, so the useful move is to show the lot. ]]
+dump_launchd() {
+  say ""
+  say "── what launchd says about the job ──"
+  local detail
+  detail="$(launchctl print "$DOMAIN/$LABEL" 2>&1)"
+  if [ -n "$detail" ]; then
+    printf '%s\n' "$detail" | sed -n '1,40p' | sed 's/^/  /'
+  else
+    say "  launchctl print said nothing. Trying the older verb:"
+    launchctl list "$LABEL" 2>&1 | sed 's/^/  /'
+  fi
+  say ""
+  say "── is the plist even valid ──"
+  if command -v plutil >/dev/null 2>&1; then
+    plutil -lint "$PLIST" 2>&1 | sed 's/^/  /'
+  else
+    say "  plutil unavailable."
+  fi
 }
 #[[ print-disabled reports the value as `=> true` on some macOS versions and
 #   `=> disabled` on others, so both are matched. The enabled spellings — false
@@ -175,12 +224,53 @@ PLISTEOF
 
   : > "$LOG"
   if ! load_job; then
-    echo "launchctl refused to load the job. The plist is at:" >&2
-    echo "  $PLIST" >&2
+    say "launchctl refused to load the job, and said:"
+    printf '%s\n' "$LOAD_ERROR" | sed 's/^/  /'
+    say ""
+    say "The plist is at: $PLIST"
+    dump_launchd
     exit 1
   fi
 
   sleep 2
+
+  #[[
+  #  Loaded is not running, and this script used to stop at loaded.
+  #
+  #  launchctl accepts a job and then declines to execute it for reasons it does
+  #  not volunteer — a disabled override, a WorkingDirectory it cannot reach, a
+  #  binary it will not run. Every one of those ends in the same place: the job
+  #  listed, no pid, no exit code, an empty log, and this command having printed
+  #  "Installed. Rojo is serving ...".
+  #
+  #  So it checks. If nothing is executing two seconds later, that is reported
+  #  here, next to the command that caused it, instead of being found later by
+  #  running status and disbelieving it.
+  #]]
+  INSTALLED_PID="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null \
+    | sed -n 's/^[[:space:]]*pid = \([0-9]*\).*/\1/p' | head -1)"
+  if [ -z "$INSTALLED_PID" ]; then
+    INSTALLED_PID="$(launchctl list "$LABEL" 2>/dev/null \
+      | sed -n 's/.*"PID"[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' | head -1)"
+  fi
+  if [ -z "$INSTALLED_PID" ]; then
+    say "⚠  launchd took the job but is NOT running it."
+    say ""
+    say "   Nothing is executing and the log is empty, so the autopull is not"
+    say "   happening. Everything below is launchd's own account of why."
+    dump_launchd
+    say ""
+    say "── meanwhile, this works and needs no launchd ──"
+    say ""
+    say "   ./scripts/dev.sh"
+    say ""
+    say "   in a Terminal tab you leave open. It adopts the Rojo you already"
+    say "   have on 34872 and pulls every 20s, which is the whole of what the"
+    say "   agent was for."
+    exit 1
+  fi
+
+  say "Running as pid $INSTALLED_PID."
   echo "Installed. Rojo is serving $REPO and the branch pulls itself."
   echo ""
   echo "  watch it:    ./scripts/autostart.sh log"
@@ -267,6 +357,7 @@ status)
       echo ""
     else
       echo "process     NOT RUNNING${LAST_EXIT:+ — last exit code $LAST_EXIT}"
+      NEEDS_DUMP=1
       if [ -z "$LAST_EXIT" ]; then
         echo "            and no exit code, so it has never run at all rather"
         echo "            than run and died. launchd is refusing to spawn it."
@@ -316,6 +407,21 @@ status)
       echo "  one means the job has never been started at all — not that it"
       echo "  started and failed. Reinstall:  ./scripts/autostart.sh install"
       echo ""
+    fi
+
+    #[[ Everything launchd knows, when none of the checks above could explain
+    #   it. Guessing at this from the outside has cost several rounds already;
+    #   the fix is to stop guessing and print what it says. ]]
+    if [ "${NEEDS_DUMP:-0}" -eq 1 ]; then
+      dump_launchd
+      say ""
+      say "── and the thing that works without any of this ──"
+      say ""
+      say "   ./scripts/dev.sh"
+      say ""
+      say "   in a Terminal tab you leave open. It adopts the Rojo you already"
+      say "   have on 34872 and pulls every 20s. No launchd involved."
+      say ""
     fi
   else
     echo "not running."
