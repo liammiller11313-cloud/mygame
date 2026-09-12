@@ -46,11 +46,6 @@ local BONK_HEIGHT = 5
 local BONK_START = 2 -- studs in front of you the box begins
 local BONK_REACH = 14 -- studs in front of you the box ends
 
--- Knockback comes from the walrus's Power, because Power IS how far you
--- send someone. Seven studs of shove per point, so the starter's 10 lands
--- on the 70 the game was already tuned around and nothing shifts under you.
-local KNOCKBACK_PER_POWER = 7
-
 -- Flat, deliberately. Scaling the lift too would make a strong walrus
 -- launch people skyward as well as far, which is twice as hard to balance
 -- and reads as a bug the first time someone leaves the map vertically.
@@ -270,9 +265,12 @@ end
 --  to the starter's, so a new walrus is never accidentally weightless.
 -- ============================================================
 
+-- Power IS the knockback, straight through. No rate, no conversion: the
+-- number here is the number of studs per second the victim leaves at, and
+-- it's the number that belongs on the podium sign.
 local WALRUS_POWER = {
-	Basic = 10,
-	Flamespitter = 15,
+	Basic = 70,
+	Flamespitter = 105,
 }
 
 -- Defined here rather than up with the other helpers because it reads the
@@ -410,7 +408,7 @@ bonkEvent.OnServerEvent:Connect(function(player)
 	end
 	startCooldown(player, nextBonk, "BonkReadyAt", COOLDOWN)
 
-	local knockback = powerOf(player, walrus) * KNOCKBACK_PER_POWER
+	local knockback = powerOf(player, walrus)
 
 	local targets = hitInFront(character, root, {
 		Start = BONK_START,
@@ -464,5 +462,5 @@ specialEvent.OnServerEvent:Connect(function(player)
 	end
 	startCooldown(player, nextSpecial, "SpecialReadyAt", special.Cooldown)
 
-	special.Activate(player, character, root, humanoid, powerOf(player, walrus) * KNOCKBACK_PER_POWER)
+	special.Activate(player, character, root, humanoid, powerOf(player, walrus))
 end)
