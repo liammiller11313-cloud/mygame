@@ -550,12 +550,45 @@ GameModeConfig.Headcount = table.freeze({
 		specialPace = 0.60,
 		bossHealth = 0.40,
 	}),
+	--[[
+		── TWO, WHICH WAS THE HARSHEST ROW IN THE TABLE ────────────────────────
+		Reported as "really hard when its just 2 people", and the numbers agree.
+
+		Divide each scale by the share of the firepower that crew has, and you
+		get what one player is actually carrying against a full team's 1.00:
+
+		    crew   population   specials   boss
+		     1        1.84        1.36      1.60
+		     2        1.32        1.10      1.24     <- was
+		     3        1.12        1.07      1.09
+		     4        1.00        1.00      1.00
+
+		The step from 2 to 3 was bigger than the step from 3 to 4, so a duo sat
+		much nearer solo than to the trio it is one player away from. That is the
+		shape being felt.
+
+		── AND A DUO IS MORE FRAGILE THAN ITS HEADCOUNT SAYS ───────────────────
+		Population is only half of it. A pin is the other half, and a pin does
+		not scale linearly at all: a Hunter on one of four survivors costs the
+		team a quarter of its guns and somebody walks over. A Hunter on one of
+		TWO costs half the guns, and the one player left has to choose between
+		breaking the pin and holding the horde — which is the same decision a
+		solo player never gets to make, because there is nobody to break it.
+
+		So specials fall furthest, to slightly BELOW parity at 0.96 per player.
+		That is deliberate and it is the one row where being under 1.00 is
+		correct: the raw count understates what each special costs a duo.
+
+		Population lands at 1.20, between the old 1.32 and the trio's 1.12 rather
+		than level with it — two players should still be harder than three, just
+		not nearly-solo harder.
+	]]
 	table.freeze({
-		population = 0.66,
-		spawnRate = 0.85,
-		specials = 0.55,
-		specialPace = 0.78,
-		bossHealth = 0.62,
+		population = 0.60,
+		spawnRate = 0.82,
+		specials = 0.48,
+		specialPace = 0.72,
+		bossHealth = 0.56,
 	}),
 	table.freeze({
 		population = 0.84,

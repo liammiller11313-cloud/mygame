@@ -53,6 +53,9 @@ local Types = require(Shared.Types)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
 local LA = Attributes.Loadout
+--[[ The server's own walrus flag. Read rather than tracked: BecomeWalrus owns
+     it, and a second copy here would be a second thing to keep in step. ]]
+local LA_WALRUS = Attributes.Player.IsWalrus
 
 --[[ Marks a Tool this service put there, so cleanup never touches a Tool that
      arrived some other way. Named rather than tracked in a table because the
@@ -326,6 +329,31 @@ function NativeToolService:refresh(player: Player)
 	local entry = loadout and loadout[slot]
 	local weaponId = entry and entry.itemId or ""
 
+	--[[
+		── AND NOT WHILE YOU ARE THE WALRUS ─────────────────────────────────────
+		This gate is the one that actually matters, and it is the one that would
+		have been missed.
+
+		BallisticsService and MeleeService refuse a shot while IsWalrus, which
+		covers every weapon this game implements. It covers none of these: a
+		Brickbattle Tool fires through its OWN remote, inside its own scripts,
+		and has never asked this game for permission to do anything. Leaving the
+		Tool equipped would have left the four weapons the ability is sold beside
+		as the only four still usable while riding the walrus.
+
+		So the Tool leaves the hand, which is the only refusal its scripts cannot
+		talk their way past. It comes back when refresh runs again, and the
+		attribute watch in start() is what makes that happen the moment the
+		walrus ends.
+	]]
+	if player:GetAttribute(LA_WALRUS) == true then
+		if held[player] then
+			clearTools(player)
+			self:_syncCreditWatch()
+		end
+		return
+	end
+
 	local definition = nativeDefinition(weaponId)
 	if not definition then
 		if held[player] then
@@ -405,6 +433,12 @@ function NativeToolService:init() end
 function NativeToolService:start()
 	local function watch(player: Player)
 		serviceTrove:connect(player:GetAttributeChangedSignal(LA.ActiveSlot), function()
+			self:refresh(player)
+		end)
+		--[[ Both edges. Becoming the walrus takes the Tool away; the walrus dying
+		     or timing out has to give it back, and no slot changed in between so
+		     nothing else here would have noticed. ]]
+		serviceTrove:connect(player:GetAttributeChangedSignal(LA_WALRUS), function()
 			self:refresh(player)
 		end)
 		--[[ A new body has a new Backpack and an empty one, so the Tool has to be

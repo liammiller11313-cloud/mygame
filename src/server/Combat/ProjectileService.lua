@@ -319,6 +319,20 @@ local SPARK_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 
 local GROUND_SEARCH = 24 -- how far down a shatter looks for a floor to sit on
 
+--[[ Said once per distinct problem. This file had no warn of its own because it
+     had nothing to warn about: every number it reads comes from a config the
+     audit already checks. A model NAME does not — it points at an asset in a
+     folder, which is the one thing in a projectile's spec that can be wrong in
+     Studio and correct in source. ]]
+local warnedOnce: { [string]: boolean } = {}
+local function warnOnce(key: string, message: string)
+	if warnedOnce[key] then
+		return
+	end
+	warnedOnce[key] = true
+	warn("[ProjectileService] " .. message)
+end
+
 local EPSILON = 1e-4
 
 --[[ How far clear of a surface a bouncing round is placed before it flies on.
@@ -685,9 +699,30 @@ function ProjectileService:launch(
 	     physics body and is simply hidden. Same rule the throwables follow, and
 	     for the same reason: flight must not change with whose model is loaded. ]]
 	local factory = Registry.find("PlaceholderFactory")
-	local dressing = factory
-		and typeof(factory.buildWeaponModel) == "function"
-		and factory:buildWeaponModel(weaponId .. "Round")
+	--[[ The model the spec NAMES first, and the `<weaponId>Round` convention only
+	     as the fallback. The convention answers nil for anything the author did
+	     not happen to name that way, and nil here means the bare physics part
+	     flies instead — a coloured brick where a rocket should be. See
+	     ProjectileProfile.model. ]]
+	local dressing = nil
+	if factory and typeof(factory.buildSuppliedModel) == "function" and spec.model then
+		dressing = factory:buildSuppliedModel("Weapons", spec.model)
+		if not dressing then
+			warnOnce(
+				"round:" .. tostring(spec.model),
+				string.format(
+					"%s names %q as its round's model and there is nothing by that name in "
+						.. "Assets.Weapons, so it is firing the bare physics part. Check the "
+						.. "spelling, or drop `model` from its projectile block.",
+					weaponId,
+					tostring(spec.model)
+				)
+			)
+		end
+	end
+	if not dressing and factory and typeof(factory.buildWeaponModel) == "function" then
+		dressing = factory:buildWeaponModel(weaponId .. "Round")
+	end
 	if dressing then
 		body.Transparency = 1
 		dressing:PivotTo(body.CFrame)

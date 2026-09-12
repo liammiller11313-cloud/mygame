@@ -1034,6 +1034,15 @@ local function activateNativeTool(): boolean
 	return true
 end
 
+--[[ The server refuses every one of these anyway — BallisticsService,
+     MeleeService and InventoryService all gate on IsWalrus, and the Tool leaves
+     your hand entirely. This is so it FEELS refused rather than merely being
+     refused: no click, no predicted flash, no local sound, no dry-fire on a gun
+     that is not the body you are driving. ]]
+local function isWalrus(): boolean
+	return player:GetAttribute(Attributes.Player.IsWalrus) == true
+end
+
 local function fireOnce()
 	local definition = state.definition
 	if not definition then
@@ -1065,6 +1074,9 @@ local function fireOnce()
 		effects are the half you would actually SEE doubled. See
 		NativeToolService, BallisticsService and MeleeService for the other ends.
 	]]
+	if isWalrus() then
+		return
+	end
 	if definition.nativeTool then
 		--[[
 			The magazine is this game's — see NativeToolService — so an empty one

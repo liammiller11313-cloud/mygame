@@ -499,6 +499,11 @@ function BallisticsService:resolveShot(
 		end
 		-- Down means the pistol, and only the pistol. Firing a rifle from the
 		-- floor would remove the entire cost of going down.
+		if shooter:GetAttribute(Attributes.Player.IsWalrus) == true then
+			-- See MeleeService for the note; the ability is a trade, not a second
+			-- set of guns.
+			return records
+		end
 		if survivors:isIncapacitated(shooter) and weaponId ~= GameConfig.Survivor.IncapWeapon then
 			return records
 		end

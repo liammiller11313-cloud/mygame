@@ -3104,6 +3104,44 @@ local function weaponTemplate(definition, category: string, cache, build: () -> 
 end
 
 --[[ The world model: what a survivor is holding, seen by everybody else. ]]
+--[[
+	Any supplied asset, by the name the author gave it, with no WeaponConfig
+	entry behind it.
+
+	buildWeaponModel cannot do this: its first act is WeaponConfig.get, so it
+	answers nil for anything that is not a weapon in the roster. A projectile's
+	ROUND is exactly that — "Walrus Ammo" is a model, not a gun — and asking for
+	one by the old convention of `<weaponId>Round` meant asking for a weapon that
+	does not exist and silently getting the bare physics part instead. That is
+	the yellow brick.
+
+	Sanitised like everything else on the way in, because this is dressing: a
+	round that flies past you is not a place to run a downloaded script.
+
+	Name matching is suppliedEntry's, so "Walrus Ammo", "WalrusAmmo" and
+	"walrus ammo" are the same answer — which is the whole reason that loose
+	pass exists.
+]]
+function PlaceholderFactory:buildSuppliedModel(category: string, name: string): Model?
+	if typeof(category) ~= "string" or typeof(name) ~= "string" or name == "" then
+		return nil
+	end
+	local entry = suppliedEntry(category, { name })
+	if not entry then
+		return nil
+	end
+	local chosen = modelsIn(entry)[1]
+	if not chosen then
+		return nil
+	end
+	local model = cloneAsModel(chosen)
+	if not model then
+		return nil
+	end
+	sanitise(model)
+	return model
+end
+
 function PlaceholderFactory:buildWeaponModel(weaponId: string): Model?
 	if typeof(weaponId) ~= "string" then
 		return nil

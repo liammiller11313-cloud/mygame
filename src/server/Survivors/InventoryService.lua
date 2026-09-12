@@ -552,6 +552,12 @@ function InventoryService:useItem(player: Player, slot: string): boolean
 	if typeof(slot) ~= "string" or Enums.Slot[slot] == nil then
 		return false
 	end
+	--[[ "and other stuff" — a medkit, a pill or a pipe bomb used out of the body
+	     you are not driving is the same free action a shot would be. See
+	     MeleeService for the whole of the reasoning. ]]
+	if player:GetAttribute(Attributes.Player.IsWalrus) == true then
+		return false
+	end
 
 	local record = records[player]
 	if not record then

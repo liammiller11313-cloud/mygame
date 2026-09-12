@@ -292,6 +292,20 @@ local function validateActor(player: Player, origin: any, direction: any): Actor
 	-- find(), not get(): melee has to keep working in a test place that never
 	-- loaded SurvivorService.
 	local survivors = Registry.find("SurvivorService")
+	--[[
+		── NOT WHILE YOU ARE THE WALRUS ────────────────────────────────────────
+		BecomeWalrus hands you a second body to drive and leaves your own
+		standing there. Firing your loadout out of a survivor you are not looking
+		through is a free second set of guns for the duration, which is not what
+		the ability is — it is a trade, and the trade is that the walrus is what
+		you have until it dies or its clock runs out.
+
+		Server side and attribute-driven, because IsWalrus is the server's own
+		flag: the client is told, it does not decide. See BecomeWalrus.
+	]]
+	if player:GetAttribute(Attributes.Player.IsWalrus) == true then
+		return nil
+	end
 	if survivors and CANNOT_ACT_STATES[survivors:getState(player)] then
 		return nil
 	end

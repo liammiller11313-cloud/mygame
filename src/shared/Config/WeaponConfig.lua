@@ -238,6 +238,20 @@ export type ProjectileProfile = {
 	     no spin at all reads as a sliding prop rather than a thing in flight. ]]
 	spin: number,
 	--[[
+		The model this round WEARS, by the name it has in Assets.Weapons.
+
+		Absent, the round looks for `<weaponId>Round` — a convention that only
+		finds anything if somebody happened to name a model that way, and which
+		answers with nothing at all otherwise: you get the bare physics part, in
+		`color`, which is where "it shoots a yellow brick" comes from.
+
+		Naming it here is the fix and it is also the honest version: an author who
+		built a model called "Walrus Ammo" should be able to say so rather than
+		rename their asset to match a convention nothing told them about. Matched
+		loosely, so spacing and case do not matter.
+	]]
+	model: string?,
+	--[[
 		── THE CLASSIC ROCKET'S SERVO ───────────────────────────────────────────
 		Absent for a round that is simply given a velocity and keeps it.
 
@@ -1120,6 +1134,10 @@ WeaponConfig.Definitions = {
 			     two are the same silhouette at distance and the colour is the only
 			     thing that says which one is coming at you. ]]
 			color = Color3.fromRGB(122, 86, 62),
+			--[[ The author's own model, by its name in Assets.Weapons. Without
+			     this the round wore nothing and flew as the bare part above,
+			     which is what was reported as a yellow brick. ]]
+			model = "Walrus Ammo",
 			-- Flat. A rocket that arced would be a grenade launcher.
 			gravity = false,
 			spin = 9,
