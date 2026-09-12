@@ -57,10 +57,17 @@ local BONK_REACH = 18 -- studs in front of you the box ends
 -- walruses - the spread between them stays exactly as the signs promise.
 local KNOCKBACK_PER_POWER = 7
 
+-- What share of its walrus's Power a plain bonk lands. The same idea as
+-- the jab's share, from the other side: Power says how hard a walrus hits,
+-- these say how much of that each attack gets. Turn this down to soften
+-- the basic attack without touching anyone's special, or KNOCKBACK_PER_POWER
+-- to soften the whole game at once.
+local BONK_SHARE = 0.8
+
 -- How high a bonk throws them. Deliberately NOT scaled by Power: how far
 -- you send someone is the walrus's business, how high is the game's. Tie
 -- the two together and the strongest walrus turns into a launcher.
-local UPWARD_FORCE = 50
+local UPWARD_FORCE = 40
 
 local RAGDOLL_TIME = 2 -- seconds they're on the floor
 
@@ -622,7 +629,7 @@ bonkEvent.OnServerEvent:Connect(function(player)
 	})
 
 	for _, target in ipairs(targets) do
-		launch(target.Character, target.Root, root, knockback, UPWARD_FORCE, RAGDOLL_TIME)
+		launch(target.Character, target.Root, root, knockback * BONK_SHARE, UPWARD_FORCE, RAGDOLL_TIME)
 
 		if target.Player then
 			payIcicle(player)
