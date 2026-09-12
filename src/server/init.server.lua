@@ -858,12 +858,6 @@ do
 			local round = definition.projectile
 			if round then
 				flight = string.format("%d/s", round.speed)
-				if round.servo then
-					flight ..= string.format(" servo%d", round.servo.gain)
-				end
-				if round.bounce then
-					flight ..= string.format(" bounce%d", round.bounce.left)
-				end
 			end
 			parts[#parts + 1] = string.format("%s %s", string.gsub(id, "^Classic", ""), flight)
 		end

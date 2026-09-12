@@ -251,48 +251,6 @@ export type ProjectileProfile = {
 		loosely, so spacing and case do not matter.
 	]]
 	model: string?,
-	--[[
-		── THE CLASSIC ROCKET'S SERVO ───────────────────────────────────────────
-		Absent for a round that is simply given a velocity and keeps it.
-
-		Present, it flies the way RocketScript.lua flies: a target point walks
-		forward along the round's own nose, and every step the round's velocity
-		is set to `gain` times however far it has fallen behind that point.
-
-		    target += LookVector
-		    shaft.AssemblyLinearVelocity = (target - shaft.Position) * 7
-
-		The target starts ON the round, so the first drift is zero, so the round
-		starts at a DEAD STOP and winds up: simulated at gain 7 and speed 75 it
-		is at 90% of cruise after 0.32s and 99% after 0.63s, on 30, 60 and 144Hz
-		alike. A classic rocket visibly leaves the tube slowly and builds, which
-		a round handed its top speed on frame one cannot do at any speed setting,
-		because it is the shape of the acceleration rather than its ceiling.
-
-		Be honest about what that buys, because the first draft of this comment
-		was not. The lag settles at a FIXED distance — `speed / gain`, about ten
-		and a half studs — so once it is up to speed the round is a constant
-		0.13s later than a constant-velocity one at every range, not
-		progressively later. Twenty studs, forty, eighty: 0.13s each time. That
-		is a launch you can see and not a window you can dodge in, and the reason
-		to carry it over is that it looks and reads like the original, not that
-		it changes the fight.
-
-		A servo round must not spin. The nose is the steering input, so a round
-		that tumbles corkscrews.
-	]]
-	servo: { gain: number }?,
-	--[[
-		── AND THE CLASSIC PELLET'S BOUNCE ──────────────────────────────────────
-		Absent for a round that scenery simply stops.
-
-		Present, the round reflects off whatever it hits and carries on with its
-		damage multiplied by the weapon's own penetrationFalloff, up to `left`
-		times. PelletScript halves on every surface until it is under a point of
-		damage and gives up; that is the same rule the penetration chain already
-		spends on bodies, so it is the same two numbers here, spent on walls.
-	]]
-	bounce: { left: number }?,
 }
 
 export type WeaponDefinition = {
@@ -3951,26 +3909,6 @@ WeaponConfig.Definitions = {
 			--[[ A pebble tumbles, and faster than a rocket does: it is small and
 			     has nothing keeping it pointed. ]]
 			spin = 9,
-			--[[
-				── AND IT BOUNCES, WHICH IT USED NOT TO ─────────────────────────
-				PelletScript halves the pellet's bite on every surface it meets,
-				wall or body alike, until it is under a point of damage. The body
-				half of that has been here since the pellet started travelling —
-				`penetration` and `penetrationFalloff` below. The wall half was
-				declined, on the grounds that a reflection solver was not worth it
-				"for a weapon nobody aims at walls on purpose".
-
-				Which gets the weapon backwards. Bouncing a pellet round a corner
-				IS aiming at a wall on purpose, and it is the one thing the classic
-				slingshot does that no other weapon in this game can do at all.
-
-				Two bounces, not unlimited: the falloff takes 32 to 16 to 8, and a
-				pellet worth 8 that is still in the air is a physics object nobody
-				can account for. The chain and the bounces share one falloff, so a
-				pellet that has already been through a Common has less to spend on
-				the wall behind it, exactly as `damage /= 2` does in the original.
-			]]
-			bounce = { left = 2 },
 		},
 
 		--[[ Shoot the floor, go up. Tamer than the pack's because this weapon
@@ -4098,16 +4036,18 @@ WeaponConfig.Definitions = {
 			what keeps the weapon usable against the things it now has to hit, and
 			it is still visibly a rocket you can watch cross a street.
 
-			And the servo itself is carried over now rather than approximated —
-			see `servo` below. The earlier note here called it "a per-frame
-			correction loop to buy a cosmetic" and skipped it. Cosmetic is about
-			right, and it was still worth having: the rocket leaves the tube
-			stopped and is at 90% of seventy-five after a third of a second, so
-			you watch it wind up instead of watching it appear at full speed.
-			What it does NOT buy is a dodge — the servo's lag settles at a fixed
-			ten and a half studs, which is a flat 0.13s at every range. Simulated
-			before it was written down, because the draft of this note claimed
-			otherwise.
+			── AND NONE OF THIS BLOCK RUNS ANY MORE ────────────────────────────
+			The servo itself was carried over here for a while — a `servo` field,
+			the wind-up off a dead stop, all of it measured. It is gone, and so is
+			the pellet's bounce beside it, because this weapon is `nativeTool`
+			now: its own Tool's RocketScript fires it, BallisticsService returns
+			before ever calling ProjectileService, and every number below was
+			describing a round this game no longer spawns.
+
+			The block is kept rather than deleted because it is still the honest
+			description of what this weapon IS, and it is what the game would fly
+			if nativeTool were ever dropped. Treat it as a specification, not as
+			live tuning. See docs/BRICKBATTLE_WEAPONS.md.
 		]]
 		projectile = {
 			speed = 75,
@@ -4124,13 +4064,11 @@ WeaponConfig.Definitions = {
 			--[[ The classic sets AssemblyLinearVelocity every frame, which
 			     overrides gravity in practice. False says the same thing once. ]]
 			gravity = false,
-			--[[ None, and now it has to be none. The servo steers by the round's
-			     own nose, so a rocket that tumbles steers itself in a corkscrew.
-			     The 1.5 that used to be here was standing in for the classic's
-			     flight; the flight is real now and does not need a stand-in. ]]
-			spin = 0,
-			--[[ RocketScript's SERVO_GAIN, exactly. ]]
-			servo = { gain = 7 },
+			--[[ Barely. A rocket is nose-forward and a spinning one reads as
+			     debris; enough to say "in flight" and not enough to look out of
+			     control. Unused while this weapon runs its own Tool's scripts —
+			     see nativeTool — and kept honest for the day it does not. ]]
+			spin = 1.5,
 		},
 
 		blastRadius = 16,
