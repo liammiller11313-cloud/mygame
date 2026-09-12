@@ -103,17 +103,65 @@ cleanup() {
 }
 trap cleanup INT TERM
 
+#[[
+#  ── SOMEBODY ELSE IS ALREADY SERVING, WHICH IS FINE ─────────────────────────
+#  Running `rojo serve` by hand is the obvious thing to do, and it used to break
+#  the autopull completely.
+#
+#  Two servers cannot hold port 34872. The second one exits with "Address
+#  already in use", this script saw its child die and exited 1, and launchd —
+#  which has KeepAlive — restarted it thirty seconds later to fail the same way,
+#  forever. The serving half was fine the whole time, because the hand-started
+#  server was doing that job; it was the PULLING half that never ran. Which
+#  presents as "autostart is on and the updates still are not arriving".
+#
+#  Serving and pulling are separate jobs and only one of them is contested. So a
+#  port that already answers is not an error: it means the serving half is
+#  handled, and this drops to pulling only.
+#
+#  Whose server it is still matters, so it is named. lsof gives the working
+#  directory of whatever holds the port, and a server running in a DIFFERENT
+#  checkout is the quiet failure sync.sh exists to catch — Studio connects, says
+#  Connected, and receives another folder's code while this one pulls updates
+#  nobody sees.
+#]]
 if [ "$SERVE" -eq 1 ]; then
-  echo "[dev] starting Rojo on branch $BRANCH"
-  "$ROJO" serve &
-  ROJO_PID=$!
-  # A moment for it to bind, so "Address already in use" is reported by Rojo
-  # itself before the pull loop starts printing over the top of it.
-  sleep 2
-  if ! kill -0 "$ROJO_PID" 2>/dev/null; then
-    echo "[dev] Rojo exited immediately — see its message above." >&2
-    echo "[dev] If the port is taken, a server is already running; use --pull-only." >&2
-    exit 1
+  if curl -fsS --noproxy '*' -m 2 "http://localhost:34872/api/rojo" >/dev/null 2>&1; then
+    SERVE=0
+    OTHER_PID="$(lsof -ti :34872 -sTCP:LISTEN 2>/dev/null | head -1)"
+    OTHER_DIR=""
+    if [ -n "$OTHER_PID" ]; then
+      OTHER_DIR="$(lsof -a -p "$OTHER_PID" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    fi
+    if [ -n "$OTHER_DIR" ] && [ "$OTHER_DIR" != "$PWD" ]; then
+      echo "[dev] A Rojo server already holds port 34872, and it is serving:"
+      echo "[dev]     $OTHER_DIR"
+      echo "[dev] which is NOT this folder ($PWD). Studio will say Connected and"
+      echo "[dev] receive that folder's code. Pulls here will not reach it."
+    elif [ -n "$OTHER_DIR" ]; then
+      echo "[dev] A Rojo server already serves this folder (pid $OTHER_PID) — using it."
+      echo "[dev] Not starting a second; pulling only. Nothing else to do."
+    else
+      echo "[dev] Something already answers on port 34872 — using it, pulling only."
+    fi
+  else
+    echo "[dev] starting Rojo on branch $BRANCH"
+    "$ROJO" serve &
+    ROJO_PID=$!
+    # A moment for it to bind, so "Address already in use" is reported by Rojo
+    # itself before the pull loop starts printing over the top of it.
+    sleep 2
+    if ! kill -0 "$ROJO_PID" 2>/dev/null; then
+      #[[ Not exit 1 any more. Under launchd that is a restart loop that never
+      #   converges, and the pull is still worth running even when the serve
+      #   failed — the two jobs are independent and failing both because one
+      #   failed is strictly worse. ]]
+      echo "[dev] Rojo exited immediately — see its message above." >&2
+      echo "[dev] Carrying on with pulls only; start a server yourself, or run" >&2
+      echo "[dev] ./scripts/rojo-doctor.sh to find out why it will not start." >&2
+      SERVE=0
+      ROJO_PID=""
+    fi
   fi
 fi
 
