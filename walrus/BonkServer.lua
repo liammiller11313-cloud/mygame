@@ -4,28 +4,30 @@
 	WHERE THIS GOES:  ServerScriptService
 	WHAT KIND:        Script   (NOT a LocalScript)
 
-	Knocks people flying when they get bonked, drops them for a couple of
-	seconds, and pays the bonker an icicle.
+	The bonk: lunge forward, swing, knock whoever you catch off their feet.
 
-	How hard you hit comes from your equipped walrus's Power in
-	WalrusConfig, so a stronger walrus really does send people further.
+	All of it runs here rather than on the client, so every player sees the
+	same lunge and the same hitbox. A swing only you can see is a swing
+	nobody can dodge.
 
 	Expects, from elsewhere in your game:
 	  * ReplicatedStorage.SlapEvent      - a RemoteEvent the client fires
-	  * ReplicatedStorage.WalrusConfig   - the ModuleScript
-	  * character.Walrus                 - the walrus model, so lobby
-										   players without one can't bonk
+	  * character.Walrus                 - the walrus model
 	  * character.Walrus.BonkSound       - optional
 	  * leaderstats.Icicles              - optional, the payout
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
 
 local bonkEvent = ReplicatedStorage:WaitForChild("SlapEvent")
-local WalrusConfig = require(ReplicatedStorage:WaitForChild("WalrusConfig"))
 
 local COOLDOWN = 1 -- seconds between bonks
+
+-- The lunge. A forward shove on your own character, so the walrus goes
+-- with it however it happens to be attached.
+local LUNGE_SPEED = 28
 
 -- The bonk volume. It starts at the walrus and reaches forward, so there is
 -- no dead patch right in front of your face.
@@ -33,10 +35,13 @@ local BONK_WIDTH = 5
 local BONK_HEIGHT = 5
 local BONK_REACH = 12 -- studs in front of you the bonk reaches
 
--- Knockback per point of Power. Power 10 gives 70, which is what the whole
--- game was tuned around before walruses had stats at all.
-local KNOCKBACK_PER_POWER = 7
-local UPWARD_FORCE = 25 -- flat, so strong walruses hit further, not higher
+-- Draws the hitbox so you can see exactly what you're swinging. Leave it on
+-- while you tune the three numbers above; set it false before you publish.
+local SHOW_HITBOX = true
+local HITBOX_SHOW_TIME = 0.2
+
+local KNOCKBACK = 70
+local UPWARD_FORCE = 25
 
 local RAGDOLL_TIME = 2 -- seconds you're on the floor after being bonked
 
@@ -77,8 +82,8 @@ local function knockDown(character, seconds)
 	knockdown[character] = token
 
 	-- PlatformStand goes limp and stays down until we turn it off. It works
-	-- on any rig and can't detach the walrus model the way swapping the
-	-- character's joints for constraints can.
+	-- on any rig, and unlike swapping the character's joints for physics
+	-- constraints it can't shake the walrus model loose.
 	humanoid.PlatformStand = true
 
 	task.delay(seconds, function()
@@ -93,6 +98,27 @@ local function knockDown(character, seconds)
 			humanoid.PlatformStand = false
 		end
 	end)
+end
+
+-- ============================================================
+--  SEEING THE SWING
+-- ============================================================
+
+local function showHitbox(cframe, size)
+	local box = Instance.new("Part")
+	box.Name = "BonkHitbox"
+	box.Size = size
+	box.CFrame = cframe
+	box.Anchored = true
+	box.CanCollide = false
+	box.CanQuery = false -- never blocks the line-of-sight check behind it
+	box.CanTouch = false
+	box.Material = Enum.Material.Neon
+	box.Color = Color3.fromRGB(120, 200, 255)
+	box.Transparency = 0.75
+	box.Parent = workspace
+
+	Debris:AddItem(box, HITBOX_SHOW_TIME)
 end
 
 -- ============================================================
@@ -176,20 +202,26 @@ bonkEvent.OnServerEvent:Connect(function(player)
 	end
 	nextBonk[player] = now + COOLDOWN
 
-	-- How hard this walrus hits.
-	local stats = WalrusConfig.get(player:GetAttribute("EquippedWalrus") or WalrusConfig.Starter)
-	local knockback = stats.Power * KNOCKBACK_PER_POWER
+	-- The lunge. Keep whatever vertical speed they already had, so this
+	-- shoves them forward without cancelling a jump or a fall.
+	local rising = root.AssemblyLinearVelocity.Y
+	root.AssemblyLinearVelocity = root.CFrame.LookVector * LUNGE_SPEED + Vector3.new(0, rising, 0)
+
+	local bonkCFrame = root.CFrame * CFrame.new(0, 0, -BONK_REACH / 2)
+	local bonkSize = Vector3.new(BONK_WIDTH, BONK_HEIGHT, BONK_REACH)
+
+	if SHOW_HITBOX then
+		showHitbox(bonkCFrame, bonkSize)
+	end
 
 	-- Ask the engine what's in the box directly, rather than building a real
-	-- Part to ask with. The old way replicated an invisible part to every
-	-- player in the server on every single bonk, and leaked it into the
-	-- Workspace forever if anything below it threw an error.
+	-- Part to ask with. The drawn box above is decoration only - it takes no
+	-- part in this, which is why it can be switched off without changing
+	-- who gets hit.
 	local params = OverlapParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { character }
 
-	local bonkCFrame = root.CFrame * CFrame.new(0, 0, -BONK_REACH / 2)
-	local bonkSize = Vector3.new(BONK_WIDTH, BONK_HEIGHT, BONK_REACH)
 	local parts = workspace:GetPartBoundsInBox(bonkCFrame, bonkSize, params)
 
 	local alreadyHit = {}
@@ -218,7 +250,7 @@ bonkEvent.OnServerEvent:Connect(function(player)
 				local offset = otherRoot.Position - root.Position
 				local direction = (offset.Magnitude > 0) and offset.Unit or root.CFrame.LookVector
 
-				otherRoot.AssemblyLinearVelocity = direction * knockback + Vector3.new(0, UPWARD_FORCE, 0)
+				otherRoot.AssemblyLinearVelocity = direction * KNOCKBACK + Vector3.new(0, UPWARD_FORCE, 0)
 
 				if otherPlayer then
 					payIcicle(player)
