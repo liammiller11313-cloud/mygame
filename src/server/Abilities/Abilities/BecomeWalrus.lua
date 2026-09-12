@@ -65,6 +65,20 @@ local BecomeWalrus = {}
      would make the two mean different things on different abilities. ]]
 local MODEL_NAME = "Become Walrus"
 
+--[[
+	── WHICH WAY THE WALRUS FACES ──────────────────────────────────────────────
+	The model was standing on its tail. It is pivoted onto the character's
+	HumanoidRootPart, whose CFrame is upright because a person is upright, and a
+	walrus authored lying down in Studio then gets stood up to match.
+
+	Ninety degrees of pitch puts it back on its belly. A constant rather than a
+	number buried in the PivotTo, because which way is "right" is a property of
+	the ASSET and nothing here can measure it: if it ends up upside down or
+	facing its own tail, this is the one line to change, and the three that
+	matter are (-90, 0, 0), (90, 0, 0) and (0, 0, 90).
+]]
+local MODEL_PITCH = -90
+
 --[[ How often the walrus's own clock is looked at, and how often a charging one
      checks what it has run into. Tied to the ability step rather than to a frame:
      a bonk sweep is an allocation, and sixty of them a second per walrus is the
@@ -326,7 +340,7 @@ local function dress(walrus: Walrus): Model?
 	local model = template:Clone()
 
 	model.Name = "FL_Walrus"
-	model:PivotTo(walrus.root.CFrame)
+	model:PivotTo(walrus.root.CFrame * CFrame.Angles(math.rad(MODEL_PITCH), 0, 0))
 
 	local motors = motorsIn(model)
 	local carrier = if #motors > 0 then rootOf(model, motors) else nil

@@ -26,7 +26,9 @@
 ]]
 
 local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
@@ -41,6 +43,40 @@ local UITheme = require(Shared.Config.UITheme)
 local COLOR = UITheme.Color
 
 local CRYO_COLOR = Color3.fromRGB(122, 196, 226)
+
+--[[ The walrus breath. Built-in textures on purpose, the same two every other
+     effect file in this folder uses: they ship with the engine, so there is no
+     asset to fail to load on the one frame somebody needs to see a cone of fire
+     coming at them. ]]
+local FLAME_TEXTURE = "rbxasset://textures/particles/fire_main.dds"
+local FLAME_SMOKE_TEXTURE = "rbxasset://textures/particles/smoke_main.dds"
+
+--[[ How long the particle lives, and therefore how the speed is solved.
+
+     The breath's REACH is a server number — AbilityConfig's FlameRange, which
+     rides every broadcast — and a flame that stops short of what it is killing
+     reads as a bug in the damage rather than a choice about the art. So the
+     lifetime is fixed here and the speed is worked out from the range that
+     arrived: range / lifetime, which puts the last particle at the last stud of
+     the cone at the moment it dies. ]]
+local FLAME_LIFETIME = 0.42
+
+--[[ How long one broadcast keeps the flame lit.
+
+     The server sends one of these per FlameTick (0.15s) while the button is
+     held, so the flame has to survive the GAP between them or it strobes. A
+     little over two ticks: long enough that a dropped packet does not blink it,
+     short enough that letting go stops it inside a fifth of a second. ]]
+local FLAME_HOLD = 0.34
+
+--[[ How fast the emitter catches up to where the server last said the walrus
+     was pointing, as a fraction per 60th of a second.
+
+     Not a snap. Six updates a second against a head that can turn as fast as
+     the mouse does means a snapped cone jumps in visible steps; lerping the
+     WHOLE transform — position and facing together — turns those steps into the
+     sweep the player is actually performing. ]]
+local FLAME_FOLLOW = 0.35
 
 --[[ The airstrike's own numbers, including the flyover meshes. Read once: this
      is a frozen table and re-reaching through the config on every strike is a
@@ -364,6 +400,262 @@ local function blast(payload: any)
 	     is lighting. ]]
 end
 
+--[[
+	── THE WALRUS BREATH ───────────────────────────────────────────────────────
+	The one effect in this file that is not a moment.
+
+	Everything else here fires once and fades: a tracer, a heal pulse, a blast.
+	The breath is HELD — the server re-broadcasts it every FlameTick for as long
+	as the button is down — so drawing it the way the others are drawn would be
+	six separate puffs a second with a visible gap between each one.
+
+	So it is a lamp rather than a flash. One node per breathing player, kept
+	alive between broadcasts, switched on by each one and switched off by a
+	deadline that each one pushes forward. The broadcasts stop, the deadline
+	passes, the flame goes out on its own. Nothing has to send a "stopped".
+
+	── WHY IT FOLLOWS RATHER THAN JUMPS ────────────────────────────────────────
+	The payload carries where the mouth was and which way it pointed at the
+	instant the server charged a tick. Six of those a second is plenty to damage
+	with and nowhere near enough to LOOK like a sweep: dropped straight onto the
+	node it reads as a cone teleporting between six poses. The node lerps toward
+	the last pose instead, so a player turning through a crowd draws the arc they
+	are actually describing.
+
+	── IT IS DRAWN FOR EVERYONE, INCLUDING THE WALRUS ──────────────────────────
+	Deliberately. This is a third-person ability — the player is driving a body
+	they can see — so the same cone that tells the team where not to stand is the
+	cone the walrus is aiming with. There is no first-person case to special-case.
+]]
+type FlameNode = {
+	part: BasePart,
+	fire: ParticleEmitter,
+	smoke: ParticleEmitter,
+	light: PointLight,
+	target: CFrame,
+	until_: number,
+	range: number,
+	angle: number,
+}
+
+local flames: { [Player]: FlameNode } = {}
+local flameStep: RBXScriptConnection? = nil
+
+local function newFlameEmitter(host: BasePart, name: string, texture: string): ParticleEmitter
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Name = name
+	emitter.Texture = texture
+	-- Out of the node's front face, which is the face aimAt points down the cone.
+	emitter.EmissionDirection = Enum.NormalId.Front
+	emitter.Enabled = false
+	emitter.Rotation = NumberRange.new(0, 360)
+	emitter.RotSpeed = NumberRange.new(-90, 90)
+	emitter.LightEmission = 1
+	emitter.LightInfluence = 0
+	emitter.Parent = host
+	return emitter
+end
+
+local function flameNode(player: Player): FlameNode?
+	local existing = flames[player]
+	if existing and existing.part.Parent then
+		return existing
+	end
+	if not folder or not folder.Parent then
+		return nil
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "FL_WalrusBreath"
+	part.Size = Vector3.new(0.2, 0.2, 0.2)
+	part.Transparency = 1
+	decorate(part)
+
+	local fire = newFlameEmitter(part, "Fire", FLAME_TEXTURE)
+	fire.Lifetime = NumberRange.new(FLAME_LIFETIME * 0.7, FLAME_LIFETIME)
+	--[[ Fat at the mouth, fatter down the cone, gone at the end. The widening is
+	     what makes a stream of particles read as a CONE rather than a jet, and
+	     it is the same shape the damage test uses. ]]
+	fire.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.6),
+		NumberSequenceKeypoint.new(0.45, 7.0),
+		NumberSequenceKeypoint.new(1, 11.0),
+	})
+	--[[ White-hot at the mouth through orange to a dull red at the tip. Colour
+	     is doing the distance cue here: the hot end is where it kills. ]]
+	fire.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 244, 214)),
+		ColorSequenceKeypoint.new(0.3, Color3.fromRGB(255, 176, 62)),
+		ColorSequenceKeypoint.new(0.75, Color3.fromRGB(224, 88, 32)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(112, 32, 18)),
+	})
+	fire.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.45),
+		NumberSequenceKeypoint.new(0.25, 0.15),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	fire.Rate = 190
+	-- Dragged, so the tip of the cone slows and billows instead of ending flat.
+	fire.Drag = 2.5
+	fire.Acceleration = Vector3.new(0, 9, 0)
+
+	local smoke = newFlameEmitter(part, "Smoke", FLAME_SMOKE_TEXTURE)
+	smoke.Lifetime = NumberRange.new(FLAME_LIFETIME * 1.6, FLAME_LIFETIME * 2.6)
+	smoke.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 3.0),
+		NumberSequenceKeypoint.new(1, 15.0),
+	})
+	smoke.Color = ColorSequence.new(Color3.fromRGB(58, 48, 44))
+	smoke.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.75),
+		NumberSequenceKeypoint.new(0.4, 0.85),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	--[[ A tenth of the fire's rate. Smoke is the tail that says the fire was
+	     here a moment ago; any more of it and it fogs the thing you are aiming. ]]
+	smoke.Rate = 22
+	smoke.Drag = 4
+	smoke.Acceleration = Vector3.new(0, 16, 0)
+	smoke.LightEmission = 0
+
+	local light = Instance.new("PointLight")
+	light.Name = "Glow"
+	light.Color = Color3.fromRGB(255, 158, 72)
+	light.Range = 26
+	light.Brightness = 2.4
+	light.Shadows = false
+	light.Enabled = false
+	light.Parent = part
+
+	local node: FlameNode = {
+		part = part,
+		fire = fire,
+		smoke = smoke,
+		light = light,
+		target = part.CFrame,
+		until_ = 0,
+		range = 0,
+		angle = 0,
+	}
+	flames[player] = node
+	return node
+end
+
+local function douse(player: Player)
+	local node = flames[player]
+	flames[player] = nil
+	if not node then
+		return
+	end
+	node.part:Destroy()
+end
+
+--[[ One frame of every lit breath. Cheap by construction: this only runs while
+     somebody is actually breathing, and it stops itself the moment the last
+     flame goes out. ]]
+local function stepFlames(delta: number)
+	local now = os.clock()
+	local lit = false
+
+	for player, node in flames do
+		if not node.part.Parent then
+			flames[player] = nil
+			continue
+		end
+
+		if now >= node.until_ then
+			if node.fire.Enabled then
+				node.fire.Enabled = false
+				node.smoke.Enabled = false
+				node.light.Enabled = false
+			end
+			--[[ The node stays. A breath is held in bursts — bonk, breathe, bonk,
+			     breathe — and rebuilding four emitters and a light every time the
+			     button comes up is work for nothing. It is destroyed when the
+			     PLAYER goes, not when the fire does. ]]
+			continue
+		end
+
+		lit = true
+		--[[ Framerate-independent lerp. The naive `alpha = FLAME_FOLLOW` chases
+		     at a rate that depends on how fast the machine is drawing, so the
+		     same sweep looks different on two clients watching the same walrus. ]]
+		local alpha = 1 - (1 - FLAME_FOLLOW) ^ (delta * 60)
+		node.part.CFrame = node.part.CFrame:Lerp(node.target, math.clamp(alpha, 0, 1))
+	end
+
+	if not lit and flameStep then
+		flameStep:Disconnect()
+		flameStep = nil
+	end
+end
+
+local function walrusFlame(payload: any)
+	local player = payload.player
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+	if typeof(payload.origin) ~= "Vector3" or typeof(payload.direction) ~= "Vector3" then
+		return
+	end
+	local direction = payload.direction
+	if direction.Magnitude <= 0.001 or direction.X ~= direction.X then
+		return
+	end
+	direction = direction.Unit
+
+	local node = flameNode(player)
+	if not node then
+		return
+	end
+
+	--[[ Out of the mouth rather than out of the middle. The server measures the
+	     cone from the root because that is where the body IS; the fire has to
+	     leave the front of the head or it looks like the walrus is on fire
+	     rather than breathing it. ]]
+	local mouth = payload.origin + direction * 3.2 + Vector3.new(0, 1.1, 0)
+	--[[ CFrame.lookAt puts -Z down the aim, and a ParticleEmitter emits down
+	     +Z on the Front face, so the node is turned to face the other way. ]]
+	node.target = CFrame.lookAt(mouth, mouth - direction)
+
+	--[[ First tick of a fresh breath: put it there rather than lerping to it
+	     from wherever the last breath ended, which could be across the map. ]]
+	if node.until_ <= os.clock() then
+		node.part.CFrame = node.target
+	end
+	node.until_ = os.clock() + FLAME_HOLD
+
+	--[[ Speed and spread re-solved only when the server's numbers actually
+	     change. They come off a frozen config and never do in practice, but they
+	     ride the payload rather than being read from AbilityConfig here, so a
+	     modifier that widened the cone one day would widen the art with it. ]]
+	local range = if typeof(payload.range) == "number" then payload.range else 60
+	local angle = if typeof(payload.angle) == "number" then payload.angle else 26
+	if node.range ~= range then
+		node.range = range
+		local speed = range / FLAME_LIFETIME
+		node.fire.Speed = NumberRange.new(speed * 0.8, speed)
+		node.smoke.Speed = NumberRange.new(speed * 0.25, speed * 0.45)
+	end
+	if node.angle ~= angle then
+		node.angle = angle
+		--[[ The emitter's spread is the same half-angle the damage cone tests,
+		     so what burns is what is drawn. ]]
+		node.fire.SpreadAngle = Vector2.new(angle, angle)
+		node.smoke.SpreadAngle = Vector2.new(angle * 0.7, angle * 0.7)
+	end
+
+	if not node.fire.Enabled then
+		node.fire.Enabled = true
+		node.smoke.Enabled = true
+		node.light.Enabled = true
+	end
+
+	if not flameStep then
+		flameStep = RunService.RenderStepped:Connect(stepFlames)
+	end
+end
+
 -- ── lifecycle ───────────────────────────────────────────────────────────────
 
 function AbilityEffects:init()
@@ -397,15 +689,31 @@ function AbilityEffects:start()
 				marker(payload)
 			elseif kind == "Explosion" then
 				blast(payload)
+			elseif kind == "WalrusFlame" then
+				walrusFlame(payload)
 			end
 		end)
 		if not ok then
 			warn("[AbilityEffects] " .. tostring(kind) .. " failed: " .. tostring(err))
 		end
 	end)
+
+	--[[ A walrus who leaves mid-breath leaves a lit node behind, and nothing
+	     would ever push its deadline again — so it would sit in the folder,
+	     dark, forever. Destroyed with the player rather than swept on a timer. ]]
+	trove:connect(Players.PlayerRemoving, douse)
 end
 
 function AbilityEffects:destroy()
+	if flameStep then
+		flameStep:Disconnect()
+		flameStep = nil
+	end
+	--[[ The nodes live in `folder`, which the trove destroys below — but the
+	     TABLE pointing at them does not, and a re-init would then find stale
+	     entries whose `part.Parent` check is the only thing standing between it
+	     and writing to a destroyed instance. Cleared here instead. ]]
+	table.clear(flames)
 	trove:destroy()
 	--[[ Nil'd as well as destroyed. The flyover's two delayed callbacks fire up
 	     to a few seconds after the marker and check this before building

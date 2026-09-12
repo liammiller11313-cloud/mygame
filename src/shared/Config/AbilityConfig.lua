@@ -269,7 +269,23 @@ local DEFINITIONS: { Ability } = {
 		displayName = "FIELD MEDIC",
 		blurb = "Patches up everyone standing near you, including you.",
 		price = 1_800,
-		cooldown = 300,
+		--[[
+			── THE ONE ABILITY THAT IS NOT 300 ─────────────────────────────────
+			Every other ability in this file is on five minutes, and Field Medic
+			was too. It is the odd one out for a reason worth writing down: the
+			other five are things you SPEND — a turret, an airstrike, a shield
+			you put up before the wave. You choose the moment.
+
+			A heal is not chosen. It is asked for, by somebody else, at whatever
+			moment they went down — and a five-minute lockout means the answer is
+			usually "not yet", which turns the ability into something you carry
+			rather than something you use. Three uses across a seventeen-minute
+			round is not a medic.
+
+			Three minutes is five uses, and still long enough that it cannot
+			replace a medkit or make being downed cheap.
+		]]
+		cooldown = 180,
 		targeted = false,
 		range = 0,
 		tuning = table.freeze({

@@ -157,6 +157,66 @@ GoreConfig.Dismemberment = table.freeze({
 	LimbLifetime = 14,
 	LimbImpulse = 26,
 	LimbSpin = 14,
+
+	--[[
+		── AND THEN THE STUMP KEEPS BLEEDING ───────────────────────────────────
+		The one thing missing from a dismemberment that otherwise had everything.
+
+		A cut used to be three moments and then nothing: the burst, two delayed
+		pumps, and a body that walked away from its own arm completely clean. A
+		Common with one arm off looked, two seconds later, exactly like a Common
+		that had never been hit — which is the gore system spending its most
+		expensive effect and then erasing the evidence of it.
+
+		Both halves of the cut get one. The stump on the BODY is what makes a
+		maimed zombie read as maimed for the rest of its life, and the stump on
+		the LIMB is what turns a tumbling arm into something that was recently
+		attached to somebody. They are the same emitter with the same numbers,
+		because it is the same wound.
+
+		── WHY IT IS A SERVER PART AND NOT A BROADCAST ─────────────────────────
+		Everything else in this system is a client effect fired off a throttled
+		event, and for good reason — a burst is a moment and moments do not need
+		to be agreed on. A drip is not a moment. It runs for seconds, it moves
+		with a body that is walking, and every player has to see it on the same
+		zombie, so it belongs on the instance rather than in a broadcast. It is
+		also cheaper that way: one replicated emitter against a stream of events
+		at four a second per stump.
+
+		── THE NUMBERS ─────────────────────────────────────────────────────────
+		Rate   is per second and deliberately low. This is dripping, not spraying;
+		       the spray already happened. High enough to be continuous at a
+		       walking pace, low enough that forty maimed bodies is not a fog.
+		Seconds is how long before it stops. Bounded because a corpse lying on the
+		       floor for forty-five seconds should stop emptying at some point,
+		       and an emitter that never switches off is a cost that only ever
+		       grows. Comfortably longer than a Common survives being maimed.
+		Speed  is barely anything. Gravity does the work — that is what makes it
+		       read as weight rather than as pressure.
+	]]
+	StumpBleeds = true,
+	StumpBleedRate = 14,
+	StumpBleedSeconds = 9,
+	StumpBleedSpeed = 2.5,
+	StumpBleedLifetime = 1.1,
+	StumpBleedSize = 0.42,
+
+	--[[
+		How far along the stump the two delayed pumps are allowed to follow.
+
+		They used to fire at a FIXED world point: wherever the joint was at the
+		instant of the cut. That is correct for a body that fell over and wrong
+		for every body that did not — a Common that loses an arm and keeps
+		running leaves its own two pumps hanging in mid-air a second behind it,
+		which reads as a bug rather than as blood.
+
+		So they follow the stump part, up to this far. The cap is a real
+		instance with a real position and asking it where it is costs nothing.
+		The clamp is for the ragdoll case: a limb the physics has flung across
+		the room should not drag the pumps with it, because a pump that travels
+		thirty studs is not a pump, it is a comet.
+	]]
+	SpurtFollowMax = 12,
 })
 
 --[[ Gibbing. The body is hidden and replaced with chunks thrown along the shot
@@ -198,6 +258,47 @@ GoreConfig.Gibs = table.freeze({
 	MeshShare = 0.5,
 	DarkMixMax = 0.85,
 	Wetness = 0.08,
+
+	--[[
+		── AND SOME OF IT IS BONE ──────────────────────────────────────────────
+		The tell of a cheap gib system, and the last one left in this one.
+
+		Everything above varies a chunk's SHAPE and its DARKNESS, and both of
+		those are variations on one idea: red. A burst of nine red things, however
+		well shaped and however well graded, still reads at a glance as a red
+		cloud — because there is no second material in it for the red to be red
+		AGAINST. A body is not one substance and a body coming apart should not
+		look like one.
+
+		Three or four pale splinters in a burst of nine is all it takes. They are
+		the only light thing in a dark effect, so the eye lands on them, and what
+		it reads is "that was a person" rather than "that was a colour". This is
+		the single highest-contrast thing that can be added to a gib and it costs
+		one comparison and three property writes per chunk.
+
+		── WHAT MAKES A SHARD A SHARD ──────────────────────────────────────────
+		Not the colour on its own. Bone is also THIN — a splinter, not a lump —
+		and it is DRY where meat is wet, so a shard that kept the flesh
+		reflectance would read as a pale wet lump, which is worse than no bone at
+		all. BoneAspect squashes two of the three axes hard enough that both the
+		box chunks and the sphere-meshed ones come out as flakes.
+
+		And a shard does not leave a smear where it lands. A piece of bone that
+		marked the floor like a piece of meat would undo the contrast on the one
+		surface the player spends the most time looking at.
+	]]
+	BoneShare = 0.24,
+	BoneColor = Color3.fromRGB(222, 214, 194),
+	--[[ How far toward the blood colour a shard may sit. Bone that came out of a
+	     body is not clean bone; the range keeps a few of them nearly white and
+	     stains the rest, which is more convincing than either extreme. ]]
+	BoneStainMax = 0.4,
+	BoneAspect = 0.3,
+	BoneWetness = 0.0,
+	--[[ Shards bleed less on the way out. Not none: a splintered bone leaves a
+	     body wet, and a pale chunk drawing no line at all separates from the
+	     burst and reads as debris that was already in the room. ]]
+	BoneTrailShare = 0.35,
 
 	--[[
 		The mark a chunk leaves where it comes to rest.

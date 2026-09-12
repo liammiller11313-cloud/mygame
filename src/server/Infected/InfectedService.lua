@@ -448,9 +448,38 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?,
 	     the population and spawn-rate scales, which change how MANY arrive; a
 	     Common with less health would change what a bullet does, and a survivor
 	     should not have to re-learn their weapon because somebody left. ]]
+	local burnScale = 1
 	if definition.isBoss then
 		local crew = GameModeConfig.headcountRow(#Players:GetPlayers())
 		health = math.max(math.floor(health * crew.bossHealth + 0.5), 1)
+		--[[ AND FIRE SCALES WITH IT. burnDamagePerSecond is a flat number, so the
+		     moment the line above started moving a boss's health the molotov
+		     stopped meaning the same thing at every crew size — and it moved in
+		     the wrong direction, because a smaller team gets a smaller boss AND
+		     keeps the full 150 a second.
+
+		     The arithmetic, with a molotov's 22-second burn against a Tank:
+
+		         crew   tank HP   molotov   share of the bar
+		         4         4000      3300               82%
+		         3         3280      3300              101%   dies to one
+		         2         2240      3300              147%   dies to one
+		         1         1600      3300              206%   dies to one
+
+		     Fire IS the intended answer to a Tank — see the note on the number
+		     itself in InfectedConfig — but "answer" was meant to be "burns off
+		     four fifths of it while the team finishes the job", not "one thrown
+		     bottle deletes the boss". Below a full team it was the latter, which
+		     is the one crew size that most needs the fight to happen.
+
+		     Scaling burn by the SAME multiplier keeps that 82% true at every
+		     crew size, and it keeps every relative claim in InfectedConfig
+		     honest as well: the Tank's 150 is still six times the Metallic's 25
+		     and the Bacteria Monster's 200 is still the highest in the game,
+		     because they all move together.
+
+		     Bosses only, for the same reason the health scale is bosses only. ]]
+		burnScale = crew.bossHealth
 	end
 
 	humanoid.MaxHealth = health
@@ -549,6 +578,13 @@ function InfectedService:spawn(kind: string, position: Vector3, cframe: CFrame?,
 		dead = false,
 		priority = definition.isSpecial or definition.isBoss,
 		errors = 0,
+
+		--[[ What this body's burn ticks are multiplied by. One for everything
+		     that is not a boss; the crew's boss-health multiplier for everything
+		     that is, so fire keeps costing the same FRACTION of a boss whatever
+		     the headcount did to its bar. Set at spawn beside the health it
+		     mirrors — see the note up there. ]]
+		burnScale = burnScale,
 
 		lastUpdate = os.clock(),
 		interval = 0,
@@ -1357,7 +1393,7 @@ function InfectedService:_stepBurn(record: any, now: number)
 	record.burnLastAt = now
 	record.burnNextAt = now + BURN_TICK_INTERVAL
 
-	local amount = record.definition.burnDamagePerSecond * elapsed
+	local amount = record.definition.burnDamagePerSecond * record.burnScale * elapsed
 	if amount <= 0 then
 		return
 	end

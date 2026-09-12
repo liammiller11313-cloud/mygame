@@ -1736,12 +1736,20 @@ function DirectorService:releaseBoss(kind: string, elite: string?): Model?
 	-- read may be up to an eighth of a second stale — long enough for somebody to
 	-- have turned around, which is the one thing this search exists to catch.
 	self:_refreshSurvivors()
-	if #self._characters == 0 then
-		return nil
-	end
 
 	local now = self:_now()
 	local anchor, radius = self:_bossAnchor(self:_survivorFlow())
+
+	--[[ Nobody has a character this instant. That is not "no boss this wave" —
+	     it is a frame during a respawn, and RoundService has already announced
+	     the thing. Placement needs a survivor to measure sight lines against, so
+	     it cannot happen NOW; it can happen in a moment, which is exactly what
+	     the queue is for. ]]
+	if #self._characters == 0 then
+		self._bossRetryAt = now + BOSS_RETRY_INTERVAL
+		self:_enqueue(SOURCE_BOSS, kind, anchor, radius, nil, elite)
+		return nil
+	end
 	local position, failure =
 		self:_placeFor({ source = SOURCE_BOSS, kind = kind, anchor = anchor, radius = radius }, now)
 
@@ -1757,15 +1765,36 @@ function DirectorService:releaseBoss(kind: string, elite: string?): Model?
 
 	local model = infected:spawn(kind, position, nil, elite)
 	if not model then
-		-- Not a placement problem, and waiting does not fix it: the roster is
-		-- already at this kind's maxAlive, or the rig could not be built.
-		-- Queueing a retry here would just burn placement searches forever.
+		--[[ Not a placement problem. Two different things land here and they need
+		     opposite answers, which the old code did not separate:
+
+		       * THE ROSTER IS FULL. maxAlive for this kind is already met — a
+		         Tank from the previous wave is still standing, or an EXPLODER
+		         INVASION-style modifier lowered the ceiling. That is TRANSIENT.
+		         It resolves the moment the team kills what is already out there,
+		         and dropping the request means the wave announced a Tank and the
+		         team never got one. Queue it.
+
+		       * THE RIG COULD NOT BE BUILT. PlaceholderFactory failed, or gave
+		         back something with no Humanoid. Waiting does not fix that, and
+		         a queued retry would re-run a placement search forever, so it is
+		         dropped loudly and stays dropped.
+
+		     Told apart by asking whether anything of this kind is actually alive:
+		     a refusal with a live roster is the ceiling, a refusal with an empty
+		     one is the factory. ]]
+		local alive = infected:getCount(kind)
+		if alive > 0 then
+			self._bossRetryAt = now + BOSS_RETRY_INTERVAL
+			self:_enqueue(SOURCE_BOSS, kind, anchor, radius, nil, elite)
+			return nil
+		end
 		warn(
 			string.format(
-				"[DirectorService] releaseBoss(%q): InfectedService refused the spawn — "
-					.. "most likely %d already alive against its maxAlive",
-				kind,
-				infected:getCount(kind)
+				"[DirectorService] releaseBoss(%q): InfectedService refused the spawn with none "
+					.. "alive, so this is a rig failure rather than the maxAlive ceiling — "
+					.. "the wave's boss is dropped",
+				kind
 			)
 		)
 		return nil
@@ -2063,8 +2092,34 @@ function DirectorService:_drainQueue(now: number)
 			self._waveSpawned += 1
 		end
 		if not model then
+			--[[ Same two cases as releaseBoss, and the same split. _bossRetryAt
+			     alone is not a retry: it is only read by _updateBosses, which
+			     returns on its first line for the whole of any wave round, so a
+			     boss dropped here used to be a boss that never arrived. ]]
 			if request.source == SOURCE_BOSS then
 				self._bossRetryAt = now + BOSS_RETRY_INTERVAL
+				local ceiling = InfectedConfig.get(request.kind)
+				local room = if ceiling then ceiling.maxAlive else 1
+				--[[ Capped at the kind's own ceiling so a Tank that simply never
+				     dies cannot ratchet one stale request per wave into a queue
+				     that empties all at once the moment it does. ]]
+				if infected:getCount(request.kind) > 0 and self:_queuedCount(SOURCE_BOSS) < room then
+					self:_enqueue(
+						SOURCE_BOSS,
+						request.kind,
+						request.anchor,
+						request.radius,
+						request.flank,
+						request.elite
+					)
+					--[[ And the tick ends here. The request went to the TAIL, and
+					     with a spawn budget of two per tick a queue holding little
+					     else would dequeue it straight back and spend the second
+					     slot re-running a search and a spawn that just failed for
+					     a reason nothing since has changed. One attempt per tick;
+					     the horde keeps the other slot. ]]
+					break
+				end
 			end
 			continue
 		end

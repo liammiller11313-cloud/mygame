@@ -264,6 +264,13 @@ local DEBRIS_GRACE = 6
 local PRIORITY_BLOOD = 1
 local PRIORITY_KILL = 2
 
+--[[ A built-in engine texture, the same one every client effect in this game
+     draws blood with. Built in specifically: this emitter is created on the
+     SERVER and replicated, so it appears on a client that has loaded nothing,
+     and an asset id that has to stream is an asset id that can arrive after the
+     zombie it belonged to is already dead. ]]
+local BLEED_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
+
 -- No infected kind attribute means no per-kind lifetime, so a stray body falls
 -- back to the Common's rather than to a number invented here.
 local FALLBACK_CORPSE_LIFETIME = InfectedConfig.Definitions[Enums.Infected.Common].corpseLifetime
@@ -1128,8 +1135,14 @@ function GoreService:dismember(
 	     flying. Massless makes that unlikely rather than impossible, and the
 	     ordering makes it moot. ]]
 	local socket = math.min(limbRoot.Size.X, limbRoot.Size.Z) * STUMP_FILL
+	--[[ The cap on the BODY, kept. The delayed pumps below fire from wherever
+	     this has got to rather than from where the cut happened — see
+	     GoreConfig's SpurtFollowMax. The limb's own cap is not kept, because a
+	     limb that has been thrown is exactly the thing those pumps must not
+	     chase. ]]
+	local bodyCap: BasePart? = nil
 	if socket > 0 then
-		self:_capStump(anchorPart, stump, socket)
+		bodyCap = self:_capStump(anchorPart, stump, socket)
 		self:_capStump(limbRoot, stump, socket)
 	end
 
@@ -1215,11 +1228,27 @@ function GoreService:dismember(
 	]]
 	for beat, delay in BLOOD.SpurtDelays do
 		task.delay(delay, function()
+			--[[ Where the wound is NOW, not where it was. A maimed Common keeps
+			     running, and pumps left behind at the old joint position hang in
+			     mid-air a stride back — which is the one way this effect can
+			     read as broken rather than as blood.
+
+			     Clamped to SpurtFollowMax so a ragdoll the physics has thrown
+			     across the room does not drag them with it: past that distance
+			     the cut is better described by where it happened than by where
+			     the body ended up. ]]
+			local at = stump
+			if bodyCap and bodyCap.Parent then
+				local moved = bodyCap.Position - stump
+				at = if moved.Magnitude <= LIMBS.SpurtFollowMax
+					then bodyCap.Position
+					else stump + moved.Unit * LIMBS.SpurtFollowMax
+			end
 			self:_emit({
 				model = nil,
 				level = LEVEL.Dismember,
 				part = partName,
-				position = stump,
+				position = at,
 				normal = away,
 				direction = away,
 				force = speed * 0.5,
@@ -1258,7 +1287,60 @@ end
 	rather than to the model, so it is destroyed by whatever destroys that part
 	and there is no second lifetime to get wrong.
 ]]
-function GoreService:_capStump(host: BasePart, at: Vector3, diameter: number)
+--[[ The drip that hangs off a cap. See GoreConfig.Dismemberment's stump-bleed
+     note for why this is an instance on the body rather than a broadcast. ]]
+local function bleedFrom(cap: BasePart, diameter: number)
+	if not LIMBS.StumpBleeds then
+		return
+	end
+
+	local drip = Instance.new("ParticleEmitter")
+	drip.Name = "FL_StumpBleed"
+	drip.Texture = BLEED_TEXTURE
+	--[[ Down. A ParticleEmitter's EmissionDirection is a face of the part it
+	     lives on, and the cap is a ball welded into the socket — so Bottom is
+	     the opening, whichever way the limb it came off was pointing. ]]
+	drip.EmissionDirection = Enum.NormalId.Bottom
+	drip.Rate = LIMBS.StumpBleedRate
+	drip.Speed = NumberRange.new(LIMBS.StumpBleedSpeed * 0.4, LIMBS.StumpBleedSpeed)
+	--[[ Wide, because a wound does not aim. The narrow cone the spray uses is a
+	     thing arriving under pressure; this is a thing falling out. ]]
+	drip.SpreadAngle = Vector2.new(55, 55)
+	drip.Lifetime = NumberRange.new(LIMBS.StumpBleedLifetime * 0.6, LIMBS.StumpBleedLifetime)
+	--[[ Sized off the socket, so a Tank's shoulder drips in proportion to a
+	     Tank and a Common's wrist does not throw a Tank's droplets. ]]
+	local size = LIMBS.StumpBleedSize * math.max(diameter, 0.2)
+	drip.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, size),
+		NumberSequenceKeypoint.new(1, size * 0.55),
+	})
+	--[[ Fresh at the wound, dark by the time it lands — the same two-colour
+	     read the client's spray uses, for the same reason: undarkened blood
+	     falling through a dim room looks like paint. ]]
+	drip.Color = ColorSequence.new(BLOOD.Color, BLOOD.DarkColor)
+	drip.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(0.7, 0.25),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	-- Gravity, near enough. Weight is the whole read.
+	drip.Acceleration = Vector3.new(0, -70, 0)
+	drip.LightEmission = 0
+	drip.LightInfluence = 1
+	drip.Parent = cap
+
+	--[[ And it stops. A corpse that bleeds for its whole forty-five seconds on
+	     the floor is an emitter nobody is looking at, times the limb budget.
+	     Disabled rather than destroyed so the pooled-instance cost is paid once
+	     and the cap stays exactly the object it was. ]]
+	task.delay(LIMBS.StumpBleedSeconds, function()
+		if drip.Parent then
+			drip.Enabled = false
+		end
+	end)
+end
+
+function GoreService:_capStump(host: BasePart, at: Vector3, diameter: number): BasePart
 	local cap = Instance.new("Part")
 	cap.Name = "FL_Stump"
 	cap.Shape = Enum.PartType.Ball
@@ -1282,6 +1364,9 @@ function GoreService:_capStump(host: BasePart, at: Vector3, diameter: number)
 	weld.Part0 = host
 	weld.Part1 = cap
 	weld.Parent = cap
+
+	bleedFrom(cap, diameter)
+	return cap
 end
 
 --[[

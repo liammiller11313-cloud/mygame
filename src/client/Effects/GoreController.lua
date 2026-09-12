@@ -840,18 +840,41 @@ local function spawnGibs(position: Vector3, direction: Vector3, seed: number, co
 		local slot = gibSlot()
 		local part = slot.part
 
-		--[[ Deep tissue is nearly black and surface flesh is bright; a burst
-		     carrying both reads as a body, and one flat colour reads as a colour.
-		     From the shared seed, so four clients tint the same chunk the same. ]]
-		part.Color = GIBS.Color:Lerp(BLOOD.DarkColor, rng:NextNumber(0, GIBS.DarkMixMax))
+		--[[ Bone or meat, off the shared seed like everything else here, so the
+		     same chunk is the same substance on all four clients. See
+		     GoreConfig.Gibs.BoneShare for why a burst needs both. ]]
+		local bone = rng:NextNumber() < GIBS.BoneShare
+
+		if bone then
+			--[[ Stained rather than clean, and dry rather than wet. A pale chunk
+			     carrying the flesh reflectance reads as a wet lump, which is the
+			     one way this can look worse than no bone at all. ]]
+			part.Color = GIBS.BoneColor:Lerp(BLOOD.DarkColor, rng:NextNumber(0, GIBS.BoneStainMax))
+			part.Reflectance = GIBS.BoneWetness
+		else
+			--[[ Deep tissue is nearly black and surface flesh is bright; a burst
+			     carrying both reads as a body, and one flat colour reads as a
+			     colour. From the shared seed, so four clients tint the same chunk
+			     the same. ]]
+			part.Color = GIBS.Color:Lerp(BLOOD.DarkColor, rng:NextNumber(0, GIBS.DarkMixMax))
+			--[[ Written back every spawn rather than only once at build time: the
+			     pool is round-robin, so this slot may have been a bone shard on
+			     the last body that burst and would still be dry. ]]
+			part.Reflectance = GIBS.Wetness
+		end
 
 		local size = rng:NextNumber(GIBS.SizeMin, GIBS.SizeMax)
 		-- Chunks, not dice: unequal sides on every axis.
 		part.Anchored = true
+		--[[ A shard is squashed on the two minor axes hard enough to read as a
+		     flake, which works for the boxes and for the sphere-meshed lumps
+		     alike — the mesh is rolled once when the slot is built and this
+		     function does not get to choose it. ]]
+		local minor = if bone then GIBS.BoneAspect else 1
 		part.Size = Vector3.new(
 			size,
-			size * rng:NextNumber(GIB_ASPECT_MIN, GIB_ASPECT_MAX),
-			size * rng:NextNumber(GIB_ASPECT_MIN, GIB_ASPECT_MAX)
+			size * rng:NextNumber(GIB_ASPECT_MIN, GIB_ASPECT_MAX) * minor,
+			size * rng:NextNumber(GIB_ASPECT_MIN, GIB_ASPECT_MAX) * minor
 		)
 		part.CFrame = CFrame.new(
 			position
@@ -887,9 +910,25 @@ local function spawnGibs(position: Vector3, direction: Vector3, seed: number, co
 		     short enough that a chunk which has landed is not still bleeding. ]]
 		slot.trailUntil = now + GIB_TRAIL_SECONDS
 		slot.trail.Enabled = true
+		--[[ A shard draws a thinner line out of the body than a piece of meat
+		     does. Set per spawn because the pool is round-robin and the slot
+		     carries whatever the last chunk through it was. ]]
+		slot.trail.Rate = GIB_TRAIL_RATE * particleScale * (if bone then GIBS.BoneTrailShare else 1)
 		--[[ From the shared seed, so the same chunks mark the floor on every
-		     client and four players walk through one room rather than four. ]]
-		slot.mark = rng:NextNumber() < GIBS.LandMarkChance
+		     client and four players walk through one room rather than four.
+
+		     Never for bone. The floor marks are what make a fought-through room
+		     read as fought-through, and they are the surface the player looks at
+		     most — a pale shard smearing one like a piece of meat spends the
+		     contrast the shard exists to create.
+
+		     Drawn BEFORE the bone test rather than after `and`, so the roll is
+		     spent either way. Short-circuiting it would make the number of draws
+		     depend on what each chunk turned out to be, and every client after
+		     the first shard would be reading a different point in a stream whose
+		     whole job is to be the same one. ]]
+		local marks = rng:NextNumber() < GIBS.LandMarkChance
+		slot.mark = marks and not bone
 	end
 end
 

@@ -48,6 +48,10 @@ local PANEL_WIDTH = 260
 --[[ Grown by a row for the keybind hint. See drawHint: a verb on a key nobody
      was told about is a verb nobody presses. ]]
 local PANEL_HEIGHT = 78
+--[[ How far above the bottom edge the panel sits. Enough to clear a phone's
+     home indicator and anything else that hugs the very edge, without pushing
+     it up into the middle of the screen where it would cover the fight. ]]
+local BOTTOM_LIFT = 72
 local BAR_HEIGHT = 8
 local HINT_HEIGHT = 16
 
@@ -98,14 +102,23 @@ local function build()
 	gui.Parent = player:WaitForChild("PlayerGui")
 	trove:add(gui)
 
-	--[[ Top centre, which is where this game already puts a thing that is
-	     happening TO you rather than a thing you own — the boss bar lives there
-	     and a walrus is the same kind of statement. Deliberately not the bottom
-	     corners, which are the hotbar's and the pad's. ]]
+	--[[
+		Bottom centre, raised clear of the very edge.
+
+		This was top centre, on the reasoning that the boss bar lives there and a
+		walrus is the same kind of statement. It is not: a boss bar is a thing
+		happening TO you and you read it once, while this is YOUR health and the
+		clock you are playing against, and both belong where the rest of your own
+		state is — down with the hotbar and the ammo.
+
+		Centre rather than a corner, because the corners are taken: the hotbar
+		holds the bottom right and the touch pad the bottom left. Raised by
+		BOTTOM_LIFT so it clears anything hugging the very edge on a phone.
+	]]
 	panel = Instance.new("Frame")
 	panel.Name = "Panel"
-	panel.AnchorPoint = Vector2.new(0.5, 0)
-	panel.Position = UDim2.new(0.5, 0, 0, LAYOUT.ScreenMargin)
+	panel.AnchorPoint = Vector2.new(0.5, 1)
+	panel.Position = UDim2.new(0.5, 0, 1, -(LAYOUT.ScreenMargin + BOTTOM_LIFT))
 	panel.Size = UDim2.fromOffset(PANEL_WIDTH, PANEL_HEIGHT)
 	panel.BackgroundColor3 = COLOR.Panel
 	panel.BackgroundTransparency = 0.25
