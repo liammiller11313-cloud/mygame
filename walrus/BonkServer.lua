@@ -46,6 +46,15 @@ local BONK_HEIGHT = 5
 local BONK_START = 2 -- studs in front of you the box begins
 local BONK_REACH = 14 -- studs in front of you the box ends
 
+-- Power is a rating out of 10-to-25, not a speed, so it needs turning into
+-- one. Seven studs per point: the starter's 10 becomes the 70 the game was
+-- tuned around, and Coinflip's 25 becomes 175.
+--
+-- This is the one dial that moves the whole roster at once. If the top end
+-- starts flinging people off the map, lower this rather than editing four
+-- walruses - the spread between them stays exactly as the signs promise.
+local KNOCKBACK_PER_POWER = 7
+
 -- Flat, deliberately. Scaling the lift too would make a strong walrus
 -- launch people skyward as well as far, which is twice as hard to balance
 -- and reads as a bug the first time someone leaves the map vertically.
@@ -265,12 +274,13 @@ end
 --  to the starter's, so a new walrus is never accidentally weightless.
 -- ============================================================
 
--- Power IS the knockback, straight through. No rate, no conversion: the
--- number here is the number of studs per second the victim leaves at, and
--- it's the number that belongs on the podium sign.
+-- Straight off the podium signs. Keep them matching: this table is what
+-- the game does, the sign is only what it claims.
 local WALRUS_POWER = {
-	Basic = 70,
-	Flamespitter = 105,
+	Basic = 10,
+	Flamespitter = 15,
+	Buff = 20,
+	Coinflip = 25,
 }
 
 -- Defined here rather than up with the other helpers because it reads the
@@ -344,8 +354,13 @@ local SPECIALS = {
 		end,
 	},
 
-	-- Flamespitter goes here when you're ready - same shape, different
-	-- Activate. Nothing else needs to change.
+	-- Still to write, each the same shape as Basic above:
+	--   Flamespitter  "Flamethrower"
+	--   Buff          "Seismic Toss"
+	--   Coinflip      "Take a Chance"
+	--
+	-- Until then those three bonk like everyone else, at their own Power,
+	-- and the HUD shows them no special row rather than a dead button.
 }
 
 -- ============================================================
@@ -408,7 +423,7 @@ bonkEvent.OnServerEvent:Connect(function(player)
 	end
 	startCooldown(player, nextBonk, "BonkReadyAt", COOLDOWN)
 
-	local knockback = powerOf(player, walrus)
+	local knockback = powerOf(player, walrus) * KNOCKBACK_PER_POWER
 
 	local targets = hitInFront(character, root, {
 		Start = BONK_START,
@@ -462,5 +477,5 @@ specialEvent.OnServerEvent:Connect(function(player)
 	end
 	startCooldown(player, nextSpecial, "SpecialReadyAt", special.Cooldown)
 
-	special.Activate(player, character, root, humanoid, powerOf(player, walrus))
+	special.Activate(player, character, root, humanoid, powerOf(player, walrus) * KNOCKBACK_PER_POWER)
 end)
