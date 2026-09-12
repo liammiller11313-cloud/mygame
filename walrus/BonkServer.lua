@@ -418,9 +418,8 @@ local SPECIALS = {
 		Cooldown = 8,
 
 		Activate = function(player, character, root, humanoid, knockback)
-			local LUNGE_SPEED = 95 -- much harder than a bonk's little step
-			local LUNGE_LIFT = 14 -- a hop, so you clear the ground going in
-			local JAB_DELAY = 0.25 -- how long the lunge gets before the jab
+			local DASH_SPEED = 85 -- studs per second, held for the whole dash
+			local DASH_TIME = 0.3 -- so the dash covers about 25 studs
 
 			-- A share of a normal bonk rather than its own number, so tuning
 			-- Power moves the jab with it instead of leaving it behind.
@@ -430,19 +429,57 @@ local SPECIALS = {
 			local JAB_UPWARD = 58 -- higher than a bonk: it's the special
 			local JAB_RAGDOLL = 3
 
-			-- The lunge. Keep upward momentum so this can't cancel a jump, but
-			-- never carry downward momentum into it: adding lift to a falling
-			-- player's negative speed can still total downward, which lunges
-			-- them into the ground instead of across it.
-			local rising = math.max(root.AssemblyLinearVelocity.Y, 0)
+			-- Lock the direction now and hold it for the whole dash. A dash that
+			-- follows wherever you're looking lets you curve mid-flight, which
+			-- makes it unreadable and so undodgeable.
 			local facing = root.CFrame.LookVector
-			root.AssemblyLinearVelocity = Vector3.new(facing.X, 0, facing.Z).Unit * LUNGE_SPEED
-				+ Vector3.new(0, rising + LUNGE_LIFT, 0)
+			local direction = Vector3.new(facing.X, 0, facing.Z)
+			if direction.Magnitude < 0.01 then
+				direction = Vector3.xAxis
+			end
+			direction = direction.Unit
 
-			-- The jab lands where the lunge carried you, not where you
-			-- started - that's the whole point of the delay.
-			task.delay(JAB_DELAY, function()
-				-- They may have been knocked down or killed mid-lunge.
+			-- A mover rather than one shove of velocity. A shove is eaten by
+			-- friction within a few frames and reads as a stumble; this holds the
+			-- speed flat for the whole dash, which is what makes it a dash.
+			local anchorPoint = Instance.new("Attachment")
+			anchorPoint.Name = "DashAnchor"
+			anchorPoint.Parent = root
+
+			local dash = Instance.new("LinearVelocity")
+			dash.Attachment0 = anchorPoint
+			dash.RelativeTo = Enum.ActuatorRelativeTo.World
+			dash.VectorVelocity = direction * DASH_SPEED
+
+			-- Per-axis force with nothing on Y. A mover that also drove the
+			-- vertical would hold them at zero fall speed and they'd hover across
+			-- the arena; leaving Y alone lets gravity carry on as normal.
+			dash.ForceLimitMode = Enum.ForceLimitMode.PerAxis
+			dash.MaxAxesForce = Vector3.new(1e6, 0, 1e6)
+			dash.Parent = root
+
+			-- Whatever else happens, these do not outlive the dash.
+			Debris:AddItem(dash, DASH_TIME + 1)
+			Debris:AddItem(anchorPoint, DASH_TIME + 1)
+
+			-- Bonked mid-dash? Cut the motor immediately, or a ragdolling body
+			-- keeps being driven forward while it's supposed to be flying away.
+			local interrupted
+			interrupted = humanoid:GetPropertyChangedSignal("PlatformStand"):Connect(function()
+				if humanoid.PlatformStand then
+					dash:Destroy()
+				end
+			end)
+
+			-- The jab fires from the callback that ends the dash, rather than off
+			-- a delay of its own. One timer, so the hit always lands exactly where
+			-- the dash put you and the two can never drift apart.
+			task.delay(DASH_TIME, function()
+				interrupted:Disconnect()
+				dash:Destroy()
+				anchorPoint:Destroy()
+
+				-- Died, left, or got knocked down on the way in.
 				if humanoid.Health <= 0 or humanoid.PlatformStand or not root.Parent then
 					return
 				end
