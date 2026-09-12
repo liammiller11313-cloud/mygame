@@ -46,8 +46,16 @@ local BONK_HEIGHT = 5
 local BONK_START = 2 -- studs in front of you the box begins
 local BONK_REACH = 14 -- studs in front of you the box ends
 
-local KNOCKBACK = 70
+-- Knockback comes from the walrus's Power, because Power IS how far you
+-- send someone. Seven studs of shove per point, so the starter's 10 lands
+-- on the 70 the game was already tuned around and nothing shifts under you.
+local KNOCKBACK_PER_POWER = 7
+
+-- Flat, deliberately. Scaling the lift too would make a strong walrus
+-- launch people skyward as well as far, which is twice as hard to balance
+-- and reads as a bug the first time someone leaves the map vertically.
 local UPWARD_FORCE = 25
+
 local RAGDOLL_TIME = 2 -- seconds they're on the floor
 
 local ICICLES_PER_BONK = 1
@@ -256,6 +264,25 @@ local function walrusNameOf(player, walrus)
 end
 
 -- ============================================================
+--  HOW HARD EACH WALRUS HITS
+--
+--  The number on the podium sign. A walrus missing from here falls back
+--  to the starter's, so a new walrus is never accidentally weightless.
+-- ============================================================
+
+local WALRUS_POWER = {
+	Basic = 10,
+	Flamespitter = 15,
+}
+
+-- Defined here rather than up with the other helpers because it reads the
+-- table above: a function written before that `local` exists would look for
+-- a global of the same name, find nothing, and hit for nil every time.
+local function powerOf(player, walrus)
+	return WALRUS_POWER[walrusNameOf(player, walrus)] or WALRUS_POWER[DEFAULT_WALRUS]
+end
+
+-- ============================================================
 --  THE SPECIALS - one per walrus, keyed by the walrus's name
 --
 --  Add a walrus by copying a whole block. The key on the left must be the
@@ -268,12 +295,17 @@ local SPECIALS = {
 		Name = "Lunge & Jab", -- what the HUD calls it
 		Cooldown = 8,
 
-		Activate = function(player, character, root, humanoid)
+		Activate = function(player, character, root, humanoid, knockback)
 			local LUNGE_SPEED = 95 -- much harder than a bonk's little step
 			local LUNGE_LIFT = 14 -- a hop, so you clear the ground going in
 			local JAB_DELAY = 0.25 -- how long the lunge gets before the jab
-			local JAB_KNOCKBACK = 110
-			local JAB_UPWARD = 40
+
+			-- A share of a normal bonk rather than its own number, so tuning
+			-- Power moves the jab with it instead of leaving it behind.
+			-- Above 1 because closing the distance first should be worth
+			-- something; drop it under 1 if the jab should trade reach for force.
+			local JAB_SHARE = 1.15
+			local JAB_UPWARD = 26
 			local JAB_RAGDOLL = 3
 
 			-- The lunge. Keep whatever vertical speed they already had, so
@@ -300,7 +332,7 @@ local SPECIALS = {
 
 				for _, target in ipairs(targets) do
 					knockDown(target.Character, JAB_RAGDOLL)
-					shove(target.Root, root, JAB_KNOCKBACK, JAB_UPWARD)
+					shove(target.Root, root, knockback * JAB_SHARE, JAB_UPWARD)
 
 					if target.Player then
 						payIcicle(player)
@@ -378,6 +410,8 @@ bonkEvent.OnServerEvent:Connect(function(player)
 	end
 	startCooldown(player, nextBonk, "BonkReadyAt", COOLDOWN)
 
+	local knockback = powerOf(player, walrus) * KNOCKBACK_PER_POWER
+
 	local targets = hitInFront(character, root, {
 		Start = BONK_START,
 		Reach = BONK_REACH,
@@ -389,7 +423,7 @@ bonkEvent.OnServerEvent:Connect(function(player)
 		-- Drop them first. Going limp before the shove lands is what makes
 		-- them tumble instead of skating along upright.
 		knockDown(target.Character, RAGDOLL_TIME)
-		shove(target.Root, root, KNOCKBACK, UPWARD_FORCE)
+		shove(target.Root, root, knockback, UPWARD_FORCE)
 
 		if target.Player then
 			payIcicle(player)
@@ -430,5 +464,5 @@ specialEvent.OnServerEvent:Connect(function(player)
 	end
 	startCooldown(player, nextSpecial, "SpecialReadyAt", special.Cooldown)
 
-	special.Activate(player, character, root, humanoid)
+	special.Activate(player, character, root, humanoid, powerOf(player, walrus) * KNOCKBACK_PER_POWER)
 end)
