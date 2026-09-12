@@ -5,6 +5,7 @@
 #   ./scripts/dev.sh              serve + auto-pull every 20s
 #   ./scripts/dev.sh --pull-only  auto-pull only (a Rojo server is already up)
 #   ./scripts/dev.sh --every 5    poll every 5 seconds instead of 20
+#   ./scripts/dev.sh --keep-local never reclaim what Studio writes back
 #
 # ── WHY THIS EXISTS ──────────────────────────────────────────────────────────
 # Rojo's live sync is genuinely live: while `rojo serve` is running and the
@@ -17,21 +18,42 @@
 # run in a second terminal. That is the manual step. This removes it.
 #
 # ── WHAT IT WILL NOT DO ──────────────────────────────────────────────────────
-# It only ever FAST-FORWARDS. If the branch has diverged, or the working tree
-# has edits that a pull would touch, it says so and keeps serving rather than
-# merging, stashing or resetting anything. Deciding what happens to your own
-# work is not a background job's business.
+# It only ever FAST-FORWARDS. If the branch has diverged it says so and keeps
+# serving rather than merging anything. Deciding what happens to your own work
+# is not a background job's business.
+#
+# ── THE ONE EXCEPTION, AND WHY IT IS NOT YOUR WORK ───────────────────────────
+# A modified file under src/ that you did not edit is Studio writing back.
+#
+# The Rojo plugin's two-way sync pushes Studio's own older copy of a script down
+# onto disk when it connects. That dirties the tree, a dirty tree cannot
+# fast-forward, and this loop then refuses every pull FOREVER after — which
+# presents as "Claude's updates stopped arriving" with a warning sitting in a
+# log file nobody is watching. It is the single most common way this stops
+# working.
+#
+# So an UNSTAGED modification or deletion of a TRACKED file under src/, and
+# nothing else in the tree, is reclaimed and the pull goes through. The bar is
+# deliberately narrow: a staged change, an untracked file, or anything at all
+# outside src/ still blocks the pull exactly as before, because each of those
+# takes a deliberate act and this one does not.
+#
+# And nothing is destroyed. The diff is written to .rojo-writeback/ first, so
+# even the case this is wrong about is `git apply` away from being undone. Use
+# --keep-local to turn the whole thing off.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 
 INTERVAL=20
 SERVE=1
+RECLAIM=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --pull-only) SERVE=0; shift ;;
+    --keep-local) RECLAIM=0; shift ;;
     --every) INTERVAL="${2:-20}"; shift 2 ;;
-    -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -105,6 +127,78 @@ fi
 WARNED_DIVERGED=0
 WARNED_DIRTY=0
 FETCH_FAILS=0
+WRITEBACK_DIR="$PWD/.rojo-writeback"
+
+#[[
+#  Is everything in the way of a pull the plugin's doing, rather than yours?
+#
+#  Reads git status in porcelain form, whose first two columns are the staged
+#  and unstaged state. A space then M or D is "tracked file, modified or deleted,
+#  NOT staged" — which is what a process writing over a file on disk produces,
+#  and what none of the deliberate acts produce:
+#
+#      " M src/…"   Studio wrote over it          -> reclaim
+#      "M  src/…"   you staged it                 -> refuse, it was deliberate
+#      "?? src/…"   a new file nobody tracked     -> refuse, nothing to restore
+#      " M docs/…"  outside the served tree       -> refuse, not the plugin
+#
+#  One non-matching line refuses the whole thing rather than reclaiming the rest
+#  around it. A tree with your work in it is a tree to keep your hands off, and
+#  partially reclaiming it would be the worst of both.
+#]]
+writeback_only() {
+  local status
+  status="$(git status --porcelain)"
+  [ -n "$status" ] || return 1
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      " M src/"*|" D src/"*) : ;;
+      *) return 1 ;;
+    esac
+  done <<< "$status"
+  return 0
+}
+
+#[[
+#  Reclaims it, having first put a COPY of every file somewhere it can be got
+#  back from. That copy is the whole reason this is allowed to be automatic: the
+#  case where this judgement is wrong costs a `cp` rather than the work.
+#
+#  Copies rather than a patch, and that distinction was measured rather than
+#  assumed. The obvious version saved `git diff` and said "git apply it to put
+#  those changes back", which is false the moment it matters: the diff is
+#  against the commit you were ON, the pull moves the file underneath it, and
+#  apply then fails on context. `--3way` is worse — it "succeeds" by writing
+#  <<<<<<< markers into a Lua file that Rojo serves straight to Studio, turning
+#  a recoverable mistake into a syntax error in the running game.
+#
+#  A copy has no context to fail on.
+#
+#  Modified files only. A file Studio DELETED needs no copy: its content is the
+#  committed content, which git still has, and checkout is what brings it back.
+#]]
+reclaim_writeback() {
+  local stamp dest file
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  dest="$WRITEBACK_DIR/$stamp"
+  mkdir -p "$dest" || return 1
+
+  echo "[dev] Studio had written back over the served tree. Reclaiming:"
+  git status --short | sed 's/^/[dev]   /'
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    mkdir -p "$dest/$(dirname "$file")" 2>/dev/null
+    cp "$file" "$dest/$file" 2>/dev/null
+  done < <(git diff --name-only --diff-filter=M -- src/ 2>/dev/null)
+
+  git checkout -- src/ 2>/dev/null || return 1
+  echo "[dev] What Studio wrote is copied under $dest — nothing was lost."
+  echo "[dev] TURN TWO-WAY SYNC OFF in the Rojo plugin's settings and this stops."
+  return 0
+}
 
 while true; do
   sleep "$INTERVAL" &
@@ -145,6 +239,12 @@ while true; do
   WARNED_DIVERGED=0
 
   COUNT=$(git rev-list --count HEAD.."origin/$BRANCH" 2>/dev/null)
+  #[[ Before the merge is attempted, not after it fails. --ff-only reports a
+  #   blocked merge the same way whatever blocked it, so asking afterwards
+  #   would mean re-deriving a cause git has already thrown away. ]]
+  if [ "$RECLAIM" -eq 1 ] && writeback_only; then
+    reclaim_writeback
+  fi
   if ! git merge --ff-only --quiet "origin/$BRANCH" 2>/dev/null; then
     if [ "$WARNED_DIRTY" -eq 0 ]; then
       WARNED_DIRTY=1

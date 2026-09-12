@@ -57,6 +57,25 @@ job_running() {
   launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || launchctl list "$LABEL" >/dev/null 2>&1
 }
 
+#[[
+#  Which folder the INSTALLED job serves, which need not be this one.
+#
+#  A LaunchAgent keeps serving whatever directory it was installed from, across
+#  every reboot, forever. There is more than one copy of this project on a
+#  working machine — a mygame-old beside a mygame is the normal shape of it —
+#  and a job pointed at the wrong one is indistinguishable from a job pointed at
+#  the right one: same label, same port, same "running", same Connected in
+#  Studio. It just serves code from months ago.
+#
+#  That is the quiet way this feature stops working, and it cannot be noticed
+#  without printing the path, so the path is printed.
+#]]
+installed_dir() {
+  [ -f "$PLIST" ] || return 1
+  sed -n '/<key>WorkingDirectory<\/key>/,/<\/string>/p' "$PLIST" \
+    | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p' | head -1
+}
+
 case "$ACTION" in
 install)
   if [ ! -x "$REPO/scripts/dev.sh" ]; then
@@ -65,6 +84,17 @@ install)
   fi
 
   mkdir -p "$HOME/Library/LaunchAgents"
+  # Said out loud when it moves, because "I reinstalled it and nothing changed"
+  # and "I reinstalled it and it now serves somewhere else" look identical from
+  # the outside, and only one of them is what you wanted.
+  PREVIOUS="$(installed_dir)"
+  if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$REPO" ]; then
+    echo "The installed job was serving:"
+    echo "    $PREVIOUS"
+    echo "Repointing it at this checkout:"
+    echo "    $REPO"
+    echo ""
+  fi
   # Replace rather than layer: bootstrap refuses a label already loaded, and an
   # install that silently kept the OLD plist would be the worst kind of working.
   unload_job
@@ -145,7 +175,18 @@ uninstall)
 
 status)
   if job_running; then
-    echo "running — Rojo is serving $REPO"
+    WD="$(installed_dir)"
+    if [ -n "$WD" ] && [ "$WD" != "$REPO" ]; then
+      echo "running — but serving a DIFFERENT folder:"
+      echo "    $WD"
+      echo "  you are standing in:"
+      echo "    $REPO"
+      echo ""
+      echo "  Studio will connect to it and say Connected, and receive that"
+      echo "  folder's code. Point it here:  ./scripts/autostart.sh install"
+    else
+      echo "running — Rojo is serving ${WD:-$REPO}"
+    fi
     echo ""
     echo "Last few lines:"
     tail -n 8 "$LOG" 2>/dev/null | sed 's/^/  /'

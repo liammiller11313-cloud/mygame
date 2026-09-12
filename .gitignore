@@ -13,3 +13,7 @@ build/
 /rojo-*.tar.gz
 .DS_Store
 *.log
+
+# Copies of anything Studio wrote back over the served tree, kept by dev.sh
+# so an automatic reclaim can never be the thing that loses work. Per-machine.
+/.rojo-writeback/
