@@ -52,7 +52,17 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --pull-only) SERVE=0; shift ;;
     --keep-local) RECLAIM=0; shift ;;
-    --every) INTERVAL="${2:-20}"; shift 2 ;;
+    #[[ The guard is the point. `shift 2` with one argument left fails WITHOUT
+    #   shifting, and with no `set -e` the loop re-enters the same case forever
+    #   — `./scripts/dev.sh --every` hung at 100% CPU before printing a line. ]]
+    --every)
+      if [ $# -lt 2 ]; then
+        echo "--every needs a number of seconds, e.g. --every 5" >&2
+        exit 2
+      fi
+      INTERVAL="$2"
+      shift 2
+      ;;
     -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac

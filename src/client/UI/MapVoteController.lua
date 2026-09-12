@@ -567,6 +567,15 @@ local function onVoteUpdated(payload: any)
 	end
 	state.tally = payload.tally
 	state.voters = tonumber(payload.voters) or 0
+	--[[ The deadline can MOVE now: the server collapses the clock the moment the
+	     result can no longer change, so a countdown drawn from the value that
+	     arrived with MapVoteStarted would read fourteen while the vote closed.
+	     Only ever accepted EARLIER than what we hold — a later one would be the
+	     vote appearing to extend itself, which nothing does. ]]
+	local moved = tonumber(payload.endsAt)
+	if moved and (state.endsAt <= 0 or moved < state.endsAt) then
+		state.endsAt = moved
+	end
 	MapVoteController:_refresh()
 end
 

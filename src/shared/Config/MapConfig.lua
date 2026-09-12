@@ -722,6 +722,23 @@ MapConfig.Vote = table.freeze({
 	DurationSeconds = 20,
 
 	--[[
+		How long the vote stays open once the answer cannot change.
+
+		Twenty seconds is the right length for a vote somebody might still be
+		thinking about. It is a long time to look at a decided one, and on a
+		two-player server the decision is usually made about four seconds in —
+		the other sixteen are dead air between rounds, every round.
+
+		"Cannot change" is stricter than "a majority voted", deliberately. Three
+		players split 2-1 IS a majority for the leader and the vote is over;
+		three players split 1-1 with one still deciding is not, even though two
+		of three have voted. So the test is arithmetic: the leader is ahead by
+		more than everybody still to vote could give the runner-up. Nobody is
+		ever cut off while their vote could still matter.
+	]]
+	SettledSeconds = 3,
+
+	--[[
 		Whether a vote also runs while the lobby is counting down toward the first
 		round of a fresh server.
 

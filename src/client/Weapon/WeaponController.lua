@@ -1044,6 +1044,14 @@ local function isWalrus(): boolean
 end
 
 local function fireOnce()
+	--[[ First, above everything. This sat below the consumable branch, which
+	     returns before reaching it — so clicking while a walrus still played the
+	     local use animation and started the timer for a medkit or a pipe bomb
+	     that InventoryService now refuses, and the prediction was rolled back a
+	     moment later for no visible reason. ]]
+	if isWalrus() then
+		return
+	end
 	local definition = state.definition
 	if not definition then
 		--[[ No gun in hand. If something spendable is, the trigger spends it.
@@ -1074,9 +1082,6 @@ local function fireOnce()
 		effects are the half you would actually SEE doubled. See
 		NativeToolService, BallisticsService and MeleeService for the other ends.
 	]]
-	if isWalrus() then
-		return
-	end
 	if definition.nativeTool then
 		--[[
 			The magazine is this game's — see NativeToolService — so an empty one
@@ -1624,7 +1629,7 @@ function WeaponController:start()
 				if not definition.nativeTool then
 					swingMelee()
 				end
-			elseif state.ammo <= 0 and now >= state.nextFireAt then
+			elseif state.ammo <= 0 and now >= state.nextFireAt and not isWalrus() then
 				-- Semi and Pump fire once per press, but an empty gun still has
 				-- to keep telling you it is empty while you hold the trigger.
 				dryFire()

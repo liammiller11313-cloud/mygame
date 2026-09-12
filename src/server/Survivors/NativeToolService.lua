@@ -66,11 +66,29 @@ local OWNED_TAG = "FL_NativeTool"
 local NativeToolService = {}
 
 local serviceTrove = Trove.new()
---[[ Connections that belong to the Tool currently in a hand, not to the
-     service. Cleaned when that Tool goes, because the next one is a different
-     instance and its Activated is a different signal — leaving the old one
-     connected would spend a round per shot per weapon ever equipped. ]]
-local toolTrove = Trove.new()
+--[[
+	Connections that belong to the Tool currently in one player's hand.
+
+	── ONE PER PLAYER, AND IT WAS ONE PER SERVER ───────────────────────────────
+	This was a single module-level trove, which made every clearTools call a
+	clean of EVERYBODY's. The failure was silent and permanent: P1 equips the
+	paintball gun, P2 then changes any slot at all, and P2's clearTools
+	disconnects P1's Activated handler. P1's Tool is still in their hand and
+	still fires; nothing spends a round ever again, and refresh cannot repair it
+	because `held[player] == weaponId` returns early. Infinite ammo for the rest
+	of the life, for a player who did nothing.
+]]
+local toolTroves: { [Player]: any } = {}
+
+local function toolTroveFor(player: Player): any
+	local existing = toolTroves[player]
+	if existing then
+		return existing
+	end
+	local fresh = Trove.new()
+	toolTroves[player] = fresh
+	return fresh
+end
 -- What each player is currently holding, by weapon id, so an unchanged slot
 -- does not re-clone a Tool the player is in the middle of using.
 local held: { [Player]: string } = {}
@@ -199,7 +217,10 @@ end
 
 local function clearTools(player: Player)
 	held[player] = nil
-	toolTrove:clean()
+	local trove = toolTroves[player]
+	if trove then
+		trove:clean()
+	end
 	sweepTools(player:FindFirstChildOfClass("Backpack"))
 	sweepTools(player.Character)
 end
@@ -268,11 +289,22 @@ function NativeToolService:_bridgeCredit(humanoid: Humanoid, creator: ObjectValu
 		})
 	)
 
-	creator.AncestryChanged:Connect(function(_, parent)
+	--[[ Tracked, and with a floor under it. A raw Connect here accumulated one
+	     live connection per kill for the life of the server, and `_lastTagged`
+	     held a strong reference to the rig — which a corpse replaced by
+	     GoreService, or a round torn down, could leave behind with the tag still
+	     inside it and the entry never cleared. The trove disconnects on round
+	     teardown either way, and the entry goes when the model does. ]]
+	serviceTrove:add(creator.AncestryChanged:Connect(function(_, parent)
 		if not parent then
 			_lastTagged[model] = nil
 		end
-	end)
+	end))
+	serviceTrove:add(model.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			_lastTagged[model] = nil
+		end
+	end))
 end
 
 --[[
@@ -412,7 +444,7 @@ function NativeToolService:refresh(player: Player)
 		The Tool still decides everything a shot DOES: what it spawns, what it
 		sounds like, what it damages. This is the count, and nothing else.
 	]]
-	toolTrove:connect(tool.Activated, function()
+	toolTroveFor(player):connect(tool.Activated, function()
 		local inv = Registry.find("InventoryService")
 		if inv and typeof(inv.consumeAmmo) == "function" then
 			inv:consumeAmmo(player, 1)
@@ -485,6 +517,11 @@ function NativeToolService:start()
 	serviceTrove:connect(Players.PlayerAdded, watch)
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		held[player] = nil
+		local trove = toolTroves[player]
+		if trove then
+			trove:destroy()
+			toolTroves[player] = nil
+		end
 		self:_syncCreditWatch()
 	end)
 
@@ -496,7 +533,10 @@ function NativeToolService:destroy()
 		clearTools(player)
 	end
 	table.clear(held)
-	toolTrove:destroy()
+	for _, trove in toolTroves do
+		trove:destroy()
+	end
+	table.clear(toolTroves)
 	if creditWatch then
 		creditWatch:Disconnect()
 		creditWatch = nil

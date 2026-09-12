@@ -3122,24 +3122,39 @@ end
 	"walrus ammo" are the same answer — which is the whole reason that loose
 	pass exists.
 ]]
+--[[ Cached like every other template here, and it has to be: this is called
+     once per ROUND FIRED. Uncached it ran suppliedEntry (whose usable() walks
+     the entry), then modelsIn again, then a clone, then a full sanitise
+     GetDescendants walk destroying scripts it had already destroyed on every
+     previous copy — all of that per bullet. suppliedEntry's own comment says
+     the result is cached like everything else, which was true of weaponTemplate
+     and false of this until now. ]]
+local suppliedTemplates: { [string]: Model } = {}
+
 function PlaceholderFactory:buildSuppliedModel(category: string, name: string): Model?
 	if typeof(category) ~= "string" or typeof(name) ~= "string" or name == "" then
 		return nil
 	end
-	local entry = suppliedEntry(category, { name })
-	if not entry then
-		return nil
+	local key = category .. "\0" .. name
+	local template = suppliedTemplates[key]
+	if not template then
+		local entry = suppliedEntry(category, { name })
+		if not entry then
+			return nil
+		end
+		local chosen = modelsIn(entry)[1]
+		if not chosen then
+			return nil
+		end
+		local built = cloneAsModel(chosen)
+		if not built then
+			return nil
+		end
+		sanitise(built)
+		suppliedTemplates[key] = built
+		template = built
 	end
-	local chosen = modelsIn(entry)[1]
-	if not chosen then
-		return nil
-	end
-	local model = cloneAsModel(chosen)
-	if not model then
-		return nil
-	end
-	sanitise(model)
-	return model
+	return template:Clone()
 end
 
 function PlaceholderFactory:buildWeaponModel(weaponId: string): Model?

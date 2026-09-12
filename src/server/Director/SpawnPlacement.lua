@@ -518,7 +518,15 @@ local function isFloorSurface(part: BasePart?, root: Instance?): boolean
 	while node and node ~= root and node ~= Workspace do
 		--[[ One short of the root. See the header: the top level is where a
 		     designer's categories live, and a category is not a surface. ]]
-		if root and node.Parent == root then
+		--[[ A CONTAINER at the top level, not a surface at the top level. The
+		     exemption is for a designer's category folders — "Walls", "Props" —
+		     and it was testing `node.Parent == root` alone, so a BasePart
+		     parented straight under the map root got it too. A part named
+		     "Ceiling" sitting at the top level was therefore accepted as floor
+		     and the Director spawned infected on the roof, which is the exact
+		     thing NeverStandOn exists to stop. A part is always a claim about
+		     itself. ]]
+		if root and node.Parent == root and not node:IsA("BasePart") then
 			if MapConfig.isNeverStandOn(node.Name) then
 				--[[ Through warnOnce, which this file already has: isFloorSurface
 				     runs thousands of times a search and a plain warn here would

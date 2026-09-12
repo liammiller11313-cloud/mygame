@@ -79,7 +79,59 @@ local function countVoters(): number
 end
 
 local function broadcastTally()
-	Remotes.Event.MapVoteUpdated:FireAllClients({ tally = tally(), voters = countVoters() })
+	Remotes.Event.MapVoteUpdated:FireAllClients({
+		tally = tally(),
+		voters = countVoters(),
+		--[[ Carried on every update because shortening the vote moves it, and
+		     the client's countdown is drawn from its own copy: without this the
+		     clock would read fourteen while the vote closed. ]]
+		endsAt = endsAt,
+	})
+end
+
+--[[
+	Collapses the clock once the result is locked in.
+
+	Not "a majority has voted" — that is the right instinct and the wrong test.
+	Three players split 2-1 is a majority AND settled; three split 1-1 with one
+	still deciding is a majority of voters and not settled at all. What matters
+	is whether anybody left could still change the answer.
+
+	So: the leader has to be ahead of the runner-up by more than every remaining
+	vote could hand the runner-up. A tie is never settled, because the tiebreak
+	moves away from the map just played and one more vote would decide it.
+]]
+local function shortenIfSettled()
+	if not active then
+		return
+	end
+	local counts = tally()
+	local first, second = 0, 0
+	for _, id in options do
+		local count = counts[id] or 0
+		if count > first then
+			first, second = count, first
+		elseif count > second then
+			second = count
+		end
+	end
+
+	local present = 0
+	for _, player in Players:GetPlayers() do
+		if player.Parent then
+			present += 1
+		end
+	end
+	local undecided = math.max(present - countVoters(), 0)
+	if first <= second + undecided then
+		return
+	end
+
+	local soon = serverNow() + VOTE.SettledSeconds
+	if soon >= endsAt then
+		return
+	end
+	endsAt = soon
 end
 
 --[[ Resolves the vote. See the header for why a tie deliberately moves away from
@@ -192,6 +244,9 @@ function MapVoteService:cast(player: Player, mapId: string)
 		return
 	end
 	votes[player] = mapId
+	--[[ Before the broadcast, so the shortened deadline rides out with the tally
+	     that caused it rather than one update behind. ]]
+	shortenIfSettled()
 	broadcastTally()
 end
 

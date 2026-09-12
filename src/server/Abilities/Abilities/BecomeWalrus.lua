@@ -330,6 +330,28 @@ local function dress(walrus: Walrus): Model?
 
 	local motors = motorsIn(model)
 	local carrier = if #motors > 0 then rootOf(model, motors) else nil
+	--[[
+		Which parts a joint already holds up.
+
+		Welding only the carrier was right for a fully jointed rig and wrong for
+		a PARTLY jointed one — a model with a single Motor6D on a jaw and twenty
+		loose decorative parts took the rig branch, so those twenty were
+		unanchored and welded to nothing and fell off the moment the ability
+		started. That is the same "pile of loose parts on the floor" the rigid
+		branch exists to avoid, one case over.
+
+		So the rule is per part, not per model: a part a Motor6D holds is left to
+		its joint, and a part nothing holds gets a weld like it always did.
+	]]
+	local jointed: { [BasePart]: boolean } = {}
+	for _, motor in motors do
+		if motor.Part0 then
+			jointed[motor.Part0] = true
+		end
+		if motor.Part1 then
+			jointed[motor.Part1] = true
+		end
+	end
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			--[[
@@ -368,10 +390,11 @@ local function dress(walrus: Walrus): Model?
 			part.CanQuery = false
 			part.CanTouch = false
 			part.CollisionGroup = "Debris"
-			--[[ Only the carrier when the model is a rig. Welding every part as
-			     well would re-pin the joints this whole branch exists to keep
-			     free — two constraints on one part and the stiffer wins. ]]
-			if carrier == nil or part == carrier then
+			--[[ The carrier carries; a jointed part is already held. Everything
+			     else still needs a weld, or it is attached to nothing. Welding a
+			     jointed part as well would re-pin the joint this branch exists to
+			     keep free — two constraints on one part and the stiffer wins. ]]
+			if carrier == nil or part == carrier or not jointed[part] then
 				local weld = Instance.new("WeldConstraint")
 				weld.Part0 = walrus.root
 				weld.Part1 = part
@@ -380,11 +403,28 @@ local function dress(walrus: Walrus): Model?
 		end
 	end
 
+	--[[
+		The Humanoid goes on BOTH paths, and the model is parented BEFORE anything
+		is played. Two orderings, two separate bugs.
+
+		animatorFor is what strips a supplied Humanoid, and it was only reached
+		when the model turned out to be a rig — so a jointless model that shipped
+		one parented a SECOND Humanoid straight into the player's character, which
+		is the coin toss every system reading FindFirstChildOfClass("Humanoid")
+		then has to make. That hazard has nothing to do with joints.
+
+		And a track played on an Animator that is not yet in the DataModel drives
+		nothing. playClips ran while the model's parent was still nil, so it
+		reported "N clip(s) looping" and the walrus slid anyway — the exact
+		symptom the report line exists to tell apart from a model with no clips.
+	]]
+	local animator = animatorFor(model)
+	model.Parent = walrus.character
+
 	local clips = 0
 	if carrier then
-		clips = playClips(model, animatorFor(model))
+		clips = playClips(model, animator)
 	end
-	model.Parent = walrus.character
 
 	--[[ Said once, because which of the three shapes the supplied model turned
 	     out to be is the difference between a walrus that lives and a walrus
