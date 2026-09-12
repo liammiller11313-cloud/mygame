@@ -285,6 +285,29 @@ export type WeaponDefinition = {
 	id: string,
 	displayName: string,
 	modelName: string, -- name in ReplicatedStorage.Assets.Weapons / .Viewmodels
+	--[[
+		── THE WEAPON BRINGS ITS OWN BEHAVIOUR ──────────────────────────────────
+		True for a weapon whose asset is a real Roblox Tool carrying its own
+		scripts, and whose shooting, sounds and effects are ITS code rather than
+		this game's.
+
+		The four Brickbattle weapons are these. Their Tools ship complete —
+		ServerLauncher, LocalLauncher, PogoServer, PogoClient, SwordScript, the
+		Slingshot pair, the Explosion and Swoosh sounds, the fire and MouseLoc
+		remotes — and the author's instruction is that those run, not a
+		reimplementation of them.
+
+		What it switches off here, because two systems doing one job is worse
+		than either: no viewmodel, no carried world model (the Tool welds its own
+		Handle the way Roblox does), and BallisticsService refuses a shot for it,
+		since the Tool fires through its own remote.
+
+		What it costs, written down rather than discovered: the game's ammo and
+		reload HUD do not apply, and a kill made with one is credited through the
+		Tool's own `creator` tag rather than through DamageService, so
+		NativeToolService bridges that back or the kill counts for nobody.
+	]]
+	nativeTool: boolean?,
 	slot: string,
 	class: WeaponClass,
 	fireMode: FireMode,
@@ -3585,6 +3608,8 @@ WeaponConfig.Definitions = {
 		id = Enums.Weapon.ClassicSword,
 		displayName = "Classic Sword",
 		modelName = "ClassicSword",
+		-- Its own Tool, its own scripts, its own sounds. See nativeTool.
+		nativeTool = true,
 		slot = Enums.Slot.Melee,
 		class = "Melee",
 		fireMode = "Melee",
@@ -3700,6 +3725,8 @@ WeaponConfig.Definitions = {
 		id = Enums.Weapon.ClassicPaintballGun,
 		displayName = "Classic Paintball Gun",
 		modelName = "ClassicPaintballGun",
+		-- Its own Tool, its own scripts, its own sounds. See nativeTool.
+		nativeTool = true,
 		slot = Enums.Slot.Primary,
 		--[[
 			── IT WAS AN SMG THAT HAPPENED TO BE GREEN ───────────────────────────
@@ -3861,6 +3888,8 @@ WeaponConfig.Definitions = {
 		id = Enums.Weapon.ClassicSlingshot,
 		displayName = "Classic Slingshot",
 		modelName = "ClassicSlingshot",
+		-- Its own Tool, its own scripts, its own sounds. See nativeTool.
+		nativeTool = true,
 		slot = Enums.Slot.Secondary,
 		class = "Pistol",
 		fireMode = "Semi",
@@ -4017,6 +4046,8 @@ WeaponConfig.Definitions = {
 		id = Enums.Weapon.ClassicRocketLauncher,
 		displayName = "Classic Rocket Launcher",
 		modelName = "ClassicRocketLauncher",
+		-- Its own Tool, its own scripts, its own sounds. See nativeTool.
+		nativeTool = true,
 		slot = Enums.Slot.Secondary,
 		class = "Launcher",
 		fireMode = "Semi",

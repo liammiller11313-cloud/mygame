@@ -225,6 +225,17 @@ status)
     DETAIL="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null)"
     JOB_PID="$(printf '%s' "$DETAIL" | sed -n 's/^[[:space:]]*pid = \([0-9]*\).*/\1/p' | head -1)"
     LAST_EXIT="$(printf '%s' "$DETAIL" | sed -n 's/^[[:space:]]*last exit code = \([0-9-]*\).*/\1/p' | head -1)"
+    #[[ `launchctl print` is the modern verb and it is not always the one that
+    #   answers — job_running has always had `launchctl list` as its fallback for
+    #   exactly that reason, and this read did not, so on a machine where print
+    #   says nothing both fields came back empty and the report was "NOT RUNNING,
+    #   and no exit code" about a job that was running fine. The old verb's
+    #   output is a plist rather than a tree; same two facts, different spelling. ]]
+    if [ -z "$DETAIL" ]; then
+      DETAIL="$(launchctl list "$LABEL" 2>/dev/null)"
+      JOB_PID="$(printf '%s' "$DETAIL" | sed -n 's/.*"PID"[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' | head -1)"
+      LAST_EXIT="$(printf '%s' "$DETAIL" | sed -n 's/.*"LastExitStatus"[[:space:]]*=[[:space:]]*\([0-9-]*\).*/\1/p' | head -1)"
+    fi
 
     WD="$(installed_dir)"
     if [ -n "$WD" ] && [ "$WD" != "$REPO" ]; then
@@ -267,8 +278,13 @@ status)
 
     # The only question Studio cares about. Same probe restart-rojo.sh uses,
     # and --noproxy because a system proxy must not answer for localhost.
+    #[[ LC_ALL=C on the tr, and it is not cosmetic. Rojo 7.7 answers MessagePack,
+    #   so the body is binary; under a UTF-8 locale macOS tr rejects it outright
+    #   with "Illegal byte sequence" and the probe returns nothing — which this
+    #   then reported as NOTHING ANSWERING about a port that was answering. C
+    #   treats the bytes as bytes, which is what they are. ]]
     SERVED="$(curl -fsS --noproxy '*' -m 2 "http://localhost:34872/api/rojo" 2>/dev/null \
-      | tr -c '[:print:]' '\n' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+      | LC_ALL=C tr -c '[:print:]' '\n' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
     if [ -n "$SERVED" ]; then
       echo "port 34872  answering, Rojo $SERVED  <- Studio can connect"
     else

@@ -85,7 +85,7 @@ if [ -f "$PLIST" ]; then
   # answers MessagePack, and the version sits in the bytes as text either way.
   for _ in 1 2 3 4 5 6 7 8; do
     sleep 1
-    BODY="$(curl -fsS --noproxy '*' -m 2 "http://localhost:$PORT/api/rojo" 2>/dev/null | tr -c '[:print:]' '\n')"
+    BODY="$(curl -fsS --noproxy '*' -m 2 "http://localhost:$PORT/api/rojo" 2>/dev/null | LC_ALL=C tr -c '[:print:]' '\n')"
     [ -n "$BODY" ] && break
   done
   GOT="$(printf '%s' "${BODY:-}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
