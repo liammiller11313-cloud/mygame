@@ -17,13 +17,13 @@ MODE="${1:-format}"
 # up as a wall of red in Studio at exactly the moment someone is trying to get
 # unblocked. audit.py still only looks at src/ — the cross-references it checks
 # are game modules, and a command-bar script has none of them.
-# packs/ is included for the same reason studio-scripts/ is. Those are Tool
-# scripts that live inside a Roblox model rather than in this game's module
-# tree, so audit.py has nothing to cross-reference in them — but a syntax error
-# in one still only surfaces as red text in Studio, at the moment somebody is
-# trying to sell the thing.
-FILES=$(find src studio-scripts packs -name '*.lua' -type f 2>/dev/null | sort)
-[ -z "$FILES" ] && { echo "no .lua files under src/, studio-scripts/ or packs/"; exit 0; }
+# packs/ used to be listed here too. It held rewritten copies of the Brickbattle
+# Ultimate tool scripts, and it is gone on purpose — the author now has the real
+# Tools in Assets.Weapons, and a folder of edited copies whose own instructions
+# said "replaces RocketScript" is a hazard aimed at the originals rather than a
+# reference. See docs/BRICKBATTLE_WEAPONS.md. Do not add it back.
+FILES=$(find src studio-scripts -name '*.lua' -type f 2>/dev/null | sort)
+[ -z "$FILES" ] && { echo "no .lua files under src/ or studio-scripts/"; exit 0; }
 
 TOTAL=$(echo "$FILES" | wc -l | tr -d ' ')
 FAILED=0

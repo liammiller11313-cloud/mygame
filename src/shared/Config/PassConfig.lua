@@ -29,13 +29,22 @@
 	Roblox already stores this, permanently and authoritatively. PassService asks
 	it once per session and caches the answer in memory. See its header.
 
-	── ⚠ NOTHING READS THIS YET, SO NOTHING IS GRANTED ──────────────────────────
-	The shop can sell Brickbattler's Pack today and buying it changes nothing in
-	the game. `PassService:owns` has no callers: the seven tools live in
-	packs/BrickbattlersPack/ as standalone Roblox Tool scripts and are not wired
-	into this game's weapon pipeline, because whether they become WeaponConfig
-	entries going through BallisticsService or stay classic tools in their own
-	lane is a design decision that has not been made.
+	── AND IT IS WIRED, WHICH IT WAS NOT WHEN THIS WAS WRITTEN ──────────────────
+	This block used to carry a ⚠ saying `PassService:owns` had no callers and
+	that buying the pack changed nothing. Both halves are now false and were left
+	standing long after they stopped being true, which is the more dangerous
+	direction for a warning to be wrong in: it reads as a reason not to publish.
+
+	The four weapons below are real WeaponConfig entries. ProfileService and
+	LoadoutService both reach PassService through the registry, so owning the
+	pass merges into the unlocked set the loadout UI and every equip gate read.
+
+	The design question the old text said was unmade has been made, too, and the
+	answer was not "classic tools in their own lane". The author's own Tools sit
+	in Assets.Weapons and contribute their parts and their Grip pose; everything
+	they DO comes from WeaponConfig and the services, because sanitise() destroys
+	every script in a supplied asset and that is the security line. See
+	docs/BRICKBATTLE_WEAPONS.md.
 
 	── FOUR OF THE SEVEN, AND WHY ───────────────────────────────────────────────
 	The pack is seven tools. Four of them are weapons in the sense WeaponConfig
@@ -54,8 +63,10 @@
 	Selling four and describing seven would be a lie, so `grants` says four. The
 	other three arrive when their pipelines do.
 
-	**Do not publish the game pass until the weapons below are in WeaponConfig.**
-	Selling a hundred Robux for nothing is a refund and a report, not a bug.
+	The rule that produced that warning still stands for anything added later:
+	do not sell a pass whose weapons are not in WeaponConfig. Selling a hundred
+	Robux for nothing is a refund and a report, not a bug. The four below have
+	been checked against it — see the ids in `grants`.
 ]]
 
 export type Pass = {

@@ -3844,7 +3844,7 @@ WeaponConfig.Definitions = {
 
 		── WHAT MAKES IT PRECISE, WRITTEN HONESTLY ──────────────────────────────
 		This used to say the pellet cancelled its own gravity, "which is the whole
-		trick". The classic's does — packs/BrickbattlersPack/Slingshot.lua hangs a
+		trick". The classic's does — the Tool's own Slingshot script hangs a
 		BodyForce of mass × workspace.Gravity on it so it flies flat instead of
 		arcing — and in THIS game that describes a mechanism which does not exist.
 		Every weapon here is hitscan. Nothing drops, so nothing has any gravity to
@@ -4033,7 +4033,7 @@ WeaponConfig.Definitions = {
 			for the shooter to have been wrong.
 
 			So it flies now. The reference implementation is in
-			packs/BrickbattlersPack/RocketScript.lua — a servo that pushes the
+			the launcher's own RocketScript — a servo that pushes the
 			missile toward a point one stud further along its own nose every
 			frame, at seven times the distance it has fallen behind.
 

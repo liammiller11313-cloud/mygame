@@ -201,7 +201,7 @@ down and goes up, the rocket shoves you away from wherever it landed.
 **It needed no remote at all**, and that is the whole design. The standalone
 pack needs one because a classic Tool has no server-side shot to hang off — the
 client says "I aimed there" and the server can only re-cast the ray and hope
-they agree; half of `packs/BrickbattlersPack/PogoServer.lua` is that defence.
+they agree; half of the pack's own PogoServer was that defence.
 None of it applies here. `BallisticsService` has already validated the shooter,
 checked the claimed origin against their real head, generated the cone from a
 shared seed, and cast the pellets itself. The launch point is not a claim, it is

@@ -9,7 +9,7 @@
 	The standalone pack needs its own RemoteEvent because a classic Tool has no
 	server-side shot to hang off: the client says "I aimed there", and the
 	server's only defence is to re-cast the ray itself and hope the two agree.
-	Half the work in packs/BrickbattlersPack/PogoServer.lua is that defence.
+	Half the work in the pack's own PogoServer was that defence.
 
 	None of it is needed here. BallisticsService has already validated the
 	shooter, checked the claimed origin against their actual head, generated the
