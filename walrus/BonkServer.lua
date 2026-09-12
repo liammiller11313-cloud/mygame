@@ -82,13 +82,85 @@ local DEBUG = true
 --  HELPERS
 -- ============================================================
 
--- Which knockdown is currently in charge of each character. Bonk someone
--- who's already down and the newer one takes over, so the older timer
--- doesn't stand them up early.
+-- Characters currently ragdolled, and everything needed to put them back:
+-- the joints we switched off, and the constraints we made to replace them.
 --
 -- Weak keys: when a character is destroyed on respawn, its entry can be
 -- collected instead of sitting here for the rest of the round.
-local knockdown = setmetatable({}, { __mode = "k" })
+local ragdolled = setmetatable({}, { __mode = "k" })
+
+-- Swap the rig's joints for physics constraints, so the body actually goes
+-- limp. PlatformStand on its own only takes away control - the character
+-- keeps its shape and tumbles as one rigid lump, which reads as a statue
+-- falling over rather than a walrus being launched.
+--
+-- Anything holding the walrus on is left strictly alone. Your equipper
+-- attaches it somehow and this code doesn't know how; turning that joint
+-- into a hinge would drop the walrus on the floor the first time its owner
+-- got hit.
+local function buildRagdoll(character)
+	local walrus = character:FindFirstChild("Walrus")
+	local motors = {}
+	local made = {}
+
+	for _, item in ipairs(character:GetDescendants()) do
+		if item:IsA("Motor6D") and item.Part0 and item.Part1 then
+			local holdsWalrus = walrus ~= nil
+				and (item.Part0:IsDescendantOf(walrus) or item.Part1:IsDescendantOf(walrus))
+
+			if not holdsWalrus then
+				-- A BallSocketConstraint joins two Attachments, so the joint's
+				-- own C0 and C1 become where those attachments sit. That's what
+				-- makes the limb hang from the same point it was welded at.
+				local socketEnd = Instance.new("Attachment")
+				socketEnd.CFrame = item.C0
+				socketEnd.Parent = item.Part0
+
+				local limbEnd = Instance.new("Attachment")
+				limbEnd.CFrame = item.C1
+				limbEnd.Parent = item.Part1
+
+				local socket = Instance.new("BallSocketConstraint")
+				socket.Attachment0 = socketEnd
+				socket.Attachment1 = limbEnd
+
+				-- Limits on, or the body reads as a noodle: limbs bend through
+				-- themselves and the whole thing looks broken rather than limp.
+				socket.LimitsEnabled = true
+				socket.UpperAngle = 45
+				socket.TwistLimitsEnabled = true
+				socket.TwistLowerAngle = -40
+				socket.TwistUpperAngle = 40
+				socket.Parent = item.Part1
+
+				-- Disabled rather than destroyed, so this is reversible - and so
+				-- the running animation has nothing left to drive.
+				item.Enabled = false
+
+				table.insert(motors, item)
+				table.insert(made, socketEnd)
+				table.insert(made, limbEnd)
+				table.insert(made, socket)
+			end
+		end
+	end
+
+	return { Motors = motors, Made = made }
+end
+
+local function clearRagdoll(state)
+	-- Constraints go first. Switching a motor back on while its replacement
+	-- is still attached leaves two things fighting over the same joint.
+	for _, item in ipairs(state.Made) do
+		item:Destroy()
+	end
+
+	for _, motor in ipairs(state.Motors) do
+		if motor.Parent then
+			motor.Enabled = true
+		end
+	end
+end
 
 local function knockDown(character, seconds)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -96,20 +168,28 @@ local function knockDown(character, seconds)
 		return
 	end
 
-	local token = (knockdown[character] or 0) + 1
-	knockdown[character] = token
+	local state = ragdolled[character]
 
-	-- PlatformStand goes limp and stays down until we turn it off. It works
-	-- on any rig, and unlike swapping the character's joints for physics
-	-- constraints it can't shake the walrus model loose.
-	humanoid.PlatformStand = true
+	-- Only come apart once. Hitting someone who's already down must not
+	-- build a second set of constraints on joints that are already swapped.
+	if not state then
+		state = buildRagdoll(character)
+		ragdolled[character] = state
+		humanoid.PlatformStand = true
+	end
+
+	-- The newer hit takes over the timer, so the older one can't stand them
+	-- up early.
+	local token = (state.Token or 0) + 1
+	state.Token = token
 
 	task.delay(seconds, function()
-		-- A later hit owns them now; let that one stand them back up.
-		if knockdown[character] ~= token then
-			return
+		if ragdolled[character] ~= state or state.Token ~= token then
+			return -- a later hit owns them now
 		end
-		knockdown[character] = nil
+		ragdolled[character] = nil
+
+		clearRagdoll(state)
 
 		if humanoid.Parent and humanoid.Health > 0 then
 			humanoid.PlatformStand = false
@@ -213,15 +293,20 @@ local function hitInFront(character, root, box)
 	return found
 end
 
--- Send them up and away.
+-- Drop them limp, then throw the whole body up and away.
 --
--- The direction is flattened to the horizontal first, and this is the whole
+-- The order matters: ragdoll first. Flinging a body that hasn't come apart
+-- yet just skids it along the floor upright.
+--
+-- The direction is flattened to the horizontal, and this is the whole
 -- reason bonks used to bury people. A target whose root sits even slightly
 -- below yours - on a slope, a step down, halfway through a fall, or simply
--- already knocked flat - gives an offset that points downward, and shoving
--- along it drives them into the floor. Height should come from `upward`
--- alone, never from where the two of you happened to be standing.
-local function shove(targetRoot, fromRoot, force, upward)
+-- already knocked flat - gives an offset that points downward, and throwing
+-- along it drives them into the floor. Height comes from `upward` alone,
+-- never from where the two of you happened to be standing.
+local function launch(targetCharacter, targetRoot, fromRoot, force, upward, seconds)
+	knockDown(targetCharacter, seconds)
+
 	local offset = targetRoot.Position - fromRoot.Position
 	local direction = Vector3.new(offset.X, 0, offset.Z)
 
@@ -238,7 +323,16 @@ local function shove(targetRoot, fromRoot, force, upward)
 		direction = Vector3.xAxis
 	end
 
-	targetRoot.AssemblyLinearVelocity = direction.Unit * force + Vector3.new(0, upward, 0)
+	local velocity = direction.Unit * force + Vector3.new(0, upward, 0)
+
+	-- Every part, not just the root. Ragdolling broke one assembly into a
+	-- dozen loose ones, so setting the root's velocity alone would fling the
+	-- root and leave the arms and legs standing where they were.
+	for _, part in ipairs(targetCharacter:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.AssemblyLinearVelocity = velocity
+		end
+	end
 end
 
 local function payIcicle(player)
@@ -362,8 +456,7 @@ local SPECIALS = {
 				})
 
 				for _, target in ipairs(targets) do
-					knockDown(target.Character, JAB_RAGDOLL)
-					shove(target.Root, root, knockback * JAB_SHARE, JAB_UPWARD)
+					launch(target.Character, target.Root, root, knockback * JAB_SHARE, JAB_UPWARD, JAB_RAGDOLL)
 
 					if target.Player then
 						payIcicle(player)
@@ -456,10 +549,7 @@ bonkEvent.OnServerEvent:Connect(function(player)
 	})
 
 	for _, target in ipairs(targets) do
-		-- Drop them first. Going limp before the shove lands is what makes
-		-- them tumble instead of skating along upright.
-		knockDown(target.Character, RAGDOLL_TIME)
-		shove(target.Root, root, knockback, UPWARD_FORCE)
+		launch(target.Character, target.Root, root, knockback, UPWARD_FORCE, RAGDOLL_TIME)
 
 		if target.Player then
 			payIcicle(player)
