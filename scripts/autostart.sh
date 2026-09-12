@@ -47,11 +47,43 @@ fi
 # Prefer the modern pair and fall back, because a machine that only has one of
 # them should still work rather than half-work.
 DOMAIN="gui/$(id -u)"
+
+#[[
+#  ── THE -w FOOTGUN, WHICH IS WHAT BROKE THIS ────────────────────────────────
+#  The fallback here used to be `launchctl unload -w`, and -w does not mean
+#  "unload harder". It writes a PERSISTENT DISABLED OVERRIDE against the label,
+#  stored outside the plist and surviving reboots, reinstalls and deleting the
+#  plist entirely.
+#
+#  A disabled service still bootstraps. `launchctl print` lists it, this
+#  script's own job_running says yes, and RunAtLoad is simply ignored — launchd
+#  loads the job and never executes it. The symptoms are precisely: loaded, no
+#  pid, no last exit code because it has never exited, and an empty log because
+#  nothing ever ran to write one.
+#
+#  And it is self-perpetuating. `bootstrap` does not clear the flag; only
+#  `enable`, or the `load -w` that never runs because bootstrap succeeded. So
+#  one fallback firing once — a bootout that failed because the job happened not
+#  to be loaded at that moment — disables autostart for good, and every
+#  reinstall afterwards reports success.
+#
+#  So: enable before every bootstrap, and never write the flag in the first
+#  place. The old verb without -w unloads exactly as well.
+#]]
 load_job() {
-  launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST" 2>/dev/null
+  launchctl enable "$DOMAIN/$LABEL" 2>/dev/null
+  launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null
 }
 unload_job() {
-  launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || launchctl unload -w "$PLIST" 2>/dev/null
+  launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || launchctl unload "$PLIST" 2>/dev/null
+}
+#[[ print-disabled reports the value as `=> true` on some macOS versions and
+#   `=> disabled` on others, so both are matched. The enabled spellings — false
+#   and enabled — contain neither word, so widening this cannot turn a working
+#   job into a reported-broken one. Checked against all four spellings. ]]
+job_disabled() {
+  launchctl print-disabled "$DOMAIN" 2>/dev/null \
+    | grep -F "\"$LABEL\"" | grep -qE "true|disabled"
 }
 job_running() {
   launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || launchctl list "$LABEL" >/dev/null 2>&1
@@ -210,11 +242,27 @@ status)
 
     if [ -n "$JOB_PID" ] && [ "$JOB_PID" != "0" ]; then
       echo "process     alive, pid $JOB_PID"
+    elif job_disabled; then
+      echo "process     NOT RUNNING — the service is DISABLED"
+      echo ""
+      echo "  Something ran 'launchctl unload -w' or 'launchctl disable' on it."
+      echo "  That writes a flag stored OUTSIDE the plist, which survives"
+      echo "  reboots, reinstalls, and deleting the plist. launchd keeps"
+      echo "  loading the job and keeps refusing to run it, which is why the"
+      echo "  log is empty and there is no exit code — it has never started."
+      echo ""
+      echo "  Clear it:  launchctl enable $DOMAIN/$LABEL"
+      echo "  then:      ./scripts/autostart.sh install"
+      echo ""
     else
       echo "process     NOT RUNNING${LAST_EXIT:+ — last exit code $LAST_EXIT}"
-      echo "            launchd has the job but nothing is executing. With"
-      echo "            KeepAlive set that means it is exiting as fast as it"
-      echo "            starts, once every 30s."
+      if [ -z "$LAST_EXIT" ]; then
+        echo "            and no exit code, so it has never run at all rather"
+        echo "            than run and died. launchd is refusing to spawn it."
+      else
+        echo "            With KeepAlive set it is exiting as fast as it starts,"
+        echo "            once every 30s. The code above says why."
+      fi
     fi
 
     # The only question Studio cares about. Same probe restart-rojo.sh uses,

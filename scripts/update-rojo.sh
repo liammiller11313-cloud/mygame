@@ -201,8 +201,10 @@ fi
 restore_agent() {
   if [ "$AGENT_WAS_UP" -eq 1 ]; then
     echo "restarting the autostart job"
+    # enable first: a disabled label bootstraps and is never run. See autostart.sh.
+    launchctl enable "gui/$(id -u)/$AGENT_LABEL" >/dev/null 2>&1
     launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist" >/dev/null 2>&1 \
-      || launchctl load -w "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist" >/dev/null 2>&1
+      || launchctl load "$HOME/Library/LaunchAgents/$AGENT_LABEL.plist" >/dev/null 2>&1
   fi
 }
 

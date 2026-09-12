@@ -37,8 +37,13 @@ STOPPED=0
 
 if [ -f "$PLIST" ]; then
   echo "Stopping the autostart job..."
+  #[[ No -w. It writes a persistent DISABLED override against the label, and a
+  #   disabled job still bootstraps, still lists, and is never run — see
+  #   autostart.sh's load_job for the whole trap. This fallback firing once,
+  #   because bootout found nothing loaded to boot out, is enough to kill
+  #   autostart permanently. ]]
   launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 \
-    || launchctl unload -w "$PLIST" >/dev/null 2>&1
+    || launchctl unload "$PLIST" >/dev/null 2>&1
   STOPPED=1
   sleep 1
 fi
@@ -69,8 +74,10 @@ fi
 # ── start it again ──────────────────────────────────────────────────────────
 if [ -f "$PLIST" ]; then
   echo "Starting the autostart job..."
+  # enable first, in case an older copy of these scripts left the flag behind.
+  launchctl enable "gui/$(id -u)/$LABEL" >/dev/null 2>&1
   launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 \
-    || launchctl load -w "$PLIST" >/dev/null 2>&1
+    || launchctl load "$PLIST" >/dev/null 2>&1
 
   # Confirm from the SERVER rather than from the binary. That the file on disk
   # is 7.7.0 was never in doubt; whether the thing now listening is, is the
