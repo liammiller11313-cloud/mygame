@@ -175,21 +175,84 @@ uninstall)
 
 status)
   if job_running; then
+    #[[
+    #  "Registered with launchd" and "actually serving" are different facts, and
+    #  this used to print the first while claiming the second.
+    #
+    #  launchctl says a job is loaded whether it is running happily, exiting
+    #  instantly in a KeepAlive restart loop, or sitting there having failed to
+    #  bind. All three read as "running". The one that gets reported is "Rojo is
+    #  serving <folder>", which is a promise about a socket nothing has asked
+    #  about — and when it is wrong, the visible evidence is an EMPTY LOG beside
+    #  a green line, which is the least actionable pair of facts possible.
+    #
+    #  So: the pid launchd actually holds, the exit code of the last run, and an
+    #  answer from the port. The port is the only one of the three that means
+    #  Studio can connect.
+    #]]
+    DETAIL="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null)"
+    JOB_PID="$(printf '%s' "$DETAIL" | sed -n 's/^[[:space:]]*pid = \([0-9]*\).*/\1/p' | head -1)"
+    LAST_EXIT="$(printf '%s' "$DETAIL" | sed -n 's/^[[:space:]]*last exit code = \([0-9-]*\).*/\1/p' | head -1)"
+
     WD="$(installed_dir)"
     if [ -n "$WD" ] && [ "$WD" != "$REPO" ]; then
-      echo "running — but serving a DIFFERENT folder:"
+      echo "loaded — but pointed at a DIFFERENT folder:"
       echo "    $WD"
       echo "  you are standing in:"
       echo "    $REPO"
       echo ""
       echo "  Studio will connect to it and say Connected, and receive that"
       echo "  folder's code. Point it here:  ./scripts/autostart.sh install"
+      echo ""
     else
-      echo "running — Rojo is serving ${WD:-$REPO}"
+      echo "loaded — pointed at ${WD:-$REPO}"
     fi
-    echo ""
-    echo "Last few lines:"
-    tail -n 8 "$LOG" 2>/dev/null | sed 's/^/  /'
+
+    if [ -n "$JOB_PID" ] && [ "$JOB_PID" != "0" ]; then
+      echo "process     alive, pid $JOB_PID"
+    else
+      echo "process     NOT RUNNING${LAST_EXIT:+ — last exit code $LAST_EXIT}"
+      echo "            launchd has the job but nothing is executing. With"
+      echo "            KeepAlive set that means it is exiting as fast as it"
+      echo "            starts, once every 30s."
+    fi
+
+    # The only question Studio cares about. Same probe restart-rojo.sh uses,
+    # and --noproxy because a system proxy must not answer for localhost.
+    SERVED="$(curl -fsS --noproxy '*' -m 2 "http://localhost:34872/api/rojo" 2>/dev/null \
+      | tr -c '[:print:]' '\n' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    if [ -n "$SERVED" ]; then
+      echo "port 34872  answering, Rojo $SERVED  <- Studio can connect"
+    else
+      echo "port 34872  NOTHING ANSWERING  <- Studio cannot connect"
+    fi
+
+    if [ -s "$LOG" ]; then
+      echo ""
+      echo "Last few lines:"
+      tail -n 8 "$LOG" 2>/dev/null | sed 's/^/  /'
+    elif [ -f "$LOG" ]; then
+      echo "log         EMPTY"
+      echo ""
+      #[[ Worth being exact about, because the tempting explanation is wrong.
+      #   dev.sh writing to a FILE appears within two seconds — measured, not
+      #   assumed — so its output is not sitting in a buffer waiting for the
+      #   process to end. An empty log is an empty log: it did not run. ]]
+      echo "  dev.sh echoes a line before it does any work, and its output"
+      echo "  reaches a log file within two seconds. So an empty log means it"
+      echo "  never ran, not that it is running quietly. Run it in the"
+      echo "  foreground and the reason prints straight to the terminal:"
+      echo ""
+      echo "      ./scripts/dev.sh"
+      echo ""
+    else
+      echo "log         MISSING ($LOG)"
+      echo ""
+      echo "  launchd creates this the moment it starts the job, so a missing"
+      echo "  one means the job has never been started at all — not that it"
+      echo "  started and failed. Reinstall:  ./scripts/autostart.sh install"
+      echo ""
+    fi
   else
     echo "not running."
     if [ -f "$PLIST" ]; then
