@@ -29,11 +29,17 @@ local COOLDOWN = 1 -- seconds between bonks
 -- with it however it happens to be attached.
 local LUNGE_SPEED = 28
 
--- The bonk volume. It starts at the walrus and reaches forward, so there is
--- no dead patch right in front of your face.
+-- The bonk volume, measured as the near and far edge of a box in front of
+-- you. Say where it starts and where it stops and the depth follows, so
+-- the two can't drift apart the way a size and a separate offset can.
+--
+-- Careful with BONK_START: everything closer than that is a hole you
+-- cannot hit through. 2 is a nose-length. Push it to 6 and someone stood
+-- against your chest is untouchable.
 local BONK_WIDTH = 5
 local BONK_HEIGHT = 5
-local BONK_REACH = 12 -- studs in front of you the bonk reaches
+local BONK_START = 2 -- studs in front of you the box begins
+local BONK_REACH = 14 -- studs in front of you the box ends
 
 -- Draws the hitbox so you can see exactly what you're swinging. Leave it on
 -- while you tune the three numbers above; set it false before you publish.
@@ -207,8 +213,13 @@ bonkEvent.OnServerEvent:Connect(function(player)
 	local rising = root.AssemblyLinearVelocity.Y
 	root.AssemblyLinearVelocity = root.CFrame.LookVector * LUNGE_SPEED + Vector3.new(0, rising, 0)
 
-	local bonkCFrame = root.CFrame * CFrame.new(0, 0, -BONK_REACH / 2)
-	local bonkSize = Vector3.new(BONK_WIDTH, BONK_HEIGHT, BONK_REACH)
+	-- Both derived from the two edges, so the box always sits exactly where
+	-- BONK_START and BONK_REACH say it does.
+	local depth = math.max(BONK_REACH - BONK_START, 0.1)
+	local centre = (BONK_START + BONK_REACH) / 2
+
+	local bonkCFrame = root.CFrame * CFrame.new(0, 0, -centre)
+	local bonkSize = Vector3.new(BONK_WIDTH, BONK_HEIGHT, depth)
 
 	if SHOW_HITBOX then
 		showHitbox(bonkCFrame, bonkSize)
