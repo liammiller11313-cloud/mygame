@@ -23,20 +23,58 @@ original while not being it.
 So the originals are the originals, and they live in Studio where the author put
 them.
 
-## Their scripts do not run, and that is not an oversight
+## Their scripts DO run, and that is the whole point
 
-`adoptWeapon`'s first line is `sanitise(model)`, which destroys every
-`LuaSourceContainer` in a supplied asset — see PlaceholderFactory's header, which
-calls it "the security line and it is not negotiable: a Script inside a
-downloaded model runs on OUR server with full permissions". It takes the Sounds
-too, because every noise in this game goes through AudioService's voice budget.
+This section used to say the opposite, and it was true when it was written.
 
-So a Tool dropped into `Assets.Weapons` contributes its **parts** and its
-**`Grip` pose**. WeaponConfig and the services contribute everything it does.
+`adoptWeapon` destroys every `LuaSourceContainer` and every `Sound` in a
+supplied asset, which is the right default — PlaceholderFactory's header calls
+it "the security line and it is not negotiable: a Script inside a downloaded
+model runs on OUR server with full permissions". For these four, that default
+threw away the thing being asked for.
 
-That split is what makes the rest of the game work on these weapons for free —
-ammo, reload, the mobile fire button, kill credit, gore, friendly fire, the
-Director's threat accounting — none of which exists in a brickbattle tool.
+So there is a second path now, and only these four take it. A weapon marked
+`nativeTool` in WeaponConfig never goes through the asset pipeline at all:
+NativeToolService clones the author's Tool out of `Assets.Weapons` exactly as
+it is — `ServerLauncher`, `LocalLauncher`, `PogoServer`, `PogoClient`,
+`SwordScript`, `Slingshot`, `Client`, the disabled projectile templates, the
+`Explosion` and `Swoosh` sounds, the `fire` and `MouseLoc` remotes — into the
+player's Backpack, and equips it.
+
+The difference from a downloaded model is not that these scripts are safe. It
+is that they are the POINT, and that the author put them there: the same trust
+boundary as the game's own source. The set is a closed list in WeaponConfig
+rather than whatever happens to be sitting in a folder.
+
+### What the game stops doing, so nothing happens twice
+
+| Ordinarily | For a native tool |
+|---|---|
+| ViewmodelController draws a first-person weapon | nothing — the engine already welds the Tool's Handle into the hand you are looking down, so a viewmodel is a second copy of the same gun on different springs |
+| CarryVisualService mounts a world model in the hand | nothing, same weld, same reason |
+| WeaponController predicts the shot: flash, sound, tracer, ammo, recoil, remote | nothing. The Tool's own LocalScript is listening for that same click |
+| BallisticsService resolves the shot | refused. Its Tool fires through its own remote |
+| MeleeService resolves the swing (the Sword is `fireMode = "Melee"`) | refused. `SwordScript` owns the slash, the lunge and both samples |
+
+### What it costs
+
+**Ammo and reload do not apply.** The HUD's magazine counter does not describe
+these four, and cannot: a brickbattle tool has no magazine. That is not a bug
+waiting to be fixed.
+
+**Kill credit needed bridging, and it is bridged.** Their scripts claim a kill
+the classic way — an ObjectValue called `creator` parented onto the victim's
+Humanoid — and nothing in this game reads that. Kills are credited off
+`InfectedService.died` and its `ctx.attacker`, set inside `damage`, which these
+weapons never reach.
+
+The rig still dies correctly: InfectedService's `Humanoid.Died` connection was
+written for exactly this case and its comment says so ("a stray
+`Humanoid:TakeDamage`"). It just died with no attacker, which is worth nothing —
+no stat, no XP, no quest, no leaderboard. So `InfectedService:creditPending`
+takes a context from outside, NativeToolService turns the `creator` tag into
+one, and every listener downstream sees the shape it always sees. First tag
+wins, so a second shooter cannot steal the first one's claim.
 
 ## The tuning is frozen
 

@@ -997,6 +997,26 @@ local function fireOnce()
 		useHeldConsumable()
 		return
 	end
+	--[[
+		── A NATIVE TOOL FIRES ITSELF ───────────────────────────────────────────
+		Before the melee branch, because the Classic Sword is both and its own
+		SwordScript owns the swing.
+
+		The four Brickbattle weapons are real Roblox Tools. Their own LocalScripts
+		are already listening for this same click on the equipped Tool, and they
+		fire, play the sound and spawn the round themselves. Everything below this
+		line is this game doing the identical job in parallel — a second muzzle
+		flash, a second sample over the top of theirs, a tracer for a shot that is
+		really a travelling part, an ammo counter for a weapon with no magazine,
+		and a FireWeapon packet the server now drops anyway.
+
+		So the whole predicted path is skipped. Not just the remote: the local
+		effects are the half you would actually SEE doubled. See
+		NativeToolService, BallisticsService and MeleeService for the other ends.
+	]]
+	if definition.nativeTool then
+		return
+	end
 	if definition.fireMode == "Melee" then
 		--[[ fireOnce runs on the press edge, so this swing is a deliberate one
 		     and may lunge. The Heartbeat repeat below calls swingMelee with

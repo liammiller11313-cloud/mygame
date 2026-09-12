@@ -626,6 +626,14 @@ function MeleeService:swing(
 	if definition.fireMode ~= "Melee" then
 		return records
 	end
+	--[[ The Classic Sword is Melee AND a native tool, so it reaches here and
+	     must not be swung twice. Its own SwordScript owns the slash, the lunge,
+	     the damage window and both sounds; resolving the same swing here as well
+	     would double every hit and play the sample over itself. See
+	     NativeToolService, and BallisticsService for the shooting half. ]]
+	if definition.nativeTool then
+		return records
+	end
 
 	-- Consumed on ADMISSION, not on success. A swing that is then thrown out by
 	-- validateActor still costs its cooldown, which is what makes the remote

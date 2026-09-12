@@ -49,9 +49,10 @@ local Attributes = require(Shared.Net.Attributes)
 local Enums = require(Shared.Enums)
 local Registry = require(Shared.Util.Registry)
 local Trove = require(Shared.Util.Trove)
+local Types = require(Shared.Types)
 local WeaponConfig = require(Shared.Config.WeaponConfig)
 
-local LA = Attributes.Player
+local LA = Attributes.Loadout
 
 --[[ Marks a Tool this service put there, so cleanup never touches a Tool that
      arrived some other way. Named rather than tracked in a table because the
@@ -65,6 +66,17 @@ local serviceTrove = Trove.new()
 -- What each player is currently holding, by weapon id, so an unchanged slot
 -- does not re-clone a Tool the player is in the middle of using.
 local held: { [Player]: string } = {}
+--[[ Rigs already claimed this life, so a second tag cannot overwrite the first.
+     Cleared when the tag that set it is removed, which every one of these
+     scripts does on a Debris timer. ]]
+local _lastTagged: { [Model]: boolean } = {}
+
+--[[ Which of the four the player is holding, for the damage context's weaponId.
+     Read at credit time rather than stored with the tag: the tag carries only a
+     player, and the alternative is guessing. ]]
+local function _heldWeapon(player: Player): string
+	return held[player] or ""
+end
 
 local warned: { [string]: boolean } = {}
 local function warnOnce(key: string, message: string)
@@ -140,14 +152,23 @@ end
 	is how every one of these four scripts does it and it is not going to change,
 	because changing it would be editing the author's code.
 
-	Nothing else in this game reads that. DamageService owns kills, and it learns
-	about one by being told. So the bridge: when a `creator` tag lands on an
-	infected rig and that rig dies, tell StatsService the same thing it would
-	have been told had the shot gone through DamageService.
+	Nothing in this game reads that. Kills are credited off `InfectedService.died`
+	and its `ctx.attacker`, which is set inside `damage` — and these Tools never
+	reach `damage`, they call `Humanoid:TakeDamage` straight. The rig still dies
+	properly, because InfectedService's Humanoid.Died connection was written for
+	precisely this case. It just dies with no attacker, and a kill with no
+	attacker is worth nothing: no stat, no XP, no quest, no leaderboard entry.
 
-	Watched per rig rather than polled, and only while the tag exists — a tag
-	expires on a Debris timer in every one of those scripts, so a listener that
-	outlived it would be a leak per zombie per shot.
+	So the tag is turned into the context the rest of the game already speaks.
+	The first `creator` to land is the one that counts — a rig shot by two people
+	carries two tags, and a later one must not steal a claim the first made,
+	which is the same first-come rule the original scripts have by accident
+	because theirs expire.
+
+	`_lastTagged` is not a cache of rigs; it is a guard against that overwrite,
+	and it is keyed on the tag's own lifetime. Every one of these scripts removes
+	its tag on a Debris timer within a second or two, so the entry goes when the
+	tag goes and nothing accumulates.
 ]]
 function NativeToolService:_bridgeCredit(humanoid: Humanoid, creator: ObjectValue)
 	local player = creator.Value
@@ -159,27 +180,38 @@ function NativeToolService:_bridgeCredit(humanoid: Humanoid, creator: ObjectValu
 		return
 	end
 
-	local connection: RBXScriptConnection? = nil
-	connection = humanoid.Died:Connect(function()
-		if connection then
-			connection:Disconnect()
-			connection = nil
-		end
-		local stats = Registry.find("StatsService")
-		if stats and typeof(stats.recordKill) == "function" then
-			pcall(function()
-				stats:recordKill(player, model)
-			end)
-		end
-	end)
+	local infected = Registry.find("InfectedService")
+	if not infected or typeof(infected.creditPending) ~= "function" then
+		return
+	end
+	-- Only rigs this game is running. A creator tag on a PLAYER — which the
+	-- sword places every time somebody hits a teammate — is not a kill credit
+	-- question and is handled by SurvivorService's own path.
+	if typeof(infected.isTracked) == "function" and not infected:isTracked(model) then
+		return
+	end
+	if _lastTagged[model] then
+		return
+	end
+	_lastTagged[model] = true
 
-	--[[ The tag going away takes the listener with it. Debris removes it a
-	     second or two after the shot in every one of these scripts, so this is
-	     the normal path and not the exceptional one. ]]
+	--[[ Bullet rather than a truer type, and deliberately: every consumer
+	     switches on damageType, and inventing a fifth kind for these would mean
+	     touching each of them for a weapon they otherwise need no opinion on.
+	     The weaponId is the real one, so anything reading THAT still sees which
+	     gun it was. ]]
+	infected:creditPending(
+		model,
+		Types.newDamageContext({
+			attacker = player,
+			weaponId = _heldWeapon(player),
+			damageType = Enums.DamageType.Bullet,
+		})
+	)
+
 	creator.AncestryChanged:Connect(function(_, parent)
-		if not parent and connection then
-			connection:Disconnect()
-			connection = nil
+		if not parent then
+			_lastTagged[model] = nil
 		end
 	end)
 end
@@ -300,5 +332,7 @@ function NativeToolService:destroy()
 	table.clear(held)
 	serviceTrove:clean()
 end
+
+Registry.register("NativeToolService", NativeToolService)
 
 return NativeToolService

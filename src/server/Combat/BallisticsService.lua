@@ -469,6 +469,14 @@ function BallisticsService:resolveShot(
 		-- confused client, not an attack.
 		return records
 	end
+	--[[ And a native tool owns its own trigger. The four Brickbattle weapons are
+	     real Roblox Tools whose own scripts fire through their own remotes, so a
+	     shot resolved here as well would be the same trigger pull twice: two
+	     sets of damage, two sounds, two impacts. Dropped for the same reason the
+	     melee line above it is. See NativeToolService. ]]
+	if definition.nativeTool then
+		return records
+	end
 
 	local survivors = Registry.find("SurvivorService")
 	if survivors then

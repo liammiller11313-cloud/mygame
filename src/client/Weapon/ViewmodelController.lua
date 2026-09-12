@@ -1562,6 +1562,21 @@ function ViewmodelController:setWeapon(weaponId: string?, definition: any)
 	if not weaponId then
 		return
 	end
+	--[[
+		── A NATIVE TOOL HAS NO VIEWMODEL, AND MUST NOT ────────────────────────
+		The four Brickbattle weapons are real Roblox Tools. The engine welds a
+		Tool's Handle into the character's right hand the moment it is equipped,
+		and in first person you are looking down that hand — so the weapon is
+		already drawn, by Roblox, from the author's own model.
+
+		A viewmodel on top of that is a second copy of the same gun floating in
+		front of the first, moving on different springs. The reset above still
+		runs, so swapping AWAY from one leaves nothing of the last weapon behind;
+		this returns before anything is built. See NativeToolService.
+	]]
+	if typeof(definition) == "table" and definition.nativeTool then
+		return
+	end
 
 	local pose = current.pose
 	local template = findTemplate(weaponId, definition)

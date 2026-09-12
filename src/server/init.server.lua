@@ -195,6 +195,9 @@ local MODULES = {
 	     and after MapService, whose map it measures. ]]
 	"Level/LedgeService",
 	"Survivors/CarryVisualService",
+	-- After CarryVisualService: the two agree about what is in a hand, and this
+	-- one is the half that says "nothing, the Tool handles it".
+	"Survivors/NativeToolService",
 	"Combat/GoreService",
 	"Combat/DamageService",
 	"Combat/BallisticsService",
@@ -835,6 +838,22 @@ do
 			     reported as "it feels the same as before", and reading them off
 			     the live config at boot is the only way to tell a weapon that
 			     has not changed from a Studio that is not running the change. ]]
+			--[[ A native tool's numbers here would be a lie. Its Tool fires it,
+			     so `projectile` describes a round this game no longer spawns —
+			     and this line exists to be believed. Say what actually drives it
+			     instead, and whether the Tool it needs is really there, because
+			     a missing Tool is a weapon that is carried and does nothing. ]]
+			if definition.nativeTool then
+				local weapons = ReplicatedStorage:FindFirstChild("Assets")
+				weapons = weapons and weapons:FindFirstChild("Weapons")
+				local tool = weapons and weapons:FindFirstChild(definition.modelName)
+				parts[#parts + 1] = string.format(
+					"%s %s",
+					string.gsub(id, "^Classic", ""),
+					if tool and tool:IsA("Tool") then "own Tool" else "own Tool MISSING"
+				)
+				continue
+			end
 			local flight = "HITSCAN"
 			local round = definition.projectile
 			if round then

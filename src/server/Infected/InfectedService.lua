@@ -805,6 +805,46 @@ end
 	studio-scripts/RigDoctor once, in Studio, where the result is visible and
 	saved.
 ]]
+--[[
+	Names who should be credited if this rig dies, for a killer that does not go
+	through `damage`.
+
+	── WHY THIS IS NOT A HOLE IN THE DAMAGE PIPELINE ───────────────────────────
+	Every weapon this game implements goes through DamageService and arrives at
+	`damage` above, which sets `deathContext` on the way past. Four do not: the
+	Brickbattle Tools run their own scripts, and those call `Humanoid:TakeDamage`
+	directly, which is the classic Roblox way and is not ours to rewrite — see
+	docs/BRICKBATTLE_WEAPONS.md.
+
+	The rig still dies correctly, because the Humanoid.Died connection in spawn()
+	was built for exactly this ("a stray Humanoid:TakeDamage") and retires the
+	brain either way. What it retires with is `record.deathContext`, and for a
+	kill this service never saw that is nil — so `died` fires with no attacker
+	and the kill counts for nobody: no stat, no XP, no quest, no leaderboard.
+
+	So the context is supplied from outside instead. NativeToolService reads the
+	`creator` tag those scripts place on the victim and calls this, and every
+	listener downstream — StatsService, ProgressionService, DirectorTemperament,
+	LeaderboardService — sees the same shape it always sees and needs no special
+	case for a weapon it has never heard of.
+
+	It only ever ANNOUNCES a killer. It applies no damage and cannot kill
+	anything, so the worst a wrong call can do is misattribute a kill that some
+	other weapon then makes — and `damage` overwrites it on the way past, so any
+	real hit afterwards takes the credit back.
+]]
+function InfectedService:creditPending(model: Model, ctx: any): boolean
+	if typeof(model) ~= "Instance" or typeof(ctx) ~= "table" then
+		return false
+	end
+	local record = self._records[model]
+	if not record then
+		return false
+	end
+	record.deathContext = ctx
+	return true
+end
+
 function InfectedService:_boltTogether(model: Model, kind: string)
 	local before = #RigUtil.getMotors(model)
 	local variant = tostring(model:GetAttribute("FL_Variant") or model.Name)

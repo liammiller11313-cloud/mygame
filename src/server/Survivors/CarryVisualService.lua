@@ -1223,6 +1223,16 @@ local function wantedKeys(player: Player): (string, string)
 	local entry = loadout[activeSlot]
 	local handsId = entry and entry.itemId or ""
 
+	--[[ A native tool puts nothing in the hands, because it has already put
+	     something there. The four Brickbattle weapons are real Roblox Tools; the
+	     engine welds a Tool's Handle to the right hand the moment it is equipped,
+	     which is the same hand this service mounts to. Both doing it is two
+	     models in one fist. See NativeToolService. ]]
+	local native = Registry.find("NativeToolService")
+	if native and typeof(native.isNative) == "function" and native:isNative(handsId) then
+		handsId = ""
+	end
+
 	local hands = if kind and handsId ~= "" then kind .. ":" .. handsId else ""
 	--[[ The kit is on the back UNLESS it is in the hands. Two mounts showing the
 	     same object at once is the one arrangement that reads as broken. ]]
