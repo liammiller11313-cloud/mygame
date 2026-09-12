@@ -38,13 +38,15 @@ local COOLDOWN = 1 -- seconds between bonks
 -- you. Say where it starts and where it stops and the depth follows, so
 -- the two can't drift apart the way a size and a separate offset can.
 --
--- Careful with the near edge: everything closer than that is a hole you
--- cannot hit through. 2 is a nose-length. Push it to 6 and someone stood
--- against your chest is untouchable.
+-- The near edge is the one to watch: everything closer than it is a hole
+-- you cannot hit through. Two characters pressed together sit roughly 3 to
+-- 4 studs apart root to root, so 4 is about as far out as this can go
+-- before someone standing on your nose becomes untouchable. Leave
+-- SHOW_HITBOX on and walk into the dummy if you push it further.
 local BONK_WIDTH = 5
 local BONK_HEIGHT = 5
-local BONK_START = 2 -- studs in front of you the box begins
-local BONK_REACH = 14 -- studs in front of you the box ends
+local BONK_START = 4 -- studs in front of you the box begins
+local BONK_REACH = 18 -- studs in front of you the box ends
 
 -- Power is a rating out of 10-to-25, not a speed, so it needs turning into
 -- one. Seven studs per point: the starter's 10 becomes the 70 the game was
@@ -55,10 +57,10 @@ local BONK_REACH = 14 -- studs in front of you the box ends
 -- walruses - the spread between them stays exactly as the signs promise.
 local KNOCKBACK_PER_POWER = 7
 
--- Flat, deliberately. Scaling the lift too would make a strong walrus
--- launch people skyward as well as far, which is twice as hard to balance
--- and reads as a bug the first time someone leaves the map vertically.
-local UPWARD_FORCE = 25
+-- How high a bonk throws them. Deliberately NOT scaled by Power: how far
+-- you send someone is the walrus's business, how high is the game's. Tie
+-- the two together and the strongest walrus turns into a launcher.
+local UPWARD_FORCE = 50
 
 local RAGDOLL_TIME = 2 -- seconds they're on the floor
 
@@ -211,14 +213,32 @@ local function hitInFront(character, root, box)
 	return found
 end
 
--- Send them away from you. Two characters standing in exactly the same spot
--- give a zero-length direction, which has no .Unit - fall back to where
--- you're facing.
+-- Send them up and away.
+--
+-- The direction is flattened to the horizontal first, and this is the whole
+-- reason bonks used to bury people. A target whose root sits even slightly
+-- below yours - on a slope, a step down, halfway through a fall, or simply
+-- already knocked flat - gives an offset that points downward, and shoving
+-- along it drives them into the floor. Height should come from `upward`
+-- alone, never from where the two of you happened to be standing.
 local function shove(targetRoot, fromRoot, force, upward)
 	local offset = targetRoot.Position - fromRoot.Position
-	local direction = (offset.Magnitude > 0) and offset.Unit or fromRoot.CFrame.LookVector
+	local direction = Vector3.new(offset.X, 0, offset.Z)
 
-	targetRoot.AssemblyLinearVelocity = direction * force + Vector3.new(0, upward, 0)
+	if direction.Magnitude < 0.01 then
+		-- Standing in exactly the same spot: use where you're facing, flattened
+		-- the same way.
+		local facing = fromRoot.CFrame.LookVector
+		direction = Vector3.new(facing.X, 0, facing.Z)
+	end
+
+	if direction.Magnitude < 0.01 then
+		-- Looking straight up or down, which a ragdolling root can do. Any
+		-- horizontal direction is as good as another here.
+		direction = Vector3.xAxis
+	end
+
+	targetRoot.AssemblyLinearVelocity = direction.Unit * force + Vector3.new(0, upward, 0)
 end
 
 local function payIcicle(player)
@@ -313,13 +333,16 @@ local SPECIALS = {
 			-- Above 1 because closing the distance first should be worth
 			-- something; drop it under 1 if the jab should trade reach for force.
 			local JAB_SHARE = 1.15
-			local JAB_UPWARD = 26
+			local JAB_UPWARD = 58 -- higher than a bonk: it's the special
 			local JAB_RAGDOLL = 3
 
-			-- The lunge. Keep whatever vertical speed they already had, so
-			-- this can't cancel a jump or pin them mid-fall.
-			local rising = root.AssemblyLinearVelocity.Y
-			root.AssemblyLinearVelocity = root.CFrame.LookVector * LUNGE_SPEED
+			-- The lunge. Keep upward momentum so this can't cancel a jump, but
+			-- never carry downward momentum into it: adding lift to a falling
+			-- player's negative speed can still total downward, which lunges
+			-- them into the ground instead of across it.
+			local rising = math.max(root.AssemblyLinearVelocity.Y, 0)
+			local facing = root.CFrame.LookVector
+			root.AssemblyLinearVelocity = Vector3.new(facing.X, 0, facing.Z).Unit * LUNGE_SPEED
 				+ Vector3.new(0, rising + LUNGE_LIFT, 0)
 
 			-- The jab lands where the lunge carried you, not where you
@@ -331,8 +354,8 @@ local SPECIALS = {
 				end
 
 				local targets = hitInFront(character, root, {
-					Start = 1,
-					Reach = 13,
+					Start = 3,
+					Reach = 16,
 					Width = 7,
 					Height = 7,
 					Color = Color3.fromRGB(255, 200, 100),

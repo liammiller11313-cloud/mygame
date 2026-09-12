@@ -53,10 +53,13 @@ local RED = Color3.fromRGB(214, 45, 58)
 local EDGE = Color3.fromRGB(240, 110, 120) -- the outline, a lit-up red
 
 local READY_TINT = Color3.fromRGB(255, 255, 255) -- gradient at full strength
-local COOLING_TINT = Color3.fromRGB(74, 68, 82) -- same gradient, turned down
+local COOLING_TINT = Color3.fromRGB(152, 146, 158) -- same gradient, muted
 
-local READY_TEXT = Color3.fromRGB(255, 255, 255)
-local COOLING_TEXT = Color3.fromRGB(176, 166, 184)
+-- Black text, so the cooling state can only mute the panel, never darken
+-- it: black on a dimmed purple would be a panel you can't read at the
+-- exact moment you're checking whether you can swing yet.
+local READY_TEXT = Color3.fromRGB(0, 0, 0)
+local COOLING_TEXT = Color3.fromRGB(52, 46, 56)
 
 local function themeGradient(parent)
 	local gradient = Instance.new("UIGradient")
