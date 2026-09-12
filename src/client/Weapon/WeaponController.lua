@@ -501,11 +501,19 @@ local function refreshLoadout(force: boolean)
 			     picking it up is worth hearing. Exactly one has, and it is the one
 			     you find once a round on the floor of a room you walked five
 			     generators for. ]]
-			local drawn = cue(definition, "Draw")
-			if AudioConfig.isConfigured(drawn) then
-				playLocal(drawn)
-			elseif definition.slot == Enums.Slot.Melee then
-				playLocal(AudioConfig.UI.MeleeDraw)
+			--[[ Nothing at all for a native tool, whose own scripts own every
+			     sound it makes. A classic Roblox weapon is silent to draw and
+			     has no equip animation, and that silence is what it sounds like;
+			     this game's draw cue on one would be this game putting a noise
+			     in the author's weapon. The Sword is slot Melee, so without the
+			     guard it picked up the melee cue by category. ]]
+			if not definition.nativeTool then
+				local drawn = cue(definition, "Draw")
+				if AudioConfig.isConfigured(drawn) then
+					playLocal(drawn)
+				elseif definition.slot == Enums.Slot.Melee then
+					playLocal(AudioConfig.UI.MeleeDraw)
+				end
 			end
 		end
 		pushWeapon()
@@ -983,6 +991,49 @@ local function spunUp(definition: any, now: number): boolean
 	return true
 end
 
+--[[
+	── THE CLICK, HANDED TO THE TOOL ───────────────────────────────────────────
+	A Roblox Tool fires on `Tool.Activated`, which the engine raises when the
+	holder clicks. This game never lets that happen: InputController binds
+	MouseButton1 through ContextActionService and returns Sink, so the click is
+	consumed before Roblox's own tool handling ever sees it. Equip a Brickbattle
+	weapon and it sits in your hand doing nothing, which is exactly what it did.
+
+	`Tool:Activate()` raises the same event by hand, so their LocalLauncher,
+	Slingshot Client and SwordScript hear the press they were written to hear,
+	and fire the shot, play the sound and spawn the round themselves. Deactivate
+	on release for the same reason — a tool written against a held trigger is
+	entitled to the end of it.
+
+	This is the whole of the wiring. Nothing here decides what a shot does.
+
+	It also buys the mobile and gamepad buttons for free: they arrive as the same
+	Action.Fire verb this reads, so a thumb on the touch pad activates the Tool
+	the same way a mouse does. Roblox's own tool-activation path reaches neither.
+]]
+local function equippedTool(): Tool?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	return character:FindFirstChildOfClass("Tool")
+end
+
+--[[ True when it handled the press, so the caller stops. Enabled is checked
+     because that is how these scripts signal their own cooldown — the classic
+     launcher sets it false for three seconds — and activating through it would
+     be firing faster than the weapon allows. ]]
+local function activateNativeTool(): boolean
+	local tool = equippedTool()
+	if not tool then
+		return false
+	end
+	if tool.Enabled then
+		tool:Activate()
+	end
+	return true
+end
+
 local function fireOnce()
 	local definition = state.definition
 	if not definition then
@@ -1015,6 +1066,7 @@ local function fireOnce()
 		NativeToolService, BallisticsService and MeleeService for the other ends.
 	]]
 	if definition.nativeTool then
+		activateNativeTool()
 		return
 	end
 	if definition.fireMode == "Melee" then
@@ -1426,6 +1478,16 @@ function WeaponController:start()
 	trove:add(input:onEnded(Action.Fire):connect(function()
 		state.firing = false
 		setWeaponLoop(nil, false)
+		--[[ The other half of the press. A Tool written against a held trigger
+		     is entitled to the end of it, and Deactivate is how Roblox says so. ]]
+		local definition = state.definition
+		if definition and definition.nativeTool then
+			local tool = equippedTool()
+			if tool then
+				tool:Deactivate()
+			end
+			return
+		end
 		--[[
 			A charge in progress is NOT cancelled here, and that is the decision
 			that makes the weapon playable.
@@ -1510,7 +1572,23 @@ function WeaponController:start()
 		     in the roster notices. ]]
 		if definition and definition.fireMode == "Auto" and (state.firing or state.spinReadyAt > 0) then
 			fireOnce()
-		elseif state.firing and definition then
+		elseif state.firing and definition and not definition.nativeTool then
+			--[[
+				── WHY nativeTool IS EXCLUDED HERE AND NOT ONLY IN fireOnce ─────
+				Both branches below reach past fireOnce, so the guard inside it
+				does not cover them, and both were wrong for these weapons.
+
+				The Sword is fireMode "Melee", so holding the trigger called
+				swingMelee every frame — a swing remote per tick, which the
+				server then refused one at a time, for a weapon whose own
+				SwordScript had already handled the press.
+
+				And dryFire is the one you would have HEARD. The game tracks no
+				magazine for a native tool, so `state.ammo` sits at zero forever
+				— which is precisely the condition for the empty click. Holding
+				fire on a working Brickbattle gun would have clicked "empty" at
+				you, once per frame, over the top of its own firing sound.
+			]]
 			if definition.fireMode == "Melee" then
 				swingMelee()
 			elseif state.ammo <= 0 and now >= state.nextFireAt then
