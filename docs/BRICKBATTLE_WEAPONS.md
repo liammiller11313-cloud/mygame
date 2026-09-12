@@ -56,6 +56,24 @@ rather than whatever happens to be sitting in a folder.
 | BallisticsService resolves the shot | refused. Its Tool fires through its own remote |
 | MeleeService resolves the swing (the Sword is `fireMode = "Melee"`) | refused. `SwordScript` owns the slash, the lunge and both samples |
 
+### Fitted to the hand, without touching the code
+
+Three properties are set on the clone. None of them is behaviour, and all three
+are things a brickbattle tool never had to care about and this game does.
+
+| Property | Why |
+|---|---|
+| `Massless = true` on every part | a Tool's Handle is welded into the arm and its mass adds to the character's. Walkspeed, jump height and the shove all read off that, so without this the movement changes depending on which weapon is out — and movement is not the Tool's to change |
+| `CanCollide = false` on every part | an equipped Handle that collides is a solid object attached to your arm: it catches on door frames, shoves teammates and pushes the camera in first person. `Touched` still fires without it, which matters because `Touched` is exactly how `SwordScript` deals its damage |
+| `CanBeDropped = false` on the Tool | Backspace drops a Tool on the floor. This game's inventory does not know the Tool exists, so a dropped one is a weapon gone from a slot that still claims it, and a live Tool lying in the map. The slot is chosen in this game's own UI and dropping is not one of the choices it offers |
+
+`CanQuery` and `CanTouch` are deliberately left alone: their scripts raycast and
+use `Touched`, and those are the two flags that would break if guessed at.
+
+There is no viewmodel, so what you see in first person is the author's own model
+welded to your own arm — which is what a classic Roblox tool has always looked
+like down the camera.
+
 ### What it costs
 
 **Ammo and reload do not apply.** The HUD's magazine counter does not describe

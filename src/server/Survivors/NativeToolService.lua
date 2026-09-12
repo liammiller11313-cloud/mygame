@@ -70,6 +70,10 @@ local held: { [Player]: string } = {}
      Cleared when the tag that set it is removed, which every one of these
      scripts does on a Debris timer. ]]
 local _lastTagged: { [Model]: boolean } = {}
+--[[ Live only while at least one player holds a native tool. Held outside the
+     trove because it is connected and disconnected repeatedly through a round,
+     which is not what a trove is for. ]]
+local creditWatch: RBXScriptConnection? = nil
 
 --[[ Which of the four the player is holding, for the damage context's weaponId.
      Read at credit time rather than stored with the tag: the tag carries only a
@@ -131,18 +135,64 @@ local function findTool(definition: any): Tool?
 	return nil
 end
 
-local function clearTools(player: Player)
-	held[player] = nil
-	local character = player.Character
-	for _, container in { player:FindFirstChildOfClass("Backpack"), character } do
-		if container then
-			for _, child in container:GetChildren() do
-				if child:IsA("Tool") and child:GetAttribute(OWNED_TAG) then
-					child:Destroy()
-				end
-			end
+--[[ Both places a Tool can be: the Backpack when stowed, the character when
+     equipped. Written out rather than looped over `{ backpack, character }`,
+     because a generic for over a table literal halts at the first nil — and a
+     player with no Backpack yet would have made that literal `{ nil, character }`
+     and cleaned NEITHER, leaving the equipped Tool in their hand forever. ]]
+local function sweepTools(container: Instance?)
+	if not container then
+		return
+	end
+	for _, child in container:GetChildren() do
+		if child:IsA("Tool") and child:GetAttribute(OWNED_TAG) then
+			child:Destroy()
 		end
 	end
+end
+
+--[[
+	── FITTING THE TOOL TO THIS GAME'S HAND, WITHOUT TOUCHING ITS CODE ─────────
+	Three properties, none of them behaviour, all of them things a brickbattle
+	tool never had to care about and this game does.
+
+	MASSLESS. A Tool's Handle is welded into the arm, and its mass is added to
+	the character's. In brickbattle that was a slab of a gun on a default rig and
+	nobody noticed; here walkspeed, jump height and the shove all read off a mass
+	that would now change depending on which weapon is out. A weapon you can feel
+	in your legs is a weapon that has changed the movement, and movement is not
+	the Tool's to change.
+
+	CANCOLLIDE. An equipped Handle that collides is a solid object attached to
+	your arm: it catches on door frames, shoves teammates, and in first person it
+	pushes the camera. Touched still fires without it — which matters, because
+	Touched is exactly how SwordScript does its damage — so nothing in their code
+	notices.
+
+	CANBEDROPPED. Backspace drops a Tool on the floor. This game's inventory has
+	no idea the Tool exists, so a dropped one is a weapon gone from a slot that
+	still says it is there, and a live Tool lying in the map for anyone to pick
+	up. The slot is chosen in this game's own UI; dropping is not one of the
+	choices it offers.
+
+	Nothing here reads or edits a line of their scripts, and CanQuery and CanTouch
+	are deliberately left alone — their scripts raycast and use Touched, and those
+	are the two flags that would break if guessed at.
+]]
+local function conditionTool(tool: Tool)
+	tool.CanBeDropped = false
+	for _, descendant in tool:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Massless = true
+			descendant.CanCollide = false
+		end
+	end
+end
+
+local function clearTools(player: Player)
+	held[player] = nil
+	sweepTools(player:FindFirstChildOfClass("Backpack"))
+	sweepTools(player.Character)
 end
 
 --[[
@@ -216,6 +266,45 @@ function NativeToolService:_bridgeCredit(humanoid: Humanoid, creator: ObjectValu
 	end)
 end
 
+--[[
+	── THE CREDIT WATCH, AND WHY IT IS NOT ALWAYS ON ───────────────────────────
+	A `creator` tag is parented onto a Humanoid by somebody else's script at a
+	moment this service has no signal for, so DescendantAdded on the whole
+	workspace is the only thing that sees it happen.
+
+	That is a very hot signal in this game. Forty-six rigs, every gib and limb
+	GoreService makes, every projectile, every effect part — all of it goes
+	through this listener, all round, on the server. The handler is two
+	comparisons, but two comparisons on every instance added to the world is a
+	cost paid continuously for a tag that is only ever placed while somebody is
+	holding one of four weapons.
+
+	So it is connected only while somebody is. In a round where nobody took a
+	Brickbattle weapon — which is most of them — the listener does not exist.
+]]
+function NativeToolService:_syncCreditWatch()
+	local wanted = next(held) ~= nil
+	if wanted == (creditWatch ~= nil) then
+		return
+	end
+	if not wanted then
+		if creditWatch then
+			creditWatch:Disconnect()
+			creditWatch = nil
+		end
+		return
+	end
+	creditWatch = workspace.DescendantAdded:Connect(function(instance: Instance)
+		if not instance:IsA("ObjectValue") or instance.Name ~= "creator" then
+			return
+		end
+		local humanoid = instance.Parent
+		if humanoid and humanoid:IsA("Humanoid") then
+			self:_bridgeCredit(humanoid, instance)
+		end
+	end)
+end
+
 --[[ Brings the player's Backpack in line with what they have selected. Cheap to
      call repeatedly: holding the same weapon does nothing at all, which matters
      because this runs on every slot change of every kind. ]]
@@ -235,6 +324,7 @@ function NativeToolService:refresh(player: Player)
 	if not definition then
 		if held[player] then
 			clearTools(player)
+			self:_syncCreditWatch()
 		end
 		return
 	end
@@ -272,8 +362,10 @@ function NativeToolService:refresh(player: Player)
 
 	local tool = source:Clone()
 	tool:SetAttribute(OWNED_TAG, true)
+	conditionTool(tool)
 	tool.Parent = backpack
 	held[player] = weaponId
+	self:_syncCreditWatch()
 
 	--[[ Equipped for them. The player chose this weapon in this game's own UI,
 	     so making them then pick it out of Roblox's hotbar would be asking twice
@@ -302,27 +394,40 @@ function NativeToolService:start()
 		self:refresh(player)
 	end
 
+	--[[
+		The loadout signal as well as the attribute, because they are not the same
+		event and only one of them covers a swap.
+
+		ActiveSlot changing is "the player selected a different slot". A weapon
+		being put INTO the slot they already have selected — picking one up,
+		buying one, the round handing out a starting loadout — never touches that
+		attribute, so watching it alone would leave the old Tool in their hand
+		while the game believed they were holding the new one.
+
+		CarryVisualService takes `changed` for exactly this reason; the two now
+		wake on the same events, which is what stops the model in the hand and the
+		Tool in the hand disagreeing. refresh is idempotent and returns on the
+		first line when nothing moved, so hearing both is free.
+	]]
+	local inventory = Registry.find("InventoryService")
+	if inventory and inventory.changed then
+		serviceTrove:add(inventory.changed:connect(function(player: Player)
+			self:refresh(player)
+		end))
+	else
+		warn("[NativeToolService] no InventoryService; native tools will not be handed out")
+	end
+
 	for _, player in Players:GetPlayers() do
 		watch(player)
 	end
 	serviceTrove:connect(Players.PlayerAdded, watch)
 	serviceTrove:connect(Players.PlayerRemoving, function(player: Player)
 		held[player] = nil
+		self:_syncCreditWatch()
 	end)
 
-	--[[ The credit bridge, hung on the whole workspace rather than on each rig:
-	     a `creator` tag is parented onto a Humanoid by somebody else's script at
-	     a moment this service has no signal for, and DescendantAdded is the only
-	     thing that sees it happen. ]]
-	serviceTrove:connect(workspace.DescendantAdded, function(instance: Instance)
-		if not instance:IsA("ObjectValue") or instance.Name ~= "creator" then
-			return
-		end
-		local humanoid = instance.Parent
-		if humanoid and humanoid:IsA("Humanoid") then
-			self:_bridgeCredit(humanoid, instance)
-		end
-	end)
+	self:_syncCreditWatch()
 end
 
 function NativeToolService:destroy()
@@ -330,6 +435,10 @@ function NativeToolService:destroy()
 		clearTools(player)
 	end
 	table.clear(held)
+	if creditWatch then
+		creditWatch:Disconnect()
+		creditWatch = nil
+	end
 	serviceTrove:clean()
 end
 

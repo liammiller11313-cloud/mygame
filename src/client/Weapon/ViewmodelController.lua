@@ -2495,13 +2495,20 @@ local function hideOwnWorldWeapon(hidden: boolean)
 		return
 	end
 
-	--[[ `current.weaponId` is nil for every held-not-wielded slot, which is the
-	     same condition that decided not to build a viewmodel. Reading it here
-	     rather than inventing a second flag is what keeps the two from ever
-	     disagreeing — the hands mount is only hidden when something is standing
-	     in for it, and the BACK mount is hidden unconditionally because the owner
-	     cannot see their own back. ]]
-	local handsReplaced = current.weaponId ~= nil
+	--[[ Whether something is actually standing in for the hands mount, asked of
+	     the viewmodel itself rather than inferred.
+
+	     This read `current.weaponId ~= nil`, on the grounds that nil was "the
+	     same condition that decided not to build a viewmodel". That stopped
+	     being true when native tools arrived: they set weaponId and build no
+	     viewmodel, so the inference now says something is standing in when
+	     nothing is. `model` IS the stand-in, so asking it cannot drift from it —
+	     which is what the old comment wanted and got by coincidence.
+
+	     Same answer as before in both original cases: a wielded weapon has a
+	     model, a held-not-wielded slot has neither. The BACK mount stays hidden
+	     unconditionally, because the owner cannot see their own back. ]]
+	local handsReplaced = model ~= nil
 
 	for _, entry in carried do
 		local hideThis = hidden and (handsReplaced or not entry.hands)
