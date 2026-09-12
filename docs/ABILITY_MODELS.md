@@ -149,6 +149,35 @@ gunner should end up and it is used as-is (anchored and made non-collidable on
 the way in). With no Seat in the model, an invisible one is placed 2.2 studs
 behind the gun along the direction it faces.
 
+## The walrus, and why it has to be a rig
+
+`Become Walrus` hides the survivor and welds `Become Walrus` onto their
+HumanoidRootPart. The player keeps driving their own character — their Humanoid,
+their WalkSpeed — so the walrus goes wherever they go, and always did.
+
+What it did NOT do was move a muscle, and that is what got reported as other
+players seeing it "frozen". Every part was welded to the root, which pins the
+whole model into one rigid body: no joint can bend and any Animator inside is
+over-constrained. It slid around in a fixed pose.
+
+So the model decides what it gets:
+
+| What you supply | What happens |
+|---|---|
+| Loose parts, no joints | welded rigid, slides in a fixed pose. The old behaviour, kept because welding one part of a pile of loose parts would drop the rest on the floor |
+| A rig — a Motor6D chain, or an R15/R6 skeleton | only its root is welded; the joints stay free and articulate |
+| A rig with an `Animation` inside it | the same, and every clip plays on a loop |
+
+It says which of the three you gave it, once, the first time somebody becomes
+one — so "my walrus still slides" is one line in the output rather than a guess.
+
+**Do not leave a `Humanoid` in the model.** It is parented INTO the character,
+and a second Humanoid there makes `FindFirstChildOfClass("Humanoid")` a coin
+toss for every system that reads the player's state off exactly that call —
+damage, downs, revives, the HUD. One is replaced with an `AnimationController`
+on the way in, which gives the Animator and none of the state machine, but it is
+better not to ship one.
+
 ## Scale
 
 A stud is about 28cm. The grey-box turret is a 2.6-stud base with a barrel three

@@ -153,6 +153,158 @@ end
      there is nothing to dress — in which case the ability still runs and the
      player is simply an invisible five-thousand-point charge, which is a better
      failure than refusing a present because an asset is missing. ]]
+--[[
+	── ARTICULATED, OR ONE SOLID LUMP ──────────────────────────────────────────
+	Every part of the walrus used to be welded to the character's root. That is
+	correct for a prop and wrong for an animal: a WeldConstraint per part pins
+	the whole model into one rigid body, so no joint can bend and any Animator
+	inside it is over-constrained and drives nothing.
+
+	It moved — the earlier Anchored fix saw to that — and it moved as a slab.
+	From the outside that is a walrus gliding around in a fixed pose, which is
+	what "frozen" looks like when the thing is not actually stationary.
+
+	So: if the model is a rig, weld only its ROOT to the character and leave its
+	own joints alone. The root carries it, the joints articulate it, and its own
+	clips play over the top. A model with no joints falls back to the old rigid
+	weld, because welding one part of a pile of loose parts would leave the rest
+	on the floor.
+]]
+local reportedRig = false
+local function reportRig(motors: number, carrier: BasePart?, clips: number)
+	if reportedRig then
+		return
+	end
+	reportedRig = true
+	if not carrier then
+		print(
+			string.format(
+				"[BecomeWalrus] %q has %d Motor6D(s), so it is welded rigid and will slide rather "
+					.. "than move. Give the model joints (a Motor6D chain, or an R15/R6 rig) and it "
+					.. "articulates; add an Animation inside it and the clip plays.",
+				MODEL_NAME,
+				motors
+			)
+		)
+	elseif clips == 0 then
+		print(
+			string.format(
+				"[BecomeWalrus] %q is a rig (%d joints) and is articulated on %q — but it carries no "
+					.. "Animation, so nothing drives those joints. Put an Animation object inside the "
+					.. "model with its AnimationId set and it plays on a loop.",
+				MODEL_NAME,
+				motors,
+				carrier.Name
+			)
+		)
+	else
+		print(
+			string.format(
+				"[BecomeWalrus] %q articulated on %q — %d joint(s), %d clip(s) looping.",
+				MODEL_NAME,
+				carrier.Name,
+				motors,
+				clips
+			)
+		)
+	end
+end
+
+local function motorsIn(model: Model): { Motor6D }
+	local motors: { Motor6D } = {}
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("Motor6D") then
+			table.insert(motors, descendant)
+		end
+	end
+	return motors
+end
+
+--[[ The part the joints hang from: the author's PrimaryPart if they set one,
+     else whichever part the most Motor6Ds treat as Part0, else the biggest.
+     Three answers because a supplied model is allowed to be any of them. ]]
+local function rootOf(model: Model, motors: { Motor6D }): BasePart?
+	if model.PrimaryPart then
+		return model.PrimaryPart
+	end
+	local score: { [BasePart]: number } = {}
+	local best, bestScore = nil, 0
+	for _, motor in motors do
+		local part = motor.Part0
+		if part then
+			score[part] = (score[part] or 0) + 1
+			if score[part] > bestScore then
+				best, bestScore = part, score[part]
+			end
+		end
+	end
+	if best then
+		return best
+	end
+	local biggest, volume = nil, -1
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			local size = part.Size.X * part.Size.Y * part.Size.Z
+			if size > volume then
+				biggest, volume = part, size
+			end
+		end
+	end
+	return biggest
+end
+
+--[[
+	Something that can play a clip, without giving the character a second
+	Humanoid.
+
+	This model is parented INTO the character. A Humanoid inside it would make
+	`FindFirstChildOfClass("Humanoid")` a coin toss for every system in the game
+	that reads the player's state off exactly that call — damage, downs, revives,
+	the HUD. So any Humanoid the author shipped is replaced with an
+	AnimationController, which offers the Animator and none of the state machine.
+]]
+local function animatorFor(model: Model): Animator?
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid:Destroy()
+	end
+	local controller = model:FindFirstChildOfClass("AnimationController")
+	if not controller then
+		controller = Instance.new("AnimationController")
+		controller.Parent = model
+	end
+	local animator = controller:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = controller
+	end
+	return animator
+end
+
+--[[ Every clip the author put in the model, looped. Nothing is invented: a
+     model with no Animation in it stays still and says so, because guessing an
+     asset id is inventing content. ]]
+local function playClips(model: Model, animator: Animator?): number
+	if not animator then
+		return 0
+	end
+	local played = 0
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("Animation") and descendant.AnimationId ~= "" then
+			local ok, track = pcall(function()
+				return animator:LoadAnimation(descendant)
+			end)
+			if ok and track then
+				track.Looped = true
+				track.Priority = Enum.AnimationPriority.Movement
+				track:Play()
+				played += 1
+			end
+		end
+	end
+	return played
+end
+
 local function dress(walrus: Walrus): Model?
 	for _, part in walrus.character:GetDescendants() do
 		if part:IsA("BasePart") and part.Transparency < 1 then
@@ -175,6 +327,9 @@ local function dress(walrus: Walrus): Model?
 
 	model.Name = "FL_Walrus"
 	model:PivotTo(walrus.root.CFrame)
+
+	local motors = motorsIn(model)
+	local carrier = if #motors > 0 then rootOf(model, motors) else nil
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			--[[
@@ -213,13 +368,28 @@ local function dress(walrus: Walrus): Model?
 			part.CanQuery = false
 			part.CanTouch = false
 			part.CollisionGroup = "Debris"
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = walrus.root
-			weld.Part1 = part
-			weld.Parent = part
+			--[[ Only the carrier when the model is a rig. Welding every part as
+			     well would re-pin the joints this whole branch exists to keep
+			     free — two constraints on one part and the stiffer wins. ]]
+			if carrier == nil or part == carrier then
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = walrus.root
+				weld.Part1 = part
+				weld.Parent = part
+			end
 		end
 	end
+
+	local clips = 0
+	if carrier then
+		clips = playClips(model, animatorFor(model))
+	end
 	model.Parent = walrus.character
+
+	--[[ Said once, because which of the three shapes the supplied model turned
+	     out to be is the difference between a walrus that lives and a walrus
+	     that slides, and it is not visible from anywhere else. ]]
+	reportRig(#motors, carrier, clips)
 	return model
 end
 
