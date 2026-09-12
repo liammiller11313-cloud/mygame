@@ -89,6 +89,30 @@ local DEBUG = true
 -- collected instead of sitting here for the rest of the round.
 local ragdolled = setmetatable({}, { __mode = "k" })
 
+-- Take physics off the victim's own machine for as long as they're down.
+--
+-- Roblox normally hands a player's character to that player's client to
+-- simulate. That client is still running its own version of events, and it
+-- will happily overwrite a velocity the server just set - which is exactly
+-- why a bonk sometimes launched someone and sometimes did nothing. With the
+-- server owning the parts, the throw lands every single time.
+local function takeOwnership(character)
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and not part.Anchored then
+			-- Throws for anything not currently simulated. Those don't need it.
+			pcall(part.SetNetworkOwner, part, nil)
+		end
+	end
+end
+
+local function returnOwnership(character)
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and not part.Anchored then
+			pcall(part.SetNetworkOwnershipAuto, part)
+		end
+	end
+end
+
 -- Swap the rig's joints for physics constraints, so the body actually goes
 -- limp. PlatformStand on its own only takes away control - the character
 -- keeps its shape and tumbles as one rigid lump, which reads as a statue
@@ -176,6 +200,7 @@ local function knockDown(character, seconds)
 		state = buildRagdoll(character)
 		ragdolled[character] = state
 		humanoid.PlatformStand = true
+		takeOwnership(character)
 	end
 
 	-- The newer hit takes over the timer, so the older one can't stand them
@@ -194,6 +219,9 @@ local function knockDown(character, seconds)
 		if humanoid.Parent and humanoid.Health > 0 then
 			humanoid.PlatformStand = false
 		end
+
+		-- Hand the character back to its owner, standing.
+		returnOwnership(character)
 	end)
 end
 
@@ -483,6 +511,14 @@ local SPECIALS = {
 				if humanoid.Health <= 0 or humanoid.PlatformStand or not root.Parent then
 					return
 				end
+
+				-- Plant the dash before hitting. Destroying the mover only stops
+				-- driving them; twenty five studs a second of momentum carries them
+				-- on for several studs more, so the hitbox would otherwise appear
+				-- around a walrus still sliding forward. Vertical speed is kept, or
+				-- dashing off a ledge would leave you hanging in the air.
+				local falling = root.AssemblyLinearVelocity.Y
+				root.AssemblyLinearVelocity = Vector3.new(0, falling, 0)
 
 				local targets = hitInFront(character, root, {
 					Start = 3,
