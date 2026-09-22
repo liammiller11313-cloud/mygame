@@ -288,4 +288,27 @@ Enums.Team = table.freeze({
 	Infected = "Infected",
 })
 
+--[[
+	What a boss leaves behind, and what it does to the gun you put it on.
+
+	Round-scoped and deliberately so: nothing here is saved, bought or carried
+	between matches. An enchantment is something the team EARNED in this round
+	off a boss they killed in this round, and it dies with the round the way the
+	round's modifier does. See EnchantConfig for the catalogue and for why that
+	scope is the whole point.
+
+	Keys must match EnchantConfig.Definitions exactly.
+]]
+Enums.Enchant = table.freeze({
+	--[[ The four are one each of the four things a weapon can be made to do
+	     that it could not before: burn, slow, feed you, or simply hit harder.
+	     Every one of them is delivered through a mechanic that already exists
+	     and is already balanced somewhere else in the game — see the notes on
+	     each in EnchantConfig. ]]
+	Ember = "Ember", -- sets what it hits alight
+	Frostbite = "Frostbite", -- slows what it hits, bosses included
+	Leech = "Leech", -- returns a share of the damage as health
+	Savage = "Savage", -- hits harder, and takes bodies apart
+})
+
 return table.freeze(Enums)

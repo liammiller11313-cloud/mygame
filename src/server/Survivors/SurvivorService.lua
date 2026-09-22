@@ -2477,6 +2477,28 @@ function SurvivorService:_beginInteract(player: Player, target: Instance)
 	end
 	record.lastInteractRequest = now
 
+	--[[
+		An enchantment book. Instant, and at the same range as a pickup, because
+		it is one — it just does not go into a slot. See EnchantService for why it
+		has its own tag rather than a Pickup.Slot: everything behind that
+		attribute can be dropped again, and a book is spent the moment it is
+		taken.
+
+		Before the pickup branch rather than after, so the two can never disagree
+		about a model that somehow carries both markings; a book is a book.
+
+		A refusal is silent and the book stays on the floor — the player is
+		holding a medkit or a pipe bomb, and the answer is to switch and press
+		again rather than to lose a boss drop to a slot that cannot hold it.
+	]]
+	if CollectionService:HasTag(target, Attributes.EnchantBookTag) then
+		local enchants = Registry.find("EnchantService")
+		if enchants and typeof(enchants.claimBook) == "function" then
+			enchants:claimBook(player, target)
+		end
+		return
+	end
+
 	-- Picking something up is instant and has its own, shorter range.
 	if target:GetAttribute(Attributes.Pickup.Slot) ~= nil then
 		local position = pivotOf(target)

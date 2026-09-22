@@ -66,6 +66,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AudioConfig = require(Shared.Config.AudioConfig)
 local Attributes = require(Shared.Net.Attributes)
 local EconomyConfig = require(Shared.Config.EconomyConfig)
+local EnchantConfig = require(Shared.Config.EnchantConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local InfectedConfig = require(Shared.Config.InfectedConfig)
@@ -864,6 +865,27 @@ local DOWNED_STATES: { [string]: boolean } = {
 	[STATE.LedgeHanging] = true,
 }
 
+--[[ Which loadout attribute carries each slot's enchantment. Only the three
+     weapon slots have one — a throwable is spent on use and a medkit is not
+     something you hit anybody with, so neither can carry one. See
+     Attributes.Loadout. ]]
+local ENCHANT_ATTRIBUTE: { [string]: string } = {
+	[SLOT.Primary] = LA.PrimaryEnchant,
+	[SLOT.Secondary] = LA.SecondaryEnchant,
+	[SLOT.Melee] = LA.MeleeEnchant,
+}
+
+--[[ What is on the weapon in this slot, or nil. Read off attributes rather than
+     asked of anything: the server writes them, they replicate for free, and a
+     player who joined mid-round has the right answer before their first frame. ]]
+local function enchantIn(slot: string): EnchantConfig.Enchant?
+	local attribute = ENCHANT_ATTRIBUTE[slot]
+	if not attribute then
+		return nil
+	end
+	return EnchantConfig.get(Attributes.get(player, attribute, ""))
+end
+
 local function refreshItems()
 	local active = Attributes.get(player, LA.ActiveSlot, SLOT.Primary)
 	local downed = DOWNED_STATES[Attributes.get(player, PA.State, STATE.Spectating)] == true
@@ -925,6 +947,8 @@ local function refreshItems()
 		--[[ What is in the slot, or — when there is nothing — what the slot is
 		     for. One label doing both is what lets an empty tile still teach a new
 		     player that the slot exists, which the old dash on its own did not. ]]
+		local enchant = if filled then enchantIn(slot) else nil
+
 		if filled then
 			local definition = WEAPON_SLOTS[slot] and WeaponConfig.get(itemId)
 			entry.label.Text = if definition then string.upper(definition.displayName) else itemLabel(itemId)
@@ -940,8 +964,15 @@ local function refreshItems()
 		     server refuses the switch silently. ]]
 		local reachable = not downed or slot == SLOT.Secondary
 
+		--[[ An enchanted weapon says so in its own colour. The label rather than a
+		     badge, because the tile is 62 pixels wide and already carries a name,
+		     a key and an ammo count — a fourth element would be the one that
+		     pushed it past readable. Colour costs no space at all, and it is the
+		     SAME colour the book was glowing on the floor and the toast named it
+		     in, so the three read as one object. ]]
 		entry.label.TextColor3 = if not reachable
 			then COLOR.TextDim
+			elseif enchant then enchant.color
 			elseif filled then COLOR.TextPrimary
 			else COLOR.TextDim
 		entry.key.TextColor3 = if reachable and filled then COLOR.TextSecondary else COLOR.TextDim
@@ -974,6 +1005,21 @@ local function refreshItems()
 			elseif selected and filled then COLOR.AccentBright
 			elseif filled then COLOR.Accent
 			else COLOR.Border
+
+		--[[ And the border takes it too — but only part of the way, and only when
+		     the tile is not the selected one.
+
+		     The three-step ladder above is load-bearing: bright orange is in your
+		     hands, orange is in your kit, grey is a slot you have nothing for. An
+		     enchantment colour painted flat over that would delete the step that
+		     says which weapon you are actually holding, which matters far more
+		     often than which weapon is enchanted. So a held tile keeps its bright
+		     orange outright, and an unheld enchanted one is pulled most of the way
+		     toward the enchantment — enough to pick out of the row, not enough to
+		     be mistaken for the selected one. ]]
+		if enchant and reachable and not selected then
+			base = base:Lerp(enchant.color, 0.75)
+		end
 
 		-- The flash rides on top of whatever the slot's resting colour is, so a
 		-- pickup reads the same whether the slot was empty, full, or selected.
@@ -1975,6 +2021,17 @@ function HudController:init()
 			LA.ThrowableId,
 			LA.HealthItemId,
 			LA.PillItemId,
+			--[[ The three enchantment attributes, watched for the same reason the
+			     ids above them are: an enchantment can change WITHOUT the weapon
+			     changing — a round reset clears every grant while the guns stay
+			     in their slots — and without these the tile would keep its
+			     enchanted colour until some unrelated attribute happened to move.
+
+			     The apply path repaints itself off the EnchantApplied toast, so
+			     these are the cases that have no event of their own. ]]
+			LA.PrimaryEnchant,
+			LA.SecondaryEnchant,
+			LA.MeleeEnchant,
 			--[[ Not a loadout attribute, but it changes what the hotbar may draw:
 			     going down locks every slot except the pistol, and without this
 			     the bar keeps showing five live options until some unrelated
@@ -2073,6 +2130,43 @@ function HudController:start()
 		end))
 	end
 	refreshWallet(false)
+
+	--[[
+		A weapon just gained an enchantment.
+
+		The notice line rather than a panel of its own, and in the enchantment's
+		colour rather than the notice's usual orange-or-red — this is neither
+		good-news nor bad-news, it is a NAMED thing, and naming it is the whole
+		job. The tile it landed on lights up in the same colour at the same
+		moment, so the line tells you what happened and the hotbar tells you where
+		it went.
+
+		The state itself is not here and never was: it rides the loadout
+		attributes, which refreshItems already reads. Losing this event costs a
+		line of text and nothing else, which is exactly what a toast should cost.
+	]]
+	trove:connect(Remotes.Event.EnchantApplied.OnClientEvent, function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local enchant = EnchantConfig.get(payload.enchantId)
+		if not enchant then
+			return -- an enchantment coming OFF; the tile going dark says it
+		end
+		local definition = WeaponConfig.get(payload.weaponId)
+		local weapon = if definition then string.upper(definition.displayName) else "WEAPON"
+		notice.label.Text = string.format("%s  ·  %s", weapon, enchant.displayName)
+		notice.label.TextColor3 = enchant.color
+		notice.label.TextTransparency = 0
+		notice.label.TextStrokeTransparency = 0.4
+		notice.label.Visible = true
+		notice.until_ = os.clock() + NOTICE_SECONDS
+		--[[ And the tile repaints now rather than on the next attribute change.
+		     The attribute and this event are two packets and arrive in no
+		     guaranteed order; repainting here means the colour is never a frame
+		     behind the line that announced it. ]]
+		refreshItems()
+	end)
 
 	trove:connect(Remotes.Event.Notice.OnClientEvent, function(payload: any)
 		if typeof(payload) ~= "table" then

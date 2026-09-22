@@ -173,6 +173,25 @@ Attributes.Loadout = table.freeze({
 	PillItemId = "FL_PillItemId",
 	ActiveSlot = "FL_ActiveSlot", -- string, Enums.Slot
 	IsReloading = "FL_IsReloading", -- boolean
+
+	--[[
+		What is on each weapon, as an Enums.Enchant id or "".
+
+		Attributes rather than a remote, for the same three reasons the ids above
+		them are: the HUD already repaints off attribute changes so the tile
+		recolours for free, a player who joins mid-round reads the current state
+		instead of waiting for the next broadcast, and there is exactly one
+		authority — the server wrote it.
+
+		Three, not six. Only a weapon can carry one: a throwable is spent the
+		moment it is used and a medkit is not a thing you hit anybody with, so an
+		enchantment on either would be a slot the player could waste a boss drop
+		into. EnchantService refuses those slots outright; these three attributes
+		are the whole of what it can write.
+	]]
+	PrimaryEnchant = "FL_PrimaryEnchant",
+	SecondaryEnchant = "FL_SecondaryEnchant",
+	MeleeEnchant = "FL_MeleeEnchant",
 })
 
 -- Written on an infected Model. The client reads these to colour outlines, pick
@@ -521,6 +540,25 @@ Attributes.Crate = table.freeze({
 	and it comes with the two signals that make the periodic scan unnecessary.
 ]]
 Attributes.PickupTag = "FL_Pickup"
+
+--[[
+	An enchantment book lying on the floor where a boss died.
+
+	Its own tag rather than a Pickup slot, because it is not one. Everything
+	behind Attributes.Pickup goes into an inventory slot and can be dropped
+	again; a book is spent the instant it is taken and never occupies anything.
+	Giving it a slot would have meant teaching InventoryService about a kind of
+	item that cannot be held, which is a larger change than one tag and reads as
+	a weapon that does not work.
+
+	The id it grants rides the same instance as an attribute, so the prompt can
+	name what is on the floor before anybody picks it up — "TAKE EMBER" is a
+	decision and "TAKE BOOK" is a lottery ticket.
+]]
+Attributes.EnchantBookTag = "FL_EnchantBook"
+Attributes.EnchantBook = table.freeze({
+	Id = "FL_EnchantId", -- string, Enums.Enchant
+})
 
 --[[
 	Stands an instance up as a pickup: the slot, the item, and the tag that lets

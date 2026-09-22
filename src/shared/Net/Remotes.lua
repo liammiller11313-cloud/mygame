@@ -270,6 +270,20 @@ local EVENTS: { string } = {
 	     happened on the server by the time this goes out. ]]
 	"AbilityEvent", -- {kind: string, id: string, player: Player?, position: Vector3?, ...}
 
+	--[[
+		A weapon just gained an enchantment, or lost one.
+
+		To the owner only, and purely so the client can say so — the state itself
+		rides the loadout attributes, which every client already reads and which a
+		late joiner gets for free. This is the TOAST, not the truth: dropping it
+		costs a line of text and nothing else.
+
+		`enchantId` is "" when the enchantment went away, which happens when the
+		weapon it was on did — an enchantment belongs to the gun, not to the
+		player, and swapping the gun out spends it.
+	]]
+	"EnchantApplied", -- S->C {slot: string, weaponId: string, enchantId: string}
+
 	-- ── Maps, crates and the map vote ───────────────────────────────────────
 	"MapVoteStarted", -- {options: {{id, displayName, blurb, image?}}, endsAt: number}
 	"CastMapVote", -- C->S (mapId: string)

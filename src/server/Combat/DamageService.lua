@@ -41,6 +41,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
 local AudioConfig = require(Shared.Config.AudioConfig)
 local DirectorConfig = require(Shared.Config.DirectorConfig)
+local EnchantConfig = require(Shared.Config.EnchantConfig)
 local Enums = require(Shared.Enums)
 local GameConfig = require(Shared.Config.GameConfig)
 local GoreConfig = require(Shared.Config.GoreConfig)
@@ -425,6 +426,43 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 		end
 	end
 
+	--[[
+		── 3b. THE ENCHANTMENT ON THE WEAPON THAT FIRED ─────────────────────────
+		A boss dropped a book, somebody put it on this gun, and this is where that
+		stops being a label and starts being damage. See EnchantService, which
+		owns which weapon carries what; this only asks.
+
+		HERE, and the position is chosen rather than convenient. After the hit
+		region and both falloffs, so it scales what the shot ACTUALLY achieved at
+		that range through that many bodies rather than the weapon's headline
+		number — a Savage rifle at the far end of its falloff gets 40% more of a
+		reduced number, which is the honest reading of "this weapon hits harder".
+		Before resistance and difficulty, so a Tank's damageResistance still
+		applies to the enchanted total and an enchantment can never be a way
+		around a body's armour.
+
+		Survivors are excluded, and not as a safety check: friendly fire is
+		blocked outright below, but a team that turns it on must not find that
+		the boss reward is also a better way to kill each other. An enchantment is
+		something you point at the horde.
+
+		Resolved once per hit rather than cached on the player: the lookup is
+		three table reads, and a cache would have to be invalidated on every
+		pickup, drop, swap and round reset — four chances to hand somebody a
+		multiplier for a gun they no longer hold.
+	]]
+	local enchant: EnchantConfig.Enchant? = nil
+	if not isSurvivor and ctx.attacker ~= nil and typeof(ctx.weaponId) == "string" then
+		local enchants = Registry.find("EnchantService")
+		if enchants and typeof(enchants.forWeapon) == "function" then
+			local found = enchants:forWeapon(ctx.attacker, ctx.weaponId)
+			if typeof(found) == "table" then
+				enchant = found
+				damage *= found.damageScale
+			end
+		end
+	end
+
 	-- ── 4. resistance, friendly fire, difficulty ─────────────────────────────
 	if isSurvivor then
 		local difficulty = difficultyProfile()
@@ -561,6 +599,17 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 			result.severedPart = nil
 		end
 
+		--[[ SAVAGE takes bodies apart, whatever the scoring said. Enforced on the
+		     same line the explosive rule is and for the same reason: the gore roll
+		     weighs overkill against a threshold, and a weapon whose whole promise
+		     is that it dismantles people must not quietly fail that promise on a
+		     body that happened to have one health left. Costs nothing — the gib
+		     path already exists and is already budgeted. ]]
+		if enchant and enchant.alwaysGibs then
+			result.goreLevel = Enums.GoreLevel.Gib
+			result.severedPart = nil
+		end
+
 		local processed, err = pcall(gore.processKill, gore, target, ctx, result)
 		if not processed then
 			warnOnce("processKill", "GoreService:processKill failed: " .. tostring(err))
@@ -620,6 +669,99 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 		local infected = Registry.find("InfectedService")
 		if infected and typeof(infected.ignite) == "function" then
 			pcall(infected.ignite, infected, target, ctx.attacker)
+		end
+	end
+
+	--[[
+		── WHAT THE ENCHANTMENT DOES ON CONTACT ─────────────────────────────────
+		Beside the incendiary block above, because it answers the same question
+		with the same three facts already resolved — who hit it, what with, and
+		what it is.
+
+		AFTER the damage, so nothing here fires at a body the hit already killed.
+		Lighting a corpse and chilling a corpse are both wasted work, and the
+		siphon is a fraction of damage DEALT, which is not a number that exists
+		until the hit has landed.
+	]]
+	if enchant and not isSurvivor and result.dealt > 0 then
+		local isBoss = infectedDefinition ~= nil and infectedDefinition.isBoss
+
+		--[[
+			EMBER lights what it hits — and never a boss.
+
+			The rule is inherited from incendiary rounds directly above, and it is
+			the same trap: `ignite` reads burnDamagePerSecond off the TARGET, and a
+			Tank's is 150 against every ordinary body's 25-45 because fire is the
+			intended answer to a Tank and a molotov is what delivers it. A sword
+			that lights one would deliver a molotov's full rate per swing, with no
+			throw and no cooldown, forever.
+
+			See EnchantConfig's header for the long version, and the Metallic's
+			note in InfectedConfig for the boss that exists to take fire away from
+			a team that opens every fight with it.
+		]]
+		if enchant.ignites and not result.killed and not (enchant.igniteSkipsBosses and isBoss) then
+			local infected = Registry.find("InfectedService")
+			if infected and typeof(infected.ignite) == "function" then
+				pcall(infected.ignite, infected, target, ctx.attacker)
+			end
+		end
+
+		--[[
+			FROSTBITE slows it, bosses included.
+
+			The one enchantment allowed to touch a boss, and allowed precisely
+			because a slow has no damage term — there is no rate to exploit and no
+			amount of hitting a Tank with it that adds up to killing one. A boss
+			shrugs off chillBossResistance of it, which is the number CryoBlast
+			already uses: a Tank you can still outrun and cannot ignore.
+		]]
+		if enchant.chillScale and enchant.chillSeconds and not result.killed then
+			--[[ Through InfectedService:getBrain, which is the one way anything
+			     outside the Infected folder reaches a brain — the same call
+			     AbilitySupport.brainOf makes for CryoBlast. ]]
+			local infected: any = Registry.find("InfectedService")
+			local brain = nil
+			if infected and typeof(infected.getBrain) == "function" then
+				local found, value = pcall(infected.getBrain, infected, target)
+				brain = if found then value else nil
+			end
+			if brain and typeof(brain.chill) == "function" then
+				--[[ chillScale is the speed the target KEEPS, so a boss keeps more
+				     of it: the resistance lifts the fraction back toward 1 rather
+				     than scaling the slow, which is the same arithmetic CryoBlast
+				     does one line at a time. ]]
+				local keep = enchant.chillScale
+				if isBoss and enchant.chillBossResistance then
+					keep += (1 - keep) * enchant.chillBossResistance
+				end
+				pcall(brain.chill, brain, math.clamp(keep, 0.05, 1), enchant.chillSeconds)
+			end
+		end
+
+		--[[
+			LEECH returns a share of what was DEALT.
+
+			Dealt, not rolled: a shot into a body with four health left heals four,
+			not the rifle's thirty-four, or a horde of nearly-dead Commons would be
+			a medkit that never runs out. Capped per hit as well, or a rocket into
+			a Tank is a full heal.
+
+			`temporary = false` — this is real health. Temporary health drains, and
+			a weapon whose promise is that it keeps you standing handing out a bar
+			that empties on its own would read as broken rather than as a nuance.
+		]]
+		if enchant.siphon and ctx.attacker and ctx.attacker.Parent then
+			local healed = result.dealt * enchant.siphon
+			if enchant.siphonMaxPerHit then
+				healed = math.min(healed, enchant.siphonMaxPerHit)
+			end
+			if healed > 0 then
+				local survivors = Registry.find("SurvivorService")
+				if survivors and typeof(survivors.heal) == "function" then
+					pcall(survivors.heal, survivors, ctx.attacker, healed, false)
+				end
+			end
 		end
 	end
 

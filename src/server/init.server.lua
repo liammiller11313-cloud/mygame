@@ -200,6 +200,12 @@ local MODULES = {
 	"Survivors/NativeToolService",
 	"Combat/GoreService",
 	"Combat/DamageService",
+	--[[ After DamageService, which asks it what is on the weapon that just hit
+	     something, and after InventoryService, whose slots it reads. Neither is a
+	     load-order requirement in fact — both are reached by registry name at call
+	     time — but the list is also the reading order, and a service that only
+	     ever answers questions belongs under the ones that ask them. ]]
+	"Combat/EnchantService",
 	"Combat/BallisticsService",
 	--[[ Read by BallisticsService when a pogo weapon's shot lands. Guarded there,
 	     so a missing PogoService costs the launch and never the shot. ]]

@@ -35,6 +35,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Attributes = require(Shared.Net.Attributes)
+local EnchantConfig = require(Shared.Config.EnchantConfig)
 local Enums = require(Shared.Enums)
 local MapConfig = require(Shared.Config.MapConfig)
 local PuzzleConfig = require(Shared.Config.PuzzleConfig)
@@ -57,6 +58,8 @@ local TEXT = UITheme.TextSize
 local LA = Attributes.Loadout
 local PA = Attributes.Player
 local PICKUP = Attributes.Pickup
+local ENCHANT_BOOK = Attributes.EnchantBook
+local ENCHANT_BOOK_TAG = Attributes.EnchantBookTag
 local STATE = Enums.SurvivorState
 
 local INTERACT_RANGE = GameConfig.Interaction.Range
@@ -482,6 +485,32 @@ local function classifyInstance(instance: Instance): (Instance?, string?, string
 		if node:GetAttribute(PICKUP.Slot) ~= nil then
 			local itemId = tostring(node:GetAttribute(PICKUP.ItemId) or node.Name)
 			return node, "TAKE", itemLabel(itemId), false, COLOR.TextPrimary
+		end
+		--[[
+			An enchantment book, dropped by a boss.
+
+			TAKE, and therefore a keypress, and that is worth being deliberate
+			about — it was nearly a walk-over. An enchantment goes onto the weapon
+			in your HANDS, so a book you collect by brushing past it is a boss
+			reward spent on whatever you happened to be holding, which on the way
+			out of a Tank fight is usually not what you wanted. A press is the
+			difference between a reward and an accident.
+
+			It also makes the prompt do the work it should: the name is readable
+			from interact range, so "switch to the shotgun before you take it" is
+			a play you can actually make.
+
+			Named rather than called "BOOK", in the enchantment's own colour —
+			the same colour the thing on the floor is glowing and the same one the
+			HUD tile takes once it is on. Three places, one value, so they read as
+			one object.
+		]]
+		if CollectionService:HasTag(node, ENCHANT_BOOK_TAG) then
+			local enchant = EnchantConfig.get(node:GetAttribute(ENCHANT_BOOK.Id))
+			if not enchant then
+				return nil, nil, nil, false, nil
+			end
+			return node, "TAKE", enchant.displayName, false, enchant.color
 		end
 		if CollectionService:HasTag(node, CLOSET_TAG) then
 			return node, "RESCUE", "SURVIVOR", true, COLOR.TextPrimary
