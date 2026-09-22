@@ -351,6 +351,106 @@ GameModeConfig.Waves = {
 	is the one that teaches the fight, and you cannot learn it from two.
 ]]
 
+--[[
+	── THE RARE FINALE ─────────────────────────────────────────────────────────
+	One round in six or so, the last wave sends something else entirely.
+
+	── THE PROBLEM IT SOLVES ───────────────────────────────────────────────────
+	Wave 15 has been the same coin flip since this table was written: an Apex
+	Tank or a plain Metallic. Two fights, both good, and a team that has played
+	six rounds has seen both several times. The finale is the moment the whole
+	round has been counting toward and it is the most predictable thing in it.
+
+	This does not make the finale harder. It makes it UNKNOWN — and an ending you
+	cannot predict is worth more than an ending you can predict and lose to.
+
+	── WHY IT IS RARE AND NOT A THIRD OPTION ───────────────────────────────────
+	Chance is deliberately low. At one in six a player sees one in an evening,
+	tells somebody about it, and goes looking for it again — which is the entire
+	mechanic. Raise it to one in three and it becomes the third face of the coin:
+	something you plan for, which is exactly what wave 15 already suffers from.
+
+	Lower than one in six and it stops existing socially. A thing nobody in the
+	server has seen is not a rare event, it is a rumour, and a rumour cannot be
+	the payoff for playing another round.
+
+	── AND IT IS A BOSS THIS MAP DOES NOT GET ──────────────────────────────────
+	The pool is every boss in the game, minus whatever this wave was ALREADY
+	going to release. That exclusion is most of the value: on Crossroads the
+	finale is a Tank or a Metallic, so a rare one is a Witch or a Bacteria
+	Monster — and the Bacteria Monster is exclusive to the Backrooms, so on three
+	maps out of four it is a creature nobody playing there has ever fought.
+
+	On the Backrooms, where the Bacteria Monster IS the finale, the same rule
+	sends one of the other three instead. Every map gets a surprise; no map gets
+	its own boss twice.
+
+	── IT COMES IN AT A TIER ABOVE APEX ────────────────────────────────────────
+	See InfectedConfig.EliteTiers.Harbinger. That tier is what makes the fight
+	worth the rarity — a plain Witch on wave 15 would be a rare event that was
+	EASIER than the ordinary one, which is the worst possible version of this.
+
+	And it keeps its tier whatever else is going on. The ELITE WAVE modifier's
+	Apex promotion does not touch it and cannot replace it: promotion exists to
+	lift an ordinary boss into a finale, and this one arrived as one.
+]]
+GameModeConfig.RareFinale = table.freeze({
+	Chance = 0.16,
+	Tier = "Harbinger",
+	--[[
+		Every boss that is a FIGHT. rollBosses removes the one the wave would
+		otherwise have sent, so this list never has to know which map it is on.
+
+		── AND THE WITCH IS NOT ON IT ──────────────────────────────────────────
+		She is the one boss in the game the team is meant to WALK AWAY FROM — see
+		InfectedConfig.PeakBosses, which lists the other three and pointedly not
+		her, because the Director should not go to its peak for a hazard you can
+		choose not to trigger.
+
+		That is exactly what disqualifies her here. A rare finale is a thing the
+		team is supposed to remember, and one they can solve by quietly going
+		round it is an anticlimax rather than a payoff: the rarest event in the
+		game would resolve as nothing happening. Wave 8 is where she belongs and
+		she is still there.
+
+		Her damage says the same thing from the other direction. The Harbinger
+		tier multiplies attacks by 1.5, which turns a Tank's 24 into 36 and keeps
+		a healthy survivor three swings from the floor — the line that tier note
+		is written around. The Witch already swings for 45. At 1.5 she hits for
+		67 and two-shots anybody at full health, which is not a harder fight, it
+		is a different game.
+
+		── NOR IS THE METALLIC, AND FOR A REASON ALREADY IN THIS FILE ──────────
+		rollBosses below already refuses to put the Apex tier on a Metallic, in
+		as many words: it is three times a Tank's health before any multiplier
+		and tripling that again is a fight no team finishes inside a wave. The
+		Harbinger tier multiplies harder than Apex does, so the same objection
+		applies with more force — 6,000 health at 4.5 is 27,000, against the
+		12,000 of the Apex Tank that is the hardest finale this game currently
+		ships. That is not a rare reward, it is a 144-second wave the team cannot
+		finish and therefore a rare event that reads as a bug.
+
+		A guard that already exists one screen down is a guard this pool has to
+		respect rather than route around.
+
+		── WHICH LEAVES TWO, AND ONE CANDIDATE PER MAP ─────────────────────────
+		Deliberately, and it is better than variety would be. The three ordinary
+		maps declare a Tank on wave 15, so their rare finale is the Bacteria
+		Monster — a creature exclusive to the Backrooms that nobody playing
+		Crossroads has ever fought. The Backrooms ends ON the Bacteria Monster,
+		so its rare finale is a Harbinger Tank: the same silhouette the team met
+		on wave 5, at a tier above the one they have been fearing all round.
+
+		Every map's rare ending is "the boss from the other place", which is a
+		cleaner idea than a random draw and needs no explaining to anybody who
+		sees one.
+	]]
+	Pool = table.freeze({
+		Enums.Infected.Tank,
+		Enums.Infected.BacteriaMonster,
+	}),
+})
+
 --[[ humans -> { chance of a second Tank, chance of a third GIVEN a second }.
      Indices are clamped into range by rollBosses, so a five-player future or a
      zero-player edge case reads the nearest row rather than nil. ]]
@@ -431,6 +531,50 @@ function GameModeConfig.rollBosses(
 	if override then
 		pool = nil
 		poolChance = 0
+	end
+
+	--[[
+		── AND THEN, RARELY, NONE OF THE ABOVE ─────────────────────────────────
+		The rare finale. See GameModeConfig.RareFinale for why it exists and why
+		the odds are what they are.
+
+		ROLLED AFTER the map override and BEFORE the substitution pool, which is
+		the only position that is correct. After the override, because the rare
+		one has to be able to replace a map's exclusive boss too — the Backrooms
+		would otherwise be the one map that never gets a surprise, and it is the
+		map whose whole character is not knowing. Before the pool, because the
+		pool is the ordinary variety this is meant to bypass entirely: rolling a
+		Metallic and THEN promoting it would make the rare finale a tier rather
+		than a different fight.
+
+		The draw is short-circuited away on waves 1 to 14 and spent exactly once
+		on wave 15, hit or miss. Nothing in the round follows it, so that costs
+		nothing and needs no ordering argument — it is written this way because
+		one condition reading "final wave, and the roll came up" is the sentence
+		the feature actually is.
+	]]
+	local rare = GameModeConfig.RareFinale
+	if wave.index >= #GameModeConfig.Waves and rng:NextNumber() < rare.Chance then
+		--[[ Everything except what this wave was already going to send. On most
+		     maps that leaves a creature nobody playing there has fought; see the
+		     config note. `declared` is read from the wave rather than from the
+		     loop below because the loop has not started yet — the finale wave
+		     declares exactly one boss, which is what makes that safe. ]]
+		local ordinary = override or wave.bosses[1]
+		local candidates: { string } = {}
+		for _, kind in rare.Pool do
+			if kind ~= ordinary then
+				table.insert(candidates, kind)
+			end
+		end
+		if #candidates > 0 then
+			return {
+				{
+					kind = candidates[rng:NextInteger(1, #candidates)],
+					tier = rare.Tier,
+				},
+			}
+		end
 	end
 
 	for _, declared in wave.bosses do

@@ -949,6 +949,86 @@ InfectedConfig.EliteTiers = table.freeze({
 		speed = 1.0,
 		outlineColor = Color3.fromRGB(240, 92, 40),
 	}),
+
+	--[[
+		── THE ONE MOST TEAMS WILL NEVER SEE ───────────────────────────────────
+		A tier above Apex, for the rare finale. See GameModeConfig.RareFinale for
+		when it is rolled and why the odds are what they are.
+
+		It exists because the round's last wave has been the same two fights
+		since the wave table was written — an Apex Tank or a plain Metallic, a
+		coin flip — and a team that has played six rounds has seen both. The
+		point of this one is not that it is harder. It is that it is UNEXPECTED,
+		and a finale you cannot predict is worth more than a finale you can
+		predict and lose to.
+
+		── WHY IT IS A TIER AND NOT A NEW CREATURE ─────────────────────────────
+		A fifth boss would need a rig, a brain module, its own tells and its own
+		balance pass, and would be the fifth thing in this game that can kill a
+		Tank's worth of health. A tier is none of that: it reuses creatures that
+		already work, and on most maps it delivers one the team has never met
+		anyway — the Bacteria Monster is exclusive to the Backrooms, so
+		"Harbinger Bacteria Monster" on Crossroads is genuinely a boss nobody
+		playing there has fought.
+
+		── THE NUMBERS, SOLVED AGAINST THE FINALE IT HAS TO BEAT ───────────────
+		The thing this has to be measurably harder than is the Apex Tank, which
+		is 4,000 at three times over, so 12,000 — the hardest ending this game
+		currently ships and one a competent team beats inside wave 15's 144
+		seconds.
+
+		At 3.6 the two candidates land either side of that:
+
+		    Harbinger Tank              4,000 x 3.6 = 14,400   1.2x an Apex Tank
+		    Harbinger Bacteria Monster  3,000 x 3.6 = 10,800   0.9x
+
+		Twenty per cent over the current finale is the right size of step. It is
+		felt immediately and it does not put the fight outside the clock, which
+		matters more here than anywhere else in the game: wave 15 is the last
+		wave, so a boss the team cannot finish in time does not escalate into
+		anything — the round simply ends with it still standing, which is the one
+		outcome that would make a rare event feel like a bug rather than a
+		defeat.
+
+		The Bacteria Monster coming in UNDER an Apex Tank is correct and not a
+		shortfall. Its fight was never about the bar — see its own note, it is a
+		timer on wherever the team is standing — and 3,000 is deliberately low so
+		that it stays a fight about ground rather than health. Multiplying it to
+		Tank parity would turn the one boss in the game that is not a bullet
+		sponge into one.
+
+		These are pre-crew numbers. GameModeConfig's headcount row scales boss
+		health after this, so a duo meets 0.56 of them.
+
+		SPEED IS 1.0, exactly as the Apex's is, and for the same reason written
+		there: the counter to a Tank is running, and a boss that outruns a
+		survivor deletes the counter instead of raising the bar. Every tier in
+		this table is allowed health, damage and reach. None of them gets legs.
+
+		Damage is 1.5 rather than the Apex's 1.35. A survivor has 100 health and
+		a Tank's swing is 24, so an Apex hits for 32 and this hits for 36 — still
+		three swings rather than two, which is the line that matters. Past 50 it
+		would two-shot a healthy survivor and the fight would stop being about
+		positioning.
+	]]
+	Harbinger = table.freeze({
+		id = "Harbinger",
+		--[[ Not "Apex Apex" and not a number. The word has to mean something on
+		     its own the first time it is heard over a callout, because there is
+		     no tutorial for a thing that turns up one round in six — "harbinger"
+		     says arrival and says end, which is the whole of what the player
+		     needs to take from it. ]]
+		titlePrefix = "Harbinger",
+		health = 3.6,
+		damage = 1.5,
+		scale = 1.18,
+		speed = 1.0,
+		--[[ Cold white-blue against the Apex's hot orange. Two elite tiers that
+		     both glowed warm would be two versions of the same warning; this one
+		     has to be legible as a DIFFERENT thing across a dark street, and the
+		     only channel it has for that is its outline. ]]
+		outlineColor = Color3.fromRGB(182, 226, 255),
+	}),
 }) :: { [string]: EliteTier }
 
 --[[ An elite modifier by id, nil for an unknown one. Ids come out of wave

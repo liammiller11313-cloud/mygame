@@ -232,6 +232,20 @@ local DEFINITIONS: { [string]: Enchant } = {
 
 EnchantConfig.Definitions = table.freeze(DEFINITIONS) :: { [string]: Enchant }
 
+--[[ The same four, in a fixed order.
+
+     Definitions is keyed by id, and `pairs` over a keyed table has no defined
+     order in Luau — so anything that needs to DEAL enchantments rather than pick
+     one needs a list, and a list built by iteration would be a different list on
+     two machines. Written out, so the Harbinger's payout is the same set on
+     every client and in every test. ]]
+EnchantConfig.All = table.freeze({
+	Enums.Enchant.Ember,
+	Enums.Enchant.Frostbite,
+	Enums.Enchant.Leech,
+	Enums.Enchant.Savage,
+})
+
 --[[
 	── WHAT EACH BOSS LEAVES ───────────────────────────────────────────────────
 	Boss-specific, because it costs nothing — the death signal already names the
@@ -274,6 +288,59 @@ EnchantConfig.Drop = table.freeze({
 		full team, and a real decision on a duo.
 	]]
 	OnePerWave = true,
+
+	--[[
+		── EXCEPT FOR A HARBINGER ──────────────────────────────────────────────
+		The rare finale pays every survivor, and it is the one thing that breaks
+		the per-wave rule above.
+
+		It has to. A Harbinger only ever appears on wave 15 — see
+		GameModeConfig.RareFinale — and one book handed to one player with two
+		minutes of round left is not a reward for the hardest fight in the game,
+		it is a participation token for whoever happened to be standing nearest.
+
+		Four books at once is also not the pacing problem the per-wave rule
+		exists to prevent. That rule is about a PACK of three Tanks on wave 11
+		flooding the middle of a round; this is the last wave, the round ends
+		minutes later, and nothing downstream can be unbalanced by it.
+
+		── AND IT IS GENUINELY USEFUL, NOT A CONSOLATION ───────────────────────
+		Wave 15 runs 144 seconds at 1.70 population with five specials alive, and
+		the boss is released at the top of it. A team that kills a Harbinger in
+		ninety seconds has fifty left against the heaviest horde in the game with
+		four enchanted weapons, which is the best possible last minute this game
+		can produce. A team that takes the whole wave gets a consolation instead,
+		which is the right way round.
+
+		Per SURVIVOR rather than per player: somebody spectating a wipe does not
+		need a book, and counting the lobby would print four of them for a team
+		of one still standing.
+	]]
+	HarbingerPaysEveryone = true,
+	--[[
+		And it pays out of the WHOLE catalogue, dealt without repeats.
+
+		Every ordinary boss draws from its own two-entry row in DropTable, which
+		is what gives the four boss waves distinct identities. A Harbinger
+		drawing the same way would hand four players four books off a pool of
+		two — half of them duplicates, on a fight most teams will see once.
+
+		So the rare finale ignores its kind's row and deals from all four, one
+		each, in a shuffled order. Four survivors get one of everything; fewer
+		get a subset with no repeats. That is a reward the team divides rather
+		than one they compare, and "who wants Frostbite" is a better thirty
+		seconds than "we all got Ember".
+	]]
+	HarbingerDealsDistinct = true,
+	--[[ The tier that triggers it, matched against the dying body's own Elite
+	     attribute. A string rather than a reach into InfectedConfig, because this
+	     file requires Enums and nothing else and a config that reaches sideways
+	     into another config stops being a description. ]]
+	HarbingerTier = "Harbinger",
+	--[[ How far apart several books are laid out. They go in a ring around where
+	     the body fell: dropped on one point they would be four overlapping props
+	     and the prompt would only ever name whichever the raycast found first. ]]
+	RingRadius = 6,
 
 	--[[ How long the book waits before it gives up and vanishes. Long enough to
 	     finish the fight it dropped out of and walk back for it; short enough

@@ -686,6 +686,52 @@ function RoundService:_enterWave(entry)
 			say("", callout, SAY_ANNOUNCE)
 		end
 
+		--[[
+			A rare finale gets a second announcement, and only a rare finale.
+
+			The subtitle above already reads "HARBINGER TANK!" — the tier prefix
+			comes free from bossCallout — but a subtitle is a line that scrolls
+			past during a wave announcement, three specials arriving and a boss
+			landing, which is exactly when this one happens. A team that has never
+			seen one has no reason to read that line differently from the four
+			boss callouts they have already heard this round.
+
+			So the notice line says it too, with the stinger, the way a boss going
+			DOWN already does. One round in six earns two channels; nothing else
+			in the wave gets this, which is the whole point of spending it here.
+
+			Tone is Danger rather than Good deliberately. Every other use of this
+			line is a reward — a boss down, an objective met — and a red line
+			where a player expects an orange one is information before a single
+			word of it has been read.
+
+			── AND NO STINGER, WHICH IT NEARLY HAD ─────────────────────────────
+			`sting` on this remote plays AudioConfig.UI.BossKillMarker, which is
+			the sound of a boss DYING. Setting it here would have announced the
+			hardest creature in the game walking in with the noise the team has
+			learned means the fight is over — the exact opposite of the fact
+			being reported, at the one moment in the round it matters most.
+
+			It does not need one. This arrives on three channels already: a red
+			line where every other notice is orange, a subtitle naming the tier,
+			and an outline colour no other body in the game has. A fourth would
+			need a sound that does not exist yet, and inventing an asset id to
+			fill a field is how a silent notice ships.
+		]]
+		for _, release in releases do
+			if release.tier == GameModeConfig.RareFinale.Tier then
+				local definition = InfectedConfig.get(release.kind)
+				local tier = InfectedConfig.elite(release.tier)
+				if definition and tier then
+					Remotes.Event.Notice:FireAllClients({
+						text = string.upper(tier.titlePrefix .. " " .. definition.displayName),
+						tone = "Danger",
+					})
+				end
+				break
+			end
+		end
+
 		local mine = generation
 		for order, release in releases do
 			if order == 1 then

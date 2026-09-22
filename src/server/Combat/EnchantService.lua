@@ -559,7 +559,19 @@ local function onInfectedDied(model: Model, ctx: any)
 		end
 	end
 
-	if DROP.OnePerWave and wave >= 0 and wave == lastDropWave then
+	--[[
+		A Harbinger — the rare finale — pays everyone, and is the one thing that
+		steps over the per-wave rule. See EnchantConfig.Drop.HarbingerPaysEveryone
+		for why that is not the pacing hole the rule exists to close.
+
+		Read off the body's own Elite attribute rather than asked of the round:
+		the creature that died is the authority on what it was, and a round that
+		has already ticked past wave 15 would answer the wrong question.
+	]]
+	local harbinger = DROP.HarbingerPaysEveryone
+		and model:GetAttribute(Attributes.Infected.Elite) == DROP.HarbingerTier
+
+	if DROP.OnePerWave and not harbinger and wave >= 0 and wave == lastDropWave then
 		return -- the pack's second and third Tank give nothing
 	end
 
@@ -577,15 +589,65 @@ local function onInfectedDied(model: Model, ctx: any)
 		return
 	end
 
+	--[[ One book, or one per survivor still standing. `getSurvivorCharacters`
+	     rather than the player list on purpose: a book for somebody spectating a
+	     wipe is a book nobody can reach, and counting the lobby would print four
+	     of them for a team of one. ]]
+	local count = 1
+	if harbinger then
+		local survivors = Registry.find("SurvivorService")
+		if survivors and typeof(survivors.getSurvivorCharacters) == "function" then
+			local ok, characters = pcall(survivors.getSurvivorCharacters, survivors)
+			if ok and typeof(characters) == "table" then
+				count = math.max(#characters, 1)
+			end
+		end
+	end
+
+	--[[ Laid out in a ring rather than stacked on the death point: four books on
+	     one spot are four overlapping props, and the prompt would only ever name
+	     whichever one the raycast reached first. One book still goes exactly
+	     where the body fell. ]]
+	--[[ A Harbinger deals one of each out of the whole catalogue instead of
+	     drawing twice from its kind's two-entry row — see
+	     EnchantConfig.Drop.HarbingerDealsDistinct. Shuffled in place on a COPY:
+	     EnchantConfig.All is frozen and shared, and shuffling the real one would
+	     reorder it for every later read in the server's life. ]]
+	local deal: { string }? = nil
+	if harbinger and DROP.HarbingerDealsDistinct then
+		deal = table.clone(EnchantConfig.All)
+		local list = deal :: { string }
+		for index = #list, 2, -1 do
+			local swap = random:NextInteger(1, index)
+			list[index], list[swap] = list[swap], list[index]
+		end
+	end
+
+	local dropped = 0
+	for index = 1, count do
+		local at = position
+		if count > 1 then
+			local bearing = (index - 1) / count * math.pi * 2
+			at = position + Vector3.new(math.cos(bearing), 0, math.sin(bearing)) * DROP.RingRadius
+		end
+		--[[ Past the end of the deal — more survivors than there are
+		     enchantments — falls back to the ordinary draw rather than dropping
+		     nothing. A fifth player would otherwise be the one person who got no
+		     reward for the hardest fight in the game. ]]
+		local id = deal and deal[index] or pool[random:NextInteger(1, #pool)]
+		if EnchantService:dropBook(at, id) then
+			dropped += 1
+		end
+	end
+
 	--[[ The wave is marked only once a book actually exists. Marking it before
 	     the drop meant a boss whose body had already been cleaned up — no
 	     primary part, no hit position — burned the wave's only book without
 	     producing one, and the team got nothing for a Tank with no way to know
 	     why. ]]
-	if not EnchantService:dropBook(position, pool[random:NextInteger(1, #pool)]) then
-		return
+	if dropped > 0 then
+		lastDropWave = wave
 	end
-	lastDropWave = wave
 end
 
 --[[ A new round wipes the slate: every grant, every book on the floor, and the

@@ -3,6 +3,19 @@
 	Bacteria Monster — the Backrooms' finale, and the one boss that attacks
 	standing still.
 
+	── IT IS NO LONGER ONLY THE BACKROOMS' ─────────────────────────────────────
+	It is still the map's own finale and still the only map that ENDS on it every
+	time. But it is also one of the two creatures GameModeConfig.RareFinale can
+	send on any map's last wave — see that note: the point of a rare finale is a
+	boss the team playing there has never fought, and on three maps out of four
+	this is the only creature that qualifies.
+
+	Nothing in this module assumes the Backrooms, and nothing below had to change
+	for it. What the map supplies is not geometry this code reads, it is the
+	reason the mechanic BITES: identical rooms with no landmarks are where being
+	forced to relocate mid-fight costs something. Somewhere with landmarks it is
+	a lesser fight, which is the correct shape for a bonus rather than a finale.
+
 	── THE ANSWER IT TAKES AWAY ────────────────────────────────────────────────
 	Every other boss in this game takes away one habit and leaves the rest.
 

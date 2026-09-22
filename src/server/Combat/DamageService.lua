@@ -304,10 +304,21 @@ local function personalDamageScale(player: Player?): number
 	return math.clamp(profile.incomingDamage, 0, 1)
 end
 
-local function pushKillFeed(attacker: Player, definition: any, ctx: DamageContext, isHeadshot: boolean)
+--[[ `named` is what this body should be CALLED: the kind's display name, with
+     its elite tier's prefix when it has one. Passed in rather than derived here
+     because the tier lives on the model as an attribute and this function has
+     never been handed the model — and a second parameter is a far smaller change
+     than a third reason for this helper to know about instances. ]]
+local function pushKillFeed(
+	attacker: Player,
+	definition: any,
+	named: string,
+	ctx: DamageContext,
+	isHeadshot: boolean
+)
 	local payload = {
 		killer = attacker.Name,
-		victim = definition.displayName,
+		victim = named,
 		weaponId = ctx.weaponId or "",
 		headshot = isHeadshot,
 	}
@@ -323,8 +334,13 @@ local function pushKillFeed(attacker: Player, definition: any, ctx: DamageContex
 		     Hunters in a wave would turn the notice line into a second kill
 		     feed. ]]
 		if definition.isBoss then
+			--[[ Named by its TIER when it has one, for the same reason the arrival
+			     callout is — "TANK DOWN" after a team has just spent two minutes
+			     on a Harbinger reads as the ordinary Tank going down, and the one
+			     fight worth telling somebody about ends with the same three words
+			     as the one on wave 5. See InfectedConfig.EliteTiers. ]]
 			Remotes.Event.Notice:FireAllClients({
-				text = string.upper(definition.displayName) .. " DOWN",
+				text = string.upper(named) .. " DOWN",
 				tone = "Good",
 				--[[ The client plays a stinger for this one. A flag rather than a
 				     sound id, because which sound a notice makes is a client
@@ -816,7 +832,16 @@ function DamageService:applyDamage(target: Model, baseDamage: number, ctx: Damag
 	end
 
 	if result.killed and not isSurvivor and attacker and attacker.Parent then
-		pushKillFeed(attacker, infectedDefinition :: any, ctx, isHeadshot)
+		--[[ Named by its TIER when it has one. "TANK DOWN" after a team has just
+		     spent two minutes on a Harbinger reads as the ordinary Tank going
+		     down, and the one fight in the round worth telling somebody about
+		     would end with the same three words as the one on wave 5. The kill
+		     feed gets the same name, so the two agree. ]]
+		local killedTier = InfectedConfig.elite(target:GetAttribute(Attributes.Infected.Elite))
+		local killedName = if killedTier
+			then killedTier.titlePrefix .. " " .. (infectedDefinition :: any).displayName
+			else (infectedDefinition :: any).displayName
+		pushKillFeed(attacker, infectedDefinition :: any, killedName, ctx, isHeadshot)
 	end
 
 	-- The bone/flesh split is not decoration: it is the only audible existence
