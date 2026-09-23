@@ -87,8 +87,8 @@ local serviceTrove = Trove.new()
 
      The weapon id is the load-bearing half. Without it an enchantment would
      survive a swap, which is the one rule this whole design rests on — see the
-     header. With it, `enchantFor` compares the stored id against what is in the
-     slot now and a mismatch simply reads as unenchanted.
+     header. With it, `forWeapon` matches on the id rather than the slot, so a
+     weapon that is no longer the one that was enchanted simply does not match.
 
      Weak-keyed so a player who leaves takes their table with them. ]]
 type Grant = { enchantId: string, weaponId: string }
@@ -463,9 +463,12 @@ end
 	empty slot — is refused and THE BOOK STAYS. Consuming it would spend a boss
 	on nothing, and the player would have no way to know what they had lost.
 
-	Range is re-checked here rather than trusted from the caller, for the
-	ordinary reason: a client asks and a server decides. SurvivorService checks
-	it too, against the same number, because it checks it for everything.
+	Range is checked HERE and only here, against the same PickupRange the prompt
+	that offered it used. SurvivorService's branch passes the model straight
+	through without measuring anything — deliberately, so there is one authority
+	on how close is close enough rather than two numbers to drift apart, and so
+	this function is safe to call from anywhere later without the caller having
+	to remember the rule.
 ]]
 function EnchantService:claimBook(player: Player, model: Instance): boolean
 	if typeof(player) ~= "Instance" or typeof(model) ~= "Instance" then
@@ -539,12 +542,22 @@ end
 	is the authority on which wave this is, and a local counter would disagree
 	with it the first time a round was restarted.
 ]]
-local function onInfectedDied(model: Model, ctx: any)
+--[[ THREE arguments, and the middle one is not optional to get right.
+     InfectedService.died fires (model, kind, ctx) — see its fire site, and see
+     EconomyService and StatsService, which both take all three. Written here as
+     (model, ctx) it bound `ctx` to the KIND STRING, which made every
+     `typeof(ctx) == "table"` test below false and quietly deleted the fallback
+     that finds a gibbed boss by where the damage landed. A Tank that came apart
+     on the killing blow has no PrimaryPart to read, so the wave's book did not
+     drop at all — on the one wave that owed the team one. ]]
+local function onInfectedDied(model: Model, kind: string, ctx: any)
 	if typeof(model) ~= "Instance" then
 		return
 	end
 
-	local kind = model:GetAttribute(Attributes.Infected.Kind)
+	--[[ The kind off the signal rather than off the model's attribute. Same
+	     value while the body exists, and this one still exists after the body
+	     has been taken apart — which is the case this function has to survive. ]]
 	local pool = EnchantConfig.dropsFor(kind)
 	if not pool or #pool == 0 then
 		return -- not a boss, or a boss with nothing authored for it
@@ -615,12 +628,22 @@ local function onInfectedDied(model: Model, ctx: any)
 	     reorder it for every later read in the server's life. ]]
 	local deal: { string }? = nil
 	if harbinger and DROP.HarbingerDealsDistinct then
-		deal = table.clone(EnchantConfig.All)
-		local list = deal :: { string }
+		--[[ Copied by hand rather than with table.clone. EnchantConfig.All is
+		     frozen, and whether a clone of a frozen table comes back frozen is a
+		     detail of the runtime rather than something this file should be
+		     betting on — and the bet would be settled by a write that throws
+		     inside a signal handler, on the rarest event in the game, where
+		     nobody would see it twice. A four-element loop costs nothing and is
+		     the same answer on every runtime there will ever be. ]]
+		local list: { string } = {}
+		for _, id in EnchantConfig.All do
+			table.insert(list, id)
+		end
 		for index = #list, 2, -1 do
 			local swap = random:NextInteger(1, index)
 			list[index], list[swap] = list[swap], list[index]
 		end
+		deal = list
 	end
 
 	local dropped = 0
@@ -628,7 +651,27 @@ local function onInfectedDied(model: Model, ctx: any)
 		local at = position
 		if count > 1 then
 			local bearing = (index - 1) / count * math.pi * 2
-			at = position + Vector3.new(math.cos(bearing), 0, math.sin(bearing)) * DROP.RingRadius
+			local out = Vector3.new(math.cos(bearing), 0, math.sin(bearing))
+			at = position + out * DROP.RingRadius
+
+			--[[
+				And back to the middle if the ring point is through a wall.
+
+				Six studs in four directions is fine in the street and wrong in a
+				corridor, which the Backrooms is made of — a book placed inside
+				geometry is not merely ugly, it is UNREACHABLE: the prompt finds
+				its target by raycast, the wall answers first, and the reward
+				silently does not exist.
+
+				Stacking several at the centre instead is safe, and safe for a
+				specific reason rather than by luck: claiming one destroys it, so
+				the next frame's raycast reaches the one behind. Books that
+				overlap resolve themselves one press at a time.
+			]]
+			if not RaycastUtil.hasLineOfSight(position, at, {}) then
+				local half = position + out * (DROP.RingRadius * 0.5)
+				at = if RaycastUtil.hasLineOfSight(position, half, {}) then half else position
+			end
 		end
 		--[[ Past the end of the deal — more survivors than there are
 		     enchantments — falls back to the ordinary draw rather than dropping

@@ -930,7 +930,41 @@ export type EliteTier = {
 	titlePrefix: string,
 	health: number, -- multiplier on the kind's health
 	damage: number, -- multiplier on the kind's attack damage
-	scale: number, -- multiplier on the kind's rig scale
+	--[[
+		── INERT. READ THIS BEFORE TRUSTING IT ─────────────────────────────────
+		It has exactly one consumer — InfectedService's spawn-time
+		RigUtil.scaleRig — and that call is a NO-OP on every infected rig in the
+		game. PlaceholderFactory says so itself, in a contract note: a grey-box
+		Humanoid is built carrying no BodyHeightScale/BodyWidthScale/
+		BodyDepthScale/HeadScale NumberValues, and adoptRig DESTROYS those values
+		on a supplied rig before scaling its geometry. Scale is baked once at
+		build time and never applied again downstream, deliberately, so it cannot
+		be applied twice.
+
+		So an Apex Tank has always been exactly the size of a plain Tank, and a
+		Harbinger is exactly the size of whatever it is a Harbinger of. The field
+		reads like a promise and is not one.
+
+		── AND DO NOT "FIX" IT WITHOUT READING THIS PARAGRAPH ──────────────────
+		Making it work needs a geometric rescale of the cloned rig at spawn time,
+		because the templates are prepared once and cloned per spawn — baking an
+		elite multiplier into a template would resize every ordinary spawn of
+		that kind too.
+
+		That rescale would then produce a body SpawnPlacement has never heard of.
+		It clears an opening using DirectorConfig.SpawnBodySize scaled by
+		InfectedConfig's `scale` alone; it has no knowledge of elites at all. An
+		Apex Tank made 12% wider than the doorway that was measured for it is the
+		"boss that cannot follow anybody indoors" failure the factory's
+		targetHeight note is written to prevent — a worse bug than the cosmetic
+		one being fixed.
+
+		Left in place rather than deleted because it is the correct field for a
+		tier to declare and the pipeline may one day be able to honour it. It is
+		documented as inert so that nobody reads a silhouette promise into it,
+		and nobody turns it on without also teaching SpawnPlacement.
+	]]
+	scale: number,
 	speed: number, -- multiplier on walk speed
 	outlineColor: Color3,
 }
@@ -1021,6 +1055,9 @@ InfectedConfig.EliteTiers = table.freeze({
 		titlePrefix = "Harbinger",
 		health = 3.6,
 		damage = 1.5,
+		--[[ Inert, like every other tier's. See the field. What separates this
+		     from an ordinary body at a glance is its outline colour, its name on
+		     the boss bar and the callout — not its silhouette. ]]
 		scale = 1.18,
 		speed = 1.0,
 		--[[ Cold white-blue against the Apex's hot orange. Two elite tiers that
